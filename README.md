@@ -14,7 +14,7 @@
 
 处于**方案设计阶段**。可行性已确认,核心架构已定,详见 `docs/`。
 
-设计讨论尚未完全结束 —— 表现层/外壳层细节、事件 JSON 的精确 schema、技术栈细节待定。下一步:在本项目里新开对话继续细化方案,然后进入实现。
+设计讨论尚未完全结束 —— 表现层/外壳层细节、事件 JSON 的精确 schema、技术栈细节待定。已完成本机环境初查并编写 M0 实现计划;下一步先验证 Godot C# 工具链兼容性,再建立最小工程骨架。见 `docs/05-m0-implementation-plan.md`。
 
 ## 仓库结构
 
@@ -23,6 +23,7 @@
   - `02-architecture.md` 架构设计
   - `03-development-plan.md` 开发计划 / 里程碑
   - `04-decisions.md` 决策记录与待定问题
+  - `05-m0-implementation-plan.md` M0 环境检查、工程骨架计划与验收标准
 - `reference/sdlpal/` —— sdlpal 源码,作为引擎逻辑参考(见 `reference/README.md`)
 - `data/raw/` —— 放原版 98 柔情版数据文件的地方(见 `data/raw/README.md`)
 
