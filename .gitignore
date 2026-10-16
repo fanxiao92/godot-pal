@@ -1,0 +1,34 @@
+# Godot 4.2+ specific ignores
+~*.dll
+
+# Godot 4+ specific ignores
+.godot/
+.nomedia
+
+# Godot-specific ignores
+.import/
+export.cfg
+export_credentials.cfg
+*.tmp
+
+# Imported translations (automatically generated from CSV files)
+*.translation
+
+# Mono-specific ignores
+.mono/
+data_*/
+mono_crash.*.json
+
+# Export outputs
+*.exe
+# Uncomment if your project does not version PCK files as runtime dependencies.
+# *.pck
+
+# Project settings
+# 原版游戏数据(版权属于大宇/软星,不入库)
+data/raw/*
+!data/raw/README.md
+
+# pal-extract 的产出(由原始数据生成,不入库)
+data/extracted/
+
