@@ -14,7 +14,7 @@
 
 处于 **M0 工程骨架阶段**。可行性已确认,核心架构已定,最小核心/游戏/测试链路已建立,详见 `docs/`。
 
-设计讨论尚未完全结束 —— 表现层/外壳层细节、事件 JSON 的精确 schema、技术栈细节待定。已通过本机 Godot C# 兼容性闸门(Godot .NET 4.7.2 + SDK 10.0.402 + net10.0),建立最小核心/游戏/测试链路并通过 headless 启动及用户桌面可视验收。独立 CLI 与 CI 尚未完成。构建与验收步骤见 `docs/07-game-startup.md`。
+设计讨论尚未完全结束 —— 表现层/外壳层细节、事件 JSON 的精确 schema、技术栈细节待定。已通过本机 Godot C# 兼容性闸门(Godot .NET 4.7.2 + SDK 10.0.402 + net10.0),建立最小核心/游戏/测试链路并通过 headless 启动及用户桌面可视验收。独立 CLI 的帮助/错误入口与进程测试已通过,尚未实现资源提取;CI 与集成验收尚未完成。游戏及工具的复现步骤见 `docs/07-game-startup.md` 和 `docs/08-extract-cli.md`。
 
 ## 仓库结构
 
@@ -26,13 +26,16 @@
   - `05-m0-implementation-plan.md` M0 环境检查、工程骨架计划与验收标准
   - `06-godot-compatibility.md` Issue #2 兼容性结论、复现方法与失败检测验证
   - `07-game-startup.md` Issue #3 最小启动链路、构建测试命令与验收状态
+  - `08-extract-cli.md` Issue #4 独立 CLI 入口、进程测试与复现命令
 - `src/Pal.Core/` —— 纯 .NET 核心类库
 - `src/Pal.Game/` —— Godot .NET 游戏工程
+- `tools/Pal.Extract/` —— 独立离线提取 CLI(当前仅帮助与参数检查)
 - `tests/Pal.Core.Tests/` —— 核心 xUnit 测试
+- `tests/Pal.Extract.Tests/` —— CLI 真实进程测试
 - `scripts/` —— 兼容性探针与游戏启动检查
 - `reference/sdlpal/` —— sdlpal 源码,作为引擎逻辑参考(见 `reference/README.md`)
 - `data/raw/` —— 放原版 98 柔情版数据文件的地方(见 `data/raw/README.md`)
 
 ## 怎么继续
 
-在本目录新开一个对话,让 AI 先读 `docs/` 全部 4 个文件和 `reference/README.md`,即可接着设计/实现。
+在本目录新开一个对话,按 `AGENTS.md` 的工作流配置读取文档。设计背景见 `docs/01-feasibility.md` 至 `docs/04-decisions.md` 和 `reference/README.md`;实现时还需读取对应 GitHub Issue 及里程碑计划/验证记录。
