@@ -14,6 +14,15 @@ export_credentials.cfg
 # Imported translations (automatically generated from CSV files)
 *.translation
 
+# .NET build/test outputs and local IDE settings
+**/bin/
+**/obj/
+**/TestResults/
+.vs/
+.idea/
+*.user
+*.suo
+
 # Mono-specific ignores
 .mono/
 data_*/

@@ -12,9 +12,9 @@
 
 ## 当前状态(2026-10-16)
 
-处于**方案设计阶段**。可行性已确认,核心架构已定,详见 `docs/`。
+处于 **M0 工程骨架阶段**。可行性已确认,核心架构已定,最小核心/游戏/测试链路已建立,详见 `docs/`。
 
-设计讨论尚未完全结束 —— 表现层/外壳层细节、事件 JSON 的精确 schema、技术栈细节待定。已编写 M0 实现计划,并通过本机 Godot C# 兼容性闸门(Godot .NET 4.7.2 + SDK 10.0.402 + net10.0);下一步建立最小工程骨架。正式工程、桌面可视验收与 CI 尚未完成。见 `docs/05-m0-implementation-plan.md` 和 `docs/06-godot-compatibility.md`。
+设计讨论尚未完全结束 —— 表现层/外壳层细节、事件 JSON 的精确 schema、技术栈细节待定。已通过本机 Godot C# 兼容性闸门(Godot .NET 4.7.2 + SDK 10.0.402 + net10.0),建立最小核心/游戏/测试链路并通过 headless 启动。桌面可视验收、独立 CLI 与 CI 尚未完成。构建与验收步骤见 `docs/07-game-startup.md`。
 
 ## 仓库结构
 
@@ -25,6 +25,11 @@
   - `04-decisions.md` 决策记录与待定问题
   - `05-m0-implementation-plan.md` M0 环境检查、工程骨架计划与验收标准
   - `06-godot-compatibility.md` Issue #2 兼容性结论、复现方法与失败检测验证
+  - `07-game-startup.md` Issue #3 最小启动链路、构建测试命令与验收状态
+- `src/Pal.Core/` —— 纯 .NET 核心类库
+- `src/Pal.Game/` —— Godot .NET 游戏工程
+- `tests/Pal.Core.Tests/` —— 核心 xUnit 测试
+- `scripts/` —— 兼容性探针与游戏启动检查
 - `reference/sdlpal/` —— sdlpal 源码,作为引擎逻辑参考(见 `reference/README.md`)
 - `data/raw/` —— 放原版 98 柔情版数据文件的地方(见 `data/raw/README.md`)
 

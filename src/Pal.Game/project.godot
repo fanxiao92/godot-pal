@@ -1,0 +1,17 @@
+config_version=5
+
+[application]
+config/name="godot-pal"
+run/main_scene="res://Scenes/Main.tscn"
+config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
+
+[display]
+window/size/viewport_width=640
+window/size/viewport_height=400
+
+[dotnet]
+project/assembly_name="Pal.Game"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.06, 0.08, 0.12, 1)
