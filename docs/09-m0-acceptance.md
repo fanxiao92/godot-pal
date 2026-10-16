@@ -2,7 +2,7 @@
 
 任务：[Issue #5](https://github.com/fanxiao92/godot-pal/issues/5)。
 
-状态：共享自动化入口已在本机通过；干净检出验证与真实 GitHub Actions 运行待完成。**在这些证据齐备前，M0 不标记完成。**
+状态：**M0 验收通过**。共享入口、本地干净检出、真实 Windows CI 与 #3 的用户桌面可视验收证据均已齐备。仅代表工程与工具链基线完成，不代表游戏内容或资源提取能力完成。
 
 ## 唯一自动化验收入口
 
@@ -63,8 +63,12 @@ $godot = ./scripts/Get-Godot.ps1 -Destination $destination
 - 本机官方引擎发行包的下载、SHA512 和版本检查：通过。
 - 共享入口反例：故意将 .NET host 作为 Godot 可执行文件，前面的构建/测试成功后，引擎版本检查仍判失败；未生成 `PASS.txt`，脚本返回非零状态。
 - 共享入口正例：用已验证的官方 Godot 包、全新包缓存运行；还原成功，构建 0 警告/0 错误，核心 1/1 与 CLI 4/4 通过，headless 导入/启动通过。
-- 干净检出：待记录。
-- 真实 CI 运行：待记录。
+- 干净检出：对提交 `461d8ea` 执行 `git clone --no-local` 到全新临时目录，运行前确认没有 `bin/`、`obj/`、`.godot/`，再用独立包缓存与官方 Godot 包运行共享入口。全部检查通过，构建后 `git status --short` 为空。参考 LFS 文件跳过 smudge，不参与构建；没有原版数据。
+- 本机干净检出辅助证据：克隆位于 `%TEMP%/pal-clean-dae2269be318455c879b5a9995a72b5c`，日志位于 `%TEMP%/pal-m0-ac3634462fb14e20a6e4cb26e8a08e8f`；复现不依赖这些特定路径。
+- 首次真实 CI：[运行 38939119820](https://github.com/fanxiao92/godot-pal/actions/runs/38939119820)，提交 `461d8ea`，Windows runner 全部步骤通过，约 1 分 28 秒。发现 Node 20 action 弃用警告后升级对应 action。
+- 升级后真实 CI：[运行 38939509686](https://github.com/fanxiao92/godot-pal/actions/runs/38939509686)，提交 `fede90d`，约 1 分 27 秒，全部步骤成功且无上述弃用警告。实际使用 SDK `10.0.402`，官方引擎校验通过，5 个测试通过，headless 启动通过。
+- 已下载并检查第二次运行的 `m0-windows-evidence` artifact，包含 TRX、完整日志及 `PASS.txt`；启动日志实际包含 `PAL_GAME_READY:Core ready`，不是只检查工作流的绿色状态。Artifact 保留 14 天，过期后可重新触发工作流生成。
+- 已检查工程跟踪文件，没有新增构建缓存、编译二进制或原版资源。
 
 ## 人工证据与仍未验证的范围
 
@@ -72,4 +76,8 @@ $godot = ./scripts/Get-Godot.ps1 -Destination $destination
 
 GdUnit4Net 尚未实际接入：采用 xUnit + 进程级 smoke test；M2 前重新验证候选框架或记录明确替代方案，见 `07-game-startup.md`。
 
-本次不验证导出包、其他操作系统、地图或事件运行，也未提供原版数据。M0 完成后仍应先准备真实 98 柔情版数据、核对版本与资源依赖，再编写 M1 计划，不直接开始全量资源转换。
+本次不验证导出包、其他操作系统、地图或事件运行，也未提供原版数据。接下来应先准备真实 98 柔情版数据、核对版本与资源依赖，再编写 M1 计划，不直接开始全量资源转换。
+
+## 审查记录
+
+按实现前提交 `31f4d85` 对照检查：Standards 轴未发现未解决的文档约定或范围问题；Spec 轴中本地/CI 共用入口、官方包完整性、干净检出、真实运行和人工证据均有对应验证。本环境未提供 subagent 调度工具，因此这是当前会话的两轴核对，不是独立双代理审查。

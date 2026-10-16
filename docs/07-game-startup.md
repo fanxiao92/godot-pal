@@ -2,7 +2,7 @@
 
 任务：[Issue #3](https://github.com/fanxiao92/godot-pal/issues/3)。
 
-状态：正式工程构建、核心测试、headless 启动和用户桌面可视验收均已通过，Issue #3 的验收完成。不代表 M0 整体完成，CI 与独立 CLI 分属 #5 与 #4。
+状态：正式工程构建、核心测试、headless 启动和用户桌面可视验收均已通过，Issue #3 的验收完成。本报告仅覆盖 #3；后续 CLI 与 CI 的整体验收结果见 `08-extract-cli.md`、`09-m0-acceptance.md`。
 
 ## 工程与行为
 

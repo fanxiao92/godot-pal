@@ -2,7 +2,7 @@
 
 任务：[Issue #4](https://github.com/fanxiao92/godot-pal/issues/4)。
 
-状态：CLI 入口及真实进程测试已通过。**当前只提供帮助与参数错误处理，不具备资源提取能力。** M0 仍需 #5 的 Windows CI 与集成验收。
+状态：CLI 入口及真实进程测试已通过。**当前只提供帮助与参数错误处理，不具备资源提取能力。** 后续 #5 的 Windows CI 与 M0 集成验收结果见 `09-m0-acceptance.md`。
 
 ## 范围与依赖
 
