@@ -2,7 +2,7 @@
 
 任务：[Issue #3](https://github.com/fanxiao92/godot-pal/issues/3)。
 
-状态：正式工程构建、核心测试和 headless 启动已通过；**桌面可视验收待用户确认，因此任务尚未完成**。不代表 M0 整体完成，CI 与独立 CLI 分属 #5 与 #4。
+状态：正式工程构建、核心测试、headless 启动和用户桌面可视验收均已通过，Issue #3 的验收完成。不代表 M0 整体完成，CI 与独立 CLI 分属 #5 与 #4。
 
 ## 工程与行为
 
@@ -50,7 +50,7 @@ headless 启动使用 `--quit-after 60` 运行有限帧数，正式游戏本身�
 
 这些检查使用本机现有 NuGet 配置和缓存，不等于干净机器或 CI 已通过。
 
-## 桌面可视验收（待完成）
+## 桌面可视验收（已通过）
 
 ```powershell
 & "C:/Users/fanxiao/scoop/apps/godot-mono/current/godot-mono.console.exe" --path src/Pal.Game
@@ -58,12 +58,12 @@ headless 启动使用 `--quit-after 60` 运行有限帧数，正式游戏本身�
 
 或者在 Godot .NET 编辑器中导入 `src/Pal.Game/project.godot` 并运行。
 
-用户需要确认：
-- [ ] 窗口可见，标题为 `godot-pal`。
-- [ ] 内容显示 `godot-pal` 与 `Core ready`，没有明显裁切或错误遮挡。
-- [ ] 点击窗口关闭按钮后正常退出，没有运行错误。
+用户已确认以下项目“全都正常”：
+- [x] 窗口可见，标题为 `godot-pal`。
+- [x] 内容显示 `godot-pal` 与 `Core ready`，没有明显裁切或错误遮挡。
+- [x] 点击窗口关闭按钮后正常退出，没有运行错误。
 
-自动化不能替代这些人工确认；未确认前保持 #3 开放。
+另已检查本次启动的桌面进程 PID 20696 不再存在。以上为用户人工验收与进程退出检查，不以 headless 成功替代可视确认。
 
 ## GdUnit4Net 评估与跟进
 
