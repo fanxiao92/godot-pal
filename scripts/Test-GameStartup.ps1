@@ -2,13 +2,16 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$GodotPath,
-    [ValidateRange(1, 600)][int]$TimeoutSeconds = 60
+    [ValidateRange(1, 600)][int]$TimeoutSeconds = 60,
+    [string]$LogDirectory
 )
 $ErrorActionPreference = 'Stop'
 $GodotPath = (Resolve-Path $GodotPath).Path
 $project = (Resolve-Path (Join-Path $PSScriptRoot '../src/Pal.Game')).Path
-$logs = Join-Path ([IO.Path]::GetTempPath()) ('pal-startup-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory $logs | Out-Null
+$logs = if ($LogDirectory) { [IO.Path]::GetFullPath($LogDirectory) } else {
+    Join-Path ([IO.Path]::GetTempPath()) ('pal-startup-' + [guid]::NewGuid().ToString('N'))
+}
+New-Item -ItemType Directory -Force $logs | Out-Null
 Write-Host "Startup logs: $logs"
 
 function Invoke-CheckedGodot {

@@ -1,0 +1,54 @@
+name: M0 Windows acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m0-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          # Reference assets are not required to build M0; no game data is downloaded.
+          lfs: false
+      - name: Install the repository SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Download and verify official Godot .NET
+        shell: pwsh
+        run: |
+          $godot = ./scripts/Get-Godot.ps1 -Destination "$env:RUNNER_TEMP/godot-4.7.2"
+          "GODOT_CONSOLE=$godot" >> $env:GITHUB_ENV
+      - name: Run shared M0 acceptance checks
+        shell: pwsh
+        run: |
+          ./scripts/Test-M0.ps1 -GodotPath $env:GODOT_CONSOLE -EvidenceDirectory "$env:RUNNER_TEMP/m0-evidence"
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: m0-windows-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/m0-evidence/acceptance.log
+            ${{ runner.temp }}/m0-evidence/PASS.txt
+            ${{ runner.temp }}/m0-evidence/tests/*.trx
+            ${{ runner.temp }}/m0-evidence/godot/*.log
