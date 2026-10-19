@@ -104,6 +104,23 @@ public class SpriteDecoderTests
     }
 
     [Fact]
+    public void DecodeFrame_retains_the_last_actual_frame_before_a_zero_terminal_slot_but_rejects_middle_zero_offsets()
+    {
+        // Independent miniature of GOP12: two actual frames followed by a zero table slot, not EOF.
+        byte[] sprite = [3, 0, 6, 0, 0, 0, 1, 0, 1, 0, 1, 11, 1, 0, 1, 0, 1, 22];
+        Assert.Equal(2, SpriteDecoder.GetFrameCount(sprite));
+        var last = SpriteDecoder.DecodeFrame(sprite, 1);
+        Assert.Equal(1, last.FrameIndex);
+        Assert.Equal(12, last.SourceOffset);
+        Assert.Equal(new byte[] { 22 }, last.Pixels);
+        Assert.Equal(new byte[] { 255 }, last.Alpha);
+        Assert.Throws<InvalidDataException>(() => SpriteDecoder.DecodeFrame(sprite, 2));
+        sprite[2] = 0; // Zero is valid only in the final slot, never in the middle.
+        Assert.Throws<InvalidDataException>(() => SpriteDecoder.GetFrameCount(sprite));
+        Assert.Throws<InvalidDataException>(() => SpriteDecoder.DecodeFrame(sprite, 0));
+    }
+
+    [Fact]
     public void DecodeFrame_accepts_zero_terminal_word_without_treating_it_as_a_frame()
     {
         byte[] sprite = [2, 0, 0, 0, 1, 0, 1, 0, 1, 42];
