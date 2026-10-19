@@ -206,7 +206,7 @@ public class ExtractSceneCliTests : IDisposable
         if (kind == "nonempty") { Directory.CreateDirectory(output); File.Copy(sentinel, Path.Combine(output, "keep.txt")); }
         string link = Path.Combine(directory, "link");
         bool linked = kind.Contains("link");
-        if (linked) CreateDirectoryLink(link, input);
+        if (linked) DirectoryLinkFixture.Create(link, input);
         var before = Directory.GetFiles(input).ToDictionary(p => p, Hash);
         try
         {
@@ -289,16 +289,6 @@ public class ExtractSceneCliTests : IDisposable
         Assert.Empty(result.Stderr);
     }
 
-    private static void CreateDirectoryLink(string link, string target)
-    {
-        if (!OperatingSystem.IsWindows()) { Directory.CreateSymbolicLink(link, target); return; }
-        var start = new System.Diagnostics.ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (string arg in new[] { "/c", "mklink", "/J", link, target }) start.ArgumentList.Add(arg);
-        using var process = System.Diagnostics.Process.Start(start)!;
-        process.WaitForExit();
-        Assert.True(process.ExitCode == 0, process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd());
-    }
-
     private void AssertArtifactIdentities(JsonElement manifest)
     {
         var artifacts = manifest.GetProperty("artifacts").EnumerateArray().ToArray();
@@ -337,14 +327,7 @@ public class ExtractSceneCliTests : IDisposable
         foreach (byte value in bytes) encoder.Literal(value);
         return encoder.End();
     }
-    private void WriteArchive(string name, params byte[][] chunks)
-    {
-        using var writer = new BinaryWriter(File.Create(Path.Combine(input, name)));
-        int offset = (chunks.Length + 1) * 4;
-        writer.Write(offset);
-        foreach (var chunk in chunks) { offset += chunk.Length; writer.Write(offset); }
-        foreach (var chunk in chunks) writer.Write(chunk);
-    }
+    private void WriteArchive(string name, params byte[][] chunks) => MkfFixture.Write(input, name, chunks);
     private static byte[] Words(params int[] values)
     {
         var bytes = new byte[values.Length * 2];

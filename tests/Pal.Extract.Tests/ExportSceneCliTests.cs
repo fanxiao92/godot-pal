@@ -346,14 +346,7 @@ public class ExportSceneCliTests : IDisposable
         WriteArchive("Sss.mkf", objects, scenes);
         WriteArchive("Data.mkf", [], [], [], roles);
     }
-    private void WriteArchive(string name, params byte[][] chunks)
-    {
-        using var writer = new BinaryWriter(File.Create(Path.Combine(input, name)));
-        int offset = (chunks.Length + 1) * 4;
-        writer.Write(offset);
-        foreach (var chunk in chunks) { offset += chunk.Length; writer.Write(offset); }
-        foreach (var chunk in chunks) writer.Write(chunk);
-    }
+    private void WriteArchive(string name, params byte[][] chunks) => MkfFixture.Write(input, name, chunks);
     private JsonDocument ReadJson(string name) => JsonDocument.Parse(File.ReadAllText(Path.Combine(output, name)));
     private Task<(int ExitCode, string Stdout, string Stderr)> Export(string? destination = null) =>
         CliProcess.Run(directory, "export-scene", "--input", input, "--output", destination ?? output,
