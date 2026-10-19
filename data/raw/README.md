@@ -2,7 +2,9 @@
 
 把你的**《仙剑奇侠传 1998 柔情版》原版数据文件**放在这个目录里。
 
-`pal-extract` 工具会读取这里的文件,把它们转换成现代资源(输出到 `data/extracted/`)。
+`pal-extract` 已支持只读检查场景所需的六个 MKF，命令见 [根目录 README](../../README.md#构建测试与运行)。后续会将原始资源转换到 `data/extracted/`；实际解压与转换尚未实现。
+
+当前用户提供的数据目录为 `data/raw/sdlpal/`。M1 只消费场景所需的归档，输出静态场景资源，范围见 [M1 计划](../../docs/milestones/m1/plan.md)。`Word.dat` / `M.msg` 含大量英文，`sdlpal.cfg` 选择 `m_chs.slf`；简体中文和英文分别来自 `m_chs.slf`、`m_eng.slf`，文字与字库转换留到 M3，不是 M1/M2 的前置要求。原始文件保持只读。
 
 ## 需要哪些文件
 

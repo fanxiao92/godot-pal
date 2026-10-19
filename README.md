@@ -12,9 +12,11 @@
 
 ## 当前状态
 
-**M0 工程骨架与工具链已验收通过，准备进入 M1。** 核心/游戏/CLI/测试链路、本地干净检出与真实 Windows CI 均通过，桌面显示和正常关闭也已由用户确认。
+**M0 工程骨架与工具链已验收通过，M1 场景资源提取进行中。** 核心/游戏/CLI/测试链路、本地干净检出与真实 Windows CI 均通过，桌面显示和正常关闭也已由用户确认。
 
-表现层/外壳层细节尚待设计。[事件 JSON 契约](docs/design/events-schema.md) 已确定原版忠实低层转写策略、v1 文件结构与基础命令,全量 opcode 映射及工具/运行时尚未实现。独立 CLI 当前仅提供帮助/错误入口,尚未实现资源提取。下一步需准备真实 98 柔情版数据并编写 M1 计划。
+表现层/外壳层细节尚待设计。[事件 JSON 契约](docs/design/events-schema.md) 已确定原版忠实低层转写策略、v1 文件结构与基础命令,全量 opcode 映射及工具/运行时尚未实现。独立 CLI 已提供帮助、参数校验与只读 MKF 检查,尚未实现解压和资源提取。
+
+用户数据已放入 `data/raw/sdlpal/`,初步核对符合 Windows 数据分支。[M1 计划](docs/milestones/m1/plan.md) 范围已确认：只提取地图、瓦片、精灵、调色板与场景对象初始数据。[实施任务 #6～#10](https://github.com/fanxiao92/godot-pal/issues/6) 已发布，只读检查入口已实现并本地验证，实际解压与资源转换仍待实现。M2 负责 Godot 场景构建与探索；事件、对话、语言包和字库独立留到 M3，不阻塞场景构建。后续阶段见 [总体路线](docs/design/development-plan.md)。
 
 ## 技术栈与开发环境
 
@@ -41,6 +43,14 @@ dotnet test GodotPal.sln --no-build --no-restore
 dotnet run --project tools/Pal.Extract --no-build -- --help
 ```
 
+只读检查原始场景归档（不解压、不写文件）：
+
+```powershell
+dotnet run --project tools/Pal.Extract --no-build -- inspect --input data/raw/sdlpal
+```
+
+输入目录需包含 `DATA.MKF`、`GOP.MKF`、`MAP.MKF`、`MGO.MKF`、`PAT.MKF`、`SSS.MKF`，文件名大小写不敏感；其他文件忽略。成功向 stdout 输出 JSON，包含归档散列、chunk 偏移与压缩线索；线索不等于已验证解压。退出码：成功 `0`、输入或归档错误 `1`、参数错误 `2`。报告字段与验证结果见 [Issue #7](https://github.com/fanxiao92/godot-pal/issues/7)。
+
 启动桌面游戏（替换为本机完整 Godot .NET 安装中的 console 可执行文件）：
 
 ```powershell
@@ -62,14 +72,14 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
 
 - `docs/` —— [文档导航](docs/README.md)
   - `design/` —— 项目设计背景、架构、总体路线和待定问题
-  - `milestones/` —— 各里程碑实施计划，当前有 `m0/plan.md`
+  - `milestones/` —— 各里程碑实施计划，当前有 M0 与 M1 计划
   - `archive/` —— 已完成阶段的历史记录，按需查阅
   - `agents/` —— Agent 的 Issue、标签与领域文档工作流
   - `adr/` —— 值得长期保留的架构取舍
 - `GLOSSARY.md` —— 项目领域术语
 - `src/Pal.Core/` —— 纯 .NET 核心类库
 - `src/Pal.Game/` —— Godot .NET 游戏工程
-- `tools/Pal.Extract/` —— 独立离线提取 CLI(当前仅帮助与参数检查)
+- `tools/Pal.Extract/` —— 独立离线提取 CLI(已支持只读归档检查，尚未实现资源转换)
 - `tests/Pal.Core.Tests/` —— 核心 xUnit 测试
 - `tests/Pal.Extract.Tests/` —— CLI 真实进程测试
 - `scripts/` —— 引擎下载、兼容性探针、游戏启动检查与共享验收入口
@@ -78,4 +88,10 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
 
 ## 怎么继续
 
-在本目录新开一个对话,按 `AGENTS.md` 的工作流配置读取文档。设计背景见 `docs/design/` 和 `reference/README.md`;实现时读取对应 GitHub Issue 正文、评论及里程碑计划。仅在排障、环境升级或追溯历史结论时查阅 `docs/archive/`。
+在本目录新开一个对话，可直接给 AI 以下提示词：
+
+> 请先读取 `AGENTS.md`，遵循其中的工作流；读取 `GLOSSARY.md`、`docs/design/` 下全部 Markdown 文件、`reference/README.md`、相关 ADR 以及 `docs/milestones/m1/plan.md`，从 M1 开始继续实现。
+>
+> M1 只做场景资源提取，输入在 `data/raw/sdlpal/`；不包含事件、对话、语言包或字库。先核对 GitHub 中现有的 M1 任务；若尚未发布，按已确认计划发布任务，避免重复创建。实现前读取对应 Issue 正文与评论，选择没有未完成阻塞项的未完成任务，按依赖顺序继续推进。
+
+`reference/README.md` 是参考源码导航，不要求通读整个 SDLPal；实现具体任务时再读取相关源码。`docs/archive/` 仅在排障、环境升级或追溯历史结论时查阅。

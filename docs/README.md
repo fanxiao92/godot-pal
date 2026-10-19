@@ -8,7 +8,7 @@
 
 - [背景与可行性](design/feasibility.md)：为什么做、目标版本与参考项目。
 - [架构设计](design/architecture.md)：离线转换与运行时边界、核心系统分层。
-- [开发计划](design/development-plan.md)：M0～M7 总体路线。
+- [开发计划](design/development-plan.md)：M0～M8 总体路线，区分场景资源、Godot 场景构建和事件里程碑。
 - [决策记录与待定问题](design/decisions.md)：已确定的方向与待讨论事项。
 - [事件格式契约](design/events-schema.md)：原版忠实转写的文件结构、基础命令、引用与验证要求；处理事件转换或执行任务时阅读。
 
@@ -19,7 +19,8 @@
 开始某个里程碑时，读取其计划及对应 GitHub Issue 正文、评论；新里程碑先制定计划，再编码。
 
 - [M0 工程骨架与工具链](milestones/m0/plan.md)：已完成，保留原始计划。
-- M1：尚未编写计划；先准备并核对真实 98 柔情版数据。
+- [M1 场景资源提取](milestones/m1/plan.md)：任务已发布，只读 MKF 检查已实现，实际解压与资源提取待实现；只包含静态场景资源，不含事件、对话、语言包或字库。
+- M2 Godot 场景构建与探索、M3 事件与对话：计划尚未编写，阶段范围见总体路线。
 
 后续计划放在 `docs/milestones/<里程碑>/plan.md`。具体任务规格、讨论和结果留在 GitHub Issues。
 
