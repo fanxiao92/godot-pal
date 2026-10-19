@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using System.Text.Json;
+using static Pal.Extract.ExportSupport;
 
 namespace Pal.Extract;
 
@@ -38,7 +38,7 @@ internal static class SceneExporter
             if (roles.Length != 900)
                 throw new InvalidDataException("data.mkf: chunk 3: PLAYERROLES requires exactly 900 bytes.");
             int roleSprite = Word(roles, 24);
-            var palette = Resource("pat.mkf", paletteId,
+            var palette = DecodeResource("pat.mkf", paletteId,
                 () => PaletteDecoder.Decode(archives[3].ReadChunk(paletteId, 1536), lighting == "night"));
             var spriteIds = records.Select(record => (int)record.wSpriteNum).Append(roleSprite)
                 .Where(id => id != 0).Distinct().Order().ToArray();
@@ -46,7 +46,7 @@ internal static class SceneExporter
             int remainingPixels = IndexedImage.MaxPixels, remainingBytes = 64 * 1024 * 1024;
             foreach (int id in spriteIds)
             {
-                sprites.Add(Resource("mgo.mkf", id, () =>
+                sprites.Add(DecodeResource("mgo.mkf", id, () =>
                 {
                     var raw = Yj2Decoder.Decode(archives[2].ReadChunk(id, 8 * 1024 * 1024), Math.Min(remainingBytes, 8 * 1024 * 1024));
                     remainingBytes -= raw.Length;
@@ -58,7 +58,7 @@ internal static class SceneExporter
                     var frames = new List<IndexedImage>();
                     foreach (int index in indices)
                     {
-                        var frame = Resource("frame", index, () => SpriteDecoder.DecodeFrame(raw, index, remainingPixels));
+                        var frame = DecodeResource("frame", index, () => SpriteDecoder.DecodeFrame(raw, index, remainingPixels));
                         remainingPixels -= frame.Pixels.Length;
                         frames.Add(frame);
                     }
@@ -121,13 +121,7 @@ internal static class SceneExporter
                     }
                 }
             });
-            WriteJson(output, "palette.json", new
-            {
-                formatVersion = 1, paletteId, lighting,
-                selectedLighting = palette.UsesNightColors ? "night" : "day",
-                colors = palette.Colors,
-                source = new { archive = "pat.mkf", chunk = paletteId, componentConversion = "six-bit << 2" }
-            });
+            WritePalette(output, paletteId, lighting, palette);
         }
         finally { foreach (var archive in archives) archive.Dispose(); }
     }
@@ -135,13 +129,6 @@ internal static class SceneExporter
     private static ushort Word(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset));
     private static short Signed(byte[] bytes, int offset) => BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(offset));
     internal static string? SpriteReference(int id) => id == 0 ? null : $"sprites/{id}.json";
-    private static T Resource<T>(string name, int chunk, Func<T> decode)
-    {
-        try { return decode(); }
-        catch (InvalidDataException exception) { throw new InvalidDataException($"{name}: chunk {chunk}: {exception.Message}", exception); }
-    }
-    private static void WriteJson(string output, string name, object value) =>
-        File.WriteAllText(Path.Combine(output, name), JsonSerializer.Serialize(value, MapExporter.JsonOptions) + "\n");
 }
 
 internal sealed record SceneSprite(int Id, int DecodedByteLength, int FrameCount, List<IndexedImage> Frames);

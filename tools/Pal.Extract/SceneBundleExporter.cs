@@ -51,7 +51,7 @@ internal static class SceneBundleExporter
                 artifacts,
                 bundleSha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))
             };
-            File.WriteAllText(Path.Combine(sceneOutput, "manifest.json"), JsonSerializer.Serialize(manifest, MapExporter.JsonOptions) + "\n");
+            ExportSupport.WriteJson(sceneOutput, "manifest.json", manifest);
             // Detect source changes on platforms that do not enforce FileShare.Read against writers.
             var after = MkfArchive.OpenRequired(input, RequiredNames, 65536);
             try

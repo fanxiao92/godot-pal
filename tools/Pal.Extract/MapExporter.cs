@@ -1,12 +1,10 @@
 using System.Buffers.Binary;
-using System.Text.Json;
+using static Pal.Extract.ExportSupport;
 
 namespace Pal.Extract;
 
 internal static class MapExporter
 {
-    internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
-
     internal static void Export(string input, string output, int mapId, int paletteId, string lighting)
     {
         string[] requiredNames = ["map.mkf", "gop.mkf", "pat.mkf"];
@@ -83,15 +81,7 @@ internal static class MapExporter
                 },
                 cells
             });
-            WriteJson(output, "palette.json", new
-            {
-                formatVersion = 1,
-                paletteId,
-                lighting,
-                selectedLighting = palette.UsesNightColors ? "night" : "day",
-                colors = palette.Colors,
-                source = new { archive = "pat.mkf", chunk = paletteId, componentConversion = "six-bit << 2" }
-            });
+            WritePalette(output, paletteId, lighting, palette);
         }
         finally { foreach (var archive in archives) archive.Dispose(); }
     }
@@ -153,15 +143,6 @@ internal static class MapExporter
                     }
         return new IndexedImage(width, height, pixels, alpha);
     }
-
-    private static T DecodeResource<T>(string name, int chunk, Func<T> decode)
-    {
-        try { return decode(); }
-        catch (InvalidDataException exception) { throw new InvalidDataException($"{name}: chunk {chunk}: {exception.Message}", exception); }
-    }
-
-    private static void WriteJson(string output, string name, object value) =>
-        File.WriteAllText(Path.Combine(output, name), JsonSerializer.Serialize(value, JsonOptions) + "\n");
 }
 
 internal sealed record MapCell(int Y, int X, int H, uint Raw, int BottomFrame, int? TopFrame,

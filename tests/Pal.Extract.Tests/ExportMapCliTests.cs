@@ -408,7 +408,7 @@ public class ExportMapCliTests : IDisposable
         string target = kind == "output-link" ? Path.Combine(directory, "empty-target") : input;
         Directory.CreateDirectory(target);
         string link = Path.Combine(directory, "link");
-        CreateDirectoryLink(link, target);
+        DirectoryLinkFixture.Create(link, target);
         try
         {
             var result = kind == "input-link"
@@ -423,21 +423,6 @@ public class ExportMapCliTests : IDisposable
             Assert.False(Directory.Exists(Path.Combine(input, "new-output")));
         }
         finally { Directory.Delete(link); }
-    }
-
-    private static void CreateDirectoryLink(string link, string target)
-    {
-        if (!OperatingSystem.IsWindows()) { Directory.CreateSymbolicLink(link, target); return; }
-        var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        foreach (var arg in new[] { "/c", "mklink", "/J", link, target }) start.ArgumentList.Add(arg);
-        using var process = System.Diagnostics.Process.Start(start)!;
-        process.WaitForExit();
-        Assert.True(process.ExitCode == 0, process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd());
     }
 
     private (int Width, int Height, byte[] Rgba) ReadPng(string name)
@@ -481,14 +466,7 @@ public class ExportMapCliTests : IDisposable
         foreach (byte value in map) encoder.Literal(value);
         WriteArchive("Map.mkf", [], encoder.End());
     }
-    private void WriteArchive(string name, params byte[][] chunks)
-    {
-        using var writer = new BinaryWriter(File.Create(Path.Combine(input, name)));
-        int offset = (chunks.Length + 1) * 4;
-        writer.Write(offset);
-        foreach (var chunk in chunks) { offset += chunk.Length; writer.Write(offset); }
-        foreach (var chunk in chunks) writer.Write(chunk);
-    }
+    private void WriteArchive(string name, params byte[][] chunks) => MkfFixture.Write(input, name, chunks);
     private JsonDocument ReadJson(string name) => JsonDocument.Parse(File.ReadAllText(Path.Combine(output, name)));
     private Task<(int ExitCode, string Stdout, string Stderr)> Export(string? destination = null, string lighting = "day") =>
         CliProcess.Run(directory, "export-map", "--input", input, "--output", destination ?? output,

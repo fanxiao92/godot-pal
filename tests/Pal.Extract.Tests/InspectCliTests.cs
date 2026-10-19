@@ -277,22 +277,7 @@ public class InspectCliTests : IDisposable
         Assert.Contains("ambiguous", result.Stderr);
     }
 
-    private void WriteArchive(string name, params byte[][] chunks)
-    {
-        using var stream = File.Create(Path.Combine(input, name));
-        using var writer = new BinaryWriter(stream);
-        var offset = (chunks.Length + 1) * 4;
-        writer.Write(offset);
-        foreach (var chunk in chunks)
-        {
-            offset += chunk.Length;
-            writer.Write(offset);
-        }
-        foreach (var chunk in chunks)
-        {
-            writer.Write(chunk);
-        }
-    }
+    private void WriteArchive(string name, params byte[][] chunks) => MkfFixture.Write(input, name, chunks);
 
     private Task<(int ExitCode, string Stdout, string Stderr)> Inspect() =>
         CliProcess.Run(directory, "inspect", "--input", input);
