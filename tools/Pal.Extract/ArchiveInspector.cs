@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Security.Cryptography;
 
 namespace Pal.Extract;
 
@@ -10,100 +9,19 @@ internal static class ArchiveInspector
 
     internal static InspectionReport Inspect(string input)
     {
-        string[] files;
+        var archives = MkfArchive.OpenRequired(input, RequiredNames);
         try
         {
-            files = Directory.GetFiles(input);
+            var versionHint = GetVersionHint(archives);
+            return new InspectionReport(1, versionHint, archives.Select(archive => new ArchiveReport(
+                archive.Name, archive.ByteLength, archive.Sha256, archive.Chunks.Count,
+                archive.Chunks.Count(chunk => chunk.ByteLength == 0),
+                archive.Chunks.Select(chunk => DescribeChunk(archive.Name, chunk, versionHint)).ToArray())).ToArray());
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            throw new InvalidDataException($"Input directory could not be read ({exception.GetType().Name}).", exception);
-        }
-        var archives = new List<ArchiveData>();
-        foreach (var name in RequiredNames)
-        {
-            var matches = files.Where(file => string.Equals(Path.GetFileName(file), name, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (matches.Length == 0)
-            {
-                throw new InvalidDataException($"{name}: required archive is missing.");
-            }
-            if (matches.Length > 1)
-            {
-                throw new InvalidDataException($"{name}: ambiguous case-insensitive file names.");
-            }
-            try
-            {
-                archives.Add(ReadArchive(matches[0], name));
-            }
-            catch (IOException exception)
-            {
-                throw new InvalidDataException($"{name}: unable to read archive ({exception.GetType().Name}).", exception);
-            }
-            catch (UnauthorizedAccessException exception)
-            {
-                throw new InvalidDataException($"{name}: unable to read archive ({exception.GetType().Name}).", exception);
-            }
-        }
-
-        var versionHint = GetVersionHint(archives);
-        return new InspectionReport(1, versionHint, archives.Select(archive => new ArchiveReport(
-            archive.Name, archive.ByteLength, archive.Sha256, archive.Chunks.Count,
-            archive.Chunks.Count(chunk => chunk.ByteLength == 0),
-            archive.Chunks.Select(chunk => DescribeChunk(archive.Name, chunk, versionHint)).ToArray())).ToArray());
+        finally { foreach (var archive in archives) archive.Dispose(); }
     }
 
-    private static ArchiveData ReadArchive(string path, string name)
-    {
-        using var stream = File.OpenRead(path);
-        using var reader = new BinaryReader(stream);
-        if (stream.Length < 4)
-        {
-            throw new InvalidDataException($"{name}: header is truncated (requires 4 bytes).");
-        }
-        var firstOffset = reader.ReadUInt32();
-        if (firstOffset < 4)
-        {
-            throw new InvalidDataException($"{name}: offset table must contain at least one DWORD.");
-        }
-        if (firstOffset % 4 != 0)
-        {
-            throw new InvalidDataException($"{name}: offset table is not DWORD-aligned.");
-        }
-        if (firstOffset > stream.Length)
-        {
-            throw new InvalidDataException($"{name}: offset table extends beyond end of file.");
-        }
-        var chunks = new List<ChunkData>();
-        var previous = firstOffset;
-        for (var index = 0; index < firstOffset / 4 - 1; index++)
-        {
-            var next = reader.ReadUInt32();
-            if (next < previous)
-            {
-                throw new InvalidDataException($"{name}: chunk {index}: offsets are not ordered.");
-            }
-            if (next > stream.Length)
-            {
-                throw new InvalidDataException($"{name}: chunk {index}: offset exceeds end of file.");
-            }
-            var tablePosition = stream.Position;
-            var length = next - previous;
-            stream.Position = previous;
-            var prefix = reader.ReadBytes((int)Math.Min(8, length));
-            stream.Position = tablePosition;
-            chunks.Add(new ChunkData(index, previous, length, prefix));
-            previous = next;
-        }
-        if (previous != stream.Length)
-        {
-            throw new InvalidDataException($"{name}: final offset does not match file length.");
-        }
-        stream.Position = 0;
-        var sha256 = Convert.ToHexStringLower(SHA256.HashData(stream));
-        return new ArchiveData(name, stream.Length, sha256, chunks);
-    }
-
-    private static string GetVersionHint(List<ArchiveData> archives)
+    private static string GetVersionHint(List<MkfArchive> archives)
     {
         var sss = archives.Single(archive => archive.Name == "sss.mkf");
         var objectSize = sss.Chunks.Count > 2 ? sss.Chunks[2].ByteLength : 0;
@@ -123,7 +41,7 @@ internal static class ArchiveInspector
         return dosCount == 2 ? "dos" : windowsObjects ? "windows" : "unknown";
     }
 
-    private static ChunkReport DescribeChunk(string name, ChunkData chunk, string versionHint)
+    private static ChunkReport DescribeChunk(string name, MkfArchive.ChunkData chunk, string versionHint)
     {
         string hint;
         uint? declaredLength = null;
@@ -156,9 +74,6 @@ internal static class ArchiveInspector
     }
 
     private static bool IsYj1(byte[] prefix) => prefix.AsSpan().StartsWith("YJ_1"u8);
-
-    private sealed record ArchiveData(string Name, long ByteLength, string Sha256, List<ChunkData> Chunks);
-    private sealed record ChunkData(int Index, uint Offset, uint ByteLength, byte[] Prefix);
 }
 
 internal sealed record InspectionReport(int FormatVersion, string VersionHint, ArchiveReport[] Archives);

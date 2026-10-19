@@ -15,7 +15,7 @@ public class CliTests
         Assert.Contains("pal-extract", result.Stdout);
         Assert.Contains("Usage:", result.Stdout);
         Assert.Contains("--help", result.Stdout);
-        Assert.Contains("not implemented", result.Stdout);
+        Assert.Contains("export-map --input <directory> --output <directory> --map <id> --palette <id> --lighting day|night", result.Stdout);
         Assert.Empty(result.Stderr);
     }
 
