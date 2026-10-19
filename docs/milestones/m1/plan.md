@@ -1,6 +1,6 @@
 # M1 实现计划：场景资源提取
 
-状态：**实施任务已发布，只读 MKF 检查已实现并本地验证，解压与资源提取尚未实现。** 规格及任务见 [Issue #6](https://github.com/fanxiao92/godot-pal/issues/6)。 本计划承接 [总体路线](../../design/development-plan.md)，只交付离线场景资源。M2 负责 Godot 场景构建与探索，M3 再接入事件与对话；任务规格和执行结果使用 GitHub Issues。
+状态：**#7～#10 的只读检查、Windows 解码、地图/精灵/场景导出及完整资源包已实现并完成本地验证；最终独立审查与 Issue 关闭待统一处理。** 规格及任务见 [Issue #6](https://github.com/fanxiao92/godot-pal/issues/6)。 本计划承接 [总体路线](../../design/development-plan.md)，只交付离线场景资源。M2 负责 Godot 场景构建与探索，M3 再接入事件与对话；任务规格和执行结果使用 GitHub Issues。
 
 ## 1. 目标与范围
 
@@ -21,7 +21,7 @@
 
 ## 3. 数据基线与首个场景
 
-当前包的 15 个 MKF 已通过一次性只读外层检查：DWORD 小端偏移表有序、无越界，末尾等于文件长度；空 chunk 合法。六个压缩归档探针和 14 字节对象表记录符合 SDLPal 的 Windows 数据判定条件，但尚未实际验证 YJ2 解压或 RLE 图像解码。
+当前包的 15 个 MKF 已通过一次性只读外层检查：DWORD 小端偏移表有序、无越界，末尾等于文件长度；空 chunk 合法。六个压缩归档探针和 14 字节对象表记录符合 SDLPal 的 Windows 数据判定条件，这些线索现已由实际 YJ2 解压、GOP/MGO RLE 与调色板/PNG 像素核对补充验证；不构成对所有资源格式的兼容承诺。
 
 `Sss.mkf` 的 SHA-256 为 `942cb898f14d609475e3bcef0944e4d082ca88f76f4a7171028b451584a5e2ff`。正式工具应记录实际消费文件的散列，不把该散列作为只允许某一份游戏数据的白名单。Windows 格式特征不能证明此重打包数据与未修改的 98 柔情版逐字节一致。
 
@@ -41,14 +41,14 @@
 
 ## 4. 实施切片与依赖
 
-各切片从真实 CLI 入口交付可独立检查的结果，沿用现有 xUnit 与进程测试。命令参数和产物字段在对应 Issue 中冻结；只读检查命令的使用说明见 [根目录 README](../../../README.md)，后续导出命令尚未实现。原生子任务与阻塞关系已建立，按下表顺序推进。
+各切片从真实 CLI 入口交付可独立检查的结果，沿用现有 xUnit 与进程测试。命令参数和产物字段在对应 Issue 中冻结；检查/转换命令的使用说明见 [根目录 README](../../../README.md)，最终 CLI、manifest v1 和资源引用规则见 [完整包契约](extract-scene.md)。原生子任务与阻塞关系已建立，按下表顺序推进。
 
 | 顺序 | 切片 | 阻塞项 | 可验证交付 |
 |---|---|---|---|
 | 1 | [MKF 只读检查入口 #7](https://github.com/fanxiao92/godot-pal/issues/7) | 无 | 已实现：指定输入目录，报告场景所需归档的 chunk、长度、空槽、输入身份与版本线索；损坏输入明确失败 |
-| 2 | [地图与瓦片图像导出 #8](https://github.com/fanxiao92/godot-pal/issues/8) | #7 | 对地图 12 完成 YJ2、GOP 帧/RLE 与调色板解码，输出地图 JSON、瓦片 PNG 和地图预览 |
-| 3 | [场景与人物资源导出 #9](https://github.com/fanxiao92/godot-pal/issues/9) | #8 | 输出场景 JSON、初始对象和主角所需的 MGO 图像及帧信息，保持原始字段与 ID |
-| 4 | [静态场景资源包集成 #10](https://github.com/fanxiao92/godot-pal/issues/10) | #9 | 一次转换生成所选静态场景的资源集合与清单，验证资源引用、来源和重复输出一致性；无需事件或语言包 |
+| 2 | [地图与瓦片图像导出 #8](https://github.com/fanxiao92/godot-pal/issues/8) | #7 | 已实现并本地验证：对地图 12 完成 YJ2、GOP 帧/RLE 与调色板解码，输出地图 JSON、瓦片 PNG 和地图预览 |
+| 3 | [场景与人物资源导出 #9](https://github.com/fanxiao92/godot-pal/issues/9) | #8 | 已实现并本地验证：输出场景 JSON、初始对象和主角所需的 MGO 图像及帧信息，保持原始字段与 ID |
+| 4 | [静态场景资源包集成 #10](https://github.com/fanxiao92/godot-pal/issues/10) | #9 | 已实现并本地验证：一次转换生成所选静态场景的资源集合与清单，验证资源引用、来源和重复输出一致性；无需事件或语言包 |
 
 ### 输入与错误处理
 
@@ -87,3 +87,10 @@
 4. 验证整个静态场景资源包的引用和重复输出一致性，确认输入散列未变，原始数据和产物未进入 Git。
 
 M1 完成需要上述自动化与真实数据验收有实际证据。离线检查和预览不能替代 M2 的 Godot 显示、行走与碰撞验证。事件转换、对话、语言包及字库交由 M3；全量脚本转换、反向编译器和逐字节往返交由 M5，具体阶段定义以 [总体路线](../../design/development-plan.md) 为准。
+
+## 6. 当前实现与验证状态
+
+- 正式完整入口是 `extract-scene --input <directory> --output <directory> --scene <id> --palette <id> --lighting day|night`；地图从真实场景记录派生，六个场景归档足够，脚本非零也无需事件文件。manifest v1 和根相对资源/散列契约见 [完整包契约](extract-scene.md)。
+- 人工合成数据的真实 CLI 自动化已覆盖正常、缺可选文字/事件、原始字段/帧/alpha、损坏引用、安全、确定性与输入不变；工具无 Godot 依赖或新包依赖。
+- 本地完整 scene2 / map12 / palette0/day 两次新目录导出 416 文件字节一致；原始对象 1～32、323 个瓦片帧和 75 个精灵帧核对通过。完整包内的独立原始字段/RLE/PAT/PNG/地图预览检查通过；YJ2 使用交付实现，不声称第二套独立解压验证或原版截图对照。27 个输入的散列/长度/mtimeNs 与开工基线一致。
+- Debug/Release solution build/test、实际 Godot console 的 headless 导入/启动通过（现有 solution 的 Pal.Game Release 仍映射 Debug，未另改配置）；此轮没有执行全新 NuGet 缓存、桌面人工检查或远程 CI，也未进入 M2。上述是已执行证据的摘要，不是最终独立审查通过或关闭任务的声明。
