@@ -19,7 +19,9 @@
 开始某个里程碑时，读取其计划及对应 GitHub Issue 正文、评论；新里程碑先制定计划，再编码。
 
 - [M0 工程骨架与工具链](milestones/m0/plan.md)：已完成，保留原始计划。
-- [M1 场景资源提取](milestones/m1/plan.md)：任务已发布，只读 MKF 检查已实现，实际解压与资源提取待实现；只包含静态场景资源，不含事件、对话、语言包或字库。
+- [M1 场景资源提取](milestones/m1/plan.md)：只读检查、Windows 地图/精灵/场景转换和完整包已实现并本地验证，等待最终独立审查；只包含静态场景资源，不含事件、对话、语言包或字库。
+  - [完整静态资源包 v1](milestones/m1/extract-scene.md)：最终 CLI、来源/参数/产物散列与相对引用契约、实际验证及未执行边界。
+  - [地图切片契约](milestones/m1/export-map.md)：原始字段、PNG/索引/alpha 和瓦片预览约定。
 - M2 Godot 场景构建与探索、M3 事件与对话：计划尚未编写，阶段范围见总体路线。
 
 后续计划放在 `docs/milestones/<里程碑>/plan.md`。具体任务规格、讨论和结果留在 GitHub Issues。

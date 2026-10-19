@@ -23,7 +23,7 @@ if (args.Length == 3 && args[0] == "inspect" && args[1] == "--input"
     }
 }
 
-if (args.Length == 11 && args[0] is "export-map" or "export-scene")
+if (args.Length == 11 && args[0] is "export-map" or "export-scene" or "extract-scene")
 {
     var options = new Dictionary<string, string>();
     for (int i = 1; i < args.Length; i += 2)
@@ -41,7 +41,8 @@ if (args.Length == 11 && args[0] is "export-map" or "export-scene")
         try
         {
             if (args[0] == "export-map") MapExporter.Export(input, output, id, paletteId, lighting);
-            else SceneExporter.Export(input, output, id, paletteId, lighting);
+            else if (args[0] == "export-scene") SceneExporter.Export(input, output, id, paletteId, lighting);
+            else SceneBundleExporter.Export(input, output, id, paletteId, lighting);
             return 0;
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
@@ -55,7 +56,7 @@ if (args.Length == 11 && args[0] is "export-map" or "export-scene")
 
 if (args.Length != 0 && (args.Length != 1 || args[0] != "--help"))
 {
-    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" ? $"Unsupported arguments for {args[0]}."
+    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" ? $"Unsupported arguments for {args[0]}."
         : $"Unsupported arguments: {string.Join(" ", args)}");
     Console.Error.WriteLine("Use --help for usage.");
     return 2;
@@ -68,6 +69,7 @@ Console.WriteLine("""
            pal-extract inspect --input <directory>
            pal-extract export-map --input <directory> --output <directory> --map <id> --palette <id> --lighting day|night
            pal-extract export-scene --input <directory> --output <directory> --scene <id> --palette <id> --lighting day|night
+           pal-extract extract-scene --input <directory> --output <directory> --scene <id> --palette <id> --lighting day|night
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
 
@@ -78,5 +80,9 @@ Console.WriteLine("""
       export-scene Export Windows initial SSS/DATA records and static MGO/PAT sprite frames.
                    Requires a new or empty output directory outside input; links are rejected.
                    Script entries remain numeric; scripts are never loaded or executed.
+
+      extract-scene Compose a complete static scene bundle with a v1 source/artifact manifest.
+                    Derives the map from the scene record; requires only six scene MKFs.
+                    Same output safety rules; no text, fonts, SLF or event artifacts required.
     """);
 return 0;
