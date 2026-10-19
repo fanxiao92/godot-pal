@@ -23,7 +23,7 @@ if (args.Length == 3 && args[0] == "inspect" && args[1] == "--input"
     }
 }
 
-if (args.Length == 11 && args[0] == "export-map")
+if (args.Length == 11 && args[0] is "export-map" or "export-scene")
 {
     var options = new Dictionary<string, string>();
     for (int i = 1; i < args.Length; i += 2)
@@ -33,13 +33,15 @@ if (args.Length == 11 && args[0] == "export-map")
     }
     if (options.Count == 5 && options.TryGetValue("--input", out var input)
         && options.TryGetValue("--output", out var output)
-        && options.TryGetValue("--map", out var mapValue) && int.TryParse(mapValue, out int mapId) && mapId > 0
+        && options.TryGetValue(args[0] == "export-map" ? "--map" : "--scene", out var idValue)
+        && int.TryParse(idValue, out int id) && id > 0
         && options.TryGetValue("--palette", out var paletteValue) && int.TryParse(paletteValue, out int paletteId) && paletteId >= 0
         && options.TryGetValue("--lighting", out var lighting) && lighting is "day" or "night")
     {
         try
         {
-            MapExporter.Export(input, output, mapId, paletteId, lighting);
+            if (args[0] == "export-map") MapExporter.Export(input, output, id, paletteId, lighting);
+            else SceneExporter.Export(input, output, id, paletteId, lighting);
             return 0;
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
@@ -53,7 +55,7 @@ if (args.Length == 11 && args[0] == "export-map")
 
 if (args.Length != 0 && (args.Length != 1 || args[0] != "--help"))
 {
-    Console.Error.WriteLine(args[0] == "export-map" ? "Unsupported arguments for export-map."
+    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" ? $"Unsupported arguments for {args[0]}."
         : $"Unsupported arguments: {string.Join(" ", args)}");
     Console.Error.WriteLine("Use --help for usage.");
     return 2;
@@ -65,11 +67,16 @@ Console.WriteLine("""
     Usage: pal-extract [--help]
            pal-extract inspect --input <directory>
            pal-extract export-map --input <directory> --output <directory> --map <id> --palette <id> --lighting day|night
+           pal-extract export-scene --input <directory> --output <directory> --scene <id> --palette <id> --lighting day|night
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
 
       export-map Export Windows MAP/GOP/PAT tiles and a static map preview.
                  Requires a new or empty output directory outside input; links are rejected.
                  No scripts or scene objects are executed or exported.
+
+      export-scene Export Windows initial SSS/DATA records and static MGO/PAT sprite frames.
+                   Requires a new or empty output directory outside input; links are rejected.
+                   Script entries remain numeric; scripts are never loaded or executed.
     """);
 return 0;
