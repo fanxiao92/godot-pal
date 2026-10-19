@@ -58,4 +58,4 @@ SSS chunk0 是原始 32 字节 EVENTOBJECT，chunk1 是 8 字节 SCENE；不是�
 
 本地实际使用场景 2 / 地图 12 / palette0/day：两次新目录导出 **416 文件（415 个受清单散列的产物 + 清单）** 字节一致；地图 323 帧、精灵 12 个 ID / 75 帧、对象 1～32 的原始字段和入口保留。完整包内的地图与精灵产物分别与 #8/#9 已核对输出逐字节一致；对完整包重跑独立 GOP/RLE/PAT/PNG 像素、地图预览重合成和原始 SSS/DATA 字段核对。MGO 原始解压字节来自交付 Yj2Decoder 的独立调用，**不是第二套独立 YJ2 实现**。全部 27 个原始文件的散列、长度、mtimeNs 与开工基线一致。
 
-当前本地 Debug/Release solution build/test 和真实 Godot console 的 headless version/import/startup 均通过。现有 solution 将 Pal.Game 的 Release 配置映射到 Debug（未修改）；提取 CLI/Core/测试实际按各自 Debug/Release 构建，不声称游戏的独立 Release 配置已验收。此轮**未重跑**全新 NuGet 缓存验收、桌面窗口人工检查、远程 CI 或其他平台检查；M0 历史验收不能当作本轮新执行。最终独立审查与 Issue 关闭由父任务统一处理。离线预览不等于 M2 的 Godot 显示、行走、碰撞或 M3 事件行为验收。
+当前本地 Debug/Release solution build/test 和真实 Godot console 的 headless version/import/startup 均通过。现有 solution 将 Pal.Game 的 Release 配置映射到 Debug（未修改）；提取 CLI/Core/测试实际按各自 Debug/Release 构建，不声称游戏的独立 Release 配置已验收。此轮**未重跑**全新 NuGet 缓存验收、桌面窗口人工检查、远程 CI 或其他平台检查；M0 历史验收不能当作本轮新执行。独立 Standards/Spec 审查及两项 P2 去重后的复核均通过，实际验收和任务收尾说明见 [M1 规格 #6](https://github.com/fanxiao92/godot-pal/issues/6)。离线预览不等于 M2 的 Godot 显示、行走、碰撞或 M3 事件行为验收。

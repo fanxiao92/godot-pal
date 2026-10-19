@@ -1,6 +1,6 @@
 # M1 实现计划：场景资源提取
 
-状态：**#7～#10 的只读检查、Windows 解码、地图/精灵/场景导出及完整资源包已实现并完成本地验证；最终独立审查与 Issue 关闭待统一处理。** 规格及任务见 [Issue #6](https://github.com/fanxiao92/godot-pal/issues/6)。 本计划承接 [总体路线](../../design/development-plan.md)，只交付离线场景资源。M2 负责 Godot 场景构建与探索，M3 再接入事件与对话；任务规格和执行结果使用 GitHub Issues。
+状态：**M1 已验收通过。#7～#10 的只读检查、Windows 解码、地图/精灵/场景导出及完整资源包已实现，本地验证、独立 Standards/Spec 审查及修复后复核均通过；任务收尾与实际证据见对应 Issue。** 规格及任务见 [Issue #6](https://github.com/fanxiao92/godot-pal/issues/6)。 本计划承接 [总体路线](../../design/development-plan.md)，只交付离线场景资源。M2 负责 Godot 场景构建与探索，M3 再接入事件与对话；任务规格和执行结果使用 GitHub Issues。
 
 ## 1. 目标与范围
 
