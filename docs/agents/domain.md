@@ -10,8 +10,8 @@
 如果这些文件尚不存在，直接继续，不因缺失而要求先创建。
 术语与决策在实际澄清后，由 domain-modeling 工作流按需记录。
 
-现有 `docs/01-feasibility.md` 至 `docs/04-decisions.md` 继续作为项目设计背景；M0 工作还应读取 `docs/05-m0-implementation-plan.md`。
-本次配置不迁移或重写已有设计文档。
+项目设计背景位于 `docs/design/`，阅读入口见 `docs/README.md`。实现任务前读取对应 GitHub Issue 正文、评论及 `docs/milestones/<里程碑>/plan.md`；如果计划尚不存在，先编写计划再编码。
+`docs/archive/` 仅在排障、环境升级或追溯历史结论时读取，不作为默认必读文档。当前技术版本与常用命令见根目录 `README.md`；检查由测试及 CI 执行，任务结果记录在 Issue 中，仅对值得长期保留的特殊调查另写记录。
 
 ## 用词与冲突
 

@@ -1,8 +1,10 @@
-# 07 · 最小游戏启动链路（M0 / Issue #3）
+# 最小游戏启动链路（M0 / Issue #3）
+
+> M0 历史归档：保留当时的环境、检查过程和结论，不作为默认必读文档。当前环境及常用命令见 [根目录 README](../../../README.md)。
 
 任务：[Issue #3](https://github.com/fanxiao92/godot-pal/issues/3)。
 
-状态：正式工程构建、核心测试、headless 启动和用户桌面可视验收均已通过，Issue #3 的验收完成。本报告仅覆盖 #3；后续 CLI 与 CI 的整体验收结果见 `08-extract-cli.md`、`09-m0-acceptance.md`。
+状态：正式工程构建、核心测试、headless 启动和用户桌面可视验收均已通过，Issue #3 的验收完成。本报告仅覆盖 #3；后续 CLI 与 CI 的整体验收结果见 [CLI 入口记录](extract-cli.md)、[M0 验收记录](acceptance.md)。
 
 ## 工程与行为
 

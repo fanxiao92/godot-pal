@@ -1,4 +1,6 @@
-# 09 · M0 Windows CI 与集成验收（Issue #5）
+# M0 Windows CI 与集成验收（Issue #5）
+
+> M0 历史归档：保留当时的环境、检查过程和结论，不作为默认必读文档。当前环境及常用命令见 [根目录 README](../../../README.md)。
 
 任务：[Issue #5](https://github.com/fanxiao92/godot-pal/issues/5)。
 
@@ -72,9 +74,9 @@ $godot = ./scripts/Get-Godot.ps1 -Destination $destination
 
 ## 人工证据与仍未验证的范围
 
-用户已在 #3 确认桌面窗口标题、`Core ready` 状态显示及正常关闭全部正常，并检查了对应进程已退出，详见 `07-game-startup.md`。CI 不代替此项人工确认。
+用户已在 #3 确认桌面窗口标题、`Core ready` 状态显示及正常关闭全部正常，并检查了对应进程已退出，详见 [游戏启动记录](game-startup.md)。CI 不代替此项人工确认。
 
-GdUnit4Net 尚未实际接入：采用 xUnit + 进程级 smoke test；M2 前重新验证候选框架或记录明确替代方案，见 `07-game-startup.md`。
+GdUnit4Net 尚未实际接入：采用 xUnit + 进程级 smoke test；M2 前重新验证候选框架或记录明确替代方案，见 [游戏启动记录](game-startup.md)。
 
 本次不验证导出包、其他操作系统、地图或事件运行，也未提供原版数据。接下来应先准备真实 98 柔情版数据、核对版本与资源依赖，再编写 M1 计划，不直接开始全量资源转换。
 

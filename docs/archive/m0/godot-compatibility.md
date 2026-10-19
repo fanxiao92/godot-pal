@@ -1,4 +1,6 @@
-# 06 · Godot C# 兼容性验证（M0 / Issue #2）
+# Godot C# 兼容性验证（M0 / Issue #2）
+
+> M0 历史归档：保留当时的环境、检查过程和结论，不作为默认必读文档。当前环境及常用命令见 [根目录 README](../../../README.md)。
 
 对应任务：[GitHub Issue #2](https://github.com/fanxiao92/godot-pal/issues/2)。
 
