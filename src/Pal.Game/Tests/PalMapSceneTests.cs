@@ -65,6 +65,55 @@ public class PalMapSceneTests
         AssertThat(scene.TextureFilter).IsEqual(CanvasItem.TextureFilterEnum.Nearest);
     }
 
+    [TestCase]
+    public void UpdateRequiresInitializationAndInitializationCannotBeRepeated()
+    {
+        var scene = new PalMapScene();
+        using var image = Image.CreateEmpty(3, 5, false, Image.Format.Rgba8);
+        using var texture = ImageTexture.CreateFromImage(image);
+        var plan = new StaticScenePlan(0, 0, 0, 0, []);
+        try
+        {
+            string? diagnostic = null;
+            try { scene.UpdateScene(plan); }
+            catch (InvalidOperationException e) { diagnostic = e.Message; }
+            AssertThat(diagnostic).IsEqual("InitializeScene is required before UpdateScene");
+            scene.InitializeScene(plan, _ => texture);
+            scene.UpdateScene(plan);
+            diagnostic = null;
+            try { scene.InitializeScene(plan, _ => texture); }
+            catch (InvalidOperationException e) { diagnostic = e.Message; }
+            AssertThat(diagnostic).IsEqual("Static scene already initialized");
+        }
+        finally { scene.Free(); }
+    }
+
+    [TestCase("throw")]
+    [TestCase("null")]
+    public void UpdateResolvesAllNativeTexturesAndPropagatesFailureBeforeAcceptingAnotherPlan(string failure)
+    {
+        var scene = new PalMapScene();
+        using var image = Image.CreateEmpty(3, 5, false, Image.Format.Rgba8);
+        using var texture = ImageTexture.CreateFromImage(image);
+        var initial = new StaticScenePlan(0, 0, 0, 0,
+            [new(SceneDrawSource.Leader, 17, 0, 5, 7, 0, 0)]);
+        var next = initial with { Commands = [new(SceneDrawSource.Leader, 17, 0, 11, 13, 0, 0),
+            new(SceneDrawSource.Object, 23, 99, 17, 19, 0, 0)] };
+        Texture2D Resolve(SceneDrawCommand command) => command.FrameIndex == 0 ? texture
+            : failure == "throw" ? throw new InvalidOperationException("native missing texture") : null!;
+        try
+        {
+            scene.InitializeScene(initial, Resolve);
+            string? diagnostic = null;
+            try { scene.UpdateScene(next); }
+            catch (InvalidOperationException e) { diagnostic = e.Message; }
+            AssertThat(diagnostic).IsEqual(failure == "throw" ? "native missing texture" : "Scene texture resolver returned null");
+            // Same saved resolver remains usable after rejection; GPU observer separately proves old pixels survive.
+            scene.UpdateScene(initial);
+        }
+        finally { scene.Free(); }
+    }
+
     // These arbitrary reference views are not legal spawn profiles. They use the public Core-plan
     // -> Godot draw seam, never a camera override or a map-only runtime fallback.
     internal static (PalMapScene Scene, StaticScenePlan Plan) LoadPlan(NativeMapFixture fixture, short leaderX, short leaderY)

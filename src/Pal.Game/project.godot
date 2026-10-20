@@ -17,6 +17,24 @@ window/stretch/scale_mode="integer"
 [dotnet]
 project/assembly_name="Pal.Game"
 
+[input]
+exploration_south={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194322)]
+}
+exploration_west={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194319)]
+}
+exploration_north={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194320)]
+}
+exploration_east={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":4194321)]
+}
+
 [rendering]
 renderer/rendering_method="gl_compatibility"
 textures/canvas_textures/default_texture_filter=0
