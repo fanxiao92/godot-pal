@@ -41,3 +41,6 @@ data/raw/*
 # pal-extract 的产出(由原始数据生成,不入库)
 data/extracted/
 
+
+# Explicitly prepared native game assets (real and derived content, never committed).
+src/Pal.Game/Assets/
