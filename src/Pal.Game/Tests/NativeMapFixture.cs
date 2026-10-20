@@ -10,7 +10,7 @@ internal sealed class NativeMapFixture : IDisposable
 {
     public string Root { get; } = "res://Assets/RuntimeTests/" + Guid.NewGuid().ToString("N");
     public PalMapScene Scene { get; }
-    public NativeMapFixture()
+    public NativeMapFixture(bool useMainViewCells = false)
     {
         var map = new PalMap { MapId = 12, Tiles = new PalTiles { MapId = 12 } };
         for (int i = 0; i < 4; i++)
@@ -24,11 +24,14 @@ internal sealed class NativeMapFixture : IDisposable
         map.RawCells = new long[cells]; map.BottomFrames = new int[cells]; map.TopFrames = new int[cells];
         Array.Fill(map.TopFrames, -1);
         map.BottomHeights = new int[cells]; map.TopHeights = new int[cells]; map.Blocked = new byte[cells];
-        // Non-origin [y=2,x=3,h=0/1], then [y=2,x=4,h=0]. Heights must not move bitmaps.
-        map.BottomFrames[262] = 1; map.BottomFrames[263] = 2; map.BottomFrames[264] = 3;
-        map.TopFrames[262] = 2; map.TopFrames[263] = 3;
-        map.BottomHeights[262] = 9; map.TopHeights[262] = 11;
-        map.RawCells[262] = 0x0B030901; map.RawCells[263] = 0x00040002; map.RawCells[264] = 3;
+        // Map-rule tests use (x3,y2). Shipped Main uses explicit T2 view(512,512),
+        // so its literal special cells are (x19,y34), h0/h1, then (x20,y34,h0).
+        // Both examples put the special bitmap at screen(80,24); neither is a party spawn.
+        int cell = useMainViewCells ? 4390 : 262;
+        map.BottomFrames[cell] = 1; map.BottomFrames[cell + 1] = 2; map.BottomFrames[cell + 2] = 3;
+        map.TopFrames[cell] = 2; map.TopFrames[cell + 1] = 3;
+        map.BottomHeights[cell] = 9; map.TopHeights[cell] = 11;
+        map.RawCells[cell] = 0x0B030901; map.RawCells[cell + 1] = 0x00040002; map.RawCells[cell + 2] = 3;
         Scene = new PalMapScene { Name = "SyntheticMap", Data = new PalSceneData { SceneId = 2, MapId = 12, Map = map } };
         Directory.CreateDirectory(ProjectSettings.GlobalizePath(Root + "/Scenes"));
     }

@@ -17,9 +17,11 @@ func observe() -> void:
     await process_frame
     await process_frame
     await process_frame
+    if not check(main.get("TestViewpoint") == Vector2i(512, 512), "shipped Main must select the visible T2 test view(512,512), not a party spawn"): return
     if not check(main.get_child_count() == 1, "native map child missing"): return
     var map = main.get_child(0)
     if not check(map.is_inside_tree() and map.is_node_ready(), "map is not ready in tree"): return
+    if not check(map.get("TestViewpoint") == Vector2i(512, 512), "shipped Main did not apply its T2 test view"): return
     var sprites = map.get_children()
     if not check(sprites.size() == 392, "two map layers were not drawn"): return
     var at_cell: Array[Sprite2D] = []
