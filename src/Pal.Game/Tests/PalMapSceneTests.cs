@@ -24,6 +24,29 @@ public class PalMapSceneTests
     }
 
     [TestCase(Timeout = 15000)]
+    public async Task ByteWrappedTestViewpointDrawsOriginalCellsAtLiteralScreenPositions()
+    {
+        using var fixture = new NativeMapFixture();
+        fixture.Scene.TestViewpoint = new Vector2I(8192, 4096);
+        using var runner = ISceneRunner.Load(fixture.Save(), true);
+        await runner.SimulateFrames(3);
+        var scene = runner.Scene()!;
+        AssertThat(scene.IsInsideTree() && scene.IsNodeReady()).IsTrue();
+        var sprites = scene.GetChildren().OfType<Sprite2D>().ToArray();
+        // Reference BYTE conversion wraps grid (259,258,h0) to special cell (3,2,h0).
+        // Literal screen position and unique frame1/2 dimensions/colors, not a production calculation.
+        var atCell = sprites.Where(s => s.Position == new Vector2(80, 24)).ToArray();
+        AssertThat(atCell.Length).IsEqual(2);
+        AssertThat(atCell[0].Texture.GetSize()).IsEqual(new Vector2(41, 25));
+        AssertThat(atCell[1].Texture.GetSize()).IsEqual(new Vector2(42, 26));
+        using var bottom = atCell[0].Texture.GetImage();
+        using var top = atCell[1].Texture.GetImage();
+        AssertThat(bottom.GetPixel(0, 0)).IsEqual(new Color(0, 1, 0, 1));
+        AssertThat(top.GetPixel(0, 0)).IsEqual(new Color(0, 0, 1, 1));
+        AssertThat(System.Array.IndexOf(sprites, atCell[1])).IsGreater(System.Array.IndexOf(sprites, atCell[0]));
+    }
+
+    [TestCase(Timeout = 15000)]
     public async Task NativePackedSceneDrawsTwoLayersInReferenceOrderWithoutHeightDisplacement()
     {
         using var fixture = new NativeMapFixture();

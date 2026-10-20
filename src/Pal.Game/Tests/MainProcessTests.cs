@@ -103,12 +103,15 @@ public class MainProcessTests
     }
 
     [TestCase(Timeout = 20000)]
-    public async Task MissingDefaultNativeSceneFailsWithItsResourceLocation()
+    public async Task MissingNativeSceneFailsWithItsSelectedResourceLocation()
     {
-        var result = await RunMain();
+        string root = "res://Assets/RuntimeTests/Missing-" + Guid.NewGuid().ToString("N");
+        AssertThat(System.IO.Directory.Exists(ProjectSettings.GlobalizePath(root))).IsFalse();
+        var result = await RunMain("--m2-resources", root);
         AssertThat(result.ExitCode).IsEqual(1);
-        AssertThat(result.Text.Contains("res://Assets/Scenes/Scene.tscn", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains(root + "/Scenes/Scene.tscn", StringComparison.Ordinal)).IsTrue();
         AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
+        AssertThat(System.IO.Directory.Exists(ProjectSettings.GlobalizePath(root))).IsFalse();
     }
 
     internal static async Task<ProcessResult> RunMain(params string[] arguments)

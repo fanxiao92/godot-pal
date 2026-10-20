@@ -4,7 +4,7 @@ Approved seam: real native `PackedScene` / `Resource` / `Texture2D`, real scene-
 
 Tests live in the existing Godot assembly, matching the #12 proven arrangement; no second Godot project or Core test migration. Fixed packages: gdUnit4.api 5.1.0-rc5, gdUnit4.test.adapter 3.1.1, Microsoft.NET.Test.Sdk 18.0.1. Godot.NET.Sdk 4.7.2 / net10.0 and repository global.json remain authoritative.
 
-Run from repository root in PowerShell 7, with the installed Godot 4.7.2 mono console executable selected explicitly. Use a dedicated artificial-data worktree with no default `Assets/Scenes/Scene.tscn` (the missing-default test intentionally verifies that condition). Test resources are independent native literals, saved under ignored `Assets/RuntimeTests/<guid>` and removed after each test. They are not a duplicate M1 JSON fixture.
+Run from repository root in PowerShell 7, with the installed Godot 4.7.2 mono console executable selected explicitly. The suite runs whether or not a default `Assets/Scenes/Scene.tscn` exists: the missing-resource case selects its own absent GUID root through the real Main arguments, without touching default assets. Test resources are independent native literals, saved under ignored `Assets/RuntimeTests/<guid>` and removed after each test. They are not a duplicate M1 JSON fixture.
 
 ```powershell
 $env:GODOT_BIN = 'C:/path/to/godot-mono.console.exe'
@@ -12,16 +12,20 @@ $logs = 'C:/external/test-results'
 dotnet build src/Pal.Game
 & $env:GODOT_BIN --headless --path src/Pal.Game --editor --import
 dotnet test src/Pal.Game --no-build --settings tests/Pal.Game.Tests/game.runsettings --list-tests
-# Expected: 28 discovered = 25 positive cases + 3 deliberate failure controls.
+# Expected: 29 discovered = 26 positive cases + 3 deliberate failure controls.
 dotnet test src/Pal.Game --no-build --settings tests/Pal.Game.Tests/game.runsettings `
   --filter 'FullyQualifiedName!~FailureControlTests' --results-directory $logs `
   --logger 'trx;LogFileName=game.trx'
-# Expected: 25 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
+# Expected: 26 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
 
 # Each command below must fail: 1 executed, 1 failed, 0 skipped; exit1.
 foreach ($control in @('IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
   dotnet test src/Pal.Game --no-build --settings tests/Pal.Game.Tests/game.runsettings `
-    --filter $control --results-directory $logs --logger "trx;LogFileName=$control.trx"
+    --filter $control --results-directory $logs --logger "trx;LogFileName=$control.trx" `
+    *> (Join-Path $logs "$control.log")
+  $exitCode = $LASTEXITCODE
+  "EXIT_CODE=$exitCode" | Tee-Object -FilePath (Join-Path $logs "$control.log") -Append
+  if ($exitCode -ne 1) { throw "$control expected exit1, got $exitCode; inspect its log and TRX counts" }
 }
 ```
 
