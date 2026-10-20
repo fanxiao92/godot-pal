@@ -20,13 +20,16 @@ public sealed class StaticSceneRules
 
     // Returns the complete draw order, including background and repeated cover tiles.
     // Missing required frames or more than 2048 sprite/cover entries fail, never substitute/truncate.
-    public StaticScenePlan BuildPlan(StaticLeader leader)
+    public StaticScenePlan BuildPlan(StaticLeader leader) => BuildPlan(leader,
+        unchecked((ushort)(leader.Direction * (leader.WalkFramesWord == 0 ? 3 : leader.WalkFramesWord))));
+
+    public StaticScenePlan BuildPlan(StaticLeader leader, int leaderFrameIndex)
     {
         if (leader.Direction is < 0 or > 3 || leader.StepPhase is < 0 or > 3)
             throw new ArgumentOutOfRangeException(nameof(leader), "Direction and step phase must be 0..3.");
         int cameraX = unchecked((short)(leader.X - AnchorX));
         int cameraY = unchecked((short)(leader.Y - AnchorY));
-        int frameIndex = unchecked((ushort)(leader.Direction * (leader.WalkFramesWord == 0 ? 3 : leader.WalkFramesWord)));
+        int frameIndex = leaderFrameIndex;
         var frame = leader.Sprite.Frames.TryGetValue(frameIndex, out var found) ? found
             : throw new InvalidOperationException($"Leader sprite {leader.Sprite.SpriteId} is missing frame {frameIndex}.");
         var sprites = new List<Pending>();
