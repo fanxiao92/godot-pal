@@ -45,8 +45,9 @@ public sealed partial class PrepareProcessTests : IDisposable
         Assert.Contains("recordIndex", result.Text);
         Assert.False(Directory.Exists(output));
     }
-    private string[] Snapshot() => Directory.GetFiles(Input, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
-        .Select(p => $"{Path.GetRelativePath(Input, p)}:{M1Bundle.Hash(File.ReadAllBytes(p))}:{File.GetLastWriteTimeUtc(p).Ticks}").ToArray();
+    private string[] Snapshot() => Snapshot(Input);
+    private static string[] Snapshot(string directory) => Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
+        .Select(p => $"{Path.GetRelativePath(directory, p)}:{M1Bundle.Hash(File.ReadAllBytes(p))}:{File.GetLastWriteTimeUtc(p).Ticks}").ToArray();
     private Task<Result> Prepare(params string[] args) => Run("pwsh", ["-NoProfile", "-NonInteractive", "-File", Path.Combine(repo, "scripts", "Prepare-GameScene.ps1"), "-InputPath", Input, "-OutputPath", output, "-GodotPath", Godot, .. args]);
     internal static async Task<Result> Run(string file, params string[] args)
     {

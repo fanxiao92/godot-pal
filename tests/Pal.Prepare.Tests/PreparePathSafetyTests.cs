@@ -72,6 +72,31 @@ public sealed partial class PrepareProcessTests
         finally { Directory.Delete(link); }
     }
     [Fact]
+    public async Task Project_contained_input_is_rejected_unchanged_before_Godot_can_start()
+    {
+        string projectInput = output + "-input";
+        Directory.CreateDirectory(Path.GetDirectoryName(projectInput)!);
+        Directory.Move(Input, projectInput);
+        try
+        {
+            var before = Snapshot(projectInput);
+            // A deliberately absent executable makes even the RED run safe: no engine can
+            // touch this project-contained package. The location diagnostic must win over
+            // executable resolution, proving rejection happens before any Godot launch.
+            string unavailableGodot = Path.Combine(root, "godot-must-not-start.exe");
+            var result = await Run("pwsh", "-NoProfile", "-NonInteractive", "-File", Path.Combine(repo, "scripts", "Prepare-GameScene.ps1"),
+                "-InputPath", Path.Combine(projectInput, "..", Path.GetFileName(projectInput)),
+                "-OutputPath", output, "-GodotPath", unavailableGodot);
+            Assert.Equal(1, result.ExitCode);
+            Assert.Equal(before, Snapshot(projectInput));
+            Assert.False(Directory.Exists(output));
+            Assert.Contains("InputPath must be outside src/Pal.Game", result.Text);
+            Assert.DoesNotContain(unavailableGodot, result.Text);
+            Assert.DoesNotContain("Prepared native Godot scene", result.Text);
+        }
+        finally { Directory.Move(projectInput, Input); }
+    }
+    [Fact]
     public async Task Missing_input_is_data_error_not_argument_error()
     {
         var result = await RunPrepare(Path.Combine(root, "absent"), output);

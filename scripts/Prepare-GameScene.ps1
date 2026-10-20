@@ -69,6 +69,8 @@ try {
     $assets = Join-Path $project 'Assets'
     if (-not (Test-Inside $outputRoot $assets)) { throw 'OutputPath must be the project Assets directory or a directory inside it.' }
     if ((Test-Inside $outputRoot $inputRoot) -or (Test-Inside $inputRoot $outputRoot)) { throw 'InputPath and OutputPath must not overlap in either direction.' }
+    # Godot's editor import scans the whole project and could write .import beside source PNGs.
+    if (Test-Inside $inputRoot $project) { throw 'InputPath must be outside src/Pal.Game; Godot project import must not modify the source package.' }
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot
     if (-not [IO.Directory]::Exists($inputRoot)) { throw 'InputPath must be an existing complete M1 package directory.' }
     Assert-TreeNoLink $inputRoot
