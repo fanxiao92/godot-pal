@@ -8,8 +8,8 @@ config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 [display]
 window/size/viewport_width=320
 window/size/viewport_height=200
-window/size/window_width_override=640
-window/size/window_height_override=400
+window/size/window_width_override=1280
+window/size/window_height_override=800
 window/stretch/mode="viewport"
 window/stretch/aspect="keep"
 window/stretch/scale_mode="integer"
