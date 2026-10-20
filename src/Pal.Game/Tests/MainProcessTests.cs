@@ -197,13 +197,16 @@ public class MainProcessTests
     [TestCase(Timeout = 20000)]
     public async Task ResourceRootDoesNotRewriteDefaultProfileUri()
     {
-        using var fixture = new NativeProfileFixture();
-        fixture.SavePacked();
-        var result = await RunMain("--m2-resources", fixture.ResourceRoot);
-        AssertThat(result.Text.Contains("profile=" + Profiles.NativeExplorationProfile.DefaultUri, StringComparison.Ordinal)).IsTrue();
-        // Identity-checked or missing: a caller-owned default must never silently become fixture.Uri.
-        AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
+        // Fail before profile loading so caller-owned default contents cannot affect this assertion.
+        string root = "res://Assets/RuntimeTests/Missing-DefaultProfile-" + Guid.NewGuid().ToString("N");
+        AssertThat(System.IO.Directory.Exists(ProjectSettings.GlobalizePath(root))).IsFalse();
+        var result = await RunMain("--m2-resources", root);
         AssertThat(result.ExitCode).IsEqual(1);
+        AssertThat(result.Text.Contains("native scene missing", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains(root + "/Scenes/Scene.tscn", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("profile=" + Profiles.NativeExplorationProfile.DefaultUri, StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
+        AssertThat(System.IO.Directory.Exists(ProjectSettings.GlobalizePath(root))).IsFalse();
     }
 
     [TestCase(Timeout = 20000)]
