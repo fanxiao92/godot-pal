@@ -20,9 +20,29 @@ func _initialize() -> void:
     if map.get("Width") != 64 or map.get("Height") != 128 or map.get("HalfRows") != 2 or map.get("RawCells").size() != 16384:
         fail("fixed map grid lost")
         return
-    if map.get("RawCells")[0] != 0x03022500 or map.get("TopFrames")[0] != 1 or map.get("TopFrames")[1] != -1 or map.get("BottomHeights")[0] != 5 or map.get("TopHeights")[0] != 3 or map.get("Blocked")[0] != 1:
-        fail("raw cells/heights/blocking lost")
-        return
+    var fields = ["RawCells", "BottomFrames", "TopFrames", "BottomHeights", "TopHeights", "Blocked"]
+    for field in fields:
+        if map.get(field).size() != 16384:
+            fail("map array size lost: " + field)
+            return
+    # Hand-worked [y,x,h] indices: [1,3,0] -> 134; [3,1,1] -> 387;
+    # [5,7,1] -> 655. Their h-neighbors and x/y transposes must remain distinct.
+    # Each literal row is [index, raw, bottom, top, bottomHeight, topHeight, blocked].
+    var expected_cells = [
+        [0, 0x03022500, 0, 1, 5, 3, 1],
+        [1, 0, 0, -1, 0, 0, 0],
+        [134, 0x07012401, 1, 0, 4, 7, 1],
+        [135, 0, 0, -1, 0, 0, 0],
+        [386, 0, 0, -1, 0, 0, 0],
+        [387, 0x02020900, 0, 1, 9, 2, 0],
+        [654, 0, 0, -1, 0, 0, 0],
+        [655, 0x00000c01, 1, -1, 12, 0, 0]
+    ]
+    for expected in expected_cells:
+        for column in range(fields.size()):
+            if map.get(fields[column])[expected[0]] != expected[column + 1]:
+                fail("map [y,x,h] array order/value lost: %s[%d]" % [fields[column], expected[0]])
+                return
     var frames = map.get("Tiles").get("Frames")
     if frames.size() != 2 or frames[0].get("Indices") != PackedByteArray([0, 1, 0, 2]) or frames[0].get("Alpha") != PackedByteArray([255, 255, 0, 255]):
         fail("frame data lost")
