@@ -11,10 +11,10 @@ $env:GODOT_BIN = 'C:/path/to/godot-mono.console.exe'
 $logs = 'C:/external/test-results'
 dotnet build src/Pal.Game
 & $env:GODOT_BIN --headless --path src/Pal.Game --editor --import
-dotnet test src/Pal.Game --no-build --settings tests/Pal.Game.Tests/game.runsettings --list-tests
+$env:PAL_TEST_GODOT = $env:GODOT_BIN
+dotnet test src/Pal.Game --no-build --list-tests
 # Expected: 29 discovered = 26 positive cases + 3 deliberate failure controls.
-dotnet test src/Pal.Game --no-build --settings tests/Pal.Game.Tests/game.runsettings `
-  --filter 'FullyQualifiedName!~FailureControlTests' --results-directory $logs `
+dotnet test src/Pal.Game --no-build --results-directory $logs `
   --logger 'trx;LogFileName=game.trx'
 # Expected: 26 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
 
@@ -29,8 +29,19 @@ foreach ($control in @('IntentionalAssertionMismatch', 'IntentionalTimeout', 'Na
 }
 ```
 
-Never treat unfiltered `dotnet test src/Pal.Game` as the positive suite: controls intentionally fail. Scene tests use `GodotExceptionMonitor`; the process tests explicitly assert child exit codes, absence of ready on rejection, and diagnostic content. Child processes have a 15-second watchdog with process-tree kill and asynchronously drained stdout/stderr. Session timeout is 120 seconds; individual scene/process tests are bounded. Check TRX counts and diagnostics, not only the CLI exit or ready marker.
+Ordinary `dotnet test src/Pal.Game` and `dotnet test GodotPal.sln` exclude the three controls by the Game project's conditional `VSTestTestCaseFilter`. An explicit CLI `--filter` overrides that default, including for each control above. `RunSettingsFilePath` selects the checked-in headless settings unless `--settings` overrides it. No machine-specific Godot executable is checked in: set both environment variables as above or use the shared script's explicit `-GodotPath`. Scene tests use `GodotExceptionMonitor`; the process tests explicitly assert child exit codes, absence of ready on rejection, and diagnostic content. Child processes have a 15-second watchdog with process-tree kill and asynchronously drained stdout/stderr. Session timeout is 120 seconds; individual scene/process tests are bounded. Check TRX counts and diagnostics, not only the CLI exit or ready marker.
 
 `ObserveMain.gd` independently loads the **shipped** Main scene, enters the tree, waits three frames and observes actual public Godot draw nodes and display transforms. It is a test observer, not a runtime fallback/alternate scene. The normal Main process is separately exercised without the observer. Headless viewport-transform checks prove the 320x200 logical field and integer display rectangle, not rendered pixel colors or a desktop manual pass.
 
-The adapter generates `src/Pal.Game/gdunit4_testadapter_v5/` itself. It is not source and must not be committed. This seam deliberately leaves the shared .gitignore, solution, CI and startup script integration to the serial integration owner. Existing startup smoke without explicit resources now fails by design; it must select an explicitly prepared artificial native root, not regain a text fallback.
+The adapter generates ignored `src/Pal.Game/gdunit4_testadapter_v5/` itself; it must not be committed. The solution includes Prepare tests and orders them before Game through a solution-only dependency: Prepare runs Game builds/imports and must finish before the Game adapter runs. Do not launch these projects concurrently against the same Godot project from separate shells.
+
+Shared local/Windows CI acceptance (PowerShell 7):
+
+```powershell
+./scripts/Test-M0.ps1 -GodotPath 'C:/path/to/godot-mono.console.exe' `
+  -EvidenceDirectory 'C:/external/new-empty-evidence-directory'
+```
+
+This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core/CLI/Prepare/Game TRX counts, lists 29 unique Godot cases, repeats the 26 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
+
+`Test-GameStartup.ps1 -GodotPath <exe>` remains independently callable. It uses the sole `M1Bundle.Write` fixture in an external temporary input, explicitly prepares a unique Assets subroot, and checks the actual Main's selected map URI plus Core ready and exit0. It only removes its own recorded, unchanged synthetic trees. Optional `-ResourceRoot res://Assets/<prepared-artificial-root>` uses caller-owned native resources without deleting them. Neither script populates the default real Assets root; ordinary game startup with missing resources still fails. Timeout or error is a failure, not a fallback. Headless automation is not GPU pixel or human desktop acceptance.

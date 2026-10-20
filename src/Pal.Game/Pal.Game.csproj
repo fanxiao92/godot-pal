@@ -5,6 +5,9 @@
     <Nullable>enable</Nullable>
     <IsTestProject>true</IsTestProject>
     <IsPackable>false</IsPackable>
+    <!-- TestPlatform uses RunSettingsFilePath by default; the CLI filter overrides this default filter. -->
+    <RunSettingsFilePath>$(MSBuildThisFileDirectory)../../tests/Pal.Game.Tests/game.runsettings</RunSettingsFilePath>
+    <VSTestTestCaseFilter Condition="'$(VSTestTestCaseFilter)' == ''">FullyQualifiedName!~FailureControlTests</VSTestTestCaseFilter>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Pal.Core/Pal.Core.csproj" />

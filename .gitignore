@@ -44,3 +44,5 @@ data/extracted/
 
 # Explicitly prepared native game assets (real and derived content, never committed).
 src/Pal.Game/Assets/
+# Official gdUnit4 .NET adapter's generated runner (not source).
+src/Pal.Game/gdunit4_testadapter_v5/

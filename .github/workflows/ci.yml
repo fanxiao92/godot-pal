@@ -1,4 +1,4 @@
-name: M0 Windows acceptance
+name: M0 and native map Windows acceptance
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
           persist-credentials: false
-          # Reference assets are not required to build M0; no game data is downloaded.
+          # Only synthetic M1 inputs are generated locally; no original game data is downloaded.
           lfs: false
       - name: Install the repository SDK
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -36,7 +36,7 @@ jobs:
         run: |
           $godot = ./scripts/Get-Godot.ps1 -Destination "$env:RUNNER_TEMP/godot-4.7.2"
           "GODOT_CONSOLE=$godot" >> $env:GITHUB_ENV
-      - name: Run shared M0 acceptance checks
+      - name: Run shared M0 and native map acceptance checks
         shell: pwsh
         run: |
           ./scripts/Test-M0.ps1 -GodotPath $env:GODOT_CONSOLE -EvidenceDirectory "$env:RUNNER_TEMP/m0-evidence"
@@ -50,5 +50,13 @@ jobs:
           path: |
             ${{ runner.temp }}/m0-evidence/acceptance.log
             ${{ runner.temp }}/m0-evidence/PASS.txt
-            ${{ runner.temp }}/m0-evidence/tests/*.trx
+            ${{ runner.temp }}/m0-evidence/*.log
+            ${{ runner.temp }}/m0-evidence/*.json
+            ${{ runner.temp }}/m0-evidence/solution/*.trx
+            ${{ runner.temp }}/m0-evidence/game/*.trx
+            ${{ runner.temp }}/m0-evidence/game-repeat/*.trx
+            ${{ runner.temp }}/m0-evidence/IntentionalAssertionMismatch/*.trx
+            ${{ runner.temp }}/m0-evidence/IntentionalTimeout/*.trx
+            ${{ runner.temp }}/m0-evidence/NativeReadyException/*.trx
             ${{ runner.temp }}/m0-evidence/godot/*.log
+            ${{ runner.temp }}/m0-evidence/godot/*.json
