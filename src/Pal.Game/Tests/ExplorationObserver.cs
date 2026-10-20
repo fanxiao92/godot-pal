@@ -1,5 +1,9 @@
 using System;
 using System.Linq;
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using Pal.Game.Profiles;
 using System.Threading.Tasks;
 using Godot;
 using Pal.Core;
@@ -25,7 +29,8 @@ public partial class ExplorationObserver : Node
             Check(main.Exploration != null, "Main exposes initialized exploration");
             Trace("start");
             string scenario = OS.GetEnvironment("PAL_EXPLORATION_CASE");
-            if (scenario == "default-scene2") await DefaultScene2();
+            if (scenario == "integration-scene2") await IntegrationScene2();
+            else if (scenario == "default-scene2") await DefaultScene2();
             else if (scenario == "dynamic") await Dynamic();
             else if (scenario.StartsWith("arrow-", StringComparison.Ordinal)) await Arrow(scenario[6..]);
             else if (scenario.StartsWith("raw-", StringComparison.Ordinal)) await RawFrames(int.Parse(scenario[4..]));
@@ -238,6 +243,136 @@ public partial class ExplorationObserver : Node
         foreach (var (x, y, color) in samples)
             Check(image.GetPixel(x, y).IsEqualApprox(color), $"literal GPU pixel({x},{y}) expected {color} got {image.GetPixel(x, y)}");
         GD.Print($"PAL_GPU_LITERAL:{samples.Length} independent color samples passed");
+    }
+
+    // Real native scene2 acceptance caller. The external route contains independent literal positions,
+    // never generated from the observed plan; it cannot set Main's state, camera or clock.
+    private async Task IntegrationScene2()
+    {
+        string evidence = OS.GetEnvironment("PAL_EXPLORATION_GPU_EVIDENCE");
+        Check(!string.IsNullOrEmpty(evidence), "integration evidence directory required");
+        Directory.CreateDirectory(evidence);
+        var data = ResourceLoader.Load<PalSceneData>("res://Assets/Scenes/Scene.tres");
+        string[] args = OS.GetCmdlineUserArgs();
+        int profileArgument = Array.IndexOf(args, "--m2-profile");
+        string profileUri = profileArgument < 0 ? NativeExplorationProfile.DefaultUri : args[profileArgument + 1];
+        var profile = NativeExplorationProfile.Load(profileUri, data);
+        string Objects() => JsonSerializer.Serialize(data.Objects.Select(o => new {
+            o.Id, o.X, o.Y, o.SLayer, o.SState, o.SVanishTime, o.WSpriteNum, o.NSpriteFrames,
+            o.WDirection, o.WCurrentFrameNum, o.WTriggerScript, o.WAutoScript, o.WTriggerMode,
+            o.NScriptIdleFrame, o.WSpritePtrOffset, o.NSpriteFramesAuto, o.WScriptIdleFrameCountAuto,
+            o.InitialFrameIndex, o.InitiallyVisible
+        }), new JsonSerializerOptions { WriteIndented = true });
+        string originalObjects = Objects();
+        File.WriteAllText(Path.Combine(evidence, "objects-before.json"), originalObjects);
+        File.WriteAllText(Path.Combine(evidence, "checked-start.json"), JsonSerializer.Serialize(new {
+            profileUri, profile.Leader.X, profile.Leader.Y, profile.Neighbors
+        }, new JsonSerializerOptions { WriteIndented = true }));
+
+        // At most sixteen reachable origins/four candidates each. Query facts are not motion proof.
+        var queue = new Queue<(int X, int Y, string Route)>();
+        var seen = new HashSet<(int, int)>();
+        queue.Enqueue((profile.Leader.X, profile.Leader.Y, ""));
+        seen.Add((profile.Leader.X, profile.Leader.Y));
+        var queries = new List<object>();
+        (int X, int Y)[] deltas = [(-16, 8), (-16, -8), (16, -8), (16, 8)];
+        for (int origin = 0; origin < 16 && queue.Count > 0; origin++)
+        {
+            var from = queue.Dequeue();
+            for (int direction = 0; direction < 4; direction++)
+            {
+                int x = from.X + deltas[direction].X, y = from.Y + deltas[direction].Y;
+                bool mapBlocked = profile.Rules.IsBlocked(x, y, checkObjects: false);
+                bool blocked = profile.Rules.IsBlocked(x, y);
+                queries.Add(new { from, direction, x, y, mapBlocked, blocked,
+                    blockers = profile.Rules.Objects.Where(o => o.State >= 2 &&
+                        Math.Abs(o.X - x) + Math.Abs(o.Y - y) * 2 < 16)
+                        .Select(o => new { o.Id, o.X, o.Y, o.State,
+                            distance = Math.Abs(o.X - x) + Math.Abs(o.Y - y) * 2 }).ToArray() });
+                if (!blocked && seen.Add((x, y))) queue.Enqueue((x, y, from.Route + direction));
+            }
+        }
+        File.WriteAllText(Path.Combine(evidence, "bounded-query.json"), JsonSerializer.Serialize(queries,
+            new JsonSerializerOptions { IncludeFields = true, WriteIndented = true }));
+        await IntegrationCapture(evidence, "start");
+        string routePath = OS.GetEnvironment("PAL_INTEGRATION_ROUTE");
+        if (!string.IsNullOrEmpty(routePath))
+        {
+            using var route = JsonDocument.Parse(File.ReadAllText(routePath));
+            foreach (var leg in route.RootElement.EnumerateArray())
+            {
+                int direction = leg.GetProperty("direction").GetInt32();
+                Check(direction is >= 0 and <= 3, "literal direction range");
+                string action = new[] { "exploration_south", "exploration_west", "exploration_north", "exploration_east" }[direction];
+                var bindings = InputMap.ActionGetEvents(action);
+                Check(bindings.Count == 1 && bindings[0] is InputEventKey binding && binding.Keycode == Arrows[direction],
+                    "real project InputMap arrow binding");
+                KeyEvent(Arrows[direction], true);
+                await NextFrame();
+                Check(Input.IsActionPressed(action), "arrow is pressed through actual InputMap");
+                foreach (var point in leg.GetProperty("positions").EnumerateArray())
+                {
+                    int x = point[0].GetInt32(), y = point[1].GetInt32();
+                    await Until(() => main.Exploration!.Leader.X == x && main.Exploration.Leader.Y == y
+                        && main.Exploration.Leader.Direction == direction && main.Exploration.IsWalking,
+                        "actual Main reaches independent literal walking point");
+                    IntegrationState(evidence, "walk");
+                    // Observe a new state before accepting another held step, even on repeated points.
+                    if (point.GetArrayLength() != 2) throw new InvalidOperationException("literal point requires x,y");
+                }
+                if (leg.TryGetProperty("blocked", out var block))
+                {
+                    int x = block[0].GetInt32(), y = block[1].GetInt32();
+                    var before = main.Exploration;
+                    await Until(() => !ReferenceEquals(before, main.Exploration) &&
+                        main.Exploration!.Leader.Direction == direction && !main.Exploration.IsWalking,
+                        "blocked arrow turns then stands");
+                    Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (x, y), "blocked position unchanged");
+                    IntegrationState(evidence, "blocked");
+                    before = main.Exploration;
+                    await Until(() => !ReferenceEquals(before, main.Exploration), "held blocked next due update");
+                    Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (x, y)
+                        && !main.Exploration.IsWalking, "held block cannot slide");
+                    IntegrationState(evidence, "blocked-held");
+                }
+                KeyEvent(Arrows[direction], false);
+                string name = leg.GetProperty("name").GetString()!;
+                if (leg.TryGetProperty("capture", out var capture) && capture.GetBoolean())
+                    await IntegrationCapture(evidence, name + "-released");
+                await NextFrame();
+                Check(!Input.IsActionPressed(action), "released arrow clears InputMap");
+                await Until(() => !main.Exploration!.IsWalking, "release stands at actual deadline");
+                var stopped = main.Exploration!;
+                IntegrationState(evidence, name + "-standing");
+                Check((stopped.Leader.X - stopped.Plan.CameraX, stopped.Leader.Y - stopped.Plan.CameraY) == (160, 112),
+                    "literal fixed anchor after movement/stop/block");
+                await Until(() => !ReferenceEquals(stopped, main.Exploration), "idle due update after release");
+                Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y, main.Exploration.Plan.CameraX,
+                    main.Exploration.Plan.CameraY, main.Exploration.Plan.LeaderFrameIndex) ==
+                    (stopped.Leader.X, stopped.Leader.Y, stopped.Plan.CameraX, stopped.Plan.CameraY, stopped.Plan.LeaderFrameIndex),
+                    "idle retains position/camera/standing bitmap");
+            }
+        }
+        string finalObjects = Objects();
+        File.WriteAllText(Path.Combine(evidence, "objects-after.json"), finalObjects);
+        Check(originalObjects == finalObjects, "all native object initial fields remain unchanged");
+        GD.Print("PAL_INTEGRATION_SCOPE:actual Main/ParseInputEvent/InputMap/Process; logical GPU; NOT physical OS input/pixels or manual desktop");
+    }
+
+    private void IntegrationState(string evidence, string label)
+    {
+        var s = main.Exploration!;
+        var state = new { label, observerProcessSignals = frame, ticks = Time.GetTicksMsec(), s.Leader.X, s.Leader.Y,
+            s.Leader.Direction, s.Leader.StepPhase, s.Leader.WalkFramesWord, s.Leader.Layer, s.IsWalking,
+            s.Plan.CameraX, s.Plan.CameraY, s.Plan.LeaderFrameIndex, s.Plan.Commands };
+        File.AppendAllText(Path.Combine(evidence, "actual-state.jsonl"), JsonSerializer.Serialize(state) + System.Environment.NewLine);
+        Trace("integration-" + label);
+    }
+
+    private async Task IntegrationCapture(string evidence, string name)
+    {
+        using var image = await Readback(name);
+        IntegrationState(evidence, "capture-" + name);
     }
 
     private async Task DefaultScene2()
