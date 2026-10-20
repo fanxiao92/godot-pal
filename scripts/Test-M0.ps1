@@ -22,13 +22,16 @@ $commands = [Collections.Generic.List[object]]::new()
 $checks = [Collections.Generic.List[object]]::new()
 $sequence = 0
 function Get-TestProcesses {
-    @(Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(godot.*|testhost.*)\.exe$' } |
+    @(Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -match '^godot.*\.exe$' -or
+        ($_.Name -match '^(dotnet|testhost|vstest.*)\.exe$' -and $_.CommandLine -match '(godot-pal|Pal\.Game|Pal\.Prepare)')
+    } |
         Select-Object ProcessId, ParentProcessId, Name, CommandLine, CreationDate)
 }
 $baseline = @(Get-TestProcesses)
 function Save-ProcessSnapshot([string]$Name) {
     $processes = @(Get-TestProcesses)
-    @{ utc = [DateTime]::UtcNow; query = 'Win32_Process: Godot/testhost executables'; baselineIds = @($baseline.ProcessId); processes = $processes; count = $processes.Count } |
+    @{ utc = [DateTime]::UtcNow; query = 'Win32_Process: all Godot and repository-related dotnet/testhost/vstest'; baselineIds = @($baseline.ProcessId); processes = $processes; count = $processes.Count } |
         ConvertTo-Json -Depth 6 | Set-Content (Join-Path $evidence "$Name.json")
     $new = @($processes | Where-Object { $_.ProcessId -notin @($baseline.ProcessId) })
     if ($new.Count) { throw "Residual test processes; inspect $Name.json (not killing unrelated processes)." }
@@ -81,7 +84,22 @@ try {
         $actual = @()
         foreach ($file in $files) {
             [xml]$trx = Get-Content -LiteralPath $file.FullName -Raw
-            $c = $trx.TestRun.ResultSummary.Counters
+            $summary = $trx.TestRun.ResultSummary
+            $c = $summary.Counters
+            $expectedOutcome = if ($Failed) { 'Failed' } else { 'Completed' }
+            # GdUnit reports deliberate assertion failures as RunInfo/Error too.
+            # Only controls may have those; session abort/crash diagnostics never qualify.
+            if ($summary.outcome -ne $expectedOutcome -or
+                @($summary.RunInfos.RunInfo | Where-Object {
+                    $_.outcome -in @('Aborted', 'Timeout') -or
+                    ($_.outcome -eq 'Error' -and $Failed -eq 0) -or
+                    $_.Text -match '(?i)Aborting test run|Test Run Aborted|test run timeout|test host process crashed|Unhandled exception|WindowsStdOutHook'
+                }).Count) {
+                throw "Test session did not complete as expected: $($file.Name) outcome=$($summary.outcome)"
+            }
+            foreach ($counter in @('error', 'timeout', 'aborted', 'inconclusive', 'passedButRunAborted', 'notRunnable', 'disconnected', 'inProgress', 'pending')) {
+                if ([int]$c.$counter -ne 0) { throw "Invalid test session counter ${counter}: $($file.Name)" }
+            }
             $p = [int]$c.passed; $f = [int]$c.failed
             $results = @($trx.TestRun.Results.UnitTestResult)
             # xUnit's TRX counters leave notExecuted=0 for platform skips; inspect actual results too.
@@ -96,7 +114,7 @@ try {
                 'Pal.Extract.Tests.InspectCliTests.Inspect_rejects_ambiguous_case_insensitive_names'
             ))) { throw "Unexpected skipped tests: $($file.Name)" }
             $actual += "$p/$s"
-            $checks.Add(@{ trx = $file.FullName; total = $total; executed = $executed; passed = $p; failed = $f; skipped = $s })
+            $checks.Add(@{ trx = $file.FullName; outcome = [string]$summary.outcome; total = $total; executed = $executed; passed = $p; failed = $f; skipped = $s })
         }
         $expected = for ($i = 0; $i -lt $Passed.Count; $i++) { "$($Passed[$i])/$($Skipped[$i])" }
         if (Compare-Object @($expected | Sort-Object) @($actual | Sort-Object)) { throw "TRX counts differ: expected $expected, got $actual" }
@@ -110,19 +128,19 @@ try {
     # Prepare launches Game builds/imports; it must finish before the adapter generates its runner.
     $solutionResults = Join-Path $evidence 'solution'
     $null = Invoke-DotnetChecked @('test', 'GodotPal.sln', '--no-build', '--no-restore', '--logger', 'trx', '--results-directory', $solutionResults)
-    Assert-Trx $solutionResults @(1, 300, 52, 26) @(0, 2, 0, 0)
+    Assert-Trx $solutionResults @(54, 300, 52, 138) @(0, 2, 0, 0)
     $list = Invoke-DotnetChecked @('test', 'src/Pal.Game', '--no-build', '--no-restore', '--list-tests')
     $list | Set-Content (Join-Path $evidence 'discovery.log')
     # This adapter's list-tests output uses short display names, including :index parameter cases.
     $discovered = @($list -split "`n" | Where-Object { $_ -match '^    [A-Za-z][A-Za-z0-9_]*(?::\d+ \(.*\))?\s*$' } | ForEach-Object { $_.Trim() })
     $controlNames = @('IntentionalAssertionMismatchPropagates', 'IntentionalTimeoutPropagates', 'NativeReadyExceptionIsNotSwallowed')
-    if ($discovered.Count -ne 29 -or @($discovered | Select-Object -Unique).Count -ne 29 -or
-        @($controlNames | Where-Object { $_ -in $discovered }).Count -ne 3) { throw "Expected 29 unique tests including 3 controls, got $($discovered.Count)." }
+    if ($discovered.Count -ne 141 -or @($discovered | Select-Object -Unique).Count -ne 141 -or
+        @($controlNames | Where-Object { $_ -in $discovered }).Count -ne 3) { throw "Expected 141 unique tests including 3 controls, got $($discovered.Count)." }
     @{ count = $discovered.Count; tests = $discovered } | ConvertTo-Json | Set-Content (Join-Path $evidence 'discovery.json')
     foreach ($run in @('game', 'game-repeat')) {
         $results = Join-Path $evidence $run
         $null = Invoke-DotnetChecked @('test', 'src/Pal.Game', '--no-build', '--no-restore', '--logger', 'trx', '--results-directory', $results)
-        Assert-Trx $results @(26) @(0)
+        Assert-Trx $results @(138) @(0)
     }
     foreach ($control in @('IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
         $results = Join-Path $evidence $control
@@ -137,7 +155,7 @@ try {
     }
     & (Join-Path $PSScriptRoot 'Test-GameStartup.ps1') -GodotPath $GodotPath -LogDirectory (Join-Path $evidence 'godot')
     Save-ProcessSnapshot 'processes-final'
-    'PASS: empty-cache restore/build; Core 1; CLI 300 + 2 existing platform skips; Prepare 52; Godot discovery 29 / positives 26 repeated; three separately verified 1-failure controls; native prepare/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
+    'PASS: empty-cache restore/build; Core 54; CLI 300 + 2 existing platform skips; Prepare 52; Godot discovery 141 / positives 138 repeated; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
         Set-Content (Join-Path $evidence 'PASS.txt')
     Write-Host 'PASS: automated M0/M2 acceptance completed. Graphical/manual acceptance is separate.'
 } finally {

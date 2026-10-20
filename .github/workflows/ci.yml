@@ -1,4 +1,4 @@
-name: M0 and native map Windows acceptance
+name: M0 and static exploration Windows acceptance
 
 on:
   push:
@@ -36,7 +36,7 @@ jobs:
         run: |
           $godot = ./scripts/Get-Godot.ps1 -Destination "$env:RUNNER_TEMP/godot-4.7.2"
           "GODOT_CONSOLE=$godot" >> $env:GITHUB_ENV
-      - name: Run shared M0 and native map acceptance checks
+      - name: Run shared M0 and static exploration acceptance checks
         shell: pwsh
         run: |
           ./scripts/Test-M0.ps1 -GodotPath $env:GODOT_CONSOLE -EvidenceDirectory "$env:RUNNER_TEMP/m0-evidence"

@@ -10,8 +10,9 @@ func _initialize() -> void:
     if not packed is PackedScene:
         fail("native PackedScene missing")
         return
+    # Preparation verifies native data/textures, not presentation. Runtime tree entry
+    # requires a checked profile and InitializeScene; never invoke _Ready here.
     var scene = packed.instantiate()
-    root.add_child(scene)
     var data = scene.get("Data")
     if data == null or data.get("SceneId") != 2 or data.get("MapId") != 12:
         fail("scene data/identity missing")
@@ -75,7 +76,7 @@ func _initialize() -> void:
         fail("preview native reference missing")
         return
     print("PAL_NATIVE_VERIFIED")
-    scene.queue_free()
+    scene.free()
     quit(0)
 
 func fail(message: String) -> void:

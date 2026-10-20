@@ -5,7 +5,9 @@ param(
     [ValidateRange(1, 600)][int]$TimeoutSeconds = 60,
     [string]$LogDirectory,
     # Optional existing native Assets root. Caller-owned resources are never removed.
-    [string]$ResourceRoot
+    [string]$ResourceRoot,
+    # Independent native profile selection, just like Main. Never authored in caller roots.
+    [string]$ProfileUri
 )
 $ErrorActionPreference = 'Stop'
 $GodotPath = (Resolve-Path $GodotPath).Path
@@ -69,6 +71,7 @@ try {
     Invoke-CheckedGodot 'version' @('--version') -ExpectedOutput '^4\.7\.2\.stable\.mono\.official\.ed1daf0bf$'
     Invoke-CheckedGodot 'import' @('--headless', '--path', $project, '--editor', '--import')
     if (-not $ResourceRoot) {
+        if ($ProfileUri) { throw 'ProfileUri requires caller-owned ResourceRoot; synthetic startup authors its own matching profile.' }
         $id = [guid]::NewGuid().ToString('N')
         $inputRoot = Join-Path ([IO.Path]::GetTempPath()) "pal-startup-input-$id"
         $outputRoot = Join-Path $project "Assets/Startup-$id"
@@ -78,14 +81,18 @@ try {
         $assembly.GetType('Pal.TestFixtures.M1Bundle').GetMethod('Write').Invoke($null, [object[]]@([string]$inputRoot)) | Out-Null
         $inputSnapshot = @(Get-OwnedSnapshot $inputRoot)
         Invoke-CheckedGodot 'prepare' @('-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'Prepare-GameScene.ps1'), '-InputPath', $inputRoot, '-OutputPath', $outputRoot, '-GodotPath', $GodotPath, '-TimeoutSeconds', "$TimeoutSeconds") -File 'pwsh' -ExpectedOutput 'Prepared native Godot scene: Scenes/Scene.tscn'
+        $ResourceRoot = "res://Assets/Startup-$id"
+        $ProfileUri = "$ResourceRoot/Profiles/Startup.tres"
+        Invoke-CheckedGodot 'profile' @('--headless', '--path', $project, '--script', (Join-Path $repository 'tests/Fixtures/WriteStartupProfile.gd'), '--', '--native-root', $ResourceRoot) -ExpectedOutput "(?m)^PAL_STARTUP_PROFILE:$([regex]::Escape($ProfileUri))\s*$"
         $outputSnapshot = @(Get-OwnedSnapshot $outputRoot)
         @{ inputRoot = $inputRoot; inputFiles = $inputSnapshot; outputRoot = $outputRoot; outputFiles = $outputSnapshot } |
             ConvertTo-Json -Depth 4 | Set-Content (Join-Path $logs 'synthetic-owned.json')
-        $ResourceRoot = "res://Assets/Startup-$id"
     }
     # The runtime validates caller-supplied resource URIs through its public Main entrypoint.
     $sceneUri = $ResourceRoot.TrimEnd('/') + '/Scenes/Scene.tscn'
-    Invoke-CheckedGodot 'startup' @('--headless', '--path', $project, '--quit-after', '60', '--', '--m2-resources', $ResourceRoot) -RequireMarker -ExpectedOutput "(?m)^PAL_MAP_LOADED:$([regex]::Escape($sceneUri))\s*$"
+    $startupArguments = @('--headless', '--path', $project, '--quit-after', '60', '--', '--m2-resources', $ResourceRoot)
+    if ($ProfileUri) { $startupArguments += @('--m2-profile', $ProfileUri) }
+    Invoke-CheckedGodot 'startup' $startupArguments -RequireMarker -ExpectedOutput "(?m)^PAL_MAP_LOADED:$([regex]::Escape($sceneUri))\s*$"
     Write-Host 'PASS: actual Main loaded the selected native map and Core ready (headless; not graphical acceptance).'
 } finally {
     # Only successful, recorded, unique synthetic trees are ours to remove. Preserve unknown/changed output.

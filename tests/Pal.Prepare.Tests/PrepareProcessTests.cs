@@ -34,6 +34,7 @@ public sealed partial class PrepareProcessTests : IDisposable
         var uri = "res://" + Path.GetRelativePath(Path.Combine(repo, "src", "Pal.Game"), output).Replace('\\', '/');
         var loaded = await Run(Godot, "--headless", "--path", Path.Combine(repo, "src", "Pal.Game"), "--script", Path.Combine(repo, "tests", "Fixtures", "VerifyNativeScene.gd"), "--", "--native-root", uri);
         Assert.True(loaded.ExitCode == 0, loaded.Text);
+        Assert.DoesNotMatch(@"(?im)^\s*(ERROR:|SCRIPT ERROR:|Unhandled exception)", loaded.Text);
         Assert.Contains("PAL_NATIVE_VERIFIED", loaded.Text);
     }
     [Fact]
