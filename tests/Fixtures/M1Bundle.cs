@@ -38,7 +38,22 @@ public static class M1Bundle
             cellOrder = "[y,x,h]", decodedByteLength = 65536, source = Source("map.mkf", 12),
             coordinates = new { bitmapX = "x*32+h*16-16", bitmapY = "y*16+h*8-8", logicalHeight = "occlusion only", bitmapAnchor = "top-left" },
             preview = new { png = "preview.png", originX = 0, originY = 0, width = 2048, height = 2048, drawOrder = "layer,y,h,x", boundary = "bottom fallback", scope = "static tiles only" },
-            cells = Enumerable.Range(0, 16384).Select(i => new { y = i / 128, x = i / 2 % 64, h = i % 2, raw = i == 0 ? 0x03022500u : 0u, bottomFrame = 0, topFrame = i == 0 ? (int?)1 : null, bottomHeight = i == 0 ? 5 : 0, topHeight = i == 0 ? 3 : 0, blocked = i == 0 })
+            cells = Enumerable.Range(0, 16384).Select(i =>
+            {
+                int y = i / 128, x = i / 2 % 64, h = i % 2;
+                // Distinct non-origin coordinates expose x/y transposition and h swaps.
+                // Raw DWORDs and their decoded fields are independently specified literals.
+                (uint Raw, int Bottom, int? Top, int BottomHeight, int TopHeight, bool Blocked) cell = (y, x, h) switch
+                {
+                    (0, 0, 0) => (0x03022500u, 0, 1, 5, 3, true),
+                    (1, 3, 0) => (0x07012401u, 1, 0, 4, 7, true),
+                    (3, 1, 1) => (0x02020900u, 0, 1, 9, 2, false),
+                    (5, 7, 1) => (0x00000c01u, 1, null, 12, 0, false),
+                    _ => (0u, 0, null, 0, 0, false)
+                };
+                return new { y, x, h, raw = cell.Raw, bottomFrame = cell.Bottom, topFrame = cell.Top,
+                    bottomHeight = cell.BottomHeight, topHeight = cell.TopHeight, blocked = cell.Blocked };
+            })
         });
         WriteJson(root, "palette.json", new { formatVersion = 1, paletteId = 0, lighting = "night", selectedLighting = "day", colors = Enumerable.Range(0, 256).Select(i => new { r = (byte)(i * 40), g = 20, b = 80 }), source = new { archive = "pat.mkf", chunk = 0, componentConversion = "six-bit << 2" } });
         object Obj(int id, int sprite) => new
