@@ -1,7 +1,9 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using GdUnit4;
 using Godot;
+using Pal.Core;
 using Pal.Game.Resources;
 using static GdUnit4.Assertions;
 
@@ -11,69 +13,70 @@ namespace Pal.Game.Tests;
 public class PalMapSceneTests
 {
     [TestCase(Timeout = 15000)]
-    public async Task NegativeTestViewpointUsesTruncationTowardZeroAndReferenceTraversalBounds()
+    public async Task NegativeCameraPlanUsesTruncationTowardZeroAndRendersThroughScene()
     {
         using var fixture = new NativeMapFixture();
-        fixture.Scene.TestViewpoint = new Vector2I(-17, -9);
-        using var runner = ISceneRunner.Load(fixture.Save(), true);
+        var (scene, plan) = LoadPlan(fixture, 143, 103);
+        var background = plan.Commands.Where(c => c.Source == SceneDrawSource.Background).ToArray();
+        AssertThat(plan.CameraX).IsEqual(-17);
+        AssertThat(plan.CameraY).IsEqual(-9);
+        AssertThat(background.Length).IsEqual(338); // 336 bottom + 2 top, literal reference traversal.
+        AssertThat((background[0].Left, background[0].Top)).IsEqual((-31, -15));
+        AssertThat(background.Any(c => c.Left == 97 && c.Top == 33 && c.FrameIndex == 1)).IsTrue();
+        using var runner = ISceneRunner.Load(scene, true);
         await runner.SimulateFrames(3);
-        var sprites = runner.Scene()!.GetChildren().OfType<Sprite2D>().ToArray();
-        AssertThat(sprites.Length).IsEqual(338); // 336 bottom + 2 top, literal reference example.
-        AssertThat(sprites[0].Position).IsEqual(new Vector2(-31, -15));
-        AssertThat(sprites.Single(s => s.Position == new Vector2(97, 33) && s.Texture.GetWidth() == 41).Centered).IsFalse();
-    }
-
-    [TestCase(Timeout = 15000)]
-    public async Task ByteWrappedTestViewpointDrawsOriginalCellsAtLiteralScreenPositions()
-    {
-        using var fixture = new NativeMapFixture();
-        fixture.Scene.TestViewpoint = new Vector2I(8192, 4096);
-        using var runner = ISceneRunner.Load(fixture.Save(), true);
-        await runner.SimulateFrames(3);
-        var scene = runner.Scene()!;
         AssertThat(scene.IsInsideTree() && scene.IsNodeReady()).IsTrue();
-        var sprites = scene.GetChildren().OfType<Sprite2D>().ToArray();
-        // Reference BYTE conversion wraps grid (259,258,h0) to special cell (3,2,h0).
-        // Literal screen position and unique frame1/2 dimensions/colors, not a production calculation.
-        var atCell = sprites.Where(s => s.Position == new Vector2(80, 24)).ToArray();
-        AssertThat(atCell.Length).IsEqual(2);
-        AssertThat(atCell[0].Texture.GetSize()).IsEqual(new Vector2(41, 25));
-        AssertThat(atCell[1].Texture.GetSize()).IsEqual(new Vector2(42, 26));
-        using var bottom = atCell[0].Texture.GetImage();
-        using var top = atCell[1].Texture.GetImage();
-        AssertThat(bottom.GetPixel(0, 0)).IsEqual(new Color(0, 1, 0, 1));
-        AssertThat(top.GetPixel(0, 0)).IsEqual(new Color(0, 0, 1, 1));
-        AssertThat(System.Array.IndexOf(sprites, atCell[1])).IsGreater(System.Array.IndexOf(sprites, atCell[0]));
     }
 
     [TestCase(Timeout = 15000)]
-    public async Task NativePackedSceneDrawsTwoLayersInReferenceOrderWithoutHeightDisplacement()
+    public async Task ByteWrappedCameraPlanKeepsLiteralScreenPositionsThroughScene()
     {
         using var fixture = new NativeMapFixture();
-        using var runner = ISceneRunner.Load(fixture.Save(), true);
-        var scene = runner.Scene() as PalMapScene ?? throw new System.InvalidOperationException("Native map did not load");
+        var (scene, plan) = LoadPlan(fixture, 8352, 4208);
+        // Reference BYTE conversion wraps grid (259,258,h0) to special cell (3,2,h0).
+        var atCell = plan.Commands.Where(c => c.Source == SceneDrawSource.Background && c.Left == 80 && c.Top == 24).ToArray();
+        AssertThat(atCell.Select(c => c.FrameIndex).ToArray()).IsEqual(new[] { 1, 2 });
+        AssertThat(plan.CameraX).IsEqual(8192);
+        AssertThat(plan.CameraY).IsEqual(4096);
+        using var runner = ISceneRunner.Load(scene, true);
+        await runner.SimulateFrames(3);
+        AssertThat(scene.IsInsideTree() && scene.IsNodeReady()).IsTrue();
+    }
+
+    [TestCase(Timeout = 15000)]
+    public async Task NativePackedSceneConsumesCompleteTwoLayerPlanWithoutAnotherCamera()
+    {
+        using var fixture = new NativeMapFixture();
+        var (scene, plan) = LoadPlan(fixture, 160, 112);
+        var background = plan.Commands.Where(c => c.Source == SceneDrawSource.Background).ToArray();
+        var atCell = background.Where(c => c.Left == 80 && c.Top == 24).ToArray();
+        AssertThat(atCell.Select(c => c.FrameIndex).ToArray()).IsEqual(new[] { 1, 2 });
+        int a = Array.IndexOf(background, atCell[0]);
+        AssertThat((background[a + 1].Left, background[a + 1].Top, background[a + 1].FrameIndex)).IsEqual((112, 24, 3));
+        var halfRow = background.Single(c => c.Left == 96 && c.Top == 32 && c.FrameIndex == 2);
+        AssertThat(Array.IndexOf(background, halfRow)).IsGreater(a + 1);
+        AssertThat(Array.IndexOf(background, atCell[1])).IsGreater(Array.IndexOf(background, halfRow));
+        AssertThat(background.Single(c => c.Left == -48 && c.Top == -24).FrameIndex).IsEqual(0);
+        using var runner = ISceneRunner.Load(scene, true);
         await runner.SimulateFrames(3);
         AssertThat(scene.IsInsideTree() && scene.IsNodeReady()).IsTrue();
         AssertThat(scene.YSortEnabled).IsFalse();
-        var sprites = scene.GetChildren().OfType<Sprite2D>().ToArray();
-        AssertThat(sprites.Length).IsGreater(0);
-        AssertThat(sprites.All(s => s.ZIndex == 0 && s.Visible)).IsTrue();
-        var atCell = sprites.Where(s => s.Position == new Vector2(80, 24)).ToArray();
-        AssertThat(atCell.Length).IsEqual(2);
-        AssertThat(atCell[0].Texture.GetWidth()).IsEqual(41);
-        AssertThat(atCell[1].Texture.GetWidth()).IsEqual(42);
-        AssertThat(atCell[0].Centered).IsFalse();
-        AssertThat(atCell[0].TextureFilter).IsEqual(CanvasItem.TextureFilterEnum.Nearest);
-        // Literal traversal: h0 x3, h0 x4, h1 x3, then the entire top layer.
-        int a = System.Array.IndexOf(sprites, atCell[0]);
-        AssertThat(sprites[a + 1].Position).IsEqual(new Vector2(112, 24));
-        AssertThat(sprites[a + 1].Texture.GetWidth()).IsEqual(43);
-        var halfRow = sprites.Single(s => s.Position == new Vector2(96, 32) && s.Texture.GetWidth() == 42);
-        AssertThat(System.Array.IndexOf(sprites, halfRow)).IsGreater(a + 1);
-        AssertThat(System.Array.IndexOf(sprites, atCell[1])).IsGreater(System.Array.IndexOf(sprites, halfRow));
-        // Bottom fallback outside grid, no top. Actual frame size retained, not forced to 32x16.
-        var outside = sprites.Where(s => s.Position == new Vector2(-48, -24)).ToArray();
-        AssertThat(outside.Length).IsEqual(1);
-        AssertThat(outside[0].Texture.GetSize()).IsEqual(new Vector2(40, 24));
+        AssertThat(scene.Scale).IsEqual(Vector2.One);
+        AssertThat(scene.TextureFilter).IsEqual(CanvasItem.TextureFilterEnum.Nearest);
+    }
+
+    // These arbitrary reference views are not legal spawn profiles. They use the public Core-plan
+    // -> Godot draw seam, never a camera override or a map-only runtime fallback.
+    internal static (PalMapScene Scene, StaticScenePlan Plan) LoadPlan(NativeMapFixture fixture, short leaderX, short leaderY)
+    {
+        var scene = ResourceLoader.Load<PackedScene>(fixture.Save(), cacheMode: ResourceLoader.CacheMode.IgnoreDeep).Instantiate<PalMapScene>();
+        var map = scene.Data.Map;
+        var rules = new StaticSceneRules(new SceneMap(scene.Data.MapId, map.RawCells.Select(c => (uint)c),
+            map.Tiles.Frames.Select(f => new SceneFrame(f.Index, f.Width, f.Height))));
+        var sprite = new SceneSprite(17, [new SceneFrame(0, 40, 24)]);
+        var plan = rules.BuildPlan(new StaticLeader(leaderX, leaderY, 0, 0, 0, 0, sprite));
+        var textures = map.Tiles.Frames.ToDictionary(f => f.Index, f => f.Texture);
+        scene.InitializeScene(plan, c => textures[c.FrameIndex]);
+        return (scene, plan);
     }
 }

@@ -12,7 +12,8 @@ public class ViewportTests
     public async Task LogicalViewportKeeps320By200AtIntegerScaleWithBlackMargins()
     {
         using var fixture = new NativeMapFixture();
-        using var runner = ISceneRunner.Load(fixture.Save(), true);
+        var (scene, _) = PalMapSceneTests.LoadPlan(fixture, 160, 112);
+        using var runner = ISceneRunner.Load(scene, true);
         var window = runner.Scene()!.GetWindow();
         var oldSize = window.Size;
         try

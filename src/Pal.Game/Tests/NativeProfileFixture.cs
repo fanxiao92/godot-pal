@@ -11,6 +11,13 @@ internal sealed class NativeProfileFixture : IDisposable
     // Deliberately outside Assets: --m2-profile accepts normalized project resource URIs.
     public string Root { get; } = "res://Tests/RuntimeProfiles/" + Guid.NewGuid().ToString("N");
     public string Uri => Root + "/Profile.tres";
+    public string ResourceRoot => map.Root;
+    public PalMapScene MapScene => map.Scene;
+    public string SavePacked(Node? root = null)
+    {
+        SaveResource(Profile, Uri);
+        return map.Save(root);
+    }
     public PalSceneData Scene => map.Scene.Data;
     public PalExplorationProfile Profile { get; }
     public NativeProfileFixture()

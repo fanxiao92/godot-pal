@@ -3,17 +3,38 @@ using System.IO;
 using System.Linq;
 using Godot;
 using Pal.Game.Resources;
+using Pal.Game.Profiles;
 
 namespace Pal.Game.Map;
 
 internal static class NativeSceneLoader
 {
-    internal static string ResourceRoot(string[] arguments)
+    internal static (string Root, string Profile) Arguments(string[] arguments)
+    {
+        const string usage = "expected unique --m2-resources <Assets URI> and --m2-profile <project URI> arguments";
+        string root = "res://Assets", profile = NativeExplorationProfile.DefaultUri;
+        bool hasRoot = false, hasProfile = false;
+        for (int i = 0; i < arguments.Length; i += 2)
+        {
+            string flag = arguments[i];
+            if (i + 1 == arguments.Length || arguments[i + 1].StartsWith("--", StringComparison.Ordinal))
+                throw new InvalidDataException(usage + ": missing value for " + flag);
+            switch (flag)
+            {
+                case "--m2-resources" when !hasRoot: root = arguments[i + 1]; hasRoot = true; break;
+                case "--m2-profile" when !hasProfile: profile = arguments[i + 1]; hasProfile = true; break;
+                default: throw new InvalidDataException(usage + ": duplicate or unknown " + flag);
+            }
+        }
+        ValidateRoot(root);
+        try { NativeExplorationProfile.ValidateUri(profile); }
+        catch (InvalidDataException e) { throw new InvalidDataException("--m2-profile " + profile + ": " + e.Message, e); }
+        return (root, profile);
+    }
+
+    private static void ValidateRoot(string root)
     {
         const string usage = "--m2-resources requires one normalized res://Assets (or child directory) URI";
-        if (arguments.Length == 0) return "res://Assets";
-        if (arguments.Length != 2 || arguments[0] != "--m2-resources") throw new InvalidDataException(usage);
-        string root = arguments[1];
         if (!(root == "res://Assets" || root.StartsWith("res://Assets/", StringComparison.Ordinal)))
             throw new InvalidDataException(usage);
         foreach (string segment in root[6..].Split('/'))
@@ -22,7 +43,6 @@ internal static class NativeSceneLoader
                 || segment.Any(c => char.IsControl(c) || "\\:%?#*\"<>|".Contains(c)))
                 throw new InvalidDataException(usage);
         }
-        return root;
     }
 
     internal static PalMapScene Load(string root)

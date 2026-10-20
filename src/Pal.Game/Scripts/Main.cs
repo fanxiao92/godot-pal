@@ -1,27 +1,26 @@
 using System;
 using Godot;
 using Pal.Game.Map;
+using Pal.Game.Profiles;
 
 namespace Pal.Game;
 
 public partial class Main : Node2D
 {
-    // Explicit T2 test data, not an original spawn. Replaced by T3's leader configuration.
-    [Export] public Vector2I TestViewpoint { get; set; } = Vector2I.Zero;
-
     public override void _Ready()
     {
-        string? scenePath = null;
+        string? scenePath = null, profilePath = null;
         try
         {
             GetWindow().MinSize = new Vector2I(320, 200);
-            string root = NativeSceneLoader.ResourceRoot(OS.GetCmdlineUserArgs());
+            var (root, profile) = NativeSceneLoader.Arguments(OS.GetCmdlineUserArgs());
             scenePath = root + "/Scenes/Scene.tscn";
+            profilePath = profile;
             var map = NativeSceneLoader.Load(root);
             try
             {
-                map.TestViewpoint = TestViewpoint;
-                map.InitializeMap();
+                var checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
+                map.InitializeScene(checkedProfile.Plan, checkedProfile.TextureFor);
             }
             catch
             {
@@ -34,7 +33,7 @@ public partial class Main : Node2D
         }
         catch (Exception e)
         {
-            GD.PrintErr($"Map startup failed{(scenePath == null ? "" : " (" + scenePath + ")")}: {e.Message}");
+            GD.PrintErr($"Static scene startup failed (scene={scenePath ?? "unselected"}, profile={profilePath ?? "unselected"}): {e.Message}");
             GetTree().Quit(1);
         }
     }

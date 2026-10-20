@@ -14,12 +14,17 @@ public static class NativeExplorationProfile
 {
     public const string DefaultUri = "res://Assets/Profiles/Exploration.tres";
 
-    public static CheckedExplorationProfile Load(string profileUri, PalSceneData scene)
+    internal static void ValidateUri(string profileUri)
     {
         Require(profileUri != null && profileUri.StartsWith("res://", StringComparison.Ordinal), "profile requires a normalized res:// resource URI");
         foreach (string segment in profileUri[6..].Split('/'))
             Require(segment.Length > 0 && segment is not ("." or "..") && !segment.EndsWith('.') && segment == segment.Trim()
                 && !segment.Any(c => char.IsControl(c) || "\\:%?#*\"<>|".Contains(c)), "profile requires a normalized res:// resource URI");
+    }
+
+    public static CheckedExplorationProfile Load(string profileUri, PalSceneData scene)
+    {
+        ValidateUri(profileUri);
         Require(ResourceLoader.Exists(profileUri), profileUri + ": native profile missing; prepare it explicitly");
         var profile = ResourceLoader.Load(profileUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep) as PalExplorationProfile;
         Require(profile != null, profileUri + ": expected PalExplorationProfile");
