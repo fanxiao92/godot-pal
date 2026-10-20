@@ -26,7 +26,7 @@ public class MainProcessTests
     [TestCase(Timeout = 20000)]
     public async Task ShippedMainEntersTreeAndDrawsSelectedNativeSceneAtFixedViewport()
     {
-        using var fixture = new NativeMapFixture();
+        using var fixture = new NativeMapFixture(useMainViewCells: true);
         fixture.Save();
         var result = await Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
             "--script", "res://Tests/ObserveMain.gd", "--", "--m2-resources", fixture.Root]);
