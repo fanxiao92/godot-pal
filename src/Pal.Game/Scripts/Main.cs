@@ -11,16 +11,21 @@ public partial class Main : Node2D
 {
     private static readonly string[] DirectionActions =
         ["exploration_south", "exploration_west", "exploration_north", "exploration_east"];
-    private ExplorationSession? session;
+    // Matches ExplorationKey order: primary/alternate pairs for each direction action.
+    private static readonly Key[] DirectionKeys =
+        [Key.Down, Key.S, Key.Left, Key.A, Key.Up, Key.W, Key.Right, Key.D];
+    private ExplorationInput? input;
     private PalMapScene? mapScene;
-    public ExplorationState? Exploration => session?.Current;
+    private Window? window;
+    public ExplorationState? Exploration => input?.Current;
 
     public override void _Ready()
     {
         string? scenePath = null, profilePath = null;
         try
         {
-            GetWindow().MinSize = new Vector2I(320, 200);
+            window = GetWindow();
+            window.MinSize = new Vector2I(320, 200);
             var (root, profile) = NativeSceneLoader.Arguments(OS.GetCmdlineUserArgs());
             scenePath = root + "/Scenes/Scene.tscn";
             profilePath = profile;
@@ -28,8 +33,8 @@ public partial class Main : Node2D
             try
             {
                 var checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
-                session = new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader);
-                map.InitializeScene(session.Current.Plan, checkedProfile.TextureFor);
+                input = new ExplorationInput(new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader));
+                map.InitializeScene(input.Current.Plan, checkedProfile.TextureFor);
             }
             catch
             {
@@ -38,6 +43,9 @@ public partial class Main : Node2D
             }
             mapScene = map;
             AddChild(map);
+            window.FocusEntered += OnFocusEntered;
+            window.FocusExited += OnFocusExited;
+            input.SetFocused(window.HasFocus());
             GD.Print($"PAL_MAP_LOADED:{root}/Scenes/Scene.tscn");
             GD.Print($"PAL_GAME_READY:{Pal.Core.Startup.Status}");
         }
@@ -49,21 +57,35 @@ public partial class Main : Node2D
         }
     }
 
+    private void OnFocusEntered() => input?.SetFocused(true);
+    private void OnFocusExited() => input?.SetFocused(false);
+
+    public override void _ExitTree()
+    {
+        if (window == null) return;
+        window.FocusEntered -= OnFocusEntered;
+        window.FocusExited -= OnFocusExited;
+    }
+
+    public override void _Input(InputEvent @event)
+    {
+        if (input == null || @event is not InputEventKey key) return;
+        for (int i = 0; i < DirectionKeys.Length; i++)
+        {
+            if (key.Keycode != DirectionKeys[i] || !key.IsAction(DirectionActions[i / 2])) continue;
+            if (key.Pressed) input.Press((ExplorationKey)i, key.Echo);
+            else input.Release((ExplorationKey)i);
+            return;
+        }
+    }
+
     public override void _Process(double delta)
     {
-        if (session == null || mapScene == null) return;
+        if (input == null || mapScene == null) return;
         try
         {
-            int? direction = null;
-            int held = 0;
-            for (int i = 0; i < DirectionActions.Length; i++)
-            {
-                if (!Input.IsActionPressed(DirectionActions[i])) continue;
-                direction = i;
-                held++;
-            }
-            if (session.Update(unchecked((uint)Time.GetTicksMsec()), held == 1 ? direction : null))
-                mapScene.UpdateScene(session.Current.Plan);
+            if (input.Update(unchecked((uint)Time.GetTicksMsec())))
+                mapScene.UpdateScene(input.Current.Plan);
         }
         catch (Exception e)
         {

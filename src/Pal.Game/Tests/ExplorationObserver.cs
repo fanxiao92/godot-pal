@@ -18,6 +18,7 @@ public partial class ExplorationObserver : Node
     private int frame;
     private ExplorationState? last;
     private static readonly Key[] Arrows = [Key.Down, Key.Left, Key.Up, Key.Right];
+    private static readonly Key[] Letters = [Key.S, Key.A, Key.W, Key.D];
 
     public override async void _Ready()
     {
@@ -27,11 +28,21 @@ public partial class ExplorationObserver : Node
             main = ResourceLoader.Load<PackedScene>("res://Scenes/Main.tscn").Instantiate<Main>();
             AddChild(main);
             Check(main.Exploration != null, "Main exposes initialized exploration");
+            Focus(true); // Public Window signal injection, not an assertion about OS focus.
             Trace("start");
             string scenario = OS.GetEnvironment("PAL_EXPLORATION_CASE");
             if (scenario == "integration-scene2") await IntegrationScene2();
             else if (scenario == "default-scene2") await DefaultScene2();
+            else if (scenario.StartsWith("alias-", StringComparison.Ordinal)) await Aliases(scenario[6..]);
+            else if (scenario.StartsWith("focus-", StringComparison.Ordinal)) await FocusRecovery(scenario[6..]);
+            else if (scenario == "repeat") await Repeats();
+            else if (scenario.StartsWith("priority-", StringComparison.Ordinal)) await Priority(scenario == "priority-four");
             else if (scenario == "dynamic") await Dynamic();
+            else if (scenario.StartsWith("key-", StringComparison.Ordinal))
+            {
+                var parts = scenario.Split('-');
+                await Arrow(parts[1], parts[2] == "wasd");
+            }
             else if (scenario.StartsWith("arrow-", StringComparison.Ordinal)) await Arrow(scenario[6..]);
             else if (scenario.StartsWith("raw-", StringComparison.Ordinal)) await RawFrames(int.Parse(scenario[4..]));
             else if (scenario.StartsWith("blocked-", StringComparison.Ordinal)) await Blocked(scenario[8..]);
@@ -46,11 +57,11 @@ public partial class ExplorationObserver : Node
         }
         finally
         {
-            foreach (var key in Arrows) KeyEvent(key, false);
+            foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, false);
         }
     }
 
-    private async Task Arrow(string direction)
+    private async Task Arrow(string direction, bool alternate = false)
     {
         // Literal PAL direction/position/frame examples, not a second movement algorithm.
         var expected = direction switch
@@ -63,9 +74,8 @@ public partial class ExplorationObserver : Node
         };
         var (key, facing, x1, y1, x2, y2, x3, y3, cameraX, cameraY, frame1, frame2, frame3) = expected;
         string action = "exploration_" + direction;
-        var bindings = InputMap.ActionGetEvents(action);
-        Check(bindings.Count == 1 && bindings[0] is InputEventKey binding && binding.Keycode == key,
-            "dedicated project action contains only the specified arrow");
+        Bindings(direction, facing);
+        if (alternate) key = Letters[facing];
         KeyEvent(key, true);
         await NextFrame(); // ParseInputEvent is buffered until the engine flushes input.
         Check(Input.IsActionPressed(action), "ParseInputEvent resolves project InputMap binding");
@@ -118,6 +128,180 @@ public partial class ExplorationObserver : Node
             && main.Exploration.Leader.StepPhase == 3 && main.Exploration.Plan.LeaderFrameIndex == frame3,
             "restart uses idle-retained phase and literal position/frame");
         KeyEvent(key, false);
+    }
+
+    private async Task Priority(bool four)
+    {
+        KeyEvent(Key.Down, true);
+        await Step(304, 328, 0, 1, 1, 144, 216);
+        KeyEvent(Key.Left, true);
+        await Step(288, 320, 1, 2, 3, 128, 208);
+        KeyEvent(Key.Up, true);
+        await Step(304, 312, 2, 3, 8, 144, 200);
+        if (four)
+        {
+            KeyEvent(Key.D, true);
+            await Step(320, 320, 3, 0, 9, 160, 208);
+            KeyEvent(Key.D, false);
+            await Step(336, 312, 2, 1, 7, 176, 200);
+            KeyEvent(Key.Up, false);
+            await Step(320, 304, 1, 2, 3, 160, 192);
+            KeyEvent(Key.Left, false);
+            await Step(304, 312, 0, 3, 2, 144, 200);
+        }
+        else
+        {
+            KeyEvent(Key.Up, false);
+            await Step(288, 304, 1, 0, 3, 128, 192);
+            KeyEvent(Key.Left, false);
+            await Step(272, 312, 0, 1, 1, 112, 200);
+        }
+        KeyEvent(Key.Down, false);
+        await Until(() => !main.Exploration!.IsWalking, "all direction groups released stand");
+        var stopped = main.Exploration!;
+        await Until(() => !ReferenceEquals(stopped, main.Exploration), "released idle deadline");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (stopped.Leader.X, stopped.Leader.Y),
+            "all releases preserve final literal position");
+    }
+
+    private async Task Aliases(string direction)
+    {
+        if (direction == "group-order")
+        {
+            KeyEvent(Key.Down, true);
+            await Step(304, 328, 0, 1, 1, 144, 216);
+            KeyEvent(Key.Left, true);
+            await Step(288, 320, 1, 2, 3, 128, 208);
+            KeyEvent(Key.S, true);
+            await Step(272, 328, 0, 3, 2, 112, 216);
+            KeyEvent(Key.S, false);
+            await Step(256, 336, 0, 0, 0, 96, 224);
+            KeyEvent(Key.Down, false);
+            await Step(240, 328, 1, 1, 4, 80, 216);
+            KeyEvent(Key.Left, false);
+        }
+        else
+        {
+            var (index, points) = direction switch
+            {
+                "south" => (0, new[] { (304, 328, 1, 144, 216), (288, 336, 0, 128, 224), (272, 344, 2, 112, 232) }),
+                "west" => (1, new[] { (304, 312, 4, 144, 200), (288, 304, 3, 128, 192), (272, 296, 5, 112, 184) }),
+                "north" => (2, new[] { (336, 312, 7, 176, 200), (352, 304, 6, 192, 192), (368, 296, 8, 208, 184) }),
+                "east" => (3, new[] { (336, 328, 10, 176, 216), (352, 336, 9, 192, 224), (368, 344, 11, 208, 232) }),
+                _ => throw new InvalidOperationException("unknown alias direction")
+            };
+            KeyEvent(Arrows[index], true);
+            var (x1, y1, f1, cx1, cy1) = points[0];
+            await Step(x1, y1, index, 1, f1, cx1, cy1);
+            KeyEvent(Letters[index], true);
+            KeyEvent(Arrows[index], false);
+            var (x2, y2, f2, cx2, cy2) = points[1];
+            await Step(x2, y2, index, 2, f2, cx2, cy2);
+            KeyEvent(Arrows[index], true);
+            KeyEvent(Letters[index], false);
+            var (x3, y3, f3, cx3, cy3) = points[2];
+            await Step(x3, y3, index, 3, f3, cx3, cy3);
+            KeyEvent(Arrows[index], false);
+        }
+        await Until(() => !main.Exploration!.IsWalking, "both aliases fully released stand");
+    }
+
+    private async Task Repeats()
+    {
+        KeyEvent(Key.Down, true);
+        await Step(304, 328, 0, 1, 1, 144, 216);
+        KeyEvent(Key.Left, true);
+        await Step(288, 320, 1, 2, 3, 128, 208);
+        var held = main.Exploration!;
+        ulong tick = Time.GetTicksMsec();
+        for (int i = 0; i < 4; i++)
+        {
+            KeyEvent(Key.Down, true); // Already held, even a non-echo duplicate cannot reorder.
+            KeyEvent(Key.Down, true, echo: true);
+            KeyEvent(Key.S, true, echo: true); // Never held: cannot activate an alias/group.
+            KeyEvent(Key.Right, true, echo: true);
+            await NextFrame();
+            Check(Time.GetTicksMsec() - tick < 70 && ReferenceEquals(held, main.Exploration),
+                "repeat storm does not create an early step");
+        }
+        await Step(272, 312, 1, 3, 5, 112, 200);
+        Check(Time.GetTicksMsec() - tick >= 85, "mixed alias/repeat cadence remains 100ms");
+        KeyEvent(Key.Left, false);
+        await Step(256, 320, 0, 0, 0, 96, 208);
+        KeyEvent(Key.Down, false);
+        KeyEvent(Key.Down, true, echo: true);
+        KeyEvent(Key.W, true, echo: true);
+        await Until(() => !main.Exploration!.IsWalking, "released old/unheld echo cannot activate movement");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y, main.Exploration.Leader.Direction,
+            main.Exploration.Leader.StepPhase, main.Exploration.Plan.LeaderFrameIndex) == (256, 320, 0, 2, 0),
+            "echo-only deadline retains literal standing position/phase/frame");
+    }
+
+    private async Task FocusRecovery(string fresh)
+    {
+        KeyEvent(Key.Down, true);
+        await Step(304, 328, 0, 1, 1, 144, 216);
+        var frozen = main.Exploration!;
+        Focus(false);
+        Focus(false);
+        foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, true);
+        KeyEvent(Key.Down, false);
+        await Frozen(frozen, 240, "unfocused across two old deadlines ignores background inputs");
+        Focus(true);
+        await Frozen(frozen, 220, "focus entered with no fresh input does not resume even idle phase");
+        foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, true, echo: true);
+        await Frozen(frozen, 220, "old and unheld echo alone cannot resume after focus entered");
+        Key keyFresh = fresh == "south-alternate" ? Key.S : Key.Up;
+        ulong tick = Time.GetTicksMsec();
+        KeyEvent(keyFresh, true);
+        if (keyFresh == Key.S) await Step(288, 336, 0, 2, 0, 128, 224);
+        else await Step(320, 320, 2, 2, 6, 160, 208);
+        Check(Time.GetTicksMsec() - tick < 85, "fresh non-echo press steps on actual next frames, not a new 100ms cooldown");
+        var resumed = main.Exploration!;
+        ulong firstTick = Time.GetTicksMsec();
+        // Repeated focused notifications must neither clear the fresh held key nor reset its deadline.
+        while (Time.GetTicksMsec() - firstTick < 60)
+        {
+            Focus(true);
+            KeyEvent(keyFresh, true, echo: true);
+            await NextFrame();
+            Check(ReferenceEquals(resumed, main.Exploration), "duplicate focus and echo do not catch up or advance early");
+        }
+        if (keyFresh == Key.S) await Step(272, 344, 0, 3, 2, 112, 232);
+        else await Step(336, 312, 2, 3, 8, 176, 200);
+        Check(Time.GetTicksMsec() - firstTick >= 85, "resumed held step retains ordinary 100ms cadence");
+        KeyEvent(keyFresh, false);
+        await Until(() => !main.Exploration!.IsWalking, "fresh release stands; background directions never accumulated");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) ==
+            (keyFresh == Key.S ? (272, 344) : (336, 312)), "release preserves resumed literal position");
+    }
+
+    private async Task Frozen(ExplorationState state, ulong duration, string message)
+    {
+        ulong start = Time.GetTicksMsec();
+        do
+        {
+            await NextFrame();
+            var current = main.Exploration!;
+            Check(ReferenceEquals(state, current) && ReferenceEquals(state.Plan, current.Plan), message);
+            Check((current.Leader.X, current.Leader.Y, current.Leader.Direction,
+                current.Leader.StepPhase, current.Plan.LeaderFrameIndex,
+                current.Plan.CameraX, current.Plan.CameraY, current.IsWalking)
+                == (304, 328, 0, 1, 1, 144, 216, true), "frozen literal walking frame/camera/phase stays intact");
+            Check(current.Plan.Commands.SequenceEqual(state.Plan.Commands), "all frozen draw commands/objects unchanged");
+        } while (Time.GetTicksMsec() - start < duration);
+        Trace("frozen-" + duration);
+    }
+
+    private async Task Step(int x, int y, int direction, int phase, int bitmap, int cameraX, int cameraY)
+    {
+        var before = main.Exploration;
+        await Until(() => !ReferenceEquals(before, main.Exploration), "next actual Main process deadline");
+        var state = main.Exploration!;
+        Check((state.Leader.X, state.Leader.Y, state.Leader.Direction, state.Leader.StepPhase,
+            state.Plan.LeaderFrameIndex, state.Plan.CameraX, state.Plan.CameraY, state.IsWalking)
+            == (x, y, direction, phase, bitmap, cameraX, cameraY, true),
+            $"literal input trace expected ({x},{y}) direction={direction} phase={phase} bitmap={bitmap} camera=({cameraX},{cameraY})");
     }
 
     private async Task Blocked(string kind)
@@ -304,9 +488,7 @@ public partial class ExplorationObserver : Node
                 int direction = leg.GetProperty("direction").GetInt32();
                 Check(direction is >= 0 and <= 3, "literal direction range");
                 string action = new[] { "exploration_south", "exploration_west", "exploration_north", "exploration_east" }[direction];
-                var bindings = InputMap.ActionGetEvents(action);
-                Check(bindings.Count == 1 && bindings[0] is InputEventKey binding && binding.Keycode == Arrows[direction],
-                    "real project InputMap arrow binding");
+                Bindings(new[] { "south", "west", "north", "east" }[direction], direction);
                 KeyEvent(Arrows[direction], true);
                 await NextFrame();
                 Check(Input.IsActionPressed(action), "arrow is pressed through actual InputMap");
@@ -446,6 +628,21 @@ public partial class ExplorationObserver : Node
         last = main.Exploration;
         var s = last!;
         GD.Print($"TRACE:{kind}:render={frame}:ticks={Time.GetTicksMsec()}:xy={s.Leader.X},{s.Leader.Y}:dir={s.Leader.Direction}:phase={s.Leader.StepPhase}:walking={s.IsWalking}:camera={s.Plan.CameraX},{s.Plan.CameraY}:frame={s.Plan.LeaderFrameIndex}");
+    }
+
+    private static void Bindings(string direction, int index)
+    {
+        var bindings = InputMap.ActionGetEvents("exploration_" + direction);
+        Check(bindings.Count == 2 && bindings.All(e => e is InputEventKey k && k.PhysicalKeycode == 0)
+            && bindings.Cast<InputEventKey>().Select(k => k.Keycode).OrderBy(k => k)
+                .SequenceEqual(new[] { Arrows[index], Letters[index] }.OrderBy(k => k)),
+            "each action has exactly its two logical keys and no physical binding");
+    }
+
+    private void Focus(bool focused)
+    {
+        var result = GetWindow().EmitSignal(focused ? Window.SignalName.FocusEntered : Window.SignalName.FocusExited);
+        GD.Print($"FOCUS_INJECTED:render={frame}:ticks={Time.GetTicksMsec()}:focused={focused}:result={result}:osHasFocus={GetWindow().HasFocus()}");
     }
 
     private void KeyEvent(Key key, bool pressed, bool echo = false)

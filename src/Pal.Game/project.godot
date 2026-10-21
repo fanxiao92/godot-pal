@@ -20,19 +20,19 @@ project/assembly_name="Pal.Game"
 [input]
 exploration_south={
 "deadzone": 0.5,
-"events": [Object(InputEventKey,"keycode":4194322)]
+"events": [Object(InputEventKey,"keycode":4194322), Object(InputEventKey,"keycode":83)]
 }
 exploration_west={
 "deadzone": 0.5,
-"events": [Object(InputEventKey,"keycode":4194319)]
+"events": [Object(InputEventKey,"keycode":4194319), Object(InputEventKey,"keycode":65)]
 }
 exploration_north={
 "deadzone": 0.5,
-"events": [Object(InputEventKey,"keycode":4194320)]
+"events": [Object(InputEventKey,"keycode":4194320), Object(InputEventKey,"keycode":87)]
 }
 exploration_east={
 "deadzone": 0.5,
-"events": [Object(InputEventKey,"keycode":4194321)]
+"events": [Object(InputEventKey,"keycode":4194321), Object(InputEventKey,"keycode":68)]
 }
 
 [rendering]

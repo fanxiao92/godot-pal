@@ -34,6 +34,60 @@ public class ExplorationProcessTests
         await CheckObservation(fixture, "arrow-" + direction);
     }
 
+    [TestCase("south", "arrow", Timeout = 20000)]
+    [TestCase("west", "arrow", Timeout = 20000)]
+    [TestCase("north", "arrow", Timeout = 20000)]
+    [TestCase("east", "arrow", Timeout = 20000)]
+    [TestCase("south", "wasd", Timeout = 20000)]
+    [TestCase("west", "wasd", Timeout = 20000)]
+    [TestCase("north", "wasd", Timeout = 20000)]
+    [TestCase("east", "wasd", Timeout = 20000)]
+    public async Task LogicalBindingsMoveHoldReleaseAndRestartActualMain(string direction, string layout)
+    {
+        using var fixture = new ExplorationFixture();
+        fixture.Native.SavePacked();
+        await CheckObservation(fixture, "key-" + direction + "-" + layout);
+    }
+
+    [TestCase("three", Timeout = 20000)]
+    [TestCase("four", Timeout = 20000)]
+    public async Task DirectionGroupsUseLatestPressAndReleaseFallbackInActualMain(string count)
+    {
+        using var fixture = new ExplorationFixture();
+        fixture.Native.SavePacked();
+        await CheckObservation(fixture, "priority-" + count);
+    }
+
+    [TestCase("south", Timeout = 20000)]
+    [TestCase("west", Timeout = 20000)]
+    [TestCase("north", Timeout = 20000)]
+    [TestCase("east", Timeout = 20000)]
+    [TestCase("group-order", Timeout = 20000)]
+    public async Task AliasesKeepIndependentHeldKeysAndDirectionGroupOrder(string direction)
+    {
+        using var fixture = new ExplorationFixture();
+        fixture.Native.SavePacked();
+        await CheckObservation(fixture, "alias-" + direction);
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task EchoAndDuplicatePressStormDoesNotReorderActivateOrAccelerate()
+    {
+        using var fixture = new ExplorationFixture();
+        fixture.Native.SavePacked();
+        await CheckObservation(fixture, "repeat");
+    }
+
+    [TestCase("south-alternate", Timeout = 20000)]
+    [TestCase("north-primary", Timeout = 20000)]
+    public async Task WindowFocusSignalsFreezeUntilFreshPressThenResumeImmediatelyWithoutCatchup(string fresh)
+    {
+        using var fixture = new ExplorationFixture();
+        fixture.AddDynamicCoverExample();
+        fixture.Native.SavePacked();
+        await CheckObservation(fixture, "focus-" + fresh);
+    }
+
     [TestCase(0, Timeout = 20000)]
     [TestCase(4, Timeout = 20000)]
     public async Task RawWalkWordSelectsThreeOrFourFramesWithoutMutatingMetadata(int raw)
