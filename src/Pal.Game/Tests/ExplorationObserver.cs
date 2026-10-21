@@ -31,7 +31,9 @@ public partial class ExplorationObserver : Node
             Focus(true); // Public Window signal injection, not an assertion about OS focus.
             Trace("start");
             string scenario = OS.GetEnvironment("PAL_EXPLORATION_CASE");
-            if (scenario == "integration-scene2") await IntegrationScene2();
+            if (scenario == "scene2-input-priority") await Scene2InputPriority();
+            else if (scenario == "scene2-input-focus") await Scene2InputFocus();
+            else if (scenario == "integration-scene2") await IntegrationScene2();
             else if (scenario == "default-scene2") await DefaultScene2();
             else if (scenario.StartsWith("alias-", StringComparison.Ordinal)) await Aliases(scenario[6..]);
             else if (scenario.StartsWith("focus-", StringComparison.Ordinal)) await FocusRecovery(scenario[6..]);
@@ -59,6 +61,177 @@ public partial class ExplorationObserver : Node
         {
             foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, false);
         }
+    }
+
+    // Shipped scene2/default profile only: real input, Window signals and Main process deadlines.
+    private async Task Scene2InputPriority()
+    {
+        var (evidence, data, objects) = Scene2InputStart();
+        using (var candidates = JsonDocument.Parse(File.ReadAllText(Path.Combine(evidence, "bounded-offline-candidates.json"))))
+        {
+            Check(candidates.RootElement.GetArrayLength() <= 32, "bounded native/M1 candidate budget");
+            var facts = candidates.RootElement.EnumerateArray().Select(c => {
+                int index = c.GetProperty("arrayIndex").GetInt32();
+                long raw = data.Map.RawCells[index];
+                Check(raw == c.GetProperty("raw").GetInt64(), "literal candidate native raw cell equals independent M1");
+                Check((raw & 0x2000) != 0 == c.GetProperty("blocked").GetBoolean(), "literal raw mask agrees with M1");
+                return new { index, raw, mask = raw & 0x2000, nativeBlocked = data.Map.Blocked[index] };
+            }).ToArray();
+            File.WriteAllText(Path.Combine(evidence, "bounded-native-candidates.json"), JsonSerializer.Serialize(facts));
+        }
+        KeyEvent(Key.Down, true);
+        await Step(720, 696, 0, 1, 1, 560, 584);
+        IntegrationState(evidence, "down");
+        KeyEvent(Key.Left, true);
+        await Step(704, 688, 1, 2, 3, 544, 576);
+        IntegrationState(evidence, "latest-left");
+        KeyEvent(Key.S, true);
+        KeyEvent(Key.S, false);
+        await Step(688, 696, 0, 3, 2, 528, 584);
+        IntegrationState(evidence, "release-s-retains-newest-south-group");
+        KeyEvent(Key.W, true);
+        await Step(704, 688, 2, 0, 6, 544, 576);
+        Check(Input.IsActionPressed("exploration_north"), "W resolves actual north InputMap");
+        IntegrationState(evidence, "latest-w-success");
+        KeyEvent(Key.Up, true);
+        await Step(720, 680, 2, 1, 7, 560, 568);
+        IntegrationState(evidence, "up-alias-success");
+        KeyEvent(Key.Up, false);
+        var before = main.Exploration;
+        await Until(() => !ReferenceEquals(before, main.Exploration), "W remains held after releasing Up alias");
+        Scene2InputLiteral(720, 680, 2, 2, 6, 560, 568, false);
+        Check(Input.IsActionPressed("exploration_north"), "one released alias leaves W action pressed");
+        IntegrationState(evidence, "release-up-still-north");
+        var held = main.Exploration!;
+        ulong tick = Time.GetTicksMsec();
+        do
+        {
+            KeyEvent(Key.Down, true); // Duplicate older direction must not become newest.
+            KeyEvent(Key.Down, true, echo: true);
+            KeyEvent(Key.S, true, echo: true); // Unheld alias must not join its group.
+            KeyEvent(Key.D, true, echo: true);
+            await NextFrame();
+            Check(ReferenceEquals(held, main.Exploration), "mixed duplicate/echo storm cannot step early");
+        } while (Time.GetTicksMsec() - tick < 50);
+        await Until(() => !ReferenceEquals(held, main.Exploration), "ordinary held repeat deadline");
+        Check(Time.GetTicksMsec() - tick >= 85, "repeat storm preserves ordinary 100ms cadence");
+        Scene2InputLiteral(720, 680, 2, 0, 6, 560, 568, false);
+        IntegrationState(evidence, "repeat-still-north");
+        KeyEvent(Key.W, false);
+        await Step(704, 688, 0, 1, 1, 544, 576);
+        IntegrationState(evidence, "fallback-down-success");
+        KeyEvent(Key.Down, false);
+        before = main.Exploration;
+        await Until(() => !ReferenceEquals(before, main.Exploration), "release south falls back to older West group");
+        Scene2InputLiteral(704, 688, 1, 2, 3, 544, 576, false);
+        IntegrationState(evidence, "fallback-left-wall-turn");
+        KeyEvent(Key.Left, false);
+        before = main.Exploration;
+        await Until(() => !ReferenceEquals(before, main.Exploration), "all released idle deadline");
+        Scene2InputLiteral(704, 688, 1, 0, 3, 544, 576, false);
+        IntegrationState(evidence, "all-released-standing");
+        Scene2InputComplete(evidence, data, objects);
+    }
+
+    private async Task Scene2InputFocus()
+    {
+        var (evidence, data, objects) = Scene2InputStart();
+        KeyEvent(Key.S, true);
+        await Step(720, 696, 0, 1, 1, 560, 584);
+        Check(Input.IsActionPressed("exploration_south"), "S resolves actual south InputMap");
+        Focus(false);
+        var frozen = main.Exploration!;
+        await IntegrationCapture(evidence, "A-south-blurred");
+        KeyEvent(Key.W, true);
+        KeyEvent(Key.S, false);
+        KeyEvent(Key.W, false);
+        await Scene2InputFrozen(frozen, 240, evidence, "background-press-release");
+        Focus(true);
+        await Scene2InputFrozen(frozen, 220, evidence, "focus-no-input");
+        foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, true, echo: true);
+        await Scene2InputFrozen(frozen, 220, evidence, "only-echo");
+        await IntegrationCapture(evidence, "B-focused-no-fresh-input");
+        ulong freshTick = Time.GetTicksMsec();
+        KeyEvent(Key.Up, true);
+        await Step(736, 688, 2, 2, 6, 576, 576);
+        Check(Time.GetTicksMsec() - freshTick < 85, "fresh north steps on next real frames without cooldown/catchup");
+        IntegrationState(evidence, "fresh-north-first");
+        var first = main.Exploration!;
+        ulong firstTick = Time.GetTicksMsec();
+        do
+        {
+            KeyEvent(Key.Up, true, echo: true);
+            await NextFrame();
+            Check(ReferenceEquals(first, main.Exploration), "resumed north cannot catch up or accelerate");
+        } while (Time.GetTicksMsec() - firstTick < 50);
+        await Step(752, 680, 2, 3, 8, 592, 568);
+        Check(Time.GetTicksMsec() - firstTick >= 85, "resumed held north retains ordinary 100ms cadence");
+        Focus(false); // Freeze the sampled walking frame using only the normal focus policy.
+        Scene2InputLiteral(752, 680, 2, 3, 8, 592, 568, true);
+        await IntegrationCapture(evidence, "C-north-two-blurred");
+        KeyEvent(Key.Up, false);
+        Focus(true);
+        KeyEvent(Key.Up, true); // Fresh edge followed by release permits an idle update, not movement.
+        KeyEvent(Key.Up, false);
+        await Until(() => !main.Exploration!.IsWalking, "fresh release returns to ordinary idle");
+        Scene2InputLiteral(752, 680, 2, 0, 6, 592, 568, false);
+        IntegrationState(evidence, "fresh-release-idle");
+        Scene2InputComplete(evidence, data, objects);
+    }
+
+    private (string Evidence, PalSceneData Data, string Objects) Scene2InputStart()
+    {
+        Check(OS.GetCmdlineUserArgs().Length == 0, "scene2 input modes require shipped defaults without custom arguments");
+        string evidence = OS.GetEnvironment("PAL_EXPLORATION_GPU_EVIDENCE");
+        Check(!string.IsNullOrEmpty(evidence), "scene2 input evidence directory required");
+        Directory.CreateDirectory(evidence);
+        var data = ResourceLoader.Load<PalSceneData>("res://Assets/Scenes/Scene.tres");
+        Check(data.SceneId == 2 && data.Objects.Count == 32, "real scene2 native objects");
+        for (int i = 0; i < 4; i++) Bindings(new[] { "south", "west", "north", "east" }[i], i);
+        Scene2InputLiteral(736, 688, 0, 0, 0, 576, 576, false);
+        string objects = Scene2InputObjects(data);
+        File.WriteAllText(Path.Combine(evidence, "objects-before.json"), objects);
+        IntegrationState(evidence, "default-start");
+        return (evidence, data, objects);
+    }
+
+    private static string Scene2InputObjects(PalSceneData data) => JsonSerializer.Serialize(data.Objects.Select(o => new {
+        o.Id, o.X, o.Y, o.SLayer, o.SState, o.SVanishTime, o.WSpriteNum, o.NSpriteFrames,
+        o.WDirection, o.WCurrentFrameNum, o.WTriggerScript, o.WAutoScript, o.WTriggerMode,
+        o.NScriptIdleFrame, o.WSpritePtrOffset, o.NSpriteFramesAuto, o.WScriptIdleFrameCountAuto,
+        o.InitialFrameIndex, o.InitiallyVisible
+    }), new JsonSerializerOptions { WriteIndented = true });
+
+    private void Scene2InputLiteral(int x, int y, int direction, int phase, int bitmap, int cameraX, int cameraY, bool walking)
+    {
+        var s = main.Exploration!;
+        Check((s.Leader.X, s.Leader.Y, s.Leader.Direction, s.Leader.StepPhase, s.Plan.LeaderFrameIndex,
+            s.Plan.CameraX, s.Plan.CameraY, s.IsWalking, s.Leader.WalkFramesWord, s.Leader.Layer)
+            == (x, y, direction, phase, bitmap, cameraX, cameraY, walking, 0, 0),
+            $"scene2 literal ({x},{y}) direction={direction} phase={phase} frame={bitmap} camera=({cameraX},{cameraY}) walking={walking}");
+    }
+
+    private async Task Scene2InputFrozen(ExplorationState frozen, ulong duration, string evidence, string label)
+    {
+        var commands = frozen.Plan.Commands.ToArray();
+        ulong tick = Time.GetTicksMsec();
+        do
+        {
+            await NextFrame();
+            Check(ReferenceEquals(frozen, main.Exploration) && ReferenceEquals(frozen.Plan, main.Exploration!.Plan),
+                "scene2 whole Current/Plan remains frozen: " + label);
+            Scene2InputLiteral(720, 696, 0, 1, 1, 560, 584, true);
+            Check(commands.SequenceEqual(main.Exploration!.Plan.Commands), "all frozen draw commands/objects unchanged");
+        } while (Time.GetTicksMsec() - tick < duration);
+        IntegrationState(evidence, label);
+    }
+
+    private static void Scene2InputComplete(string evidence, PalSceneData data, string objects)
+    {
+        string after = Scene2InputObjects(data);
+        File.WriteAllText(Path.Combine(evidence, "objects-after.json"), after);
+        Check(objects == after, "all 32 native object initial records remain unchanged");
+        GD.Print("PAL_SCENE2_INPUT_SCOPE:shipped Main/default profile; InputMap/ParseInputEvent/real Process/public Window signals; NOT OS physical input/focus, physical pixels or manual acceptance");
     }
 
     private async Task Arrow(string direction, bool alternate = false)
