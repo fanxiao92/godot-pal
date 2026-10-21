@@ -49,3 +49,30 @@ This starts with empty NuGet package/HTTP caches, restores/builds the solution, 
 The preparation-only `tests/Fixtures/VerifyNativeScene.gd` checks native PackedScene data and actual decoded PNG textures without entering the scene tree; all 48 literal map-array values remain independent fixture expectations. Runtime presentation instead loads a checked profile and calls `InitializeScene` before AddChild. The preparation process regression rejects engine ERROR/SCRIPT ERROR/Unhandled diagnostics even when the child exits0 and prints its marker.
 
 Artificial GPU literal pixels and static-frame checks are opt-in through `PAL_STATIC_GPU_EVIDENCE` in the existing observer; they are not part of headless CI. Real scene2/profile and non-headless GPU evidence are local, ignored and never uploaded. Neither is physical OS presentation, operator interaction or remote CI acceptance. These fixtures are exploration test entries, not original spawn/save/story data; no movement/input/scripts are authorized by static rendering.
+
+
+## Focus recovery: processing boundary versus business time
+
+`ExplorationObserver.FocusRecovery` uses its own test-only `_Process` callback in the same default
+main-thread process group, with priority `Main.ProcessPriority + 1`. Godot 4.7.2's `Node.ProcessPriority`
+and `_Process` documentation specify lower priorities run first; `SceneTree.ProcessFrame` is emitted
+**before** node processing and is not evidence that Main has completed an update.
+
+In the sampler's post-Main callback, `Input.ParseInputEvent` and `Input.FlushBufferedEvents` deliver the
+fresh logical key through normal `_Input`/InputMap. The first following post-Main callback unconditionally
+captures and checks that completed update: it must no longer be the frozen state and must match the
+literal first position/direction/phase/frame/camera. Subsequent changed states are captured and checked
+as the literal held step and released standing frame, with normal duplicate Window focus/echo events.
+Snapshots are retained in the callback; a late awaiting coroutine never substitutes a later live state.
+The local await-frame counter is not Main's process-frame identity. Buffered boundary diagnostics use
+`Engine.GetProcessFrames`; timestamps are diagnostic, not performance or cooldown assertions.
+
+The existing Core test `Fresh_press_after_focus_resets_old_deadline_then_uses_100ms_wrap_and_no_catchup`
+uses explicit public `Update(ticks)` inputs for reset-before-old-deadline, 99/100ms, wrap and no-catchup.
+These exact business-time boundaries cannot be inferred from integration observer latency: a delayed
+first engine update can make both a correct implementation and a wrong cooldown appear to move.
+The integration sampler instead verifies actual wiring and the first completed-update literal trace.
+Its unchanged 650ms wait is a liveness guard: missing samples are incomplete observation, while a
+captured wrong first update is a functional failure. No production clocks/state or callbacks are set
+or invoked by the observer. This scoped sampler does not change the separate opt-in scene2/GPU modes
+and is not OS keyboard/focus or graphical acceptance. No cases or gate counts are added.

@@ -17,6 +17,9 @@ public partial class ExplorationObserver : Node
     private Main main = null!;
     private int frame;
     private ExplorationState? last;
+    private Action? sampleFocusProcess;
+
+    public override void _Process(double delta) => sampleFocusProcess?.Invoke();
     private static readonly Key[] Arrows = [Key.Down, Key.Left, Key.Up, Key.Right];
     private static readonly Key[] Letters = [Key.S, Key.A, Key.W, Key.D];
 
@@ -425,28 +428,111 @@ public partial class ExplorationObserver : Node
         foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, true, echo: true);
         await Frozen(frozen, 220, "old and unheld echo alone cannot resume after focus entered");
         Key keyFresh = fresh == "south-alternate" ? Key.S : Key.Up;
-        ulong tick = Time.GetTicksMsec();
-        KeyEvent(keyFresh, true);
-        if (keyFresh == Key.S) await Step(288, 336, 0, 2, 0, 128, 224);
-        else await Step(320, 320, 2, 2, 6, 160, 208);
-        Check(Time.GetTicksMsec() - tick < 85, "fresh non-echo press steps on actual next frames, not a new 100ms cooldown");
-        var resumed = main.Exploration!;
-        ulong firstTick = Time.GetTicksMsec();
-        // Repeated focused notifications must neither clear the fresh held key nor reset its deadline.
-        while (Time.GetTicksMsec() - firstTick < 60)
+        await ObserveFocusUpdates(keyFresh, frozen);
+    }
+
+    // Same main-thread process group; lower ProcessPriority callbacks finish first.
+    // Flush after Main's current callback, then sample the first following Main callback, not ProcessFrame.
+    private async Task ObserveFocusUpdates(Key key, ExplorationState frozen)
+    {
+        Check(main.IsProcessing() && main.ProcessThreadGroup == ProcessThreadGroupEnum.Inherit
+            && ProcessThreadGroup == ProcessThreadGroupEnum.Inherit, "focus sampler shares Main's default process group");
+        int originalPriority = ProcessPriority;
+        ProcessPriority = main.ProcessPriority + 1;
+        int stage = 0;
+        bool complete = false;
+        Exception? failure = null;
+        ulong deliveredFrame = 0;
+        var samples = new List<ExplorationState>();
+        var boundaries = new List<string>();
+        void Capture(string label, ExplorationState state)
         {
-            Focus(true);
-            KeyEvent(keyFresh, true, echo: true);
-            await NextFrame();
-            Check(ReferenceEquals(resumed, main.Exploration), "duplicate focus and echo do not catch up or advance early");
+            samples.Add(state); // Retain the completed update even if the awaiting observer resumes much later.
+            boundaries.Add($"FOCUS_PROCESS:{label}:process={Engine.GetProcessFrames()}:ticks={Time.GetTicksMsec()}:xy={state.Leader.X},{state.Leader.Y}:phase={state.Leader.StepPhase}:camera={state.Plan.CameraX},{state.Plan.CameraY}:bitmap={state.Plan.LeaderFrameIndex}");
         }
-        if (keyFresh == Key.S) await Step(272, 344, 0, 3, 2, 112, 232);
-        else await Step(336, 312, 2, 3, 8, 176, 200);
-        Check(Time.GetTicksMsec() - firstTick >= 85, "resumed held step retains ordinary 100ms cadence");
-        KeyEvent(keyFresh, false);
-        await Until(() => !main.Exploration!.IsWalking, "fresh release stands; background directions never accumulated");
-        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) ==
-            (keyFresh == Key.S ? (272, 344) : (336, 312)), "release preserves resumed literal position");
+        sampleFocusProcess = () =>
+        {
+            try
+            {
+                if (stage == 0)
+                {
+                    KeyEvent(key, true);
+                    Input.FlushBufferedEvents(); // ParseInputEvent -> normal _Input/InputMap before the next Main._Process.
+                    deliveredFrame = Engine.GetProcessFrames();
+                    boundaries.Add($"FOCUS_PROCESS:delivered:process={deliveredFrame}:ticks={Time.GetTicksMsec()}");
+                    Check(ReferenceEquals(frozen, main.Exploration), "input delivery alone cannot advance Main");
+                    stage = 1;
+                    return;
+                }
+                var current = main.Exploration!;
+                if (stage == 1)
+                {
+                    Check(Engine.GetProcessFrames() > deliveredFrame, "sample follows the flushed input's process frame");
+                    Capture("first", current);
+                    Check(!ReferenceEquals(frozen, current), "first Main process after flushed fresh press must advance, not eventual motion");
+                    CheckFocusSample(current, key, 0);
+                    stage = 2;
+                }
+                else if (stage == 2 && !ReferenceEquals(samples[0], current))
+                {
+                    Capture("held", current);
+                    CheckFocusSample(current, key, 1);
+                    KeyEvent(key, false);
+                    Input.FlushBufferedEvents();
+                    stage = 3;
+                    return;
+                }
+                else if (stage == 3)
+                {
+                    if (ReferenceEquals(samples[1], current)) return;
+                    Capture("released", current);
+                    CheckFocusSample(current, key, 2);
+                    complete = true;
+                    sampleFocusProcess = null;
+                    return;
+                }
+                // Real repeated signals/echo must preserve held input; the next changed state must be the literal held step.
+                Focus(true);
+                KeyEvent(key, true, echo: true);
+                Input.FlushBufferedEvents();
+                Check(ReferenceEquals(current, main.Exploration), "duplicate focus/echo events cannot advance state themselves");
+            }
+            catch (Exception e)
+            {
+                failure = e;
+                complete = true;
+                sampleFocusProcess = null;
+            }
+        };
+        try
+        {
+            await Until(() => complete, "focus update sampling incomplete (liveness), not a cooldown assertion");
+            if (failure != null) throw failure;
+            Check(samples.Count == 3, "captured first, held and released completed updates");
+        }
+        finally
+        {
+            sampleFocusProcess = null;
+            ProcessPriority = originalPriority;
+            foreach (string boundary in boundaries) GD.Print(boundary);
+        }
+    }
+
+    private static void CheckFocusSample(ExplorationState state, Key key, int update)
+    {
+        var expected = (key, update) switch
+        {
+            (Key.S, 0) => (288, 336, 0, 2, 0, 128, 224, true),
+            (Key.S, 1) => (272, 344, 0, 3, 2, 112, 232, true),
+            (Key.S, 2) => (272, 344, 0, 0, 0, 112, 232, false),
+            (Key.Up, 0) => (320, 320, 2, 2, 6, 160, 208, true),
+            (Key.Up, 1) => (336, 312, 2, 3, 8, 176, 200, true),
+            (Key.Up, 2) => (336, 312, 2, 0, 6, 176, 200, false),
+            _ => throw new InvalidOperationException("unknown focus literal")
+        };
+        Check((state.Leader.X, state.Leader.Y, state.Leader.Direction, state.Leader.StepPhase,
+            state.Plan.LeaderFrameIndex, state.Plan.CameraX, state.Plan.CameraY, state.IsWalking) == expected,
+            "completed focus update has literal position/direction/phase/frame/camera/walking: " + update);
     }
 
     private async Task Frozen(ExplorationState state, ulong duration, string message)
