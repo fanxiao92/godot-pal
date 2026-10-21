@@ -15,6 +15,12 @@ public sealed class ExplorationSession
         Current = new(initialLeader, false, rules.BuildPlan(initialLeader));
     }
 
+    internal void ResetSchedule()
+    {
+        hasUpdated = false;
+        nextDeadline = 0;
+    }
+
     public bool Update(uint ticksMilliseconds, int? direction)
     {
         if (direction is < 0 or > 3) throw new ArgumentOutOfRangeException(nameof(direction));
