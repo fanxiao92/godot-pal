@@ -120,6 +120,7 @@ try {
         $checks | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $evidence 'test-results.json')
     }
 
+    $null = & (Join-Path $PSScriptRoot 'Get-GdUnitPackages.ps1')
     $null = Invoke-DotnetChecked @('--info')
     $null = Invoke-DotnetChecked @('restore', 'GodotPal.sln', '--no-http-cache')
     $null = Invoke-DotnetChecked @('build', 'GodotPal.sln', '--no-restore')

@@ -14,6 +14,9 @@ export_credentials.cfg
 # Imported translations (automatically generated from CSV files)
 *.translation
 
+# Verified GdUnit local source and its atomic bootstrap staging directories.
+/.packages/
+
 # .NET build/test outputs and local IDE settings
 **/bin/
 **/obj/

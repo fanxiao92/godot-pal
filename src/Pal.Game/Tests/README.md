@@ -2,21 +2,22 @@
 
 Approved seam: real native `PackedScene` / `Resource` / `Texture2D`, real scene-tree entry and frames, checked Core draw plans rendered by Godot, viewport transforms, and child-process exit/diagnostics from the shipped Main. No mocks or internal-only test interfaces. This does not replace graphical/desktop pixel acceptance.
 
-Tests live in the existing Godot assembly, matching the #12 proven arrangement; no second Godot project or Core test migration. Fixed packages: gdUnit4.api 5.1.0-rc5, gdUnit4.test.adapter 3.1.1, Microsoft.NET.Test.Sdk 18.0.1. Godot.NET.Sdk 4.7.2 / net10.0 and repository global.json remain authoritative.
+Tests live in the existing Godot assembly, matching the #12 proven arrangement; no second Godot project or Core test migration. Fixed packages: gdUnit4.api 5.1.0-rc6.pal.a5f20fb8.1, gdUnit4.test.adapter 3.2.0-pal.a5f20fb8.1, Microsoft.NET.Test.Sdk 18.0.1. See [pinned source-package bootstrap and provenance](../../../docs/testing/gdunit-source-packages.md); direct dotnet commands require bootstrap first. Godot.NET.Sdk 4.7.2 / net10.0 and repository global.json remain authoritative.
 
 Run from repository root in PowerShell 7, with the installed Godot 4.7.2 mono console executable selected explicitly. The suite runs whether or not a default `Assets/Scenes/Scene.tscn` or `Assets/Profiles/Exploration.tres` exists: the missing-resource case selects its own absent GUID root through the real Main arguments, without touching default assets. Test resources are independent native literals, saved under ignored `Assets/RuntimeTests/<guid>` and removed after each test. They are not a duplicate M1 JSON fixture.
 
 ```powershell
 $env:GODOT_BIN = 'C:/path/to/godot-mono.console.exe'
 $logs = 'C:/external/test-results'
+./scripts/Get-GdUnitPackages.ps1
 dotnet build src/Pal.Game
 & $env:GODOT_BIN --headless --path src/Pal.Game --editor --import
 $env:PAL_TEST_GODOT = $env:GODOT_BIN
 dotnet test src/Pal.Game --no-build --list-tests
-# Expected: 141 discovered = 138 positive cases + 3 deliberate failure controls.
+# Expected: 173 discovered = 170 positive cases + 3 deliberate failure controls.
 dotnet test src/Pal.Game --no-build --results-directory $logs `
   --logger 'trx;LogFileName=game.trx'
-# Expected: 138 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
+# Expected: 170 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
 
 # Each command below must fail: 1 executed, 1 failed, 0 skipped; exit1.
 foreach ($control in @('IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
@@ -42,7 +43,7 @@ Shared local/Windows CI acceptance (PowerShell 7):
   -EvidenceDirectory 'C:/external/new-empty-evidence-directory'
 ```
 
-This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 54, CLI 300 + 2 named platform skips, Prepare 52 and Game 138; lists 141 unique Godot cases and repeats the 138 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
+This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 129, CLI 300 + 2 named platform skips, Prepare 52 and Game 170; lists 173 unique Godot cases and repeats the 170 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
 
 `Test-GameStartup.ps1 -GodotPath <exe>` remains independently callable. It uses the sole `M1Bundle.Write` fixture in an external temporary input, explicitly prepares a unique Assets subroot and a matching typed artificial native profile (raw WORD0, start320,320, South0/layer0/phase0), then checks the actual Main's selected map URI plus Core ready and exit0. It only removes its own recorded, unchanged synthetic trees. Optional `-ResourceRoot res://Assets/<prepared-root>` uses caller-owned native resources without writing/deleting them. Add `-ProfileUri res://<selected-profile>.tres` to select a caller-owned native profile explicitly. With caller resources and no ProfileUri, Main retains its independent default `res://Assets/Profiles/Exploration.tres`; a changed resource root does not relocate it. ProfileUri alone is rejected before synthetic preparation. Synthetic output cleanup is snapshotted only after profile authoring. Neither script populates the default real Assets root; ordinary game startup with missing resources still fails. Timeout or error is a failure, not a fallback. Headless automation is not GPU pixel or human desktop acceptance.
 

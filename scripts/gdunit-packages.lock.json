@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/godot-gdunit-labs/gdUnit4Net",
+    "sha": "a5f20fb8c12864b17c77d433cad14f9bf0094458"
+  },
+  "recipe": {
+    "repository": "https://github.com/fanxiao92/gdUnit4Net",
+    "sha": "d6d2aea6812debce526aeb3b03b6094edb82a608"
+  },
+  "run": {
+    "url": "https://github.com/fanxiao92/gdUnit4Net/actions/runs/39608085368/attempts/1",
+    "id": "39608085368",
+    "attempt": 1,
+    "artifactId": "12348323804",
+    "artifactExpiresAt": "2026-11-04T13:27:50Z"
+  },
+  "release": {
+    "tag": "pal-gdunit-a5f20fb8-1",
+    "baseUrl": "https://github.com/fanxiao92/gdUnit4Net/releases/download/pal-gdunit-a5f20fb8-1/"
+  },
+  "assets": [
+    {
+      "file": "gdUnit4.api.5.1.0-rc6.pal.a5f20fb8.1.nupkg",
+      "id": "gdUnit4.api",
+      "version": "5.1.0-rc6.pal.a5f20fb8.1",
+      "size": 461464,
+      "sha256": "a0bbd3ecabece6f44b1de2fbd70fd7da5b78fe45885c2503efda9e7694394717"
+    },
+    {
+      "file": "gdUnit4.test.adapter.3.2.0-pal.a5f20fb8.1.nupkg",
+      "id": "gdUnit4.test.adapter",
+      "version": "3.2.0-pal.a5f20fb8.1",
+      "size": 134940,
+      "sha256": "6c1aa1b0dfe998dc11ac3f8589683e75c0556683ace4002af885a6c103b95be2"
+    },
+    {
+      "file": "provenance.json",
+      "size": 19847,
+      "sha256": "9d4c6aa82a1be121f8d4ccd1f5796eec186975fc29fd283d09466a827becd3d8"
+    },
+    {
+      "file": "SHA256SUMS",
+      "size": 305,
+      "sha256": "632e7b37a8a9a2d62a396126c83e2ebb05a18d092599532c116e91276d22ca61"
+    }
+  ]
+}
