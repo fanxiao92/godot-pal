@@ -229,6 +229,7 @@ public class MainProcessTests
         AssertThat(result.ExitCode).IsEqual(1);
         AssertThat(result.Text.Contains(root + "/Scenes/Scene.tscn", StringComparison.Ordinal)).IsTrue();
         AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
+        AssertThat(result.Text.Contains("Attempt to disconnect a nonexistent connection", StringComparison.Ordinal)).IsFalse();
         AssertThat(System.IO.Directory.Exists(ProjectSettings.GlobalizePath(root))).IsFalse();
     }
 

@@ -17,6 +17,7 @@ public partial class Main : Node2D
     private ExplorationInput? input;
     private PalMapScene? mapScene;
     private Window? window;
+    private bool focusSignalsConnected;
     public ExplorationState? Exploration => input?.Current;
 
     public override void _Ready()
@@ -45,6 +46,7 @@ public partial class Main : Node2D
             AddChild(map);
             window.FocusEntered += OnFocusEntered;
             window.FocusExited += OnFocusExited;
+            focusSignalsConnected = true;
             input.SetFocused(window.HasFocus());
             GD.Print($"PAL_MAP_LOADED:{root}/Scenes/Scene.tscn");
             GD.Print($"PAL_GAME_READY:{Pal.Core.Startup.Status}");
@@ -62,9 +64,10 @@ public partial class Main : Node2D
 
     public override void _ExitTree()
     {
-        if (window == null) return;
+        if (window == null || !focusSignalsConnected) return;
         window.FocusEntered -= OnFocusEntered;
         window.FocusExited -= OnFocusExited;
+        focusSignalsConnected = false;
     }
 
     public override void _Input(InputEvent @event)
