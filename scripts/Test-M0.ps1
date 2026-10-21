@@ -21,17 +21,16 @@ $transcribing = $false
 $commands = [Collections.Generic.List[object]]::new()
 $checks = [Collections.Generic.List[object]]::new()
 $sequence = 0
-function Get-TestProcesses {
-    @(Get-CimInstance Win32_Process | Where-Object {
-        $_.Name -match '^godot.*\.exe$' -or
-        ($_.Name -match '^(dotnet|testhost|vstest.*)\.exe$' -and $_.CommandLine -match '(godot-pal|Pal\.Game|Pal\.Prepare)')
-    } |
-        Select-Object ProcessId, ParentProcessId, Name, CommandLine, CreationDate)
+& (Join-Path $repository 'tests/Pal.Game.Tests/ProcessSnapshot.Tests.ps1')
+$baseline = @(& (Join-Path $PSScriptRoot 'Get-TestProcesses.ps1'))
+$existingGodot = @($baseline | Where-Object Name -Like 'godot*.exe' | Select-Object ProcessId, Name)
+if ($existingGodot.Count) {
+    $existingGodot | ConvertTo-Json | Set-Content (Join-Path $evidence 'processes-baseline.json')
+    throw 'Existing Godot process; inspect processes-baseline.json (not querying details or killing it).'
 }
-$baseline = @(Get-TestProcesses)
 function Save-ProcessSnapshot([string]$Name) {
-    $processes = @(Get-TestProcesses)
-    @{ utc = [DateTime]::UtcNow; query = 'Win32_Process: all Godot and repository-related dotnet/testhost/vstest'; baselineIds = @($baseline.ProcessId); processes = $processes; count = $processes.Count } |
+    $processes = @(& (Join-Path $PSScriptRoot 'Get-TestProcesses.ps1'))
+    @{ utc = [DateTime]::UtcNow; query = 'Server-filtered Win32_Process: global Godot PID/Name only; explicit repository dotnet/testhost/vstest identities'; baselineIds = @($baseline.ProcessId); processes = $processes; count = $processes.Count } |
         ConvertTo-Json -Depth 6 | Set-Content (Join-Path $evidence "$Name.json")
     $new = @($processes | Where-Object { $_.ProcessId -notin @($baseline.ProcessId) })
     if ($new.Count) { throw "Residual test processes; inspect $Name.json (not killing unrelated processes)." }
