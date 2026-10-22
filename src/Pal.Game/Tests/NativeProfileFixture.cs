@@ -41,6 +41,33 @@ internal sealed class NativeProfileFixture : IDisposable
                 WalkFramesSource = new PalWalkFramesSource { Archive = "data.mkf", Sha256 = new string('b', 64),
                     Chunk = 3, ByteOffset = 768, RoleId = 0, Field = "rgwWalkFrames" } } };
     }
+    public void ConfigureStaticScene4()
+    {
+        Scene.SceneId = 4;
+        Scene.MapId = Scene.Map.MapId = Scene.Map.Tiles.MapId = 10;
+        Scene.WEventObjectIndex = 28;
+        Profile.SceneId = 4;
+        Profile.Start.X = 1232; Profile.Start.Y = 1336;
+        Profile.Start.Direction = 0; Profile.Start.Layer = 0; Profile.Start.StepPhase = 0;
+        var sprite = Scene.Sprites[0];
+        for (int frame = 1; frame < 12; frame++) AddAliasFrame(frame);
+        sprite.SpriteId = 207;
+        sprite.Source["chunk"] = 207;
+        Scene.SpriteIds = [207];
+        Scene.DefaultParty[0].WSpriteNum = 207;
+        Scene.DefaultParty[0].Sprite = sprite;
+        for (int id = 29; id <= 60; id++)
+        {
+            var obj = AddObject(id);
+            obj.X = 3000; obj.Y = 3000;
+            obj.WSpriteNum = 207; obj.Sprite = sprite;
+            if (id == 60)
+            {
+                obj.X = 1216; obj.Y = 1344; obj.SState = 2; obj.SVanishTime = 0;
+            }
+        }
+    }
+
     public PalSceneObject AddObject(int id = 1)
     {
         var obj = new PalSceneObject { Id = id, X = 600, Y = 600, SState = 1, WSpriteNum = 17,
