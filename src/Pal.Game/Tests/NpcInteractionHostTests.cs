@@ -41,7 +41,7 @@ public class NpcInteractionHostTests
         {
             var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
                 "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri],
-                new System.Collections.Generic.Dictionary<string, string>
+                new System.Collections.Generic.Dictionary<string, string?>
                 {
                     ["PAL_DIALOGUE_GPU_EVIDENCE"] = evidence,
                     ["PAL_DIALOGUE_NATIVE_ROOT"] = providedDialogue,
@@ -65,6 +65,56 @@ public class NpcInteractionHostTests
                 AssertThat(result.Text.Contains(field + " identity mismatch", StringComparison.Ordinal)).IsTrue();
                 AssertThat(result.Text.Contains("provided='" + (kind == "dialogue" ? providedDialogue : providedPalette) + "'", StringComparison.Ordinal)).IsTrue();
                 AssertThat(result.Text.Contains("actual='" + (kind == "dialogue" ? actualDialogue : actualPalette) + "'", StringComparison.Ordinal)).IsTrue();
+                AssertThat(result.Text.Contains("PAL_INTERACTION_BEGIN")).IsFalse();
+                AssertThat(result.Text.Contains("completed=true")).IsFalse();
+                AssertThat(File.Exists(Path.Combine(evidence, "resource-identity.json"))).IsFalse();
+            }
+        }
+        finally { if (string.IsNullOrEmpty(parent)) Directory.Delete(evidence, true); }
+    }
+
+    [TestCase("evidence-only", Timeout = 20000)]
+    [TestCase("native-only", Timeout = 20000)]
+    [TestCase("palette-only", Timeout = 20000)]
+    public async Task RealDialogueFixture_headless_evidence_does_not_require_GPU_inputs_but_rejects_partial_inputs(string kind)
+    {
+        using var fixture = new NpcInteractionFixture();
+        string paletteUri = fixture.Static.Root + "/Palette.tres";
+        if (kind != "evidence-only")
+            NativeProfileFixture.SaveResource(fixture.Static.Scene.Palette, paletteUri);
+        string parent = OS.GetEnvironment("PAL_RESOURCE_IDENTITY_TEST_EVIDENCE");
+        string evidence = Path.Combine(string.IsNullOrEmpty(parent) ? Path.GetTempPath() : parent, "pal-headless-evidence-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(evidence);
+        try
+        {
+            // Null explicitly removes inherited GPU inputs from the child's environment.
+            var environment = new System.Collections.Generic.Dictionary<string, string?>
+            {
+                ["PAL_DIALOGUE_GPU_EVIDENCE"] = evidence,
+                ["PAL_DIALOGUE_NATIVE_ROOT"] = kind == "native-only" ? ProjectSettings.GlobalizePath(fixture.Profile.DialogueDirectory) : null,
+                ["PAL_DIALOGUE_PALETTE"] = kind == "palette-only" ? ProjectSettings.GlobalizePath(paletteUri) : null
+            };
+            File.WriteAllText(Path.Combine(evidence, "environment.json"), System.Text.Json.JsonSerializer.Serialize(environment));
+            var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
+                "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri], environment);
+            File.WriteAllText(Path.Combine(evidence, "child.log"), result.Text);
+            File.WriteAllText(Path.Combine(evidence, "exit-code.txt"), result.ExitCode.ToString());
+            foreach (string line in result.Text.Split('\n')) GD.Print("Headless evidence child: " + line);
+            if (kind == "evidence-only")
+            {
+                AssertThat(result.ExitCode).IsEqual(0);
+                AssertThat(result.Text.Contains("PAL_INTERACTION_END:language=zh-Hans:calls=2:entry=0188:completed=true")).IsTrue();
+                using var output = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(evidence, "fixture-result.json")));
+                AssertThat(output.RootElement.GetProperty("completed").GetBoolean()).IsTrue();
+                AssertThat(output.RootElement.GetProperty("failures").GetInt32()).IsEqual(0);
+                AssertThat(output.RootElement.GetProperty("actualMain").GetBoolean()).IsTrue();
+                AssertThat(output.RootElement.GetProperty("callsCompleted").GetInt32()).IsEqual(2);
+                AssertThat(File.Exists(Path.Combine(evidence, "resource-identity.json"))).IsFalse();
+            }
+            else
+            {
+                AssertThat(result.ExitCode).IsEqual(1);
+                AssertThat(result.Text.Contains("GPU resource identity requires both PAL_DIALOGUE_NATIVE_ROOT and PAL_DIALOGUE_PALETTE", StringComparison.Ordinal)).IsTrue();
                 AssertThat(result.Text.Contains("PAL_INTERACTION_BEGIN")).IsFalse();
                 AssertThat(result.Text.Contains("completed=true")).IsFalse();
                 AssertThat(File.Exists(Path.Combine(evidence, "resource-identity.json"))).IsFalse();

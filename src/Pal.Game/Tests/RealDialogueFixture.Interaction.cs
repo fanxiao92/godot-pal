@@ -89,16 +89,22 @@ public partial class RealDialogueFixture
 
     private void BindInteractionResourceIdentity(string profileUri, string dialogueDirectory, PalPalette palette)
     {
-        // Ordinary headless interaction runs have no GPU evidence contract. GPU runs
-        // must bind the script's protected paths to the typed resources actually loaded.
-        if (string.IsNullOrEmpty(_evidence)) return;
+        // An evidence output directory alone does not select GPU inputs in headless runs.
+        // Graphical runs or explicitly supplied GPU inputs must satisfy the full contract.
+        string nativeRoot = OS.GetEnvironment("PAL_DIALOGUE_NATIVE_ROOT");
+        string palettePath = OS.GetEnvironment("PAL_DIALOGUE_PALETTE");
+        bool hasNativeRoot = !string.IsNullOrEmpty(nativeRoot);
+        bool hasPalette = !string.IsNullOrEmpty(palettePath);
+        if (!_graphical && !hasNativeRoot && !hasPalette) return;
+        Require(hasNativeRoot && hasPalette,
+            "GPU resource identity requires both PAL_DIALOGUE_NATIVE_ROOT and PAL_DIALOGUE_PALETTE.");
         Require(Directory.Exists(_evidence), "GPU evidence must be a new explicit directory.");
         Require(!string.IsNullOrEmpty(palette.ResourcePath) && !palette.ResourcePath.Contains("::", StringComparison.Ordinal),
             "PalettePath identity requires the loaded scene palette to be an external native resource.");
         string actualDialogue = IdentityPath(dialogueDirectory);
         string actualPalette = IdentityPath(palette.ResourcePath);
-        string providedDialogue = IdentityPath(RequiredEnvironment("PAL_DIALOGUE_NATIVE_ROOT"));
-        string providedPalette = IdentityPath(RequiredEnvironment("PAL_DIALOGUE_PALETTE"));
+        string providedDialogue = IdentityPath(nativeRoot);
+        string providedPalette = IdentityPath(palettePath);
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         Require(string.Equals(providedDialogue, actualDialogue, comparison),
             $"NativeDialogueDirectory identity mismatch: provided='{providedDialogue}'; actual='{actualDialogue}'.");
