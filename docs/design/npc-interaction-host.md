@@ -88,6 +88,8 @@ Main 的只读 `Exploration/Interaction/Dialogue/Display` 和 `UpdateCompleted` 
   -EvidenceDirectory C:/Temp/pal-npc-gpu-new-unique
 ```
 
+interaction 模式仍须提供 `NativeDialogueDirectory` 和 `PalettePath`，但它们必须分别指向 typed profile 选中的对话目录和实际已加载场景的外部 palette ResourcePath。fixture 在输入/截图前按规范化绝对路径核对（Windows忽略大小写），不以内容 hash 相同冒充路径身份；不一致明确报告 provided/actual 并失败，不生成成功身份凭据。匹配后保存 `resource-identity.json`，脚本仅在该凭据与参数/profile一致时允许成功；既有资源前后 hash/mtime 保护继续保留。无profile旧模式仍直接消费原两个参数，不要求新凭据。
+
 两语言各独立新目录/进程。fixture实际搜索、完整执行、恢复、返回后再完整交谈，按真实显示完成帧与FramePostDraw保存每次typing/加速/等待/轮转/恢复的实际与独立expected图。文本和布局预期来自native消息、字形位平面与参考literal，不从被测drawplan/当前snapshot取正文；snapshot只决定当前进度。地图前态仅是恢复oracle，不独立证明地图所有像素正确。本次真实273个场景帧的非透明索引没有F9–FE，因此真实地图/对象/领队在提示轮转时**应不变**；fixture先核该事实。人工索引测试另外证明这些消费者的F9/FA改变及alpha，不虚称在真实人物上观察到不存在的颜色变化。
 
 未传新参数时旧人工背景真实GPU入口仍保留。headless状态、GPU像素、物理键盘/Alt-Tab、人工窗口缩放/桌面画面/关闭、远端CI和最终共享门分列；后四类不因本组件自动化通过而被接受。真实资源/截图/完整证据只在ignored或仓库外，不提交上传。全局引擎串行，异常留证后停止；最终共享门由#26统一执行。

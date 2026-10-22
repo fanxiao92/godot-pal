@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 # One explicitly selected language/process per invocation. No build, prepare, cleanup or retry.
 $project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../src/Pal.Game'))
-$native = (Resolve-Path -LiteralPath $NativeDialogueDirectory).Path
+$native = [IO.Path]::TrimEndingDirectorySeparator((Resolve-Path -LiteralPath $NativeDialogueDirectory).Path)
 $palette = (Resolve-Path -LiteralPath $PalettePath).Path
 $godot = (Resolve-Path -LiteralPath $GodotPath).Path
 $evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
@@ -79,14 +79,19 @@ try {
     $unchanged = $before -ceq $after
     $resultPath = Join-Path $evidence 'fixture-result.json'
     $fixture = if (Test-Path -LiteralPath $resultPath) { Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json } else { $null }
+    $identityPath = Join-Path $evidence 'resource-identity.json'
+    $identity = if (Test-Path -LiteralPath $identityPath) { Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json } else { $null }
+    $identityMatched = -not $InteractionProfileUri -or ($null -ne $identity -and
+        $identity.InteractionProfileUri -ceq $InteractionProfileUri -and
+        $native.Equals($identity.NativeDialogueDirectory, $comparison) -and $palette.Equals($identity.PalettePath, $comparison))
     $engineError = ($output + "`n" + $errors) -match '(?im)(ERROR:|SCRIPT ERROR:|Unhandled|PAL_DIALOGUE_GPU_FAILED)'
-    $passed = -not $timedOut -and $code -eq 0 -and $unchanged -and -not $engineError -and
+    $passed = -not $timedOut -and $code -eq 0 -and $unchanged -and $identityMatched -and -not $engineError -and
         $null -ne $fixture -and $fixture.completed -eq $true -and $fixture.failures -eq 0 -and $fixture.checks.Count -eq $(if ($InteractionProfileUri) { 10 } else { 6 }) -and
         (-not $InteractionProfileUri -or $output.Contains("PAL_INTERACTION_END:language=${Language}:calls=2:entry=0188:completed=true")) -and
         $output.Contains("PAL_DIALOGUE_GPU_END:language=${Language}:failures=0:completed=true")
     [ordered]@{
         Pid = $ownedPid; StartedAtUtc = $startedAt.ToString('O'); EndedAtUtc = [DateTime]::UtcNow.ToString('O')
-        ExitCode = $code; TimedOut = $timedOut; ResourcesUnchanged = $unchanged; EngineError = $engineError
+        ExitCode = $code; TimedOut = $timedOut; ResourcesUnchanged = $unchanged; ResourceIdentityMatched = $identityMatched; EngineError = $engineError
         FixtureCompleted = ($null -ne $fixture -and $fixture.completed -eq $true); Passed = $passed
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'process-result.json') -Encoding utf8
     Write-Output "GPU_EVIDENCE=$evidence"

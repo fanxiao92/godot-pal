@@ -11,6 +11,68 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class NpcInteractionHostTests
 {
+    [TestCase("matched", Timeout = 20000)]
+    [TestCase("dialogue", Timeout = 20000)]
+    [TestCase("palette", Timeout = 20000)]
+    public async Task RealDialogueFixture_binds_evidence_to_consumed_resource_paths(string kind)
+    {
+        using var fixture = new NpcInteractionFixture();
+        fixture.CopyDialogue();
+        string paletteUri = fixture.Static.Root + "/Palette.tres";
+        string otherPaletteUri = fixture.Static.Root + "/OtherPalette.tres";
+        NativeProfileFixture.SaveResource(fixture.Static.Scene.Palette, paletteUri);
+        File.Copy(ProjectSettings.GlobalizePath(paletteUri), ProjectSettings.GlobalizePath(otherPaletteUri));
+        fixture.Static.Scene.Palette = ResourceLoader.Load<Pal.Game.Resources.PalPalette>(paletteUri);
+        fixture.Static.SavePacked();
+        fixture.Rehash();
+        string actualDialogue = Path.GetFullPath(ProjectSettings.GlobalizePath(fixture.Profile.DialogueDirectory));
+        string actualPalette = Path.GetFullPath(ProjectSettings.GlobalizePath(paletteUri));
+        string providedDialogue = kind == "dialogue"
+            ? Path.GetFullPath(ProjectSettings.GlobalizePath("res://Tests/Fixtures/TriggerDialogue")) : actualDialogue;
+        string providedPalette = kind == "palette" ? Path.GetFullPath(ProjectSettings.GlobalizePath(otherPaletteUri)) : actualPalette;
+        // Both mismatch inputs exist and are byte-identical: hashes cannot establish path identity.
+        AssertThat(Godot.FileAccess.GetSha256(providedDialogue + "/Font.tres"))
+            .IsEqual(Godot.FileAccess.GetSha256(actualDialogue + "/Font.tres"));
+        AssertThat(Godot.FileAccess.GetSha256(providedPalette)).IsEqual(Godot.FileAccess.GetSha256(actualPalette));
+        string parent = OS.GetEnvironment("PAL_RESOURCE_IDENTITY_TEST_EVIDENCE");
+        string evidence = Path.Combine(string.IsNullOrEmpty(parent) ? Path.GetTempPath() : parent, "pal-resource-identity-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(evidence);
+        try
+        {
+            var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
+                "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri],
+                new System.Collections.Generic.Dictionary<string, string>
+                {
+                    ["PAL_DIALOGUE_GPU_EVIDENCE"] = evidence,
+                    ["PAL_DIALOGUE_NATIVE_ROOT"] = providedDialogue,
+                    ["PAL_DIALOGUE_PALETTE"] = providedPalette
+                });
+            File.WriteAllText(Path.Combine(evidence, "child.log"), result.Text);
+            File.WriteAllText(Path.Combine(evidence, "exit-code.txt"), result.ExitCode.ToString());
+            foreach (string line in result.Text.Split('\n')) GD.Print("Identity child: " + line);
+            if (kind == "matched")
+            {
+                AssertThat(result.ExitCode).IsEqual(0);
+                AssertThat(result.Text.Contains("PAL_INTERACTION_END:language=zh-Hans:calls=2:entry=0188:completed=true")).IsTrue();
+                using var identity = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(evidence, "resource-identity.json")));
+                AssertThat(identity.RootElement.GetProperty("NativeDialogueDirectory").GetString()).IsEqual(actualDialogue);
+                AssertThat(identity.RootElement.GetProperty("PalettePath").GetString()).IsEqual(actualPalette);
+            }
+            else
+            {
+                AssertThat(result.ExitCode).IsEqual(1);
+                string field = kind == "dialogue" ? "NativeDialogueDirectory" : "PalettePath";
+                AssertThat(result.Text.Contains(field + " identity mismatch", StringComparison.Ordinal)).IsTrue();
+                AssertThat(result.Text.Contains("provided='" + (kind == "dialogue" ? providedDialogue : providedPalette) + "'", StringComparison.Ordinal)).IsTrue();
+                AssertThat(result.Text.Contains("actual='" + (kind == "dialogue" ? actualDialogue : actualPalette) + "'", StringComparison.Ordinal)).IsTrue();
+                AssertThat(result.Text.Contains("PAL_INTERACTION_BEGIN")).IsFalse();
+                AssertThat(result.Text.Contains("completed=true")).IsFalse();
+                AssertThat(File.Exists(Path.Combine(evidence, "resource-identity.json"))).IsFalse();
+            }
+        }
+        finally { if (string.IsNullOrEmpty(parent)) Directory.Delete(evidence, true); }
+    }
+
     [TestCase("mixed")]
     [TestCase("duplicate-profile")]
     [TestCase("duplicate-language")]

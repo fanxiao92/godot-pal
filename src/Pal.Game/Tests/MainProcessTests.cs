@@ -299,11 +299,13 @@ public class MainProcessTests
         foreach (string line in result.Text.Split('\n')) GD.Print("Child: " + line.TrimEnd('\r'));
     }
 
-    internal static async Task<ProcessResult> Run(string[] arguments)
+    internal static async Task<ProcessResult> Run(string[] arguments, System.Collections.Generic.IReadOnlyDictionary<string, string>? environment = null)
     {
         var info = new ProcessStartInfo(OS.GetExecutablePath())
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in arguments) info.ArgumentList.Add(arg);
+        if (environment is not null)
+            foreach (var pair in environment) info.Environment[pair.Key] = pair.Value;
         using var process = Process.Start(info) ?? throw new InvalidOperationException("Godot did not start");
         GD.Print($"Owned child Godot pid={process.Id}");
         var stdout = process.StandardOutput.ReadToEndAsync();

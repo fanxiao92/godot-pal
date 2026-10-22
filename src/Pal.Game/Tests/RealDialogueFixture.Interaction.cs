@@ -51,6 +51,7 @@ public partial class RealDialogueFixture
             var scene = ResourceLoader.Load<PackedScene>(profile.StaticResources + "/Scenes/Scene.tscn").Instantiate<PalMapScene>();
             try
             {
+                BindInteractionResourceIdentity(args.DialogueProfile!, root, scene.Data.Palette);
                 if (_graphical)
                 {
                     var frames = scene.Data.Map.Tiles.Frames.Concat(scene.Data.Sprites.SelectMany(s => s.Frames)).ToArray();
@@ -85,6 +86,32 @@ public partial class RealDialogueFixture
         }
         catch (Exception error) { Fail(error); }
     }
+
+    private void BindInteractionResourceIdentity(string profileUri, string dialogueDirectory, PalPalette palette)
+    {
+        // Ordinary headless interaction runs have no GPU evidence contract. GPU runs
+        // must bind the script's protected paths to the typed resources actually loaded.
+        if (string.IsNullOrEmpty(_evidence)) return;
+        Require(Directory.Exists(_evidence), "GPU evidence must be a new explicit directory.");
+        Require(!string.IsNullOrEmpty(palette.ResourcePath) && !palette.ResourcePath.Contains("::", StringComparison.Ordinal),
+            "PalettePath identity requires the loaded scene palette to be an external native resource.");
+        string actualDialogue = IdentityPath(dialogueDirectory);
+        string actualPalette = IdentityPath(palette.ResourcePath);
+        string providedDialogue = IdentityPath(RequiredEnvironment("PAL_DIALOGUE_NATIVE_ROOT"));
+        string providedPalette = IdentityPath(RequiredEnvironment("PAL_DIALOGUE_PALETTE"));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        Require(string.Equals(providedDialogue, actualDialogue, comparison),
+            $"NativeDialogueDirectory identity mismatch: provided='{providedDialogue}'; actual='{actualDialogue}'.");
+        Require(string.Equals(providedPalette, actualPalette, comparison),
+            $"PalettePath identity mismatch: provided='{providedPalette}'; actual='{actualPalette}'.");
+        File.WriteAllText(Path.Combine(_evidence, "resource-identity.json"), System.Text.Json.JsonSerializer.Serialize(new
+        {
+            InteractionProfileUri = profileUri, NativeDialogueDirectory = actualDialogue, PalettePath = actualPalette
+        }));
+    }
+
+    private static string IdentityPath(string path) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(ProjectSettings.GlobalizePath(path)));
 
     private void ObserveMainUpdate()
     {
