@@ -14,10 +14,10 @@ dotnet build src/Pal.Game
 & $env:GODOT_BIN --headless --path src/Pal.Game --editor --import
 $env:PAL_TEST_GODOT = $env:GODOT_BIN
 dotnet test src/Pal.Game --no-build --list-tests
-# Expected: 173 discovered = 170 positive cases + 3 deliberate failure controls.
+# Expected: 232 discovered = 229 positive cases + 3 deliberate failure controls.
 dotnet test src/Pal.Game --no-build --results-directory $logs `
   --logger 'trx;LogFileName=game.trx'
-# Expected: 170 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
+# Expected: 229 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
 
 # Each command below must fail: 1 executed, 1 failed, 0 skipped; exit1.
 foreach ($control in @('IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
@@ -43,7 +43,7 @@ Shared local/Windows CI acceptance (PowerShell 7):
   -EvidenceDirectory 'C:/external/new-empty-evidence-directory'
 ```
 
-This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 129, CLI 300 + 2 named platform skips, Prepare 52 and Game 170; lists 173 unique Godot cases and repeats the 170 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
+This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 316, CLI 317 + 2 named platform skips, Prepare 52 and Game 229; lists 232 unique Godot cases and repeats the 229 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. These are required counts for the current source, not a claim that a new full gate has passed. Prepare52 retains the M2 static preparation chain; it does not cover the new dialogue importer (its separate existing preparation evidence is listed in the [M3 evidence checkpoint](../../../docs/milestones/m3/acceptance.md)). The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
 
 `Test-GameStartup.ps1 -GodotPath <exe>` remains independently callable. It uses the sole `M1Bundle.Write` fixture in an external temporary input, explicitly prepares a unique Assets subroot and a matching typed artificial native profile (raw WORD0, start320,320, South0/layer0/phase0), then checks the actual Main's selected map URI plus Core ready and exit0. It only removes its own recorded, unchanged synthetic trees. Optional `-ResourceRoot res://Assets/<prepared-root>` uses caller-owned native resources without writing/deleting them. Add `-ProfileUri res://<selected-profile>.tres` to select a caller-owned native profile explicitly. With caller resources and no ProfileUri, Main retains its independent default `res://Assets/Profiles/Exploration.tres`; a changed resource root does not relocate it. ProfileUri alone is rejected before synthetic preparation. Synthetic output cleanup is snapshotted only after profile authoring. Neither script populates the default real Assets root; ordinary game startup with missing resources still fails. Timeout or error is a failure, not a fallback. Headless automation is not GPU pixel or human desktop acceptance.
 
@@ -152,7 +152,7 @@ dialogue resources with file identity locks. No automatic preparation, M2/static
 ordinary scene4 story scheduling is performed. Full authoring/startup and lifecycle details:
 [Godot host contract](../../../docs/design/npc-interaction-host.md).
 
-`NpcInteractionHostTests` adds25 cases at the approved native resource/normal Main process seams:
+`NpcInteractionHostTests` has 31 cases at the approved native resource/normal Main process seams:
 explicit arguments, exact native search metadata, indexed tile/object/leader textures, resource/owner/
 identity/unsupported-entry rejection, two-language search-to-return/repeat and synchronous no-wait
 return. Its child sessions reuse `RealDialogueFixture`, load the shipped Main, deliver real logical
