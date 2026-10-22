@@ -14,10 +14,10 @@ dotnet build src/Pal.Game
 & $env:GODOT_BIN --headless --path src/Pal.Game --editor --import
 $env:PAL_TEST_GODOT = $env:GODOT_BIN
 dotnet test src/Pal.Game --no-build --list-tests
-# Expected: 232 discovered = 229 positive cases + 3 deliberate failure controls.
+# Expected: 242 discovered = 239 positive cases + 3 deliberate failure controls.
 dotnet test src/Pal.Game --no-build --results-directory $logs `
   --logger 'trx;LogFileName=game.trx'
-# Expected: 229 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
+# Expected: 239 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
 
 # Each command below must fail: 1 executed, 1 failed, 0 skipped; exit1.
 foreach ($control in @('IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
@@ -43,7 +43,7 @@ Shared local/Windows CI acceptance (PowerShell 7):
   -EvidenceDirectory 'C:/external/new-empty-evidence-directory'
 ```
 
-This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 316, CLI 317 + 2 named platform skips, Prepare 52 and Game 229; lists 232 unique Godot cases and repeats the 229 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. These are required counts for the current source, not a claim that a new full gate has passed. Prepare52 retains the M2 static preparation chain; it does not cover the new dialogue importer (its separate existing preparation evidence is listed in the [M3 evidence checkpoint](../../../docs/milestones/m3/acceptance.md)). The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
+This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 327, CLI 322 + 2 named platform skips, Prepare 52 and Game 239; lists 242 unique Godot cases and repeats the 239 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. These are required counts for the current source, not a claim that a new full gate has passed. Prepare52 retains the M2 static preparation chain; it does not cover the new dialogue importer (its separate existing preparation evidence is listed in the [M3 evidence checkpoint](../../../docs/milestones/m3/acceptance.md)). The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
 
 `Test-GameStartup.ps1 -GodotPath <exe>` remains independently callable. It uses the sole `M1Bundle.Write` fixture in an external temporary input, explicitly prepares a unique Assets subroot and a matching typed artificial native profile (raw WORD0, start320,320, South0/layer0/phase0), then checks the actual Main's selected map URI plus Core ready and exit0. It only removes its own recorded, unchanged synthetic trees. Optional `-ResourceRoot res://Assets/<prepared-root>` uses caller-owned native resources without writing/deleting them. Add `-ProfileUri res://<selected-profile>.tres` to select a caller-owned native profile explicitly. With caller resources and no ProfileUri, Main retains its independent default `res://Assets/Profiles/Exploration.tres`; a changed resource root does not relocate it. ProfileUri alone is rejected before synthetic preparation. Synthetic output cleanup is snapshotted only after profile authoring. Neither script populates the default real Assets root; ordinary game startup with missing resources still fails. Timeout or error is a failure, not a fallback. Headless automation is not GPU pixel or human desktop acceptance.
 
@@ -171,3 +171,11 @@ not an independent whole-map renderer. The real scene's273 indexed frames have n
 they correctly stay unchanged while full scene palettes are still delivered. Artificial indexed
 texture checks cover actual F9/FA changes and alpha separately. Neither GPU nor headless is physical
 keyboard, OS Alt-Tab, human desktop/close feedback, remote CI or final shared-gate acceptance.
+
+## #26 reference display timing/input regression checkpoint
+
+Typing consumes fresh non-echo Search/Menu presses, never the held key that initiated interaction. The short press latches until the current glyph post-delay completes; skip then remains active over body lines until a wait resets it. Waiting accepts every mapped reference logical key (including arrows/keypad, PageUp/PageDown/Home/End and r/a/d/e/w/q/f/s); right Ctrl, unmapped keys and echo do not advance. Non-confirm direction presses remain visible to Main for held movement after return50ms, with release processed normally.
+
+The first glyph is visible on Update0, followed by its delay; the last glyph also owns its post-draw delay. Waiting latches a short press but checks it only on the accumulated100ms boundary, after palette rotation. Deterministic Core tests cover exact deadlines and late updates; engine tests capture UpdateCompleted snapshots and do not replace those deadlines with wall-clock observations. One controlled consume-all-mapped-input mutant is rejected by the actual Main held-direction/return/release regression. Existing immediate-completion fixtures now wait for the real guarded completion callback, without enlarging timeouts or accepting arbitrary phases.
+
+Current source requirements are Core327 (=316+11 timing cases), CLI322+2 existing skips (=317+5 boundary cases), Game239 positives (=229+4 stride+6 input/host cases), discovery242 including the three unchanged controls. Matching component checks are not a full239 Game run or shared-gate PASS. The changed timing/input path requires newly matched bilingual GPU verification; old67f GPU results retain their historical identity and are not proof of the new behavior.

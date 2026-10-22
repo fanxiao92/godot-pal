@@ -19,9 +19,9 @@ public class DialogueDisplaySessionTests
         Assert.Empty(session.Current.VisibleText);
         Assert.Empty(session.Current.VisibleLines);
         session.Update(23, false, false);
-        Assert.Empty(session.Current.VisibleText);
-        session.Update(1, false, false);
         Assert.Equal("A", session.Current.VisibleText);
+        session.Update(1, false, false);
+        Assert.Equal("AB", session.Current.VisibleText);
         Assert.Equal(0, session.Current.LineIndex);
         Assert.Equal(7, session.Current.Color);
         Assert.Equal(title, session.Current.TitleText);
@@ -61,7 +61,7 @@ public class DialogueDisplaySessionTests
             line => { Assert.Equal(0, line.LineIndex); Assert.Equal("A", Assert.Single(line.Runs).Text); },
             line => { Assert.Equal(1, line.LineIndex); Assert.Equal("B", Assert.Single(line.Runs).Text); });
         Assert.Single(firstLine.VisibleLines);
-        session.Update(0, true, false);
+        session.Update(100, true, false);
         Assert.Equal(DialogueDisplayPhase.Completed, session.Current.Phase);
         Assert.Empty(session.Current.TitleText);
         Assert.Empty(session.Current.VisibleLines);
@@ -74,7 +74,7 @@ public class DialogueDisplaySessionTests
             DialogueMessagePart.FromText("NPC:"), DialogueMessagePart.FromText("A"),
             DialogueMessagePart.Clear, DialogueMessagePart.FromText("B")]), 7, 0);
         session.Update(24, false, false);
-        session.Update(0, true, false);
+        session.Update(100, true, false);
         Assert.Equal("NPC:", session.Current.TitleText);
         Assert.True(session.Current.ClearDisplay);
         Assert.Empty(session.Current.VisibleLines);
@@ -114,15 +114,15 @@ public class DialogueDisplaySessionTests
         Assert.Equal(DialogueDisplayPhase.Typing, session.Current.Phase);
         Assert.Equal(7, session.Current.Color);
         Assert.Equal(string.Empty, session.Current.VisibleText);
-        session.Update(23, advancePressed: false, accelerateHeld: false);
-        Assert.Equal(string.Empty, session.Current.VisibleText);
-        session.Update(1, advancePressed: false, accelerateHeld: false);
+        session.Update(23, advancePressed: false, acceleratePressed: false);
         Assert.Equal("A", session.Current.VisibleText);
+        session.Update(1, advancePressed: false, acceleratePressed: false);
+        Assert.Equal("AB", session.Current.VisibleText);
         Assert.Equal(7, Assert.Single(session.Current.VisibleRuns).Color);
-        session.Update(24, advancePressed: false, accelerateHeld: false);
+        session.Update(24, advancePressed: false, acceleratePressed: false);
         Assert.Equal("AB", session.Current.VisibleText);
         Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, session.Current.Phase);
-        session.Update(0, advancePressed: true, accelerateHeld: false);
+        session.Update(100, advancePressed: true, acceleratePressed: false);
         Assert.Equal(DialogueDisplayPhase.Completed, session.Current.Phase);
         Assert.Equal(string.Empty, session.Current.VisibleText);
     }
@@ -133,12 +133,12 @@ public class DialogueDisplaySessionTests
         var session = new DialogueDisplaySession(
             new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("AB")]), 4, 9);
 
-        session.Update(0, advancePressed: false, accelerateHeld: true);
+        session.Update(24, advancePressed: false, acceleratePressed: true);
 
         Assert.Equal("AB", session.Current.VisibleText);
         Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, session.Current.Phase);
         Assert.Equal(9, session.Current.Color);
-        session.Update(0, advancePressed: true, accelerateHeld: false);
+        session.Update(100, advancePressed: true, acceleratePressed: false);
         Assert.Equal(DialogueDisplayPhase.Completed, session.Current.Phase);
     }
 
@@ -158,7 +158,7 @@ public class DialogueDisplaySessionTests
         Assert.Equal("D", session.Current.VisibleText);
         session.Update(0, false, false);
         Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, session.Current.Phase);
-        session.Update(0, true, false);
+        session.Update(100, true, false);
         Assert.Equal(DialogueDisplayPhase.Typing, session.Current.Phase);
         Assert.Equal(string.Empty, session.Current.VisibleText);
         Assert.True(session.Current.ClearDisplay);
@@ -179,7 +179,7 @@ public class DialogueDisplaySessionTests
         Assert.Empty(session.Current.VisibleLines);
         session.Update(23, false, false);
         Assert.Equal(DialogueDisplayPhase.Typing, session.Current.Phase);
-        Assert.Empty(session.Current.VisibleText);
+        Assert.Equal("A", session.Current.VisibleText);
         session.Update(1, false, false);
         Assert.Equal("A", session.Current.VisibleText);
         Assert.False(session.Current.ClearDisplay);
@@ -192,7 +192,7 @@ public class DialogueDisplaySessionTests
         var session = new DialogueDisplaySession(
             new DialogueMessageBlock(61, 61, [DialogueMessagePart.Clear]), 4, 0);
 
-        session.Update(0, advancePressed: false, accelerateHeld: false);
+        session.Update(0, advancePressed: false, acceleratePressed: false);
 
         Assert.Equal(DialogueDisplayPhase.Completed, session.Current.Phase);
         Assert.True(session.Current.ClearDisplay);
@@ -210,7 +210,7 @@ public class DialogueDisplaySessionTests
         Assert.Equal(1, session.Current.PaletteRotation);
         session.Update(500, false, false);
         Assert.Equal(0, session.Current.PaletteRotation);
-        session.Update(0, true, false);
+        session.Update(100, true, false);
         Assert.Equal(0, session.Current.PaletteRotation);
         Assert.Equal(DialogueDisplayPhase.Completed, session.Current.Phase);
     }
@@ -236,7 +236,7 @@ public class DialogueDisplaySessionTests
             new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("A")]), inheritedColor: 0, commandColor: 0);
 
         Assert.Equal(0, session.Current.Color);
-        session.Update(24, advancePressed: false, accelerateHeld: false);
+        session.Update(24, advancePressed: false, acceleratePressed: false);
         Assert.Equal(0, Assert.Single(session.Current.VisibleRuns).Color);
         Assert.Equal(0, DialogueTextTokenizer.TokenizeLine("A", initialColor: 0, initialDelayMilliseconds: 24).Tokens[0].Color);
     }
@@ -259,7 +259,8 @@ public class DialogueDisplaySessionTests
         Assert.Equal(string.Empty, session.Current.VisibleText);
         Assert.Equal(1, session.Current.LineIndex);
         session.Update(135, false, false);
-        Assert.Equal(string.Empty, session.Current.VisibleText);
+        Assert.Equal("B", session.Current.VisibleText);
+        Assert.Equal(DialogueDisplayPhase.Typing, session.Current.Phase);
         session.Update(1, false, false);
         Assert.Equal("B", session.Current.VisibleText);
         Assert.Equal(0x1A, Assert.Single(session.Current.VisibleRuns).Color);
@@ -285,14 +286,14 @@ public class DialogueDisplaySessionTests
         session.Update(24, false, false);
         Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, session.Current.Phase);
         Assert.Equal("A", session.Current.VisibleText);
-        session.Update(0, true, false);
+        session.Update(100, true, false);
         Assert.Equal(DialogueDisplayPhase.Typing, session.Current.Phase);
         Assert.True(session.Current.ClearDisplay);
         Assert.Equal(string.Empty, session.Current.VisibleText);
         session.Update(24, false, false);
         Assert.Equal("B", session.Current.VisibleText);
         Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, session.Current.Phase);
-        session.Update(0, true, false);
+        session.Update(100, true, false);
         Assert.Equal(DialogueDisplayPhase.Completed, session.Current.Phase);
     }
 }

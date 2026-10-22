@@ -19,6 +19,9 @@ public sealed class DialogueDisplaySession
     private int _currentDelayMilliseconds = DialogueTextTokenizer.DefaultDelayMilliseconds;
     private uint _elapsed;
     private uint _waitElapsed;
+    private bool _pendingAdvance;
+    private bool _skip;
+    private bool _pendingSkip;
     private int _paletteRotation;
     private IReadOnlyList<DialogueTextToken> _tokens = Array.Empty<DialogueTextToken>();
     private readonly List<DialogueTextToken> _visible = [];
@@ -49,7 +52,8 @@ public sealed class DialogueDisplaySession
             : Snapshot(DialogueDisplayPhase.Typing, clearDisplay);
     }
 
-    public void Update(uint elapsedMilliseconds, bool advancePressed, bool accelerateHeld)
+    /// <summary>Advance is a fresh mapped wait press; acceleration is a fresh Search/Menu press, never held state.</summary>
+    public void Update(uint elapsedMilliseconds, bool advancePressed, bool acceleratePressed)
     {
         if (_current.Phase == DialogueDisplayPhase.Completed) return;
         if (_current.Phase == DialogueDisplayPhase.WaitingForAdvance)
@@ -57,7 +61,8 @@ public sealed class DialogueDisplaySession
             ulong waiting = (ulong)_waitElapsed + elapsedMilliseconds;
             _paletteRotation = (_paletteRotation + (int)(waiting / 100)) % 6;
             _waitElapsed = (uint)(waiting % 100);
-            if (advancePressed) AdvancePastWait();
+            _pendingAdvance |= advancePressed;
+            if (waiting >= 100 && _pendingAdvance) AdvancePastWait();
             else _current = Snapshot(DialogueDisplayPhase.WaitingForAdvance, _current.ClearDisplay);
             return;
         }
@@ -66,8 +71,7 @@ public sealed class DialogueDisplaySession
         {
             _clearAfterWait = true;
             _consumeClearEntry = false;
-            _current = Snapshot(DialogueDisplayPhase.WaitingForAdvance);
-            if (advancePressed) AdvancePastWait();
+            _current = BeginWait();
             return;
         }
 
@@ -78,8 +82,7 @@ public sealed class DialogueDisplaySession
             _consumeClearEntry = _clearAfterWait;
             if (_clearAfterWait)
             {
-                _current = Snapshot(DialogueDisplayPhase.WaitingForAdvance);
-                if (advancePressed) AdvancePastWait();
+                _current = BeginWait();
             }
             else
             {
@@ -94,7 +97,8 @@ public sealed class DialogueDisplaySession
         }
 
         if (_visibleLength == 0 && _visible.Count > 0) _visible.Clear();
-        if (accelerateHeld || advancePressed)
+        _pendingSkip |= acceleratePressed;
+        if (_skip)
         {
             _visibleLength = _tokens.Count;
             _visible.Clear();
@@ -103,15 +107,33 @@ public sealed class DialogueDisplaySession
         }
         else
         {
+            // text.c draws first, then delays after that glyph, including the last one.
+            if (_visibleLength == 0 && _tokens.Count > 0)
+                _visible.Add(_tokens[_visibleLength++]);
             ulong accumulated = (ulong)_elapsed + elapsedMilliseconds;
-            while (_visibleLength < _tokens.Count)
+            bool lastDelayCompleted = _tokens.Count == 0;
+            while (_visibleLength > 0)
             {
-                int delay = _tokens[_visibleLength].DelayMilliseconds;
+                int delay = _tokens[_visibleLength - 1].DelayMilliseconds;
                 if (accumulated < (uint)delay) break;
                 accumulated -= (uint)delay;
+                if (_pendingSkip)
+                {
+                    _skip = true;
+                    _pendingSkip = false;
+                    while (_visibleLength < _tokens.Count) _visible.Add(_tokens[_visibleLength++]);
+                    lastDelayCompleted = true;
+                    break;
+                }
+                if (_visibleLength == _tokens.Count) { lastDelayCompleted = true; break; }
                 _visible.Add(_tokens[_visibleLength++]);
             }
             _elapsed = (uint)Math.Min(accumulated, uint.MaxValue);
+            if (!lastDelayCompleted)
+            {
+                _current = Snapshot(DialogueDisplayPhase.Typing);
+                return;
+            }
         }
 
         if (_visibleLength >= _tokens.Count)
@@ -122,7 +144,7 @@ public sealed class DialogueDisplaySession
             _visibleLength = 0;
             _elapsed = 0;
             if (_partIndex == _block.Parts.Count)
-                _current = Snapshot(DialogueDisplayPhase.WaitingForAdvance);
+                _current = BeginWait();
             else
             {
                 DialogueMessagePart next = _block.Parts[_partIndex];
@@ -130,14 +152,14 @@ public sealed class DialogueDisplaySession
                 {
                     _clearAfterWait = true;
                     _consumeClearEntry = true;
-                    _current = Snapshot(DialogueDisplayPhase.WaitingForAdvance);
+                    _current = BeginWait();
                 }
                 else if (_lineIndex > 3)
                 {
                     _clearAfterWait = true;
                     _consumeClearEntry = false;
                     _promptFrame = 0;
-                    _current = Snapshot(DialogueDisplayPhase.WaitingForAdvance);
+                    _current = BeginWait();
                 }
                 else
                 {
@@ -185,10 +207,23 @@ public sealed class DialogueDisplaySession
         return clearDisplay;
     }
 
+    private DialogueDisplaySnapshot BeginWait()
+    {
+        // PAL_DialogWaitForKey clears transient keys and fUserSkip at the wait boundary.
+        _skip = false;
+        _pendingSkip = false;
+        _pendingAdvance = false;
+        _waitElapsed = 0;
+        return Snapshot(DialogueDisplayPhase.WaitingForAdvance);
+    }
+
     private void AdvancePastWait()
     {
         _paletteRotation = 0;
         _waitElapsed = 0;
+        _pendingAdvance = false;
+        _pendingSkip = false;
+        _skip = false;
         if (!_clearAfterWait)
         {
             _current = Snapshot(DialogueDisplayPhase.Completed, clearDisplay: true);

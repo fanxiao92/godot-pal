@@ -61,6 +61,7 @@ public class TriggerDialogueFixtureTests
         AssertThat(trigger.Session.BlocksSceneUpdates).IsTrue();
         ulong waitingFrame = updateFrame;
         await Key(runner, Godot.Key.Space, true);
+        await Until(runner, () => scriptPhase == TriggerScriptPhase.Completed);
         AssertThat(updateFrame > waitingFrame).IsTrue();
         AssertThat(scriptPhase).IsEqual(TriggerScriptPhase.Completed);
         AssertThat(updated!.ClearDisplay).IsTrue();
@@ -76,6 +77,7 @@ public class TriggerDialogueFixtureTests
         AssertThat(trigger.Session.PendingDisplay!.Display.Current.Phase).IsEqual(DialogueDisplayPhase.Typing);
         await Until(runner, () => updated?.Phase == DialogueDisplayPhase.WaitingForAdvance);
         await Key(runner, Godot.Key.Escape, true);
+        await Until(runner, () => scriptPhase == TriggerScriptPhase.Completed);
         AssertThat(scriptPhase).IsEqual(TriggerScriptPhase.Completed);
         AssertThat(trigger.Session.ReturnEntry).IsEqual(0x0188);
     }
@@ -178,6 +180,7 @@ public class TriggerDialogueFixtureTests
         AssertThat(surface.GetRenderedPixel(0, 0)).IsEqual(Colors.Green);
         AssertThat(trigger.Session!.Phase).IsEqual(TriggerScriptPhase.WaitingForDisplay);
         await Key(runner, Godot.Key.Space, true);
+        await Until(runner, () => updated?.Phase == DialogueDisplayPhase.Completed);
         AssertThat(updated!.Phase).IsEqual(DialogueDisplayPhase.Completed);
         AssertThat(trigger.Session.Phase).IsEqual(TriggerScriptPhase.Completed);
         AssertThat(restores).IsEqual(2);
@@ -239,6 +242,7 @@ public class TriggerDialogueFixtureTests
         SendKey(Godot.Key.Space, false); SendKey(Godot.Key.Escape, false);
         await Until(runner, () => updated?.Phase == DialogueDisplayPhase.WaitingForAdvance && updatedRequest != first);
         await Key(runner, Godot.Key.Space, true);
+        await Until(runner, () => trigger.Session.Phase == TriggerScriptPhase.Completed);
         AssertThat(trigger.Session.Phase).IsEqual(TriggerScriptPhase.Completed);
     }
 
@@ -404,6 +408,7 @@ public class TriggerDialogueFixtureTests
         AssertThat(trigger.Session.CurrentPosition!.SourceAddress).IsEqual(0x018E);
         await Until(runner, () => updated?.Phase == DialogueDisplayPhase.WaitingForAdvance);
         await Key(runner, Godot.Key.Space, true);
+        await Until(runner, () => trigger.Session.Phase == TriggerScriptPhase.Completed);
         AssertThat(trigger.Session.Phase).IsEqual(TriggerScriptPhase.Completed);
         AssertThat(restores).IsEqual(3);
     }

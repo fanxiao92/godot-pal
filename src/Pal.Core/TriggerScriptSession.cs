@@ -81,7 +81,7 @@ public sealed class TriggerScriptSession
                     // Exercise the existing display rules on a separate preview, so even a later
                     // unsupported control fails before the real call changes caller or shows text.
                     var preview = new DialogueDisplaySession(content.Block, Context.Color, 0);
-                    while (preview.Current.Phase != DialogueDisplayPhase.Completed) preview.Update(0, true, true);
+                    while (preview.Current.Phase != DialogueDisplayPhase.Completed) preview.Update(preview.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
                 }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
             }

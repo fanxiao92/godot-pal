@@ -2,7 +2,7 @@
 
 ## 状态与范围
 
-#26 第一阶段以本地 integration 合入 `6c2e036f984dac1479b22697f73488fa2499f37d` 为起点，仅同步共享脚本/当前文档与匹配检查。#21/#22/#23/#24/#27/#25 成果均在该祖先链；完整 M3 验收尚未完成。GitHub 回读仍为 #20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED，不能以本地实现替代关票/推送或整体验收。
+#26 第一阶段以本地 integration 合入 `6c2e036f984dac1479b22697f73488fa2499f37d` 为起点，仅同步共享脚本/当前文档与匹配检查。#21/#22/#23/#24/#27/#25 成果均在该祖先链；后续阶段1修正两项Standards边界，阶段2修正四项reference显示输入/时序偏差及直接调用方/fixtures，均待独立定点复核；完整 M3 验收尚未完成。GitHub 回读仍为 #20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED，不能以本地实现替代关票/推送或整体验收。
 
 批准范围见 [计划](plan.md)；普通运行与资源身份见 [NPC 宿主契约](../../design/npc-interaction-host.md)。这是 scene4/map10/owner60/0188 的显式独立上下文，不是原版出生、正常自由探索或全量 VM/auto。owner57 热点未改 state，只是不在此上下文调度；32原始对象保留显示/碰撞。默认简中，英文只在启动时显式选择。不带 M3 参数仍走 M2 Main，独立静态模式保留。运行时只读准备好的原生资源和现代事件 JSON，不读原始 MKF/SLF/M.MSG/M1 JSON/参考头文件，不自动提取或补配置。
 
@@ -12,18 +12,18 @@
 
 | 层 | 当前源要求 | 计数来源/限制 |
 |---|---:|---|
-| Core | 316 pass，0 skip | #25 最终 Core316；公开确定性时间/输入/回执与搜索返回规则 |
-| CLI | 317 pass＋2原skip | #22 的314＋#23三项（两项 DialogueLanguageCliTests、一项直接 RLE）；#23保存完整319结果，不沿用旧314作为当前门要求 |
+| Core | 327 pass，0 skip | 316原案例＋11个显示参考时序案例；本轮fullCore327已匹配通过，不再以旧316证明新规则 |
+| CLI | 322 pass＋2原skip | 原317＋阶段1五个LF边界案例，阶段1匹配EventCli19通过；未重新执行完整CLI |
 | Prepare | 52 pass，0 skip | 相对 main 未改，仍是 M2静态准备链；**不代表覆盖新增对话 importer** |
-| Game positives | 229 pass，0 skip，每轮 | #25 的223个不同案例＋身份/兼容修复新增6；8个positive classes |
-| Game discovery | 232 unique | 本阶段已实际发现232，包含229 positives及原3 controls，无重复 |
+| Game positives | 239 pass，0 skip，每轮 | 原229＋阶段1四个stride＋阶段2六个输入/宿主案例；本轮仅匹配36通过，未跑完整239 |
+| Game discovery | 242 unique | 本轮实际发现242，包含239 positives及原3 controls，无重复 |
 | controls | 各1 failed、exit1 | AssertionMismatch须320/321；Timeout须指定500ms；NativeReady须ISSUE13_EXPECTED_READY_EXCEPTION，不接受崩溃/会话中止替代 |
 
 最终共享门须执行 solution、独立 Game、repeat、发现与三个单独控制，以及原生 prepare/profile/import/Main 启动链。核实际数字退出、完整 TRX Summary/RunInfo/Times/definitions/entries/results/unique IDs 与指定诊断，不拼接组件结果为整门通过。CLI仅允许两个具名原能力skip；其他层不得skip。当前修改只是门要求，不是预填未来 PASS。
 
 ## 已有证据及源码适用性
 
-以下为先前组件运行，本阶段不重复全量。详细原件和数字退出在本机任务交接记录 `C:/Users/xiaofan/.pi/m3-execution/26-pre-gate.md`；该工程外记录不是清洁检出依赖，真实内容从不上传。
+以下为先前组件运行，本阶段不重复全量。详细原件和数字退出在本机任务交接记录 `C:/Users/xiaofan/.pi/m3-execution/26-pre-gate.md`，后续边界修复及输入/时序记录分别为同目录26-boundary-fixes.md与26-dialogue-fidelity-fix.md；该工程外记录不是清洁检出依赖，真实内容从不上传。
 
 | 组件 | 已实现/已核证据 | 不能外推为 |
 |---|---|---|
@@ -35,7 +35,7 @@
 | #25 搜索宿主 | `67f60cd`：Core316沿用，Game121＋79＋23＝223不同positive，精确提交真实双语headless各2calls；精确提交双语map10 GPU各10×64000像素零差 | 新单轮Game229、物理键盘/桌面屏幕、整幅地图独立oracle |
 | #25 身份/兼容 | `cb8c37c`＋`1298835`：真实可失败RED，最终GREEN6；GPU匹配单语10零差与旧无profile6零差；原Standards定点No issues/OK | 新双语全套；旧HEAD/DLL冒充新HEAD实测 |
 
-最新两个 #25 补丁仅改fixture/证据门/测试/必要说明，生产Core/Main/显示及独立compositor未变。旧精确67f双语GPU适用于未改图形路径，新增6定点证明路径身份与headless evidence-only兼容；不把旧源/DLL身份改写为新运行。普通 headless只输出证据不要求GPU输入，graphical或显式任一GPU输入仍必须两项齐全并核真实加载路径。
+这两个#25补丁当时仅改fixture/证据门/测试/必要说明，生产Core/Main/显示及独立compositor未变。当前#26已经改变Core显示时序与Game输入，旧精确67f双语GPU不能再证明当前时序/输入，新的匹配双语GPU待独立授权；纯字形位图合成、锚点和纹理路径未因阶段2改变。#25新增6定点仍只证明当时路径身份与headless evidence-only兼容，不把旧源/DLL身份改写为新运行。普通 headless只输出证据不要求GPU输入，graphical或显式任一GPU输入仍必须两项齐全并核真实加载路径。
 
 真实273帧的非透明像素不含F9–FE：真实地图/对象/领队在等待轮转时应不变，人工F9/FA/alpha消费者测试另证实际颜色变化。map-before-dialogue仅是背景恢复oracle，不是完整地图独立渲染器。真实GPU为逻辑帧回读＋程序化输入，不是人工OS屏幕验收。
 

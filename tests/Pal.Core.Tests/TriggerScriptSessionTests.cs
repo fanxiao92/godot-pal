@@ -28,11 +28,11 @@ public class TriggerScriptSessionTests
         Assert.Equal(1, reference.Span);
         Assert.Equal(new TriggerPosition("shared", "L0189", 0x0189), reference.Position);
         Assert.False(script.AcknowledgeDisplay(request.Id));
-        request.Display.Update(0, true, false);
+        request.Display.Update(24, false, true);
         Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, request.Display.Current.Phase);
         Assert.Equal(TriggerScriptPhase.WaitingForDisplay, script.Phase);
         Assert.False(script.AcknowledgeDisplay(request.Id));
-        request.Display.Update(0, true, false);
+        request.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(request.Id));
         Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
         Assert.Null(script.PendingDisplay);
@@ -113,7 +113,7 @@ public class TriggerScriptSessionTests
         if (secondId != 61) request.Display.Update(24, false, false);
         Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, request.Display.Current.Phase);
         Assert.Equal(secondId == 61 ? 2 : 3, request.Display.Current.VisibleLines.Count);
-        request.Display.Update(0, true, false);
+        request.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(request.Id));
         Assert.Equal(4, script.CurrentPosition!.SourceAddress);
     }
@@ -151,7 +151,7 @@ public class TriggerScriptSessionTests
         script.Start("shared", "npc", 60);
         var first = script.PendingDisplay!;
         first.Display.Update(24, false, false);
-        first.Display.Update(0, true, false);
+        first.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(first.Id));
         var second = script.PendingDisplay!;
         Assert.NotEqual(first.Id, second.Id);
@@ -160,11 +160,12 @@ public class TriggerScriptSessionTests
         Assert.Equal(0, second.Context.PortraitId);
         Assert.Equal("", second.Display.Current.VisibleText);
         second.Display.Update(135, false, false);
-        Assert.Equal("", second.Display.Current.VisibleText);
+        Assert.Equal("B", second.Display.Current.VisibleText);
+        Assert.Equal(DialogueDisplayPhase.Typing, second.Display.Current.Phase);
         second.Display.Update(1, false, false);
         Assert.Equal("B", second.Display.Current.VisibleText);
         Assert.Equal(0x1A, second.Display.Current.Color);
-        second.Display.Update(0, true, false);
+        second.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(second.Id));
         Assert.Equal(0x4F, script.Context.Color);
         Assert.Equal(0, script.Context.PortraitId);
@@ -221,7 +222,7 @@ public class TriggerScriptSessionTests
         Assert.Throws<InvalidOperationException>(() => script.Start("shared", "npc", 9));
         Assert.True(script.BlocksSceneUpdates);
         first.Display.Update(24, false, false);
-        first.Display.Update(0, true, false);
+        first.Display.Update(100, true, false);
         Assert.False(script.AcknowledgeDisplay(foreign.PendingDisplay!.Id));
         Assert.True(script.AcknowledgeDisplay(first.Id));
         var second = script.PendingDisplay!;
@@ -229,7 +230,7 @@ public class TriggerScriptSessionTests
         Assert.Same(second, script.PendingDisplay);
         Assert.Empty(second.Display.Current.VisibleText); // The preceding completion input was not forwarded.
         second.Display.Update(24, false, false);
-        second.Display.Update(0, true, false);
+        second.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(second.Id));
         Assert.False(script.AcknowledgeDisplay(second.Id));
         Assert.False(script.BlocksSceneUpdates);
@@ -251,14 +252,14 @@ public class TriggerScriptSessionTests
             var request = script.PendingDisplay!;
             Assert.Equal(61, Assert.Single(request.MessageReferences).StartMessageId);
             request.Display.Update(23, false, false);
-            Assert.Empty(request.Display.Current.VisibleText);
-            request.Display.Update(1, false, false);
             Assert.Equal("A", request.Display.Current.VisibleText);
+            request.Display.Update(1, false, false);
+            Assert.Equal("AB", request.Display.Current.VisibleText);
             request.Display.Update(1000, false, false); // A late elapsed interval is not frozen by a desktop focus state.
             Assert.Equal("AB", request.Display.Current.VisibleText);
             Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, request.Display.Current.Phase);
             Assert.False(script.AcknowledgeDisplay(request.Id));
-            request.Display.Update(0, true, false);
+            request.Display.Update(100, true, false);
             Assert.True(script.AcknowledgeDisplay(request.Id));
             Assert.Equal(0x0188, script.ReturnEntry);
             Assert.Equal(0x018B, script.CurrentPosition!.SourceAddress);
@@ -292,7 +293,7 @@ public class TriggerScriptSessionTests
         Assert.Equal(new TriggerPosition("other", "L0002", 2), Assert.Single(request.MessageReferences).Position);
         Assert.Equal(new TriggerPosition("shared", "L0004", 4), script.CurrentPosition);
         request.Display.Update(24, false, false);
-        request.Display.Update(0, true, false);
+        request.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(request.Id));
         Assert.Equal(0, script.Caller);
     }
@@ -312,7 +313,7 @@ public class TriggerScriptSessionTests
         Assert.Equal(62, Assert.Single(request.MessageReferences).StartMessageId);
         Assert.Equal(0, Assert.Single(request.MessageReferences).Span);
         request.Display.Update(24, false, false);
-        request.Display.Update(0, true, false);
+        request.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(request.Id));
         Assert.Equal(3, script.ReturnEntry);
     }
@@ -340,7 +341,7 @@ public class TriggerScriptSessionTests
         var request = script.PendingDisplay!;
         Assert.Equal("AB", Assert.Single(request.Content.Parts).Text);
         var preview = new DialogueDisplaySession(request.Content, request.Context.Color, 0, request.Context.DelayMilliseconds);
-        preview.Update(0, true, true);
+        preview.Update(24, true, true);
         Assert.Equal("AB", preview.Current.VisibleText);
         Assert.Empty(request.Display.Current.VisibleText);
     }
@@ -378,7 +379,7 @@ public class TriggerScriptSessionTests
         script.Start("shared", "npc", 60);
         var request = script.PendingDisplay!;
         request.Display.Update(24, false, false);
-        request.Display.Update(0, true, false);
+        request.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(request.Id));
         Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
         Assert.Equal(3, script.CurrentPosition!.SourceAddress);
@@ -445,7 +446,7 @@ public class TriggerScriptSessionTests
         Assert.False(script.AcknowledgeDisplay(body.Id));
         body.Display.Update(24, false, false);
         Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, body.Display.Current.Phase);
-        body.Display.Update(0, true, false);
+        body.Display.Update(100, true, false);
         Assert.True(script.AcknowledgeDisplay(body.Id));
         Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
     }

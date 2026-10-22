@@ -134,7 +134,13 @@ public partial class RealDialogueFixture : Node
                     KeyEvent(true); // Real Godot input delivery, not a direct session update.
                     _stage = 2;
                     break;
-                case 2:
+                case 1 when snapshot is { Phase: DialogueDisplayPhase.WaitingForAdvance }:
+                    // Short content may finish before the first observable update. Record the
+                    // natural body, not a fabricated typing/acceleration claim.
+                    Capture("natural-body", Expected(snapshot), snapshot);
+                    _stage = 3;
+                    break;
+                case 2 when snapshot is { Phase: DialogueDisplayPhase.WaitingForAdvance }:
                     KeyEvent(false);
                     Require(snapshot is { Phase: DialogueDisplayPhase.WaitingForAdvance }
                         && snapshot.VisibleText == string.Concat(_lines[0].Tokens.Select(token => token.Text)),
@@ -152,10 +158,10 @@ public partial class RealDialogueFixture : Node
                     KeyEvent(true);
                     _stage = 5;
                     break;
-                case 5:
+                case 5 when snapshot is { Phase: DialogueDisplayPhase.Completed }:
                     KeyEvent(false);
                     Require(snapshot is { Phase: DialogueDisplayPhase.Completed, ClearDisplay: true, PaletteRotation: 0 },
-                        "Advance must complete and restore the dialogue palette on the actual next update.");
+                        "Advance must complete and restore the dialogue palette at the actual guarded completion update.");
                     Capture("completed-restored", Background(), snapshot);
                     Finish();
                     break;

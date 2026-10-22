@@ -72,7 +72,7 @@ public partial class PalTriggerDialogue : Node
         while (preview.PendingDisplay is { } request)
         {
             ValidateRequest(request);
-            while (request.Display.Current.Phase != DialogueDisplayPhase.Completed) request.Display.Update(0, true, true);
+            while (request.Display.Current.Phase != DialogueDisplayPhase.Completed) request.Display.Update(request.Display.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
             preview.AcknowledgeDisplay(request.Id);
         }
         Session.Start(fileId, entryId, caller);
