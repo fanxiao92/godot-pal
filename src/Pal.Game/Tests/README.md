@@ -101,3 +101,44 @@ prove what keys are delivered on return. No Windows/other-platform claim or manu
 follows from this headless signal injection. Core timing boundaries remain covered through explicit
 `ExplorationSession.Update(ticks)` tests; Godot observer waits are bounded liveness guards, not timing
 measurements.
+
+
+## M3 modern trigger/display fixture (#24)
+
+`TriggerDialogueFixtureTests` uses the existing display scene, actual modern JSON files and native
+manual resources in `Tests/Fixtures/TriggerDialogue`. It drives `PalTriggerDialogue.Initialize/Start`,
+not a hand-authored UI command sequence; `request.Display` is the actual rendered/updated Core session.
+The suite has 20 cases: two language/repeat loops, font preflight, leading CLEAR with real background
+and palette consumers, a two-request input/context boundary, ten resource/entry negatives, two completed
+restore cases (CLEAR/name), synchronous multiple-restore draining before body text, and two initialization
+diagnostic cases. The latter require exact resource-path-prefixed messages for an invalid Prompt-01 plane
+and language format version, with the original InvalidDataException and its reason retained as the inner exception. The existing
+three `DialogueDisplayFixtureTests` remain unchanged and run in the same targeted validation.
+
+Run with the existing exact engine/packages/runsettings, serially after the usual PID/Name preflight:
+
+```powershell
+dotnet build src/Pal.Game --no-restore
+& $env:GODOT_BIN --headless --path src/Pal.Game --editor --import
+dotnet test src/Pal.Game --no-build --no-restore `
+  --filter 'FullyQualifiedName~TriggerDialogueFixtureTests|FullyQualifiedName~DialogueDisplayFixtureTests' `
+  --logger 'trx;LogFileName=trigger-dialogue.trx' --results-directory $logs
+# This slice: 23 completed passes; validate actual exit, Summary/RunInfo and all result counts.
+```
+
+Snapshots used for runtime assertions are saved from `PalDialogueDisplay.UpdateCompleted`, emitted at
+the end of the actual display `_Process` after palette/background restoration and before return.
+The coordinator subscribes first and handles receipts before the fixture saves its state. This avoids
+assuming a `SceneTree.ProcessFrame` coroutine resumed after the display callback, or measuring a
+scheduler delay as a business deadline. The new request is observed at that exact completion boundary:
+its initial typing snapshot must be empty even when two advance keys were delivered in the same batch.
+A controlled erroneous second `_Process(0)` after receipt is caught as WaitingForAdvance instead of
+Typing. Core retains deterministic millisecond cutoff coverage; fixture frame bounds are liveness
+protection only. Logical focus signals are delivered with an explicit subscriber and must not stop
+normal dialogue updates; this is not an OS focus/physical-keyboard test.
+
+The restoration fixture binds `BackgroundRestoreRequested` to restore an independently loaded native
+background into the actual indexed surface and `ActivePaletteChanged` to its texture palette. It checks
+real target pixels, not just ClearDisplay flags. These are headless resource/state/texture checks, not
+GPU screen pixels. Main/search/map10, physical keyboard, real-resource GPU and shared-gate acceptance
+remain separate #25/#26 responsibilities. See [the runtime contract](../../../docs/design/trigger-execution.md).

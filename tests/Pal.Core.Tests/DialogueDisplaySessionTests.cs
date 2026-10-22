@@ -168,6 +168,25 @@ public class DialogueDisplaySessionTests
     }
 
     [Fact]
+    public void Leading_clear_restores_before_body_without_introducing_an_input_wait()
+    {
+        var session = new DialogueDisplaySession(new DialogueMessageBlock(61, 61, [
+            DialogueMessagePart.Clear, DialogueMessagePart.FromText("A")]), 4, 0);
+
+        Assert.Equal(DialogueDisplayPhase.Typing, session.Current.Phase);
+        Assert.True(session.Current.ClearDisplay);
+        Assert.Empty(session.Current.VisibleText);
+        Assert.Empty(session.Current.VisibleLines);
+        session.Update(23, false, false);
+        Assert.Equal(DialogueDisplayPhase.Typing, session.Current.Phase);
+        Assert.Empty(session.Current.VisibleText);
+        session.Update(1, false, false);
+        Assert.Equal("A", session.Current.VisibleText);
+        Assert.False(session.Current.ClearDisplay);
+        Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, session.Current.Phase);
+    }
+
+    [Fact]
     public void Clear_only_block_completes_without_waiting_when_no_dialogue_line_has_been_shown()
     {
         var session = new DialogueDisplaySession(

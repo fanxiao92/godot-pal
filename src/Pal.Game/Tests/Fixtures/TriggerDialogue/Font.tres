@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="PalDialogueFont" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueFont.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueGlyph.cs" id="2"]
+
+[sub_resource type="Resource" id="GlyphA"]
+script = ExtResource("2")
+Codepoint = 65
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126)
+
+[sub_resource type="Resource" id="GlyphB"]
+script = ExtResource("2")
+Codepoint = 66
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126)
+
+[sub_resource type="Resource" id="GlyphColon"]
+script = ExtResource("2")
+Codepoint = 58
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 0, 0, 24, 24, 0, 0, 0, 0, 24, 24, 0, 0, 0, 0)
+
+[resource]
+script = ExtResource("1")
+SourceIdentity = "synthetic-fixture-font"
+Glyphs = Array[Resource]([SubResource("GlyphA"), SubResource("GlyphB"), SubResource("GlyphColon")])

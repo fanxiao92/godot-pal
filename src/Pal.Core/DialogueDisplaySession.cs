@@ -29,18 +29,24 @@ public sealed class DialogueDisplaySession
     private DialogueDisplaySnapshot _current;
 
     public DialogueDisplaySnapshot Current => _current;
+    /// <summary>Text control state to carry to the next display after completion, including trailing controls.</summary>
+    public int TextColor => _currentTextColor;
+    public int DelayMilliseconds => _currentDelayMilliseconds;
 
-    public DialogueDisplaySession(DialogueMessageBlock block, int inheritedColor, int commandColor)
+    public DialogueDisplaySession(DialogueMessageBlock block, int inheritedColor, int commandColor,
+        int initialDelayMilliseconds = DialogueTextTokenizer.DefaultDelayMilliseconds)
     {
         ArgumentNullException.ThrowIfNull(block);
         if (inheritedColor is < 0 or > 255 || commandColor is < 0 or > 255)
             throw new ArgumentOutOfRangeException(nameof(commandColor), "Dialogue colors must be palette indices.");
+        if (initialDelayMilliseconds < 0) throw new ArgumentOutOfRangeException(nameof(initialDelayMilliseconds));
+        _currentDelayMilliseconds = initialDelayMilliseconds;
         _block = block;
         _currentTextColor = commandColor == 0 ? inheritedColor : commandColor;
-        SetNextLine();
+        bool clearDisplay = SetNextLine();
         _current = _partIndex >= _block.Parts.Count
             ? Snapshot(DialogueDisplayPhase.Completed, clearDisplay: true)
-            : Snapshot(DialogueDisplayPhase.Typing);
+            : Snapshot(DialogueDisplayPhase.Typing, clearDisplay);
     }
 
     public void Update(uint elapsedMilliseconds, bool advancePressed, bool accelerateHeld)
@@ -144,14 +150,16 @@ public sealed class DialogueDisplaySession
         else _current = Snapshot(DialogueDisplayPhase.Typing);
     }
 
-    private void SetNextLine()
+    private bool SetNextLine()
     {
+        bool clearDisplay = false;
         // PAL_ShowDialogText treats a colon-terminated message before the first body line
         // as an immediate title. It changes neither body color/delay nor the body line count.
-        while (_lineIndex == 0 && _partIndex < _block.Parts.Count
-            && _block.Parts[_partIndex] is { IsClear: false, Text: { Length: > 0 } text }
-            && text[^1] is ':' or '\uFF1A' or '\u2236')
+        while (_lineIndex == 0 && _partIndex < _block.Parts.Count)
         {
+            // No body means no key wait, but script.c still restores the background.
+            if (_block.Parts[_partIndex].IsClear) { clearDisplay = true; _partIndex++; continue; }
+            if (_block.Parts[_partIndex].Text is not { Length: > 0 } text || text[^1] is not (':' or '\uFF1A' or '\u2236')) break;
             var title = new System.Text.StringBuilder();
             // PAL_UnescapeText returns the original string unless a backslash is present.
             // Once enabled, escaped characters survive and unescaped display controls disappear.
@@ -174,6 +182,7 @@ public sealed class DialogueDisplaySession
             _promptFrame = line.PromptFrame;
         }
         else _promptFrame = 0;
+        return clearDisplay;
     }
 
     private void AdvancePastWait()

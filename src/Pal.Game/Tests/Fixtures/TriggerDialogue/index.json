@@ -1,0 +1,16 @@
+{
+  "formatVersion": 1,
+  "profile": "faithful",
+  "source": {
+    "archive": "SSS.MKF",
+    "chunk": 4,
+    "byteOrder": "little",
+    "instructionCount": 396,
+    "byteLength": 3168,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "files": [
+    "scene-004",
+    "shared"
+  ]
+}
