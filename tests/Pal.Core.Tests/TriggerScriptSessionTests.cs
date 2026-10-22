@@ -381,6 +381,19 @@ public class TriggerScriptSessionTests
         Assert.Equal(1, script.ReturnEntry);
     }
 
+    [Fact]
+    public void CLEAR_without_body_lines_is_not_a_player_or_display_wait_boundary()
+    {
+        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 62, [
+            DialogueMessagePart.Clear, DialogueMessagePart.FromText("NPC:"), DialogueMessagePart.Clear])]);
+        var script = new TriggerScriptSession(new EventFixture().Load(), language);
+        script.Start("shared", "npc", 60);
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Null(script.PendingDisplay);
+        Assert.False(script.BlocksSceneUpdates);
+        Assert.Equal(1, script.ReturnEntry);
+    }
+
     internal static EventFixture TwoDisplays()
     {
         var fixture = new EventFixture();

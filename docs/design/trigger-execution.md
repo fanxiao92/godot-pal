@@ -64,7 +64,7 @@ if (request is not null)
 
 已有 `PalDialogueDisplay.Start` 自行创建显示会话；后续 Godot 适配器需要增加接收此 request/既有 `Display` 的接合方式，不能先更新一个会话却渲染另一个。保留原公开 Start 调用兼容性。实际时间、键盘、字体/画像资源、调色板和背景由外层提供；不得在 Core 之外复制逐字算法。
 
-`AcknowledgeDisplay(id)` 仅在 id 匹配当前请求且**该真实 Display 已 Completed** 时返回 true，并继续执行到下一个真正显示边界或完成。提前、重复、陈旧、跨调用/跨执行器回执返回 false，不修改状态。等待中 Start 另一调用会明确抛错。仅名称内容没有正文等待，会在同一次 Start 中直接完成，不人为要求输入回执。
+`AcknowledgeDisplay(id)` 仅在 id 匹配当前请求且**该真实 Display 已 Completed** 时返回 true，并继续执行到下一个真正显示边界或完成。提前、重复、陈旧、跨调用/跨执行器回执返回 false，不修改状态。等待中 Start 另一调用会明确抛错。仅名称或无正文的 CLEAR 没有正文等待，会在同一次 Start 中直接完成，不人为要求输入回执；已有正文后的 CLEAR 则仍由显示会话等待输入后清屏。
 
 ## 本组件证据边界
 
