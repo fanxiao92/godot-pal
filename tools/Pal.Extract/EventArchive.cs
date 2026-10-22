@@ -56,7 +56,7 @@ internal static class EventArchive
         }
     }
 
-    internal static void Rebuild(string input, string output)
+    internal static bool Rebuild(string input, string output)
     {
         string sourceDirectory = Path.GetFullPath(input);
         if (!Directory.Exists(sourceDirectory)) throw new InvalidDataException("Events input directory does not exist.");
@@ -129,6 +129,7 @@ internal static class EventArchive
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         using var outputStream = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         outputStream.Write(bytes);
+        return !string.Equals(Convert.ToHexStringLower(SHA256.HashData(bytes)), expectedHash, StringComparison.Ordinal);
     }
 
     private static JsonObject Decode(byte[] script, int index, int count)

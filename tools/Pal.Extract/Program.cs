@@ -42,10 +42,11 @@ if (args.Length == 5 && args[0] == "rebuild-events" && args[1] == "--input" && a
 {
     try
     {
-        EventArchive.Rebuild(args[2], args[4]);
+        bool differsFromSource = EventArchive.Rebuild(args[2], args[4]);
+        if (differsFromSource) Console.WriteLine("Rebuilt chunk differs from the recorded source SHA-256; semantic edits were encoded.");
         return 0;
     }
-    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Text.Json.JsonException)
+    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Text.Json.JsonException or InvalidOperationException or FormatException or OverflowException)
     {
         Console.Error.WriteLine(exception is InvalidDataException ? $"Event rebuild failed: {exception.Message}"
             : $"Event rebuild failed: unable to read input or write output ({exception.GetType().Name}).");

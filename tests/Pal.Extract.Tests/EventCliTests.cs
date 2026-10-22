@@ -77,7 +77,9 @@ public sealed class EventCliTests : IDisposable
         var command = JsonNodeForEdit(rootElement);
         command["commands"]![0]!["color"] = 12;
         File.WriteAllText(path, command.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        Assert.Equal(0, (await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt)).ExitCode);
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(0, rebuild.ExitCode);
+        Assert.Contains("differs from the recorded source SHA-256", rebuild.Stdout);
         byte[] bytes = File.ReadAllBytes(rebuilt);
         Assert.Equal((ushort)59, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(2)));
         Assert.Equal((ushort)12, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(4)));
@@ -99,6 +101,21 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(1, result.ExitCode);
         Assert.Empty(result.Stdout);
         Assert.Contains("unknown field", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(rebuilt));
+    }
+
+    [Fact]
+    public async Task Rebuild_events_rejects_missing_address_without_writing_partial_chunk()
+    {
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        node["commands"]!.AsArray().RemoveAt(3);
+        File.WriteAllText(path, node.ToJsonString());
+        var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("cover every source address", result.Stderr);
         Assert.False(File.Exists(rebuilt));
     }
 
