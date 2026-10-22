@@ -36,6 +36,52 @@ public class ExplorationInputTests
             initial.Leader.Direction, initial.Leader.StepPhase));
     }
 
+    [Fact]
+    public void Held_direction_uses_the_normal_schedule_across_elapsed_updates()
+    {
+        var input = new ExplorationInput(new ExplorationSession(new StaticSceneRules(DrawMap()), Leader()));
+        input.Press(ExplorationKey.EastPrimary);
+        Assert.True(input.Update(0));
+        AssertState(input, 336, 248, 3, 1, 10, true);
+        Assert.True(input.Update(100));
+        AssertState(input, 352, 256, 3, 2, 9, true);
+        Assert.True(input.Update(200));
+        AssertState(input, 368, 264, 3, 3, 11, true);
+    }
+
+    [Fact]
+    public void Released_latest_direction_falls_back_on_the_next_normal_update()
+    {
+        var input = new ExplorationInput(new ExplorationSession(new StaticSceneRules(DrawMap()), Leader()));
+        input.Press(ExplorationKey.SouthPrimary);
+        input.Press(ExplorationKey.WestPrimary);
+        Assert.True(input.Update(0));
+        AssertState(input, 304, 232, 1, 1, 4, true);
+        input.Release(ExplorationKey.WestPrimary);
+        Assert.True(input.Update(100));
+        AssertState(input, 288, 240, 0, 2, 0, true);
+    }
+
+    [Theory]
+    [InlineData(0u, 99u, 100u, 350u, 449u, 450u)]
+    [InlineData(4294967246u, 49u, 50u, 300u, 399u, 400u)]
+    public void Input_uses_the_normal_100ms_schedule_across_wrap_and_late_updates(
+        uint first, uint early, uint due, uint delayed, uint beforeNext, uint next)
+    {
+        var input = new ExplorationInput(new ExplorationSession(new StaticSceneRules(DrawMap()), Leader()));
+        input.Press(ExplorationKey.EastPrimary);
+        Assert.True(input.Update(first));
+        AssertState(input, 336, 248, 3, 1, 10, true);
+        Assert.False(input.Update(early));
+        Assert.True(input.Update(due));
+        AssertState(input, 352, 256, 3, 2, 9, true);
+        Assert.True(input.Update(delayed));
+        AssertState(input, 368, 264, 3, 3, 11, true);
+        Assert.False(input.Update(beforeNext));
+        Assert.True(input.Update(next));
+        AssertState(input, 384, 272, 3, 0, 9, true);
+    }
+
     [Theory]
     [InlineData(false, 320, 240, 1, 3, 304, 288)]
     [InlineData(true, 352, 240, 2, 6, 336, 320)]
@@ -123,114 +169,6 @@ public class ExplorationInputTests
     }
 
     [Fact]
-    public void Losing_focus_freezes_the_entire_walking_state_plan_and_static_objects_during_background_input()
-    {
-        var obj = new SceneObject(93, 336, 246, 1, 0, 0, 7, 1, 0, 0,
-            new SceneSprite(7, [new SceneFrame(0, 20, 30)]));
-        var rules = new StaticSceneRules(DrawMap(), [obj, obj with { Id = 94, State = -1, VanishTime = 9 }]);
-        var input = new ExplorationInput(new ExplorationSession(rules, Leader()));
-        input.Press(ExplorationKey.EastPrimary);
-        input.Press(ExplorationKey.EastAlternate);
-        Assert.True(input.Update(0));
-        AssertState(input, 336, 248, 3, 1, 10, true);
-        var walking = input.Current;
-        var plan = walking.Plan;
-        var commands = plan.Commands.ToArray();
-        var objects = rules.Objects.ToArray();
-
-        input.SetFocused(false);
-        Assert.Same(walking, input.Current);
-        Assert.False(input.Update(100));
-        input.Press(ExplorationKey.WestPrimary);
-        input.Press(ExplorationKey.NorthAlternate, repeat: true);
-        input.Release(ExplorationKey.EastPrimary);
-        input.Release(ExplorationKey.EastAlternate);
-        input.SetFocused(false);
-        Assert.False(input.Update(10000));
-        Assert.False(input.Update(20000));
-        Assert.Same(walking, input.Current);
-        Assert.Same(plan, input.Current.Plan);
-        Assert.Equal(commands, input.Current.Plan.Commands);
-        Assert.Equal(objects, rules.Objects);
-        Assert.Equal((176, 136, 10, 1), (plan.CameraX, plan.CameraY, plan.LeaderFrameIndex, plan.StepPhase));
-        AssertState(input, 336, 248, 3, 1, 10, true);
-    }
-
-    [Fact]
-    public void Returning_focus_waits_for_fresh_nonrepeat_press_and_discards_old_and_background_keys()
-    {
-        var input = new ExplorationInput(new ExplorationSession(new StaticSceneRules(DrawMap()), Leader()));
-        input.Press(ExplorationKey.EastPrimary);
-        input.Press(ExplorationKey.EastAlternate);
-        Assert.True(input.Update(0));
-        var walking = input.Current;
-        input.SetFocused(false);
-        input.Press(ExplorationKey.WestPrimary);
-        input.Press(ExplorationKey.NorthAlternate);
-        input.SetFocused(true);
-        Assert.Same(walking, input.Current);
-        Assert.False(input.Update(20000));
-        input.Press(ExplorationKey.EastPrimary, repeat: true);
-        input.Press(ExplorationKey.SouthAlternate, repeat: true);
-        input.Release(ExplorationKey.NorthAlternate);
-        input.SetFocused(true);
-        Assert.False(input.Update(30000));
-        Assert.Same(walking, input.Current);
-        AssertState(input, 336, 248, 3, 1, 10, true);
-
-        input.Press(ExplorationKey.EastPrimary);
-        Assert.Same(walking, input.Current);
-        Assert.True(input.Update(30000));
-        AssertState(input, 352, 256, 3, 2, 9, true);
-        Assert.False(input.Update(30099));
-        Assert.True(input.Update(30100));
-        AssertState(input, 368, 264, 3, 3, 11, true);
-        input.Release(ExplorationKey.EastPrimary);
-        Assert.True(input.Update(30200));
-        AssertState(input, 368, 264, 3, 0, 9, false);
-        Assert.True(input.Update(30300));
-        AssertState(input, 368, 264, 3, 2, 9, false);
-    }
-
-    [Theory]
-    [InlineData(0u, 1u, 100u, 101u, 350u, 351u, 449u, 450u)]
-    [InlineData(4294967246u, 4294967247u, 50u, 51u, 300u, 301u, 399u, 400u)]
-    public void Fresh_press_after_focus_resets_old_deadline_then_uses_100ms_wrap_and_no_catchup(
-        uint first, uint resume, uint early, uint due, uint delayed, uint afterDelay, uint beforeNext, uint next)
-    {
-        var input = new ExplorationInput(new ExplorationSession(new StaticSceneRules(DrawMap()), Leader()));
-        input.Press(ExplorationKey.EastPrimary);
-        Assert.True(input.Update(first));
-        var walking = input.Current;
-        input.SetFocused(true);
-        Assert.False(input.Update(resume));
-        Assert.Same(walking, input.Current);
-        input.SetFocused(false);
-        input.SetFocused(true);
-        Assert.False(input.Update(resume));
-        input.Press(ExplorationKey.WestAlternate);
-        input.SetFocused(true);
-        Assert.Same(walking, input.Current);
-        Assert.True(input.Update(resume));
-        AssertState(input, 320, 240, 1, 2, 3, true);
-        var resumed = input.Current;
-        input.SetFocused(true);
-        Assert.False(input.Update(early));
-        Assert.Same(resumed, input.Current);
-        Assert.True(input.Update(due));
-        AssertState(input, 304, 232, 1, 3, 5, true);
-        Assert.True(input.Update(delayed));
-        AssertState(input, 288, 224, 1, 0, 3, true);
-        var late = input.Current;
-        input.SetFocused(true);
-        Assert.False(input.Update(afterDelay));
-        Assert.False(input.Update(beforeNext));
-        Assert.Same(late, input.Current);
-        Assert.True(input.Update(next));
-        AssertState(input, 272, 216, 1, 1, 4, true);
-    }
-
-    [Fact]
     public void Constructor_rejects_null_session_immediately()
     {
         Assert.Equal("session", Assert.Throws<ArgumentNullException>(() => new ExplorationInput(null!)).ParamName);
@@ -241,7 +179,7 @@ public class ExplorationInputTests
     [InlineData(8)]
     [InlineData(int.MinValue)]
     [InlineData(int.MaxValue)]
-    public void Invalid_keys_are_rejected_before_echo_or_focus_gates_without_changing_state_or_schedule(int value)
+    public void Invalid_keys_are_rejected_without_changing_state_or_schedule(int value)
     {
         var input = new ExplorationInput(new ExplorationSession(new StaticSceneRules(DrawMap()), Leader()));
         input.Press(ExplorationKey.EastPrimary);
@@ -253,26 +191,17 @@ public class ExplorationInputTests
         Assert.Equal("key", Assert.Throws<ArgumentOutOfRangeException>(() => input.Release(invalid)).ParamName);
         Assert.False(input.Update(99));
         Assert.Same(walking, input.Current);
-        input.SetFocused(false);
-        Assert.Equal("key", Assert.Throws<ArgumentOutOfRangeException>(() => input.Press(invalid)).ParamName);
-        Assert.Equal("key", Assert.Throws<ArgumentOutOfRangeException>(() => input.Press(invalid, repeat: true)).ParamName);
-        Assert.Equal("key", Assert.Throws<ArgumentOutOfRangeException>(() => input.Release(invalid)).ParamName);
-        input.SetFocused(true);
-        Assert.Equal("key", Assert.Throws<ArgumentOutOfRangeException>(() => input.Press(invalid)).ParamName);
-        Assert.Equal("key", Assert.Throws<ArgumentOutOfRangeException>(() => input.Press(invalid, repeat: true)).ParamName);
-        Assert.Equal("key", Assert.Throws<ArgumentOutOfRangeException>(() => input.Release(invalid)).ParamName);
-        Assert.False(input.Update(20000));
-        Assert.Same(walking, input.Current);
+        Assert.True(input.Update(20000));
+        AssertState(input, 352, 256, 3, 2, 9, true);
         input.Press(ExplorationKey.WestPrimary);
-        Assert.True(input.Update(1));
-        AssertState(input, 320, 240, 1, 2, 3, true);
+        Assert.True(input.Update(20100));
+        AssertState(input, 336, 248, 1, 3, 5, true);
     }
 
     [Fact]
-    public void Initially_idle_and_all_released_after_resume_keep_the_sessions_normal_stop_phase()
+    public void Initially_idle_and_all_released_keep_the_sessions_normal_stop_phase()
     {
         var input = new ExplorationInput(new ExplorationSession(new StaticSceneRules(DrawMap()), Leader()));
-        input.SetFocused(true);
         input.Press(ExplorationKey.SouthPrimary, repeat: true);
         input.Release(ExplorationKey.WestAlternate);
         Assert.True(input.Update(0));
@@ -289,13 +218,13 @@ public class ExplorationInputTests
         input.Press(ExplorationKey.WestPrimary);
         Assert.True(input.Update(300));
         AssertState(input, 304, 232, 1, 3, 5, true);
-        input.SetFocused(false);
-        input.SetFocused(true);
+        input.Release(ExplorationKey.WestPrimary);
         input.Press(ExplorationKey.SouthPrimary);
         input.Release(ExplorationKey.SouthPrimary);
-        Assert.True(input.Update(301));
+        Assert.False(input.Update(301));
+        Assert.True(input.Update(400));
         AssertState(input, 304, 232, 1, 0, 3, false);
-        Assert.True(input.Update(401));
+        Assert.True(input.Update(500));
         AssertState(input, 304, 232, 1, 2, 3, false);
     }
 
@@ -351,7 +280,7 @@ public class ExplorationInputTests
     }
 
     [Fact]
-    public void Movement_rebuilds_complete_dynamic_cover_order_and_focus_preserves_it_until_fresh_input()
+    public void Movement_rebuilds_complete_dynamic_cover_order_and_released_input_stands_on_schedule()
     {
         var cells = new uint[16384];
         cells[1425] = 0x05030501; // (8,11,1), bottom frame1 / top frame2, height5
@@ -383,18 +312,12 @@ public class ExplorationInputTests
             new SceneDrawCommand(SceneDrawSource.Background, 12, 2, 80, 40, 40, 1)
         }, background.Where(c => c.FrameIndex is 1 or 2));
 
-        input.SetFocused(false);
-        input.Press(ExplorationKey.WestPrimary);
-        Assert.False(input.Update(10000));
-        input.SetFocused(true);
-        input.Press(ExplorationKey.EastAlternate, repeat: true);
-        Assert.False(input.Update(10001));
+        input.Release(ExplorationKey.EastAlternate);
+        Assert.False(input.Update(99));
         Assert.Same(walking, input.Current);
         Assert.Same(plan, input.Current.Plan);
         Assert.Equal(commands, input.Current.Plan.Commands);
-        input.Press(ExplorationKey.EastAlternate);
-        input.Release(ExplorationKey.EastAlternate);
-        Assert.True(input.Update(1));
+        Assert.True(input.Update(100));
         AssertState(input, 336, 248, 3, 2, 9, false);
         Assert.Equal((176, 136), (input.Current.Plan.CameraX, input.Current.Plan.CameraY));
         Assert.Equal(new[] {

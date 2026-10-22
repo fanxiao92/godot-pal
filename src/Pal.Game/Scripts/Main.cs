@@ -16,8 +16,6 @@ public partial class Main : Node2D
         [Key.Down, Key.S, Key.Left, Key.A, Key.Up, Key.W, Key.Right, Key.D];
     private ExplorationInput? input;
     private PalMapScene? mapScene;
-    private Window? window;
-    private bool focusSignalsConnected;
     public ExplorationState? Exploration => input?.Current;
 
     public override void _Ready()
@@ -25,8 +23,7 @@ public partial class Main : Node2D
         string? scenePath = null, profilePath = null;
         try
         {
-            window = GetWindow();
-            window.MinSize = new Vector2I(320, 200);
+            GetWindow().MinSize = new Vector2I(320, 200);
             var (root, profile) = NativeSceneLoader.Arguments(OS.GetCmdlineUserArgs());
             scenePath = root + "/Scenes/Scene.tscn";
             profilePath = profile;
@@ -44,10 +41,6 @@ public partial class Main : Node2D
             }
             mapScene = map;
             AddChild(map);
-            window.FocusEntered += OnFocusEntered;
-            window.FocusExited += OnFocusExited;
-            focusSignalsConnected = true;
-            input.SetFocused(window.HasFocus());
             GD.Print($"PAL_MAP_LOADED:{root}/Scenes/Scene.tscn");
             GD.Print($"PAL_GAME_READY:{Pal.Core.Startup.Status}");
         }
@@ -57,17 +50,6 @@ public partial class Main : Node2D
             SetProcess(false);
             GetTree().Quit(1);
         }
-    }
-
-    private void OnFocusEntered() => input?.SetFocused(true);
-    private void OnFocusExited() => input?.SetFocused(false);
-
-    public override void _ExitTree()
-    {
-        if (window == null || !focusSignalsConnected) return;
-        window.FocusEntered -= OnFocusEntered;
-        window.FocusExited -= OnFocusExited;
-        focusSignalsConnected = false;
     }
 
     public override void _Input(InputEvent @event)
