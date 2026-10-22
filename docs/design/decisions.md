@@ -16,14 +16,14 @@
 | D10 | 原版不恢复结构化控制流 | 取舍与被替代方案见 [ADR-0001](../adr/0001-faithful-event-transcription.md)。 |
 | D11 | 公共事件与语言包分离，默认简体中文 | 使用当前包的 `m_chs.slf` / `m_eng.slf`，按参考保留消息映射及显示语义；切换语言配置不改剧情逻辑，不另加对话中途热切换。方向保留到 M3 实现，不阻塞 M1/M2；见 [事件契约](events-schema.md#语言包与-slf-来源)。 |
 | D12 | 场景构建与事件里程碑分开 | M1 提取静态场景资源，M2 构建 Godot 探索场景，M3 接入最小真实事件与对话；后续战斗和全量转换顺延，见 [总体路线](development-plan.md)。 |
-| D13 | M2 采用单领队静态探索切片 | 直接进入场景 2，以独立测试配置补足起点和经离线核对的角色行走参数；显式准备 M1 包，不改原包、不运行脚本或对象计时。320×200 原始比例整数缩放、键盘、参考离散行走/相机、不插值、失焦暂停清键；先验收 Windows 开发运行，见 [M2 计划](../milestones/m2/plan.md)。 |
+| D13 | M2 采用单领队静态探索切片 | 直接进入场景 2，以独立测试配置补足起点和经离线核对的角色行走参数；显式准备 M1 包，不改原包、不运行脚本或对象计时。M2 当时验收的桌面行为包括失焦暂停清键；#21 已在当前代码中按 SDLPal 参考取消该策略，M2 历史验收记录不变。详见 [M2 计划](../milestones/m2/plan.md)。 |
 | D14 | M2 先验证 Godot 场景测试框架 | #12 有界隔离关卡已通过并接入，不降 Godot/.NET 基线、不迁移 Core xUnit；#18 后续另获批准交付特定固定源码 API/adapter 包、完整门禁与同字节发布，见[包来源与 bootstrap](../testing/gdunit-source-packages.md)。进一步升级或回切官方包仍需另行决定。 |
 | D15 | M2 原生资源与独立 typed profile | #13 后续批准以 M1 PNG/JSON 为显式离线输入，运行时加载 Godot Resource/PackedScene/Texture2D；#14 独立 `.tres` profile 提供经核对的起点/行走参数，Prepare 不 author profile，见 [M2 计划](../milestones/m2/plan.md#3-资源准备与测试配置)。不取消未来事件 JSON。 |
-| D16 | M2 离散调度与桌面扩展 | 首步立即、后续 100ms、晚到不补走，不加插值；失焦冻结/清键、回焦需 fresh press 并立即首步是明确扩展，不宣称 SDLPal 原版行为。默认窗口 1280×800（4×），逻辑视野仍 320×200。 |
+| D16 | M2 离散调度与桌面扩展（历史决策） | 首步立即、后续 100ms、晚到不补走，不加插值；当时批准的失焦冻结/清键与回焦 fresh-press 策略是明确扩展，不宣称 SDLPal 原版行为。#21 已取消当前探索链路中的该扩展；默认窗口 1280×800（4×）、逻辑视野 320×200 保留。 |
 
 ## 待定问题
 
-- **Q1 其余表现层 / 外壳层能力**：M2 的逻辑步进、键盘输入、缩放、焦点和原生资源接入已实现并通过 Windows 分层验收，见 [M2 计划](../milestones/m2/plan.md)与[验收记录](../milestones/m2/acceptance.md)；收尾文档独立双轴终审已通过，#11/#17/#19 均已关闭，成果已合入并推送 main，远端完整 Windows headless CI 已通过。转场、音视频及其他后续能力仍按对应阶段设计，不把 M2 选择外推为全部运行时方案。
+- **Q1 其余表现层 / 外壳层能力**：M2 的逻辑步进、键盘输入、缩放与原生资源接入已实现并通过其历史 Windows 分层验收；M2 失焦暂停在 #21 中按参考撤销。历史验收与当前行为区分见 [M2 计划](../milestones/m2/plan.md)、[M2 验收记录](../milestones/m2/acceptance.md)及[Game 测试说明](../../src/Pal.Game/Tests/README.md#desktop-focus-and-exploration-behavior)。#11/#17/#19 已关闭；转场、音视频及其他后续能力仍按对应阶段设计。
 - **Q2 events.json 契约与实现进度**:忠实转写策略、v1 封套、引用和基础命令已定义,见 [事件契约](events-schema.md)。尚需按真实切片补充 opcode 注册表并实现验证;手写新内容的结构化 profile 及完整指令集留待第二阶段。
 - **Q3 数据来源与其余资源仍待验证**:当前输入在 `data/raw/sdlpal/`,外层归档与对象表符合 Windows 数据分支,但含 SDLPal 翻译内容,未证明与未修改的 98 柔情版完全一致。Windows 静态场景切片的 YJ2/图像/原始记录提取已本地验证，完整包见 [M1 计划](../milestones/m1/plan.md)；文字与字形留到 M3 验证。
 - **Q4 符号表方案已确定,待实现**:数字 ID 为真值,游戏可核对名称与可选 `symbols.json` 生成 `_` 注释字段。具体规则见 [事件契约](events-schema.md#7-可读名字),不另建一套剧情标志来替代对象状态和可变入口。
@@ -38,7 +38,7 @@ brainstorming 已完成:可行性、目标、版本、移植方式、两阶段�
 
 **事件设计已确认**:忠实低层转写、具名命令与 `raw`、完整来源信息、可变入口、trigger/auto 区分及字节往返与行为测试分离。本文为决策索引,格式细节以事件契约为准。
 
-**M2 设计已确认**：单领队探索、静态对象、独立测试配置与显式资源准备、320×200 整数缩放、键盘/失焦处理和参考步进；完整共识、入口/配置契约与纵向任务表见 [M2 计划](../milestones/m2/plan.md)。功能、Windows 自动/人工验收及文档独立双轴终审均已接受；各切片和整体验收最终提交/收尾记录见 [#17](https://github.com/fanxiao92/godot-pal/issues/17) / [父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)。#11/#17 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 已关闭，成果已合入并推送 main，远端完整 Windows headless CI 已通过；这不扩大音频、导出包和其他平台的验收范围。实际证据与当前任务状态以验收记录和 GitHub 为准。
+**M2 历史设计及后续修正**：单领队探索、静态对象、独立测试配置与显式资源准备、320×200 整数缩放、键盘和参考步进见 [M2 计划](../milestones/m2/plan.md)。其失焦暂停曾作为 M2 扩展交付；#21 当前将该扩展从共享探索链路移除，不改写 M2 的历史验收记录。功能、Windows 自动/人工验收及文档独立双轴终审均已接受；各切片和整体验收最终提交/收尾记录见 [#17](https://github.com/fanxiao92/godot-pal/issues/17) / [父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)。#11/#17 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 已关闭，成果已合入并推送 main，远端完整 Windows headless CI 已通过；这不扩大音频、导出包和其他平台的验收范围。实际证据与当前任务状态以验收记录和 GitHub 为准。
 
 **未完成**：其余表现层/外壳层能力、静态切片以外的资源转换与语言包契约验证、全量 opcode 映射及事件工具/运行时实现。M3 仍须另行规划与批准，不隐式启动。
 
