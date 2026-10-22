@@ -78,14 +78,14 @@ public class ExplorationProcessTests
         await CheckObservation(fixture, "repeat");
     }
 
+    [TestCase("south-primary", Timeout = 20000)]
     [TestCase("south-alternate", Timeout = 20000)]
-    [TestCase("north-primary", Timeout = 20000)]
-    public async Task WindowFocusSignalsFreezeUntilFreshPressThenResumeImmediatelyWithoutCatchup(string fresh)
+    public async Task WindowFocusSignalsDoNotFreezeExplorationOrClearHeldInput(string keyAlias)
     {
         using var fixture = new ExplorationFixture();
         fixture.AddDynamicCoverExample();
         fixture.Native.SavePacked();
-        await CheckObservation(fixture, "focus-" + fresh);
+        await CheckObservation(fixture, "focus-signal-no-op-" + keyAlias);
     }
 
     [TestCase(0, Timeout = 20000)]
