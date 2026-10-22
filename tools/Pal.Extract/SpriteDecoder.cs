@@ -27,8 +27,16 @@ public static class SpriteDecoder
         if (offset == 0 || offset == sprite.Length)
             throw new InvalidDataException("Sprite frame offset points to a sentinel, not image data.");
         var rle = sprite.Slice(offset, end - offset);
-        int position = 0;
-        if (rle.Length >= 4 && rle[..4].SequenceEqual(new byte[] { 2, 0, 0, 0 })) position = 4;
+        return DecodeRle(rle, maxPixels, frameIndex, offset, allowFrameHeader: true);
+    }
+
+    /// <summary>Decodes one direct PAL RLE bitmap whose bytes begin with width/height, not a sprite offset table.</summary>
+    public static IndexedImage DecodeRle(ReadOnlySpan<byte> rle, int maxPixels = IndexedImage.MaxPixels) =>
+        DecodeRle(rle, maxPixels, frameIndex: 0, sourceOffset: 0, allowFrameHeader: true);
+
+    private static IndexedImage DecodeRle(ReadOnlySpan<byte> rle, int maxPixels, int frameIndex, int sourceOffset, bool allowFrameHeader)
+    {
+        int position = allowFrameHeader && rle.Length >= 4 && rle[..4].SequenceEqual(new byte[] { 2, 0, 0, 0 }) ? 4 : 0;
         if (rle.Length - position < 4)
             throw new InvalidDataException("Sprite RLE dimensions are truncated.");
         int width = BinaryPrimitives.ReadUInt16LittleEndian(rle[position..]);
@@ -61,7 +69,7 @@ public static class SpriteDecoder
         // Frame starts are word offsets; one unused byte may align the next frame.
         if (rle.Length - position > 1)
             throw new InvalidDataException("Sprite RLE has data beyond its final run and word padding.");
-        return new IndexedImage(width, height, pixels, alpha, frameIndex, offset);
+        return new IndexedImage(width, height, pixels, alpha, frameIndex, sourceOffset);
     }
 
     private static int TableWordCount(ReadOnlySpan<byte> sprite)

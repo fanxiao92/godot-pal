@@ -1,0 +1,33 @@
+{
+  "formatVersion": 1,
+  "source": [
+    {
+      "file": "ascii.h",
+      "role": "ISO",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "file": "fontglyph.h",
+      "role": "Unifont",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "glyphs": [
+    {
+      "codepoint": 65,
+      "source": "ISO",
+      "width": 8,
+      "height": 15,
+      "rowBytes": 1,
+      "bitmap": "7E7E7E7E7E7E7E7E7E7E7E7E7E7E7E"
+    },
+    {
+      "codepoint": 66,
+      "source": "ISO",
+      "width": 8,
+      "height": 15,
+      "rowBytes": 1,
+      "bitmap": "7E7E7E7E7E7E7E7E7E7E7E7E7E7E7E"
+    }
+  ]
+}

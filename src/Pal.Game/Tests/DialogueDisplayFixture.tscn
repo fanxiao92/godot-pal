@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Dialogue/PalDialogueDisplay.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Dialogue/PalDialoguePaletteSurface.cs" id="2"]
+
+[node name="DialogueDisplayFixture" type="Control"]
+custom_minimum_size = Vector2(320, 200)
+script = ExtResource("1")
+
+[node name="IndexedBackground" type="Control" parent="."]
+offset_right = 8.0
+offset_bottom = 8.0
+script = ExtResource("2")
