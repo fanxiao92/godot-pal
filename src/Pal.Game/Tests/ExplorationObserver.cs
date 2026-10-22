@@ -388,12 +388,13 @@ public partial class ExplorationObserver : Node
         KeyEvent(key, true);
         await Step(304, 328, 0, 1, 1, 144, 216);
         Focus(false);
-        Focus(true);
         await Step(288, 336, 0, 2, 0, 128, 224);
+        Focus(true);
+        await Step(272, 344, 0, 3, 2, 112, 232);
         KeyEvent(key, false);
         await Until(() => !main.Exploration!.IsWalking, "released key stands on the ordinary next update");
         Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y, main.Exploration.Leader.StepPhase)
-            == (288, 336, 0), "focus signals do not clear held input or alter the ordinary schedule");
+            == (272, 344, 0), "focus signals do not clear held input or alter the ordinary schedule");
     }
 
     private async Task Step(int x, int y, int direction, int phase, int bitmap, int cameraX, int cameraY)
@@ -744,8 +745,24 @@ public partial class ExplorationObserver : Node
 
     private void Focus(bool focused)
     {
-        var result = GetWindow().EmitSignal(focused ? Window.SignalName.FocusEntered : Window.SignalName.FocusExited);
-        GD.Print($"FOCUS_INJECTED:render={frame}:ticks={Time.GetTicksMsec()}:focused={focused}:result={result}:osHasFocus={GetWindow().HasFocus()}");
+        var window = GetWindow();
+        int observed = 0;
+        void Observe() => observed++;
+        // Godot can return Unavailable for a valid signal without subscribers. Observe real delivery.
+        if (focused) window.FocusEntered += Observe;
+        else window.FocusExited += Observe;
+        try
+        {
+            var result = window.EmitSignal(focused ? Window.SignalName.FocusEntered : Window.SignalName.FocusExited);
+            GD.Print($"FOCUS_INJECTED:render={frame}:ticks={Time.GetTicksMsec()}:focused={focused}:result={result}:observed={observed}:osHasFocus={window.HasFocus()}");
+            Check(result == Error.Ok, $"public Window focus signal delivery succeeds (focused={focused}, result={result})");
+            Check(observed == 1, $"public Window focus signal observed exactly once (focused={focused}, observed={observed})");
+        }
+        finally
+        {
+            if (focused) window.FocusEntered -= Observe;
+            else window.FocusExited -= Observe;
+        }
     }
 
     private void KeyEvent(Key key, bool pressed, bool echo = false)

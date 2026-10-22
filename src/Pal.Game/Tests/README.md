@@ -90,9 +90,13 @@ its ordinary input, public Core update, and 100ms schedule; the change does not 
 release events.
 
 `WindowFocusSignalsDoNotFreezeExplorationOrClearHeldInput` injects public Window focus signals around
-normal logical key input to the shipped Main and observes literal state changes at later actual Main
-updates. This checks that the former Main hooks are gone and the logical key remains governed by ordinary
-input delivery. It does **not** simulate desktop focus loss, establish OS/Godot key-release behavior, or
+normal logical key input to the shipped Main. Each injection temporarily subscribes a public observation
+callback, requires `Error.Ok` and exactly one callback, and unsubscribes in `finally`; Godot 4.7.2 can return
+`Unavailable` for a valid signal with no subscribers, so an unchecked emit does not prove delivery.
+The two key aliases must reach literal walking states at actual Main updates both after `FocusExited`
+and after `FocusEntered`, then stand after explicit key release. This checks that focus signals neither
+freeze updates nor clear logical held input; input remains governed by ordinary delivery. It does **not**
+simulate desktop focus loss, establish OS/Godot key-release behavior, or
 prove what keys are delivered on return. No Windows/other-platform claim or manual Alt-Tab acceptance
 follows from this headless signal injection. Core timing boundaries remain covered through explicit
 `ExplorationSession.Update(ticks)` tests; Godot observer waits are bounded liveness guards, not timing
