@@ -60,6 +60,16 @@ public class SpriteDecoderTests
         Assert.All(image.Alpha[..131], value => Assert.Equal(255, value));
     }
 
+    [Fact]
+    public void DecodeRle_handles_direct_rle_without_a_frame_offset_table()
+    {
+        byte[] direct = [1, 0, 1, 0, 1, 5];
+        var image = SpriteDecoder.DecodeRle(direct);
+        Assert.Equal((1, 1), (image.Width, image.Height));
+        Assert.Equal(new byte[] { 5 }, image.Pixels);
+        Assert.Equal(new byte[] { 255 }, image.Alpha);
+    }
+
     public static TheoryData<byte[]> InvalidSprites => new()
     {
         Array.Empty<byte>(), new byte[] {0, 0}, new byte[] {3, 0, 0, 0}, // missing/zero/truncated table
