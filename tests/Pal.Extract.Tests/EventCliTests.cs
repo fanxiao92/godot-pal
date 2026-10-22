@@ -68,6 +68,48 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(originalArchive, File.ReadAllBytes(Path.Combine(input, "SSS.MKF")));
     }
 
+    [Theory]
+    [InlineData("entry-id", "Entry ids must be unique identifiers.")]
+    [InlineData("label", "invalid command label.")]
+    [InlineData("local-label", "malformed reference")]
+    [InlineData("cross-file-label", "malformed file#label reference")]
+    [InlineData("sha256", "index.json: sha256 must be lowercase hexadecimal.")]
+    public async Task Rebuild_events_rejects_final_line_feed_in_identifiers_and_hash(string mutation, string diagnostic)
+    {
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string eventPath = Path.Combine(exported, "shared.json");
+        string indexPath = Path.Combine(exported, "index.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(eventPath))!.AsObject();
+        var index = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(indexPath))!.AsObject();
+        if (mutation == "entry-id")
+            events["entries"]![0]!["id"] = events["entries"]![0]!["id"]!.GetValue<string>() + "\n";
+        else if (mutation == "sha256")
+            index["source"]!["sha256"] = index["source"]!["sha256"]!.GetValue<string>() + "\n";
+        else if (mutation == "label")
+            events["commands"]![0]!["label"] = "L0000\n"; // No incoming reference to address zero in this package.
+        else
+        {
+            // Keep every reference resolved and the complete original instruction bytes intact.
+            const string label = "L0001\n";
+            events["commands"]![1]!["label"] = label;
+            string reference = mutation == "cross-file-label" ? "shared#" + label : label;
+            events["commands"]![0]!["next"] = reference;
+            foreach (var entry in events["entries"]!.AsArray())
+                if (entry!["sourceAddress"]!.GetValue<int>() == 1) entry["target"] = reference;
+        }
+        File.WriteAllText(eventPath, events.ToJsonString());
+        File.WriteAllText(indexPath, index.ToJsonString());
+        var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        // In RED, the old validator accepts these and writes unchanged bytes (hash LF
+        // misleadingly reports a semantic edit); this is not a dangling-reference failure.
+        if (result.ExitCode == 0) Assert.Equal(ReadChunk4(), File.ReadAllBytes(rebuilt));
+        Assert.True(result.ExitCode == 1, $"Expected schema rejection; exit={result.ExitCode}; stdout={result.Stdout}; stderr={result.Stderr}");
+        Assert.Empty(result.Stdout);
+        Assert.Contains(diagnostic, result.Stderr, StringComparison.Ordinal);
+        Assert.False(File.Exists(rebuilt));
+    }
+
     [Fact]
     public async Task Rebuild_events_reencodes_edited_named_fields_and_preserves_unmapped_operands()
     {

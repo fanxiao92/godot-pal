@@ -9,7 +9,7 @@ namespace Pal.Extract;
 internal static class EventArchive
 {
     private const int MaximumChunkBytes = 64 * 1024 * 1024;
-    private static readonly Regex Identifier = new("^[A-Za-z_][A-Za-z0-9_-]*$", RegexOptions.CultureInvariant);
+    private static readonly Regex Identifier = new(@"^[A-Za-z_][A-Za-z0-9_-]*\z", RegexOptions.CultureInvariant);
 
     internal static void Export(string input, string output)
     {
@@ -131,7 +131,7 @@ internal static class EventArchive
         var bytes = new byte[length];
         foreach (var pair in allCommands) Encode(pair.Value.Command, bytes.AsSpan(pair.Key * 8, 8));
         string expectedHash = String(source, "sha256");
-        if (!Regex.IsMatch(expectedHash, "^[0-9a-f]{64}$", RegexOptions.CultureInvariant)) throw new InvalidDataException("index.json: sha256 must be lowercase hexadecimal.");
+        if (!Regex.IsMatch(expectedHash, @"^[0-9a-f]{64}\z", RegexOptions.CultureInvariant)) throw new InvalidDataException("index.json: sha256 must be lowercase hexadecimal.");
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         using var outputStream = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         outputStream.Write(bytes);
