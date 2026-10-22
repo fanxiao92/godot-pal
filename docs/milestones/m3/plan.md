@@ -1,6 +1,6 @@
 # M3 实现计划：独立真实 NPC 对话切片
 
-> 当前检查点（#26 候选阶段）：本地集成已含 #21/#22/#23/#24/#27/#25，#25 合入为 `6c2e036f984dac1479b22697f73488fa2499f37d`。#26 在隔离分支同步共享脚本/文档并修正终审指出的字形/标识符边界及四项显示输入/时序偏差，仅做匹配组件检查；尚未执行最终完整共享门，不提前接受 M3。已批准规格、实际实现、组件验证、人工及远端 CI 分列于[验收检查点](acceptance.md)。GitHub 实时回读：#20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED；本地集成不自动关票或代表已推送。
+> 当前检查点（实际integration）：#21/#22/#23/#24/#27/#25/#26已本地集成至 `dab79ad85a4a352826a31eb0569a58e1f17eca88`，tree `b4fb69689d6820727b31ce6909117b1904a5b540`。全M3候选双轴初审及修后定点复核已关闭原六项source finding；精确 `5bf481f` 匹配双语GPU通过，机械merge同tree；精确 `dab79ad8` 原完整自动门PASS获独立evidence review支持。**父追加严格逐进程capture NOT SATISFIED/P1仍BLOCK，人工桌面/物理键盘/OS释放与当前CI未做，whole M3未验收。** 已批准规格、实测身份、保护及限制见[验收检查点](acceptance.md)。GitHub仅截至既有读取：#20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED；本轮未新查，本地集成不自动关票或代表已推送。
 
 以下保留既有批准范围与调查依据；涉及“尚未验证”的原始调查描述只描述批准时点，当前分层结果以上述检查点为准。M0/M1/M2 已完成，不重做已关闭的 #1～#19；M2 的历史接受记录不因当前焦点策略修正而失效。
 
@@ -136,8 +136,8 @@ T1/T2 的逻辑依赖独立，不代表批准并行写同一工作树或并行�
 ## 8. 当前证据与下一步
 
 - 已批准的独立切片已本地实现：完整事件转换/重建、现代双语资源/字形/画像/提示、可暂停 trigger、实际 Main 搜索/返回/再次交谈及参考焦点修正。
-- 当前源要求 Core327、CLI322＋2既有skip、Prepare52（M2静态链）、Game239 positive＋3controls＝242发现。数字由源增量/独立原件及实际发现核对，不表示已执行一轮新全套；旧Game223＋后续6＋阶段1的4＋阶段2的6为要求来源；新完整239轮仍未执行。
-- 完整共享门仍待固定全 M3 候选的独立 Standards/Spec 审查、清 finding、合入实际 integration 后另行授权执行；本轮source阶段不跑完整 Test-M0/solution、完整Game或三个引擎控制全套。
-- 已有真实 map10 双语 headless 与 GPU 及其源码适用性见 [分层检查点](acceptance.md)。旧67f GPU不证明本轮改变的输入/时序，新的匹配双语GPU仍待独立授权；它们也不是物理键盘、Alt-Tab、人工桌面/关闭或当前远端 CI。
+- 精确 `dab79ad8` 原Test-M0完整门正常exit0/约479s：Core327P、CLI322P＋2准确历史Windows skip、Prepare52P（仅M2 synthetic链）、Game solution/standalone/repeat各239P/Completed，discovery242unique与独立source239完整FQN集合逐轮一致；三个精确失败控制和六个startup stage完整。自动门PASS与独立evidence复核支持不等于严格采证通过。
+- 全M3双轴初审/两阶段修复及定点复核、固定候选机械合入已完成；完整共享门已用1/2，旧lifecycle修后1/2独立保留。外部observer PID复用/handle race导致主6 PID/UTC及部分内部退出缺失，新P1仍BLOCK、verifier criterion-1=`not-satisfied`；不倒填、不补跑、不降低标准或关闭P1。
+- 精确 `5bf481f` /同tree的匹配双语map10/profile GPU各10×64000零差、各2calls/资源身份匹配，旧无profile zh-Hans6零差独立保留；原1.1/255每通道容差不变。GPU fresh pre/post source/DLL恒定不外推到不同worktree的gate DLL，gate没有fresh postbuild/pretest清单。旧67f证据保持历史边界；这些都不是物理键盘、Alt-Tab、人工桌面/关闭或当前远端CI。
 - 真实资源只在本地 ignored 目录，复用已准备产物；不重提取/覆盖/改profile，不上传 CI。普通运行命令与 profile 契约见 [宿主说明](../../design/npc-interaction-host.md)。本机 integration 的实际命令留工程外任务交接记录，不能把该路径当作清洁检出自带资源。
-- 父在自动工程与独立复核完成后统一给一次人工清单，分别核真实地图/对象/领队、两语言文字/头像/阴影/提示/恢复、搜索/再交互、物理键盘/OS焦点及关闭。远端 CI 仅按权限显式发布后观察，不擅自 dispatch/push/关票。
+- 一次性人工命令/清单已集中在[验收检查点](acceptance.md#一次性-windows-人工清单尚未执行)，尚未执行，不要求用户补已完成工程测试。严格采证补执行/标准改变/敏感原件处置/无保留签字均需另获明确决定；当前只诚实doc回填，源码资源契约未改，不为doc提交重跑CPU/GPU。远端CI尚无当前integration结果及发布授权，不擅自dispatch/push/关票。
