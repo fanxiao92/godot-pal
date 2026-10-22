@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Godot;
 
 namespace Pal.Game.Resources;
@@ -7,8 +9,9 @@ public partial class PalDialogueIndexedImage : Resource
 {
     [Export] public int Width { get; set; }
     [Export] public int Height { get; set; }
-    [Export] public byte[] PaletteIndices { get; set; } = Array.Empty<byte>();
-    [Export] public byte[] Alpha { get; set; } = Array.Empty<byte>();
+    [Export] public string SourceIdentity { get; set; } = "";
+    [Export] public byte[] PaletteIndices { get; set; } = System.Array.Empty<byte>();
+    [Export] public byte[] Alpha { get; set; } = System.Array.Empty<byte>();
 
     public void Validate()
     {

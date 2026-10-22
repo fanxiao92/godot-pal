@@ -44,8 +44,11 @@ public class DialogueLanguageCliTests
             Assert.Equal(2, Assert.Single(english.RootElement.GetProperty("messages").EnumerateArray())
                 .GetProperty("entries").GetArrayLength());
             Assert.Equal(18, new FileInfo(Path.Combine(output, "images", "portrait-059.pimg")).Length);
+            Assert.Equal(18, new FileInfo(Path.Combine(output, "images", "prompt-00.pimg")).Length);
             Assert.Equal(18, new FileInfo(Path.Combine(output, "images", "prompt-01.pimg")).Length);
             Assert.Equal(18, new FileInfo(Path.Combine(output, "images", "prompt-02.pimg")).Length);
+            using var imageIndex = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(output, "images", "index.json")));
+            Assert.Equal(new[] { 0, 1, 2 }, imageIndex.RootElement.GetProperty("prompt").GetProperty("frames").EnumerateArray().Select(value => value.GetInt32()));
             using var font = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(output, "font.json")));
             var isoGlyph = Assert.Single(font.RootElement.GetProperty("glyphs").EnumerateArray()
                 .Where(glyph => glyph.GetProperty("codepoint").GetInt32() == 'l'));

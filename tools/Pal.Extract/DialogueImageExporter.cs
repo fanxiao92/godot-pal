@@ -16,13 +16,15 @@ internal static class DialogueImageExporter
         IndexedImage portrait = SpriteDecoder.DecodeRle(portraitChunk);
         byte[] promptChunk = data.ReadChunk(12, MaximumImageBytes);
         int frameCount = SpriteDecoder.GetFrameCount(promptChunk);
-        if (frameCount < 2) throw new InvalidDataException("DATA.MKF chunk 12 must contain prompt frames 1 and 2.");
+        if (frameCount < 2) throw new InvalidDataException("DATA.MKF chunk 12 must contain prompt frames 0, 1, and 2.");
+        IndexedImage defaultPrompt = SpriteDecoder.DecodeFrame(promptChunk, 0);
         IndexedImage firstPrompt = SpriteDecoder.DecodeFrame(promptChunk, 1);
         IndexedImage secondPrompt = SpriteDecoder.DecodeFrame(promptChunk, 2);
 
         string images = Path.Combine(destination, "images");
         Directory.CreateDirectory(images);
         WriteImage(images, "portrait-059", portrait);
+        WriteImage(images, "prompt-00", defaultPrompt);
         WriteImage(images, "prompt-01", firstPrompt);
         WriteImage(images, "prompt-02", secondPrompt);
         WriteJson(Path.Combine(images, "index.json"), new
@@ -35,7 +37,7 @@ internal static class DialogueImageExporter
                 new { file = data.Name, byteLength = data.ByteLength, sha256 = data.Sha256 }
             },
             portrait = new { sourceArchive = rgm.Name, sourceChunk = 59, file = "portrait-059.pimg" },
-            prompt = new { sourceArchive = data.Name, sourceChunk = 12, frames = new[] { 1, 2 } }
+            prompt = new { sourceArchive = data.Name, sourceChunk = 12, frames = new[] { 0, 1, 2 } }
         });
     }
 

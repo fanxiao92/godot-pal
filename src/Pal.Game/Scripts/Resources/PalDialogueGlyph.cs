@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Godot;
 
 namespace Pal.Game.Resources;
@@ -9,7 +11,7 @@ public partial class PalDialogueGlyph : Resource
     [Export] public int Width { get; set; }
     [Export] public int Height { get; set; }
     [Export] public int RowBytes { get; set; } = 1;
-    [Export] public byte[] Bitmap { get; set; } = Array.Empty<byte>();
+    [Export] public byte[] Bitmap { get; set; } = System.Array.Empty<byte>();
 
     public bool IsSet(int x, int y)
     {

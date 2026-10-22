@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using Godot;
 using Godot.Collections;
 using Pal.Core;
@@ -9,6 +13,7 @@ public partial class PalDialogueLanguage : Resource
 {
     [Export] public int FormatVersion { get; set; } = 1;
     [Export] public string Language { get; set; } = "zh-Hans";
+    [Export] public string SourceIdentity { get; set; } = "";
     [Export] public Array<PalDialogueMessageRange> Messages { get; set; } = new();
 
     public DialogueLanguagePackage ToCorePackage()

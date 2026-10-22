@@ -1,0 +1,9 @@
+{
+  "formatVersion": 1,
+  "defaultLanguage": "zh-Hans",
+  "languages": [
+    "en",
+    "zh-Hans"
+  ],
+  "messageReferences": "original-start-message-id-and-span"
+}

@@ -1,6 +1,8 @@
+using System;
+using System.IO;
+using System.Linq;
 using Godot;
 using Godot.Collections;
-using System.Linq;
 
 namespace Pal.Game.Resources;
 
@@ -9,6 +11,7 @@ public partial class PalDialogueFont : Resource
 {
     [Export] public int FormatVersion { get; set; } = 1;
     [Export] public int LineHeight { get; set; } = 16;
+    [Export] public string SourceIdentity { get; set; } = "";
     [Export] public Array<PalDialogueGlyph> Glyphs { get; set; } = new();
 
     public PalDialogueGlyph GetGlyph(int codepoint)

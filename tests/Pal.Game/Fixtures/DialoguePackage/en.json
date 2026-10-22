@@ -1,0 +1,20 @@
+{
+  "formatVersion": 1,
+  "language": "en",
+  "source": {
+    "file": "m_eng.slf",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "messages": [
+    {
+      "startMessageId": 61,
+      "endMessageId": 62,
+      "entries": [
+        {
+          "kind": "text",
+          "text": "B"
+        }
+      ]
+    }
+  ]
+}
