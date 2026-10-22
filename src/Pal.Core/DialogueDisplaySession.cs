@@ -29,12 +29,18 @@ public sealed class DialogueDisplaySession
     private DialogueDisplaySnapshot _current;
 
     public DialogueDisplaySnapshot Current => _current;
+    /// <summary>Text control state to carry to the next display after completion, including trailing controls.</summary>
+    public int TextColor => _currentTextColor;
+    public int DelayMilliseconds => _currentDelayMilliseconds;
 
-    public DialogueDisplaySession(DialogueMessageBlock block, int inheritedColor, int commandColor)
+    public DialogueDisplaySession(DialogueMessageBlock block, int inheritedColor, int commandColor,
+        int initialDelayMilliseconds = DialogueTextTokenizer.DefaultDelayMilliseconds)
     {
         ArgumentNullException.ThrowIfNull(block);
         if (inheritedColor is < 0 or > 255 || commandColor is < 0 or > 255)
             throw new ArgumentOutOfRangeException(nameof(commandColor), "Dialogue colors must be palette indices.");
+        if (initialDelayMilliseconds < 0) throw new ArgumentOutOfRangeException(nameof(initialDelayMilliseconds));
+        _currentDelayMilliseconds = initialDelayMilliseconds;
         _block = block;
         _currentTextColor = commandColor == 0 ? inheritedColor : commandColor;
         SetNextLine();
