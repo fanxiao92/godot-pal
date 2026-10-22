@@ -140,5 +140,34 @@ normal dialogue updates; this is not an OS focus/physical-keyboard test.
 The restoration fixture binds `BackgroundRestoreRequested` to restore an independently loaded native
 background into the actual indexed surface and `ActivePaletteChanged` to its texture palette. It checks
 real target pixels, not just ClearDisplay flags. These are headless resource/state/texture checks, not
-GPU screen pixels. Main/search/map10, physical keyboard, real-resource GPU and shared-gate acceptance
-remain separate #25/#26 responsibilities. See [the runtime contract](../../../docs/design/trigger-execution.md).
+GPU screen pixels. Main/search/map10 are connected in the explicit #25 mode documented below; physical keyboard and
+shared-gate acceptance remain separate #26 responsibilities. The original display fixture is not map10 acceptance. See [the runtime contract](../../../docs/design/trigger-execution.md).
+
+## M3 independent NPC interaction host (#25)
+
+Normal Main explicitly accepts `--m3-dialogue-profile res://.../Profile.tres`, optionally
+`--m3-dialogue-language en` (default `zh-Hans`). The composite native profile references the existing
+static profile as the sole origin/walk-frame source, the complete modern events, and seven native
+dialogue resources with file identity locks. No automatic preparation, M2/static replacement, or
+ordinary scene4 story scheduling is performed. Full authoring/startup and lifecycle details:
+[Godot host contract](../../../docs/design/npc-interaction-host.md).
+
+`NpcInteractionHostTests` adds25 cases at the approved native resource/normal Main process seams:
+explicit arguments, exact native search metadata, indexed tile/object/leader textures, resource/owner/
+identity/unsupported-entry rejection, two-language search-to-return/repeat and synchronous no-wait
+return. Its child sessions reuse `RealDialogueFixture`, load the shipped Main, deliver real logical
+input, and observe actual Main/Display completion boundaries. The adapter receipts first, Main must
+already be Returning in the same display completion callback, with caller60/ReturnEntry0188. A
+controlled delayed-Main-receipt counterexample is caught there. Core deterministic49/50ms tests
+remain authoritative for exact deadlines; engine scheduling/observer durations are not that proof.
+Short artificial English can legally finish on the first update; it does not prove visible typing or
+acceleration. Batches finish only the current native body part without consuming a later wait.
+
+Real map GPU uses the same `Test-RealDialogueGpu.ps1` with optional `-InteractionProfileUri` and a new
+external evidence directory. Each language completes two full actual-search sessions and ten64000-pixel
+checks at paired completed-update/FramePostDraw boundaries. It independently composes portrait/name/
+body/shadows/prompt from native inputs and literal layout. Map prestate is only a restoration oracle,
+not an independent whole-map renderer. The real scene's273 indexed frames have no opaqueF9–FE pixels;
+they correctly stay unchanged while full scene palettes are still delivered. Artificial indexed
+texture checks cover actual F9/FA changes and alpha separately. Neither GPU nor headless is physical
+keyboard, OS Alt-Tab, human desktop/close feedback, remote CI or final shared-gate acceptance.

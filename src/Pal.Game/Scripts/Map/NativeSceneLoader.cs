@@ -9,8 +9,27 @@ namespace Pal.Game.Map;
 
 internal static class NativeSceneLoader
 {
-    internal static (string Root, string Profile, bool StaticAcceptance) Arguments(string[] arguments)
+    internal static (string Root, string Profile, bool StaticAcceptance, string? DialogueProfile, string Language) Arguments(string[] arguments)
     {
+        if (arguments.Any(a => a.StartsWith("--m3-dialogue", StringComparison.Ordinal)))
+        {
+            string? dialogueProfile = null, language = null;
+            for (int i = 0; i < arguments.Length; i += 2)
+            {
+                if (i + 1 == arguments.Length || arguments[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    throw new InvalidDataException("M3 dialogue: missing value for " + arguments[i]);
+                switch (arguments[i])
+                {
+                    case "--m3-dialogue-profile" when dialogueProfile is null: dialogueProfile = arguments[i + 1]; break;
+                    case "--m3-dialogue-language" when language is null: language = arguments[i + 1]; break;
+                    default: throw new InvalidDataException("M3 dialogue: duplicate, mixed, or unknown " + arguments[i]);
+                }
+            }
+            if (dialogueProfile is null) throw new InvalidDataException("M3 dialogue requires --m3-dialogue-profile");
+            NativeExplorationProfile.ValidateUri(dialogueProfile);
+            if (language is not (null or "zh-Hans" or "en")) throw new InvalidDataException("M3 dialogue language must be zh-Hans or en");
+            return ("", "", false, dialogueProfile, language ?? "zh-Hans");
+        }
         const string usage = "expected unique --m2-resources/--m2-profile or --m3-static-resources/--m3-static-profile arguments";
         string root = "res://Assets", profile = NativeExplorationProfile.DefaultUri;
         bool hasRoot = false, hasProfile = false;
@@ -39,10 +58,10 @@ internal static class NativeSceneLoader
         bool staticAcceptance = selectedMode == "m3-static";
         if (staticAcceptance && (!hasRoot || !hasProfile))
             throw new InvalidDataException("M3 static acceptance requires both --m3-static-resources and --m3-static-profile");
-        return (root, profile, staticAcceptance);
+        return (root, profile, staticAcceptance, null, "zh-Hans");
     }
 
-    private static void ValidateRoot(string root)
+    internal static void ValidateRoot(string root)
     {
         const string usage = "--m2-resources requires one normalized res://Assets (or child directory) URI";
         if (!(root == "res://Assets" || root.StartsWith("res://Assets/", StringComparison.Ordinal)))

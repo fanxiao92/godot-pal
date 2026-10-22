@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][string]$PalettePath,
     [Parameter(Mandatory)][ValidateSet('zh-Hans', 'en')][string]$Language,
     [Parameter(Mandatory)][string]$EvidenceDirectory,
-    [Parameter(Mandatory)][string]$GodotPath
+    [Parameter(Mandatory)][string]$GodotPath,
+    [string]$InteractionProfileUri
 )
 $ErrorActionPreference = 'Stop'
 # One explicitly selected language/process per invocation. No build, prepare, cleanup or retry.
@@ -22,6 +23,10 @@ if (Test-Path -LiteralPath $evidence) { throw 'EvidenceDirectory must be a new d
 $protected = @('Font.tres', 'Language.zh-Hans.tres', 'Language.en.tres', 'Portrait-059.tres', 'Prompt-00.tres', 'Prompt-01.tres', 'Prompt-02.tres') |
     ForEach-Object { Join-Path $native $_ }
 $protected += $palette
+if ($InteractionProfileUri) {
+    if (-not $InteractionProfileUri.StartsWith('res://')) { throw 'InteractionProfileUri must select an existing native res:// profile.' }
+    $protected += Join-Path $project $InteractionProfileUri.Substring(6)
+}
 function Snapshot {
     @($protected | ForEach-Object {
         $item = Get-Item -LiteralPath $_
@@ -41,6 +46,7 @@ $start.RedirectStandardOutput = $true
 $start.RedirectStandardError = $true
 $start.WorkingDirectory = $project
 $arguments = @('--path', $project, '--audio-driver', 'Dummy', 'res://Tests/RealDialogueFixture.tscn')
+if ($InteractionProfileUri) { $arguments += @('--', '--m3-dialogue-profile', $InteractionProfileUri, '--m3-dialogue-language', $Language) }
 foreach ($argument in $arguments) { $start.ArgumentList.Add($argument) }
 $start.Environment['PAL_DIALOGUE_NATIVE_ROOT'] = $native.Replace('\', '/')
 $start.Environment['PAL_DIALOGUE_PALETTE'] = $palette.Replace('\', '/')
@@ -49,7 +55,8 @@ $start.Environment['PAL_DIALOGUE_GPU_EVIDENCE'] = $evidence
 [ordered]@{
     Executable = $godot; Arguments = $arguments; Language = $Language; NativeDialogueDirectory = $native
     PalettePath = $palette; Version = $version; Head = (git -C $repo rev-parse HEAD)
-    Scope = 'Uncommitted candidate; native dialogue resources, synthetic indexed background, logical GPU readback, programmatic key input. No physical/manual acceptance.'
+    InteractionProfileUri = $InteractionProfileUri; WorkingTreeStatus = (git -C $repo status --short | Out-String)
+    Scope = if ($InteractionProfileUri) { 'Actual Main interaction + map10, complete events, logical GPU readback and programmatic input. Map prestate is a restoration oracle, not independent full-map pixel proof. No physical/manual acceptance.' } else { 'Native dialogue resources, synthetic indexed background, logical GPU readback, programmatic key input. No physical/manual acceptance.' }
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'command.json') -Encoding utf8
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $start
@@ -74,7 +81,8 @@ try {
     $fixture = if (Test-Path -LiteralPath $resultPath) { Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json } else { $null }
     $engineError = ($output + "`n" + $errors) -match '(?im)(ERROR:|SCRIPT ERROR:|Unhandled|PAL_DIALOGUE_GPU_FAILED)'
     $passed = -not $timedOut -and $code -eq 0 -and $unchanged -and -not $engineError -and
-        $null -ne $fixture -and $fixture.completed -eq $true -and $fixture.failures -eq 0 -and $fixture.checks.Count -eq 6 -and
+        $null -ne $fixture -and $fixture.completed -eq $true -and $fixture.failures -eq 0 -and $fixture.checks.Count -eq $(if ($InteractionProfileUri) { 10 } else { 6 }) -and
+        (-not $InteractionProfileUri -or $output.Contains("PAL_INTERACTION_END:language=${Language}:calls=2:entry=0188:completed=true")) -and
         $output.Contains("PAL_DIALOGUE_GPU_END:language=${Language}:failures=0:completed=true")
     [ordered]@{
         Pid = $ownedPid; StartedAtUtc = $startedAt.ToString('O'); EndedAtUtc = [DateTime]::UtcNow.ToString('O')

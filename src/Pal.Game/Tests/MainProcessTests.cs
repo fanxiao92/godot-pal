@@ -305,6 +305,7 @@ public class MainProcessTests
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in arguments) info.ArgumentList.Add(arg);
         using var process = Process.Start(info) ?? throw new InvalidOperationException("Godot did not start");
+        GD.Print($"Owned child Godot pid={process.Id}");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -312,7 +313,9 @@ public class MainProcessTests
         catch (OperationCanceledException)
         {
             process.Kill(true); await process.WaitForExitAsync().ConfigureAwait(false);
-            throw new TimeoutException("Godot runtime test exceeded 15s; process tree killed");
+            string partial = await stdout + "\n" + await stderr;
+            foreach (string line in partial.Split('\n')) GD.Print("Timed-out child: " + line.TrimEnd('\r'));
+            throw new TimeoutException($"Godot runtime test exceeded 15s; owned pid={process.Id}, exit={process.ExitCode}; process tree killed");
         }
         var result = new ProcessResult(process.ExitCode, await stdout + "\n" + await stderr);
         return result;

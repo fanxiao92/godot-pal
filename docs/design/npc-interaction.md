@@ -1,10 +1,10 @@
 # 独立 NPC 搜索与返回探索（Core）
 
-本页是 #25 的纯 Core 组件契约；不是 scene 4 正常场景调度、Godot 接合、真实图形或 M3 验收通过声明。参考固定 `play.c:PAL_GetSearchTriggerRange/PAL_Search/PAL_StartFrame`、`input.c:PAL_ClearKeyState` 和 `game.c` / `util.c` 的等待循环。事件与显示沿用 [trigger-execution](trigger-execution.md)，不复制执行器、tokenizer 或逐字规则。
+本页是 #25 的纯 Core 组件契约；实际 Main 的显式启动、组合资源配置、输入/更新与palette接合见 [Godot宿主契约](npc-interaction-host.md)。不是 scene 4 正常场景调度或 M3 验收通过声明。参考固定 `play.c:PAL_GetSearchTriggerRange/PAL_Search/PAL_StartFrame`、`input.c:PAL_ClearKeyState` 和 `game.c` / `util.c` 的等待循环。事件与显示沿用 [trigger-execution](trigger-execution.md)，不复制执行器、tokenizer 或逐字规则。
 
 ## 元数据与查询
 
-`SceneObject.TriggerMode` / `TriggerEntry` 是原始 `wTriggerMode` / `wTriggerScript` WORD 的非位置 init 属性。默认0保留旧构造/解构签名及普通静态入口；**交互宿主必须在现有原生对象转换处逐个填入实际值**，不能用默认0启动交互或只保留 owner60。现有 `NativeExplorationProfile` 转换和 Main 尚由下游宿主接入，本组件不修改 Game。
+`SceneObject.TriggerMode` / `TriggerEntry` 是原始 `wTriggerMode` / `wTriggerScript` WORD 的非位置 init 属性。默认0保留旧构造/解构签名及普通静态入口；**交互宿主必须在现有原生对象转换处逐个填入实际值**，不能用默认0启动交互或只保留 owner60。Game的 `NativeExplorationProfile` 已在完整转换处填写这两个实际WORD；普通静态入口不因此调度事件。Core组件不依赖Game。
 
 `StaticSceneRules.FindSearchTarget(leader)` 返回 `SceneSearchMatch(ObjectId, SampleIndex)` 或 null。它按13个参考采样优先、每采样按传入的原对象顺序扫描，不按ID重排，不是 nearest/raycast：
 
@@ -39,7 +39,7 @@ Returning 的50ms从显示恢复/trigger真正完成的 `completionTicks` 开始
 
 ## 正常 Godot 宿主调用示例
 
-以下是接合顺序示例，不是第二个 `_Process` 或已完成的 Main 修改。profile须由既有完整原生验证得来；必须核 scene4/map10、全部32原始对象、原始入口/owner身份及已批准起点。默认旧 Main / 静态模式应保留。`dialogue.Initialize` 等完整现代资源初始化沿用 #24。
+以下是Core消费顺序示例，不是第二个 `_Process`；实际Main和启动配置见宿主契约。profile须由既有完整原生验证得来；必须核 scene4/map10、全部32原始对象、原始入口/owner身份及已批准起点。默认旧 Main / 静态模式应保留。`dialogue.Initialize` 等完整现代资源初始化沿用 #24。
 
 ```csharp
 // 原生转换时：所有对象均以实际WORD填充，不修改Resource。
