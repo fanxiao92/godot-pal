@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Pal.TestFixtures;
 using Xunit;
 
 namespace Pal.Prepare.Tests;
@@ -75,10 +76,11 @@ public sealed partial class PrepareProcessTests
     public async Task Project_contained_input_is_rejected_unchanged_before_Godot_can_start()
     {
         string projectInput = output + "-input";
-        Directory.CreateDirectory(Path.GetDirectoryName(projectInput)!);
-        Directory.Move(Input, projectInput);
         try
         {
+            // TEMP and the checkout can be on different drives in CI. Author the
+            // artificial package in place instead of moving the shared temp input.
+            M1Bundle.Write(projectInput);
             var before = Snapshot(projectInput);
             // A deliberately absent executable makes even the RED run safe: no engine can
             // touch this project-contained package. The location diagnostic must win over
@@ -94,7 +96,7 @@ public sealed partial class PrepareProcessTests
             Assert.DoesNotContain(unavailableGodot, result.Text);
             Assert.DoesNotContain("Prepared native Godot scene", result.Text);
         }
-        finally { Directory.Move(projectInput, Input); }
+        finally { if (Directory.Exists(projectInput)) Directory.Delete(projectInput, true); }
     }
     [Fact]
     public async Task Missing_input_is_data_error_not_argument_error()
