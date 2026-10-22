@@ -44,7 +44,14 @@ public sealed class SceneSprite
 // Coordinates and frame parameters retain the event object's raw WORDs; signed fields stay signed.
 public sealed record SceneObject(ushort Id, ushort X, ushort Y, short State, short VanishTime,
     short Layer, ushort SpriteNumber, ushort SpriteFrames, ushort Direction, ushort CurrentFrame,
-    SceneSprite? Sprite = null);
+    SceneSprite? Sprite = null)
+{
+    // Raw event-object WORDs. Non-positional additions preserve existing construction/deconstruction.
+    public ushort TriggerMode { get; init; }
+    public ushort TriggerEntry { get; init; }
+}
+
+public sealed record SceneSearchMatch(ushort ObjectId, int SampleIndex);
 
 public sealed record StaticLeader(short X, short Y, int Direction, ushort Layer,
     int StepPhase, ushort WalkFramesWord, SceneSprite Sprite);

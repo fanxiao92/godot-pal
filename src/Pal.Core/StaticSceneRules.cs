@@ -18,6 +18,36 @@ public sealed class StaticSceneRules
             throw new ArgumentException("An object's sprite identity must match its raw sprite number.", nameof(objects));
     }
 
+    // PAL_Search: sample priority, then original object order; not distance or visibility.
+    public SceneSearchMatch? FindSearchTarget(StaticLeader leader)
+    {
+        if (leader.Direction is < 0 or > 3) throw new ArgumentOutOfRangeException(nameof(leader));
+        int x = leader.X, y = leader.Y;
+        int ox = leader.Direction is 2 or 3 ? 16 : -16;
+        int oy = leader.Direction is 0 or 3 ? 8 : -8;
+        var samples = new (int X, int Y)[13];
+        samples[0] = (x, y);
+        for (int i = 0; i < 4; i++)
+        {
+            samples[i * 3 + 1] = (Pack(x + ox), Pack(y + oy));
+            samples[i * 3 + 2] = (Pack(x), Pack(y + oy * 2));
+            samples[i * 3 + 3] = (Pack(x + ox * 2), Pack(y));
+            x += ox; y += oy;
+        }
+        for (int i = 0; i < samples.Length; i++)
+        {
+            var point = samples[i];
+            foreach (var obj in Objects)
+                if (obj.State > 0 && obj.TriggerMode < 4 && obj.TriggerMode * 6 - 4 > i &&
+                    point.X / 32 == obj.X / 32 && point.Y / 16 == obj.Y / 16 &&
+                    (point.X % 32 != 0) == (obj.X % 32 != 0))
+                    return new(obj.Id, i);
+        }
+        return null;
+    }
+
+    internal StaticSceneRules WithObjects(IEnumerable<SceneObject> objects) => new(map, objects);
+
     // Returns the complete draw order, including background and repeated cover tiles.
     // Missing required frames or more than 2048 sprite/cover entries fail, never substitute/truncate.
     public StaticScenePlan BuildPlan(StaticLeader leader) => BuildPlan(leader,
