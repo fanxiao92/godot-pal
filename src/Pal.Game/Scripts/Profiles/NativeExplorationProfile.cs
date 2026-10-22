@@ -74,7 +74,11 @@ public static class NativeExplorationProfile
             objects.Add(new(Word(obj.Id, "Id"), Word(obj.X, "X"), Word(obj.Y, "Y"),
                 Signed(obj.SState, "SState"), Signed(obj.SVanishTime, "SVanishTime"), Signed(obj.SLayer, "SLayer"),
                 Word(obj.WSpriteNum, "WSpriteNum"), Word(obj.NSpriteFrames, "NSpriteFrames"),
-                Word(obj.WDirection, "WDirection"), Word(obj.WCurrentFrameNum, "WCurrentFrameNum"), sprite));
+                Word(obj.WDirection, "WDirection"), Word(obj.WCurrentFrameNum, "WCurrentFrameNum"), sprite)
+            {
+                TriggerMode = (ushort)obj.WTriggerMode,
+                TriggerEntry = (ushort)obj.WTriggerScript
+            });
         }
         Require(required.SetEquals(sprites.Keys), "scene sprites must match complete static dependencies");
         var rules = new StaticSceneRules(new SceneMap(scene.MapId, scene.Map.RawCells.Select(c => checked((uint)c)),
@@ -198,6 +202,32 @@ public sealed class CheckedExplorationProfile
         IReadOnlyList<StartNeighbor> neighbors, Dictionary<(bool Tile, int Id, int Frame), Texture2D> textures)
     {
         Rules = rules; Leader = leader; Plan = plan; Neighbors = neighbors; this.textures = textures;
+    }
+
+    // Opt-in for dialogue hosts only. Never mutate imported textures or recover indices from RGB:
+    // duplicate palette colors make that inverse ambiguous. M2 keeps its original texture path.
+    public void SetPalette(PalSceneData scene, Color[] palette)
+    {
+        if (palette.Length != 256) throw new InvalidDataException("Scene palette requires 256 colors");
+        var frames = scene.Map.Tiles.Frames.Select(f => (Key: (true, scene.MapId, f.Index), Frame: f))
+            .Concat(scene.Sprites.SelectMany(s => s.Frames.Select(f => (Key: (false, s.SpriteId, f.Index), Frame: f)))).ToArray();
+        foreach (var (_, frame) in frames)
+            if (frame.Indices.Length != (long)frame.Width * frame.Height || frame.Alpha.Length != frame.Indices.Length)
+                throw new InvalidDataException($"Native indexed frame {frame.ResourcePath} #{frame.Index}: Indices/Alpha planes required for scene palette changes");
+        foreach (var (key, frame) in frames)
+        {
+            var rgba = new byte[frame.Indices.Length * 4];
+            for (int i = 0; i < frame.Indices.Length; i++)
+            {
+                Color color = palette[frame.Indices[i]];
+                rgba[i * 4] = (byte)Math.Clamp((int)Math.Round(color.R * 255), 0, 255);
+                rgba[i * 4 + 1] = (byte)Math.Clamp((int)Math.Round(color.G * 255), 0, 255);
+                rgba[i * 4 + 2] = (byte)Math.Clamp((int)Math.Round(color.B * 255), 0, 255);
+                rgba[i * 4 + 3] = (byte)Math.Clamp((int)Math.Round(color.A * frame.Alpha[i]), 0, 255);
+            }
+            using var image = Image.CreateFromData(frame.Width, frame.Height, false, Image.Format.Rgba8, rgba);
+            textures[key] = ImageTexture.CreateFromImage(image);
+        }
     }
 
     // Commands already contain final positions and order; this only resolves their native bitmap.

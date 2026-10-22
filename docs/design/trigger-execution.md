@@ -24,6 +24,8 @@ CLI 的 `EventArchive` 混合了文件 I/O、编解码与严格离线校验，�
 
 `Phase` 为 Ready / WaitingForDisplay / Completed。`BlocksSceneUpdates` 仅在普通显示请求未回执期间为真，不是焦点暂停。没有失焦参数或焦点冻结时钟。
 
+`Entries` 只读转发已解析完整集合的入口元数据，供正常宿主选择交互入口，不开始/预演调用、不重复加载文件。#25 的搜索请求/运行时pose/入口回写和50ms返回契约见 [npc-interaction](npc-interaction.md)；宿主仍将请求交本页的同一 `PalTriggerDialogue.Start` 预检/执行/回执链。
+
 `CurrentPosition` 是实际继续位置（显示请求挂起时通常指向下一 setDialog 或 end），不是返回保存入口。目标 0188..018B 在 Start 内直接推进到显示请求，继续位置是 018B，`ReturnEntry` 始终为 0188，caller 为调用者60。0000 完成后可 Start 同一入口再次完整执行。`caller=FFFF` 沿用此执行器实例上次成功调用的 caller（初始0）；owner 不是 caller 的替代品，宿主应在同一调度上下文复用执行器实例。
 
 每次调用重置速度为3单位/24ms。颜色和速度控制由现有显示会话处理；完成回执继承 `TextColor` 和 `DelayMilliseconds`，包括行尾无可见字形的控制。setDialog 不重置速度。结束恢复 upper、无画像、默认色4F、非RNG；速度按参考在下次调用重新设为24ms，而不是在 EndDialog 额外改写。

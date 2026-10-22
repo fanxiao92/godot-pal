@@ -38,6 +38,7 @@ public partial class RealDialogueFixture : Node
 
     public override void _Ready()
     {
+        if (OS.GetCmdlineUserArgs().Contains("--m3-dialogue-profile")) { ReadyInteraction(); return; }
         try
         {
             Require(DisplayServer.GetName() != "headless", "This fixture requires a graphical renderer.");
@@ -100,6 +101,7 @@ public partial class RealDialogueFixture : Node
 
     public override void _Process(double delta)
     {
+        if (_interactionMode) { ProcessInteraction(); return; }
         if (_finished) return;
         if (_started > 0 && Time.GetTicksMsec() - _started > 30000)
         {
@@ -114,6 +116,7 @@ public partial class RealDialogueFixture : Node
     // another render signal or a test-side simulated frame implies another business update.
     private void ObserveRenderedFrame()
     {
+        if (_interactionMode) { ObserveInteraction(); return; }
         if (_finished || _updateFrame == _lastRenderedUpdate) return;
         _lastRenderedUpdate = _updateFrame;
         try
@@ -161,12 +164,19 @@ public partial class RealDialogueFixture : Node
         catch (Exception error) { Fail(error); }
     }
 
-    private byte[] Background() => _background.ToArray();
+    private bool[] _overlayMask = [];
+    private byte[] Background()
+    {
+        if (!_interactionMode) return _background.ToArray();
+        _overlayMask = new bool[320 * 200];
+        return new byte[320 * 200];
+    }
 
     private byte[] Expected(DialogueDisplaySnapshot snapshot)
     {
         byte[] pixels = Background();
-        Paste(pixels, _portrait, 9, 4); // text.c: (48 - 78/2, 55 - 102/2).
+        if (snapshot.Phase == DialogueDisplayPhase.Completed) return pixels;
+        Paste(pixels, _portrait, Math.Max(0, 48 - _portrait.Width / 2), Math.Max(0, 55 - _portrait.Height / 2)); // text.c: (48 - 78/2, 55 - 102/2).
         DrawLine(pixels, new[] { (_title, 0x8C) }, 8, startX: 80);
         bool waiting = snapshot.Phase == DialogueDisplayPhase.WaitingForAdvance;
         int completedLines = waiting ? _lines.Length : snapshot.LineIndex;
@@ -178,7 +188,8 @@ public partial class RealDialogueFixture : Node
             Paste(pixels, _prompts[_lines[^1].PromptFrame], promptX, 26 + (_lines.Length - 1) * 18);
         }
         else
-            DrawLine(pixels, snapshot.VisibleRuns.Select(run => (run.Text, run.Color)), 26 + snapshot.LineIndex * 18);
+            DrawLine(pixels, _lines[snapshot.LineIndex].Tokens.Take(snapshot.VisibleText.EnumerateRunes().Count())
+                .Select(token => (token.Text, token.Color)), 26 + snapshot.LineIndex * 18);
         return pixels;
     }
 
@@ -202,7 +213,7 @@ public partial class RealDialogueFixture : Node
         }
     }
 
-    private static void Paste(byte[] pixels, PalDialogueIndexedImage input, int left, int top)
+    private void Paste(byte[] pixels, PalDialogueIndexedImage input, int left, int top)
     {
         for (int i = 0; i < input.PaletteIndices.Length; i++)
         {
@@ -211,9 +222,13 @@ public partial class RealDialogueFixture : Node
         }
     }
 
-    private static void Put(byte[] pixels, int x, int y, byte index)
+    private void Put(byte[] pixels, int x, int y, byte index)
     {
-        if (x is >= 0 and < 320 && y is >= 0 and < 200) pixels[y * 320 + x] = index;
+        if (x is >= 0 and < 320 && y is >= 0 and < 200)
+        {
+            pixels[y * 320 + x] = index;
+            if (_interactionMode) _overlayMask[y * 320 + x] = true;
+        }
     }
 
     private void Capture(string name, byte[] expectedIndices, DialogueDisplaySnapshot? snapshot)
@@ -230,8 +245,12 @@ public partial class RealDialogueFixture : Node
         {
             int index = expectedIndices[y * 320 + x];
             int mapped = index is >= 0xF9 and <= 0xFE ? 0xF9 + (index - 0xF9 + rotation) % 6 : index;
-            Color want = _palette[mapped];
+            bool scenePixel = _interactionMode && !_overlayMask[y * 320 + x];
+            Color want = scenePixel ? _mapBaseline!.GetPixel(x, y) : _palette[mapped];
             expected.SetPixel(x, y, want);
+            // Native index audit established that this real map/objects/leader have no
+            // opaque F9-FE pixels. The saved pose stays unchanged during these rotations;
+            // it is a restoration oracle, not an independent complete map renderer.
             Color got = actual.GetPixel(x, y);
             const float tolerance = 1.1f / 255f; // Only byte conversion rounding, not a geometric tolerance.
             if (Math.Abs(want.R - got.R) <= tolerance && Math.Abs(want.G - got.G) <= tolerance
@@ -269,7 +288,8 @@ public partial class RealDialogueFixture : Node
         File.WriteAllText(Path.Combine(_evidence, "fixture-result.json"), JsonSerializer.Serialize(new
         {
             language = _languageId, failures = _failures, completed, failure, checks = _checks,
-            scope = "Native resources + programmatic input + logical GPU readback on a synthetic indexed background; not map10 or physical keyboard/manual acceptance."
+            actualMain = _interactionMode, callsCompleted = _callsCompleted,
+            scope = _interactionMode ? "Actual Main + full events + programmatic search/input + real update receipts; map GPU readback when non-headless. Not physical keyboard/manual acceptance; map baseline is only a restoration oracle, not an independent complete map renderer." : "Native resources + programmatic input + logical GPU readback on a synthetic indexed background; not map10 or physical keyboard/manual acceptance."
         }, new JsonSerializerOptions { WriteIndented = true }));
 
     private void DisconnectRenderer()
@@ -279,7 +299,13 @@ public partial class RealDialogueFixture : Node
         _subscribed = false;
     }
 
-    public override void _ExitTree() => DisconnectRenderer();
+    public override void _ExitTree()
+    {
+        DisconnectRenderer();
+        if (_main is not null) _main.UpdateCompleted -= ObserveMainUpdate;
+        if (_interactionMode && _display is not null) _display.UpdateCompleted -= ObserveDisplayUpdate;
+        _mapBaseline?.Dispose();
+    }
 
     private static void KeyEvent(bool pressed)
     {

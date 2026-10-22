@@ -10,6 +10,8 @@ public sealed class TriggerScriptSession
     private int _address;
     private int _lastCaller;
 
+    // Metadata discovery for the host's selected interaction; does not start or preview a call.
+    public IReadOnlyList<TriggerEventEntry> Entries => _events.Entries;
     public TriggerScriptPhase Phase { get; private set; }
     public bool BlocksSceneUpdates => Phase == TriggerScriptPhase.WaitingForDisplay;
     public int Caller { get; private set; }
