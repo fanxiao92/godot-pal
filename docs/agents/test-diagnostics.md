@@ -2,7 +2,7 @@
 
 本页记录 M2 / [Issue #17](https://github.com/fanxiao92/godot-pal/issues/17) 的历史异常，防止后续把不同失败混为一谈；不是新的诊断结果。任务实时状态与后续处理以该 Issue 正文、评论及对应提交的实际证据为准。通用测试规则见根目录 [AGENTS.md](../../AGENTS.md#测试)。
 
-**当前检查点（2026-10-22）**：#18 固定源码包已批准交付并稳定发布，原完整 Windows 自动门已通过，修复/消费提交已本地合入 `04f8e91713da4f69531f9461a1ff83c78a170baf`，未推送。Windows 分层人工检查（含最新 resize/letterbox 与正常关闭的操作者反馈）及文档独立双轴终审已接受；用户已明确授权定向文档提交和 #17/#11 收尾，实际提交与 Issue 状态见关联任务。包来源与 bootstrap 见[固定包说明](../testing/gdunit-source-packages.md)，完整门/人工时线与限制见 [M2 验收记录](../milestones/m2/acceptance.md)。以下旧失败仍为失败，一次完整 PASS 不证明 hook 概率故障根治。
+**当前检查点（2026-10-22）**：M2 已完成。#18 固定源码包及本地完整自动门、Windows 分层人工检查（含 resize/letterbox 与正常关闭反馈）、收尾文档独立双轴终审均已接受；成果已合入并通过 SSH 推送 main，#11/#17/#18 及后续跨盘测试缺陷 #19 均已关闭。已验证交付提交为 `a76f83b`，[远端完整 Windows CI39738074108](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过；此前失败CI39731421949仍为失败，根因与修复见第5节。包来源与 bootstrap 见[固定包说明](../testing/gdunit-source-packages.md)，完整门/人工时线与限制见 [M2 验收记录](../milestones/m2/acceptance.md)。以下旧失败仍为失败，后续完整 PASS 不证明 hook 精确根因或概率故障根治；本轮文档同步不授权重跑。
 
 ## 当前工具链决策
 
@@ -85,5 +85,13 @@ WindowFocusSignalsFreezeUntilFreshPressThenResumeImmediatelyWithoutCatchup:1 (no
 - **原生资源负例**：故意损坏 profile 的测试会产生解析／加载 ERROR，历史 TRX 将其记录在 `ResultSummary/Output/StdOut`，并非对应 case 的 stdout。结合选中URI、负例定义、退出码与用例结果核对；不能仅凭 ERROR 字样判框架崩溃，也不能把所有 ERROR 一律豁免。
 - **Main退出清理**：候选修复 `5539426` 处理初始化早期失败时断开尚未连接的焦点信号，已有定点回归证据。它与输出捕获崩溃不是已证明的因果关系，应用范围也应核对当前分支。
 - **音频**：历史桌面启动出现 WASAPI `ERR_CANT_OPEN` / `init_output_device error.` 后回退 dummy。图形启动成功或后续某次 stderr 为空均不能证明音频已验证；按实际验收范围保留此限制。
+
+## 5. 远端 CI 跨盘夹具失败与 #19 回归
+
+**历史失败**：[CI39731421949](https://github.com/fanxiao92/godot-pal/actions/runs/39731421949) 在 `e1bc730` 首次推送后失败；Prepare51pass/1fail，失败用例为 `Project_contained_input_is_rejected_unchanged_before_Godot_can_start`。异常是 `Directory.Move(Input, projectInput)` 抛出的 `Source and destination path must have identical roots. Move will not work across volumes.`，发生在fixture准备阶段、正式RunPrepare/断言之前，不是输入被产品按预期拒绝。人工PNG/JSON由 `M1Bundle.Write` 生成，不依赖未上传的原版数据；也不同于本页hook/sessionabort或旧零字节scene解析错误。
+
+**获准修复与因果验证**：[#19](https://github.com/fanxiao92/godot-pal/issues/19#issuecomment-6335139243) 只改 `PreparePathSafetyTests.cs`，直接在工程内目标位置写入人工包，并在finally中删除本用例GUID目录；保留全部原断言、52项Prepare计数及产品路径安全政策，不改生产代码、依赖或CI配置。原代码同根PASS1、临时SUBST不同根RED1且异常一致；修复后原case不同根GREEN1，16项路径安全测试正常根/不同根各16PASS，无skip。临时映射已移除；SUBST仅模拟不同DOS路径根，不声称两物理盘，亦未启动本地Godot或重跑本地完整门。
+
+**后续独立完整门**：修复 `a76f83b` 通过SSH推送main后，新CI39738074108自动执行并成功；父核51份原件/9TRX/10主命令、Prepare52及原失败FQN明确Passed，Game170×3、发现173、三个精确负控制、原生prepare/profile/import/Main启动和最终受限进程快照均符合预期。CI原件记录人工输入C:与工程输出D:。#19已关闭并回填父票；这是新运行证据，不改写失败CI、原源码或本地RED记录，也不新增音频/GPU人工/导出/其他平台验收。
 
 本页不提供统一的“已知错误忽略列表”。每次新失败仍需核原始证据；未经确认的原因、未执行的检查和尚未验证的能力应分别标明。

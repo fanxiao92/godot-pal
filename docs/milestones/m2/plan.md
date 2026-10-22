@@ -1,6 +1,6 @@
 # M2 实现计划：Godot 场景构建与探索
 
-状态（2026-10-22）：**Windows 单领队探索功能、自动/人工验收及文档独立双轴终审已完成。** 已验收实现基线为 `04f8e91713da4f69531f9461a1ff83c78a170baf`，本地交付未推送；最终文档提交与收尾记录见 [#17](https://github.com/fanxiao92/godot-pal/issues/17) / [父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)，实际 Issue 状态以 GitHub 为准。分层证据、完整门禁计数和未验收范围见 [M2 验收记录](acceptance.md)。M0/M1 历史构建、离线预览或启动 smoke test 不替代 M2 功能证据；后续工作按 [Issue 工作流](../../agents/issue-tracker.md) 核对实时正文、评论与直接依赖，不重做已接受前置。
+状态（2026-10-22）：**M2 已完成。** Windows 单领队探索功能、自动/人工验收及收尾文档独立双轴终审已接受；成果已合入并推送 main，已验证交付提交为 `a76f83b`。[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)、[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，[远端完整 Windows headless CI](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过。分层证据、完整门禁计数和未验收范围见 [M2 验收记录](acceptance.md)。M0/M1 历史构建、离线预览或启动 smoke test 不替代 M2 功能证据；后续工作按 [Issue 工作流](../../agents/issue-tracker.md) 核对实时正文、评论与直接依赖，不重做已接受前置。
 
 本计划承接 [总体路线](../../design/development-plan.md)、[架构设计](../../design/architecture.md) 与 [M1 完整静态资源包契约](../m1/extract-scene.md)。技术基线与当前可执行命令以 [根目录 README](../../../README.md) 及工程配置为准；下文入口按已交付实现同步，原立项的 Content/M2Scene 与 JSON profile 路线已由 #13 后续批准的原生资源路线替代，不是当前可执行契约。
 
@@ -138,7 +138,7 @@ profile 是 `PalExplorationProfile : Resource`，字段使用实际 C# 导出属
 - **准备与加载**：覆盖完整包、版本错误、坏散列/长度、缺资源/非法帧、路径越界、非空目标、原包不变、无原始归档/事件/文字也可运行；测试配置与默认角色/精灵匹配。
 - **Godot 集成**：实际加载人工资源、构建场景、接入输入、处理帧、失焦/恢复和错误退出；检查测试失败确实传到进程结果，不只等待 `PAL_GAME_READY`。
 - **画面验证**：节点、坐标或排序断言不等于像素输出正确；headless 测试不当作实际图形渲染证据。用有图形渲染的检查与桌面观察核对透明、帧锚点、遮挡、像素缩放，明确各自覆盖范围。
-- 保留 solution 构建/测试、M1 CLI 回归与 Godot import/startup 检查。共享入口已交付为 `scripts/Test-M0.ps1 -GodotPath <exe>`，内部 bootstrap、串行执行并保留原始证据；独立 Game 命令/环境变量/runsettings 见 [测试说明](../../../src/Pal.Game/Tests/README.md)。已接受完整门为 Core129、CLI300pass/302total（2项准确Windows大小写歧义跳过）、Prepare52、solution/独立/repeat Game各170、发现173含三个各1fail/exit1指定原因控制，以及原生 prepare/profile/import/Main startup0，详 [验收记录](acceptance.md)。CI 路线只使用人工小型资源，不上传原版数据；远端 Game CI 未运行。
+- 保留 solution 构建/测试、M1 CLI 回归与 Godot import/startup 检查。共享入口已交付为 `scripts/Test-M0.ps1 -GodotPath <exe>`，内部 bootstrap、串行执行并保留原始证据；独立 Game 命令/环境变量/runsettings 见 [测试说明](../../../src/Pal.Game/Tests/README.md)。已接受完整门为 Core129、CLI300pass/302total（2项准确Windows大小写歧义跳过）、Prepare52、solution/独立/repeat Game各170、发现173含三个各1fail/exit1指定原因控制，以及原生 prepare/profile/import/Main startup0，详 [验收记录](acceptance.md)。本地原完整门与 #19 修复后远端完整 Windows headless CI 均已通过；CI 只使用代码生成的人工小型资源，不读取或上传原版数据。
 
 ### 真实资源 Windows 桌面验收
 
@@ -151,7 +151,7 @@ profile 是 `PalExplorationProfile : Resource`，字段使用实际 C# 导出属
 
 ## 8. 已发布的纵向任务与依赖
 
-以下为最初六张纵向任务及直接阻塞设计（均为 #11 原生子任务）。#12～#16 已完成关闭，后续另增的 #18 固定源码包基础设施是 #17 的直接前置且已关闭；#17 整体验收与父规格的最终收尾状态以对应 Issue 为准。表中交付描述保留各票原始增量职责，不代表当前仍待实现。
+以下为最初六张纵向任务及直接阻塞设计（均为 #11 原生子任务）。#12～#17 与父规格 #11 均已完成关闭，后续另增的 #18 固定源码包基础设施是 #17 的直接前置且已关闭；交付后发现的 #19 跨盘测试夹具缺陷也已修复关闭，并由新的远端完整 CI 验证通过。#19 不属于最初六张原生子任务。表中交付描述保留各票原始增量职责，不代表当前仍待实现。
 
 | 顺序 | 任务 | 直接阻塞项 | 可独立验收的交付 |
 |---|---|---|---|
@@ -160,7 +160,7 @@ profile 是 `PalExplorationProfile : Resource`，字段使用实际 C# 导出属
 | T3 | [#14 显示初始对象和领队并实现静态遮挡](https://github.com/fanxiao92/godot-pal/issues/14) | #13 | 核对领队参数与起点，独立配置驱动静态场景、锚点和两层遮挡；起点校验复用后续碰撞查询，不实现玩家移动 |
 | T4 | [#15 打通领队行走、碰撞、动画与相机](https://github.com/fanxiao92/godot-pal/issues/15) | #14 | 方向键经核心推进驱动位置/朝向/帧、地图/对象碰撞、视口和移动后遮挡，交付真实探索闭环 |
 | T5 | [#16 完善双键位、按键优先级和失焦恢复](https://github.com/fanxiao92/godot-pal/issues/16) | #15 | 在实际探索上验证 WASD/方向键、别名/repeat、回退和失焦暂停清键/恢复不补步；缩放只回归，不重复实现 |
-| T6 | [#17 完成集成回归与真实桌面验收](https://github.com/fanxiao92/godot-pal/issues/17) | #16、追加 #18（均已关闭） | 整体构建/规则/Godot/CLI 回归、人工资源 CI 路线和真实 Windows 桌面证据；自动/人工及文档独立终审已接受，最终提交与回填收尾记录见本票 |
+| T6 | [#17 完成集成回归与真实桌面验收](https://github.com/fanxiao92/godot-pal/issues/17) | #16、追加 #18（均已关闭） | 整体构建/规则/Godot/CLI 回归、人工资源 CI 路线和真实 Windows 桌面证据；已完成关闭，自动/人工及收尾文档独立终审已接受；后续 #19 修复补足远端完整 CI 通过证据 |
 
 最初顺序为 `#12 → #13 → #14 → #15 → #16 → #17`；#18 后续追加，不能再把这条初始线性图当作完整当前依赖。#12 已真正通过，#17 的直接阻塞 #16/#18 均已关闭。后续仍需核对实时依赖，不能用关闭未通过关卡来解除阻塞。
 
@@ -168,6 +168,6 @@ profile 是 `PalExplorationProfile : Resource`，字段使用实际 C# 导出属
 
 ## 9. 当前进度与下一步
 
-- 已完成：#12 框架关卡、#13 原生资源准备/地图、#14 角色参数/起点/静态对象遮挡、#15 行走闭环、#16 双键位/焦点，以及 #18 固定源码包交付和本地合入；原完整 Windows 自动门与实际操作者的分层桌面检查均已接受，详 [验收记录](acceptance.md)。
-- 收尾依据：文档独立 Standards / Spec-evidence 终审均通过；用户已明确允许定向提交本九文档（包含保留的既有改动）并按 #17 → #11 回填/关闭。最终提交及服务器状态以关联 Issue 记录为准；这些文档独立于上述已验收实现基线，不改变生产/测试实现。
-- 后续：不重跑已接受门禁、不重复准备真实资源；M3 事件/对话仍需另行规划与批准。远端 Game CI、音频、导出包和其他平台未验收，推送亦需单独授权。
+- 已完成：#12～#17 全部切片与整体验收、父规格 #11、#18 固定源码包交付及 #19 跨盘测试修复均已关闭；本地完整自动门、实际操作者分层桌面检查和修复后的远端完整 Windows headless CI 均已通过，详 [验收记录](acceptance.md)。
+- 主干交付：收尾文档随 `e1bc730` 提交，后续单测试文件修复 `a76f83b` 已合入并通过 SSH 推送 main。10 个附加 worktree 已安全移除，主目录数据/资源保留，19 份历史 TRX 与 837 份资源先行工程外归档；分支引用保留供回溯。
+- 后续：M3 尚未启动，事件/对话切片仍需另行规划与批准；音频、导出包和其他平台未验收。后续修改、运行和推送按新任务授权执行，不因 M2 完成自动重跑门禁或准备真实资源。

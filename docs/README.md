@@ -22,8 +22,8 @@
 - [M1 场景资源提取](milestones/m1/plan.md)：只读检查、Windows 地图/精灵/场景转换和完整包已完成本地验收及独立双轴审查；只包含静态场景资源，不含事件、对话、语言包或字库。
   - [完整静态资源包 v1](milestones/m1/extract-scene.md)：最终 CLI、来源/参数/产物散列与相对引用契约、实际验证及未执行边界。
   - [地图切片契约](milestones/m1/export-map.md)：原始字段、PNG/索引/alpha 和瓦片预览约定。
-- [M2 Godot 场景构建与探索](milestones/m2/plan.md)：Windows 单领队、静态对象、原生资源/独立 `.tres` profile、320×200 整数缩放、键盘与焦点处理已实现，自动/人工验收及文档独立终审已完成；最终文档提交与收尾记录见 #17 / 父规格 #11。计划提供真实入口/配置与任务表。
-  - [M2 分层验收记录](milestones/m2/acceptance.md)：规则、headless、GPU、操作者反馈的证据矩阵及未验收范围；追溯 #11/#17 时阅读。
+- [M2 Godot 场景构建与探索](milestones/m2/plan.md)：Windows 单领队、静态对象、原生资源/独立 `.tres` profile、320×200 整数缩放、键盘与焦点处理已实现，自动/人工验收及收尾文档独立终审已完成，成果已合入并推送 main，远端完整 Windows headless CI 已通过；#11/#17/#19 均已关闭。计划提供真实入口/配置与任务表。
+  - [M2 分层验收记录](milestones/m2/acceptance.md)：本地规则/headless、GPU、操作者反馈、主干交付及 #19 修复后远端 CI 的分层证据和未验收范围；追溯 #11/#17/#19 时阅读。
   - [固定 GdUnit 源码包](testing/gdunit-source-packages.md)：#18 包身份、发布与 bootstrap；直接还原/构建或排查包来源时阅读。
 - M3 事件与对话：计划尚未编写，阶段范围见总体路线。
 

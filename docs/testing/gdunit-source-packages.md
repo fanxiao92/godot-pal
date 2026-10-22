@@ -7,6 +7,23 @@ ranges for `gdUnit4.api` **5.1.0-rc6.pal.a5f20fb8.1** and
 and Core dependencies remain unchanged. The packages' GodotSharp 4.7.0 minimum
 does not authorize downgrading the project's direct SDK baseline.
 
+## Current delivery status (2026-10-22)
+
+The consumer and focus fixes were integrated at `04f8e91`; the accepted M2
+closeout documents were committed at `e1bc730`. M2 is now complete: #11/#17/#18
+and the subsequent cross-drive test-fixture bug #19 are closed, and the accepted
+delivery commit `a76f83b` is published on `main` via SSH. The separate full
+[Windows Game CI run 39738074108](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108)
+passed using synthetic resources and the same pinned packages. The first remote
+CI failed during fixture setup; that failure remains preserved, not reclassified.
+See the [M2 layered acceptance record](../milestones/m2/acceptance.md) for the
+local gate, actual operator acceptance, main delivery, #19 regression and remote
+CI evidence. Audio, exports and other platforms remain unvalidated; passing gates
+do not prove the exact historical stdout-hook cause or zero recurrence risk.
+
+The publication barrier below records the earlier package-release checkpoint,
+not today's integration or M2 status. No package identity changed after release.
+
 ## Immutable identity and publication barrier
 
 `scripts/gdunit-packages.lock.json` is the checked-in consumption lock: source,
@@ -55,12 +72,14 @@ The archive's original bytes, mtime and creation-time history remained protected
 with access-time effects of hash reads recorded honestly. No Prepare error checks,
 Game assertions, timeouts, capture behavior, repeat rounds or controls were relaxed.
 
-This is one observed complete automatic pass, not proof of zero-probability stdout
-hook failure, remote game CI, manual resize/GPU/audio/export/other-platform acceptance,
-primary-branch integration or whole-M2 completion. Package graphs, evidence-cache
-hashes and copied DLLs establish file-level identity; in-process loading paths/hashes
-were not directly probed. The candidate remains uncommitted and unmerged at this
-publication checkpoint; the original user documentation is preserved.
+This local gate alone did not prove zero-probability stdout-hook failure, remote
+Game CI, manual resize/GPU/audio/export/other-platform acceptance, primary-branch
+integration or whole-M2 completion. Package graphs, evidence-cache hashes and
+copied DLLs establish file-level identity; in-process loading paths/hashes were
+not directly probed. At that publication checkpoint the candidate was still
+uncommitted and unmerged, with the original user documentation preserved.
+Subsequent integration and acceptance are recorded above, not inferred from the
+pack-only Actions run or retroactively assigned to this local gate.
 
 ## Bootstrap before restore
 

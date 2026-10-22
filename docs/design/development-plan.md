@@ -24,16 +24,19 @@
 
 ### M2 · Godot 场景构建与探索
 
-状态：**Windows 探索功能、自动/人工验收与文档独立双轴终审已完成（2026-10-22）。** 最终文档提交与收尾记录见 [#17](https://github.com/fanxiao92/godot-pal/issues/17) / 父规格 [#11](https://github.com/fanxiao92/godot-pal/issues/11)；本地交付未推送。实际入口、独立配置及任务状态见 [M2 计划](../milestones/m2/plan.md)，分层证据与限制见 [验收记录](../milestones/m2/acceptance.md)。
+状态：**已完成（2026-10-22）。** Windows 探索功能、自动/人工验收及收尾文档独立双轴终审已接受，成果已合入并推送 main；[#17](https://github.com/fanxiao92/godot-pal/issues/17)、父规格 [#11](https://github.com/fanxiao92/godot-pal/issues/11) 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，远端完整 Windows headless CI 已通过。实际入口、独立配置及任务状态见 [M2 计划](../milestones/m2/plan.md)，分层证据与限制见 [验收记录](../milestones/m2/acceptance.md)。
 
 - 显式校验 M1 PNG/JSON 输入包并导入为 Godot 原生 Resource/PackedScene/Texture2D；独立 `.tres` 探索 profile 另行配置起点及经离线核对的默认领队行走参数，Prepare 不 author profile，运行时不读取 M1 JSON/MKF、不修改既有 M1 包。
 - 直接进入场景 2 / 地图 12，显示地图、对象与单领队，核对瓦片、遮挡和领队行走帧；多队员跟随不在本轮范围。
 - 场景系统按参考实现离散行走、转向、地图与对象碰撞、相机；320×200 原始比例整数缩放，方向键/WASD，失焦暂停清键，不加视觉插值。
 - 场景对象保持原始初始数据，不执行进入、交互或自动脚本，不自行循环对象帧或推进计时状态；动态行为留到 M3。
-- #12 有界 GdUnit4Net 隔离兼容性关卡已通过并接入，#18 后续批准的固定源码包已交付；Core 继续原 xUnit 基线。M2 验收 Windows 开发运行，不包含导出包或其他平台验收；远端 Game CI 未执行。
+- #12 有界 GdUnit4Net 隔离兼容性关卡已通过并接入，#18 后续批准的固定源码包已交付；Core 继续原 xUnit 基线。M2 验收 Windows 开发运行，不包含导出包或其他平台验收；远端 Game headless CI 已随 #19 修复验证通过，使用人工资源而非原版数据。
 - **目标:打通“资源转换 → Godot 加载 → 场景显示与行走”,不要求剧情或对话可运行。** 初始场景构建不等于原版某个剧情时刻的完整还原。
 
 ### M3 · 事件与对话垂直切片
+
+状态：**尚未启动**。以下是路线目标，具体切片仍需另行规划与批准，M2 完成不自动授权 M3 实施。
+
 - 打通最小真实交互的“事件转换 → 触发 → 执行 → 表现 → 返回探索”,遵循 [事件契约](events-schema.md) 与忠实转写决策。
 - 实现切片需要的 trigger/auto 语义、入口和状态迁移、条件/跳转、等待及继续;按实际需要注册具名命令,未支持操作保留为 `raw` 并明确拒绝执行。
 - 接入对话显示、语言包与所需字库,默认简体中文,按参考保留中英文消息映射及各自显示控制。它们不是 M1/M2 的前置条件。

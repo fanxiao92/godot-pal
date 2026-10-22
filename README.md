@@ -14,7 +14,7 @@
 
 **M0 工程骨架与工具链、M1 静态场景资源提取均已验收通过。** M0 的核心/游戏/CLI/测试链路、本地干净检出与真实 Windows CI 均通过，桌面显示和正常关闭也已由用户确认。M1 的本地构建、测试、真实资源核对及独立 Standards/Spec 审查已通过；其结果不替代 M2 验收。
 
-**M2 Windows 单领队探索切片的功能、自动/人工验收与文档独立双轴终审均已完成（2026-10-22）。** 已验收实现基线为 `04f8e91713da4f69531f9461a1ff83c78a170baf`，本地交付未推送；最终文档提交与收尾记录以 [#17](https://github.com/fanxiao92/godot-pal/issues/17) / [父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11) 为准。场景 2 / 地图 12 的静态对象、单领队离散行走/碰撞/遮挡、320×200 整数缩放、方向键/WASD 与失焦恢复已交付。入口与独立原生配置见 [M2 计划](docs/milestones/m2/plan.md)，分层证据与限制见 [M2 验收记录](docs/milestones/m2/acceptance.md)。其余表现层/外壳层能力按后续阶段设计。[事件 JSON 契约](docs/design/events-schema.md) 已确定原版忠实低层转写策略、v1 文件结构与基础命令,全量 opcode 映射及工具/运行时尚未实现。独立 CLI 已提供只读 MKF 检查、Windows YJ2/图像解码、地图/精灵导出及带 v1 来源清单的完整静态场景包。
+**M2 Windows 单领队探索里程碑已完成（2026-10-22）。** 功能、自动/人工验收及收尾文档独立双轴终审均已接受；成果已合入并通过 SSH 推送到 `main`，已验证交付提交为 `a76f83bf08c421e83892cc9515cbdd4c032014ec`。[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)、[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 和后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，[远端完整 Windows CI](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过。场景 2 / 地图 12 的静态对象、单领队离散行走/碰撞/遮挡、320×200 整数缩放、方向键/WASD 与失焦恢复已交付。入口与独立原生配置见 [M2 计划](docs/milestones/m2/plan.md)，分层证据与限制见 [M2 验收记录](docs/milestones/m2/acceptance.md)。其余表现层/外壳层能力按后续阶段设计。[事件 JSON 契约](docs/design/events-schema.md) 已确定原版忠实低层转写策略、v1 文件结构与基础命令,全量 opcode 映射及工具/运行时尚未实现。独立 CLI 已提供只读 MKF 检查、Windows YJ2/图像解码、地图/精灵导出及带 v1 来源清单的完整静态场景包。
 
 用户数据已放入 `data/raw/sdlpal/`,初步核对符合 Windows 数据分支。[M1 计划](docs/milestones/m1/plan.md) 范围已确认：只提取地图、瓦片、精灵、调色板与场景对象初始数据。[实施任务 #6～#10](https://github.com/fanxiao92/godot-pal/issues/6) 已完成本地验收和独立双轴审查，结果与收尾说明见对应 Issue。场景 2 的两次完整导出 416 文件字节一致，原始数据散列/长度/mtime 不变；M1 当轮 Debug/Release 构建测试与 Godot headless 启动通过，当轮未重跑 clean-cache/桌面/远程 CI 验收。M2 负责 Godot 场景构建与探索；事件、对话、语言包和字库独立留到 M3，不阻塞场景构建。后续阶段见 [总体路线](docs/design/development-plan.md)。
 
@@ -96,7 +96,7 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
   -GodotPath "C:/path/to/godot-mono.console.exe"
 ```
 
-该入口使用全新 NuGet 包/HTTP 缓存，执行还原、构建、Core/CLI/Prepare/Game 测试、发现/重复/指定失败控制和人工资源的 headless 导入/启动；日志路径会打印到终端，不清空既有 `.godot` 缓存。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；当前 Windows 分层结果见 [M2 验收记录](docs/milestones/m2/acceptance.md)，远端 Game CI 未执行。
+该入口使用全新 NuGet 包/HTTP 缓存，执行还原、构建、Core/CLI/Prepare/Game 测试、发现/重复/指定失败控制和人工资源的 headless 导入/启动；日志路径会打印到终端，不清空既有 `.godot` 缓存。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；当前本地 Windows 分层结果及已通过的远端人工资源 headless CI 见 [M2 验收记录](docs/milestones/m2/acceptance.md)。
 
 技术版本记录在此，检查由测试和 CI 执行，任务结果记录在 GitHub Issue 中；不要求每次检查另写一份报告。M0 的详细历史记录保留在 [归档](docs/archive/m0/acceptance.md)，仅在排障或追溯时查阅。
 
@@ -124,6 +124,6 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
 
 > 请先读取 `AGENTS.md`，遵循其中的工作流；读取 `GLOSSARY.md`、`docs/design/` 下全部 Markdown 文件、`reference/README.md`、相关 ADR 以及 `docs/milestones/m2/plan.md`，核对当前里程碑和 GitHub 状态，再确认下一项已批准任务。
 >
-> M0/M1 已完成；M2 Windows 探索功能、自动/人工验收与文档独立终审已完成，最终提交与 #11/#17 收尾记录以实时状态为准。读取父规格、相应任务正文/评论及直接依赖，不重做已关闭的 #12～#16/#18，不把离线预览当作桌面验收。M2 运行时使用显式准备的 Godot 原生资源与独立 `.tres` profile，不读取 M1 JSON/MKF，不接事件、对话、语言包或字库。先确认剩余已批准任务；只有另获批准才规划 M3 的真实事件/对话切片，不隐式开始实现。提交、推送和 Issue 关闭按明确授权执行。
+> M0/M1/M2 已完成；M2 已合入并推送 main，远端完整 Windows CI 已通过，#11/#17/#19 均已关闭。读取父规格、相应任务正文/评论及直接依赖核对实时状态，不重做已关闭的 #12～#19，不把离线预览当作桌面验收。M2 运行时使用显式准备的 Godot 原生资源与独立 `.tres` profile，不读取 M1 JSON/MKF，不接事件、对话、语言包或字库。先确认剩余已批准任务；只有另获批准才规划 M3 的真实事件/对话切片，不隐式开始实现。提交、推送和 Issue 关闭按明确授权执行。
 
 `reference/README.md` 是参考源码导航，不要求通读整个 SDLPal；实现具体任务时再读取相关源码。`docs/archive/` 仅在排障、环境升级或追溯历史结论时查阅。
