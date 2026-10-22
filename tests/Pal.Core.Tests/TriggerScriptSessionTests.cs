@@ -190,13 +190,17 @@ public class TriggerScriptSessionTests
     }
 
     [Fact]
-    public void Title_only_content_has_no_player_wait_and_disabled_entry_does_not_block_scene_updates()
+    public void Title_only_content_exposes_completed_restore_request_without_a_player_wait()
     {
         var fixture = new EventFixture();
         var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 62, [DialogueMessagePart.FromText("NPC:")])]);
         var script = new TriggerScriptSession(fixture.Load(), language);
         Assert.False(script.BlocksSceneUpdates);
         script.Start("shared", "npc", 60);
+        var request = Assert.IsType<TriggerDialogueRequest>(script.PendingDisplay);
+        Assert.Equal(DialogueDisplayPhase.Completed, request.Display.Current.Phase);
+        Assert.True(request.Display.Current.ClearDisplay);
+        Assert.True(script.AcknowledgeDisplay(request.Id));
         Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
         Assert.False(script.BlocksSceneUpdates);
         Assert.Null(script.PendingDisplay);
@@ -382,16 +386,68 @@ public class TriggerScriptSessionTests
     }
 
     [Fact]
-    public void CLEAR_without_body_lines_is_not_a_player_or_display_wait_boundary()
+    public void CLEAR_without_body_lines_exposes_completed_restore_request_without_a_player_wait()
     {
         var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 62, [
             DialogueMessagePart.Clear, DialogueMessagePart.FromText("NPC:"), DialogueMessagePart.Clear])]);
         var script = new TriggerScriptSession(new EventFixture().Load(), language);
         script.Start("shared", "npc", 60);
+        var request = Assert.IsType<TriggerDialogueRequest>(script.PendingDisplay);
+        Assert.Equal(DialogueDisplayPhase.Completed, request.Display.Current.Phase);
+        Assert.True(request.Display.Current.ClearDisplay);
+        Assert.True(script.AcknowledgeDisplay(request.Id));
+        Assert.False(script.AcknowledgeDisplay(request.Id));
         Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
         Assert.Null(script.PendingDisplay);
         Assert.False(script.BlocksSceneUpdates);
         Assert.Equal(1, script.ReturnEntry);
+    }
+
+    [Fact]
+    public void Multiple_completed_restore_requests_drain_to_real_body_wait_without_forwarding_input()
+    {
+        var fixture = TwoDisplays();
+        var end = fixture.Commands[5]!.DeepClone();
+        fixture.Commands[5] = fixture.Commands[3]!.DeepClone();
+        fixture.Commands[5]!["label"] = "L0005";
+        fixture.Commands[5]!["source"]!["index"] = 5;
+        fixture.Commands[5]!["next"] = "L0006";
+        var message = fixture.Commands[4]!.DeepClone();
+        message["label"] = "L0006";
+        message["source"]!["index"] = 6;
+        message["messageId"] = 91;
+        message["next"] = "L0007";
+        fixture.Commands.Add(message);
+        end["label"] = "L0007";
+        end["source"]!["index"] = 7;
+        fixture.Commands.Add(end);
+        fixture.Index["source"]!["instructionCount"] = 8;
+        fixture.Index["source"]!["byteLength"] = 64;
+        var language = new DialogueLanguagePackage("en", [
+            new DialogueMessageBlock(61, 61, [DialogueMessagePart.Clear]),
+            new DialogueMessageBlock(90, 90, [DialogueMessagePart.FromText("NPC:")]),
+            new DialogueMessageBlock(91, 91, [DialogueMessagePart.FromText("A")])]);
+        var script = new TriggerScriptSession(fixture.Load(), language);
+        script.Start("shared", "npc", 60);
+        var first = Assert.IsType<TriggerDialogueRequest>(script.PendingDisplay);
+        Assert.Equal(DialogueDisplayPhase.Completed, first.Display.Current.Phase);
+        Assert.True(script.AcknowledgeDisplay(first.Id));
+        var second = Assert.IsType<TriggerDialogueRequest>(script.PendingDisplay);
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Equal(DialogueDisplayPhase.Completed, second.Display.Current.Phase);
+        Assert.False(script.AcknowledgeDisplay(first.Id));
+        Assert.True(script.AcknowledgeDisplay(second.Id));
+        var body = Assert.IsType<TriggerDialogueRequest>(script.PendingDisplay);
+        Assert.Equal(DialogueDisplayPhase.Typing, body.Display.Current.Phase);
+        Assert.Empty(body.Display.Current.VisibleText);
+        Assert.False(script.AcknowledgeDisplay(first.Id));
+        Assert.False(script.AcknowledgeDisplay(second.Id));
+        Assert.False(script.AcknowledgeDisplay(body.Id));
+        body.Display.Update(24, false, false);
+        Assert.Equal(DialogueDisplayPhase.WaitingForAdvance, body.Display.Current.Phase);
+        body.Display.Update(0, true, false);
+        Assert.True(script.AcknowledgeDisplay(body.Id));
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
     }
 
     internal static EventFixture TwoDisplays()

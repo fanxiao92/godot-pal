@@ -128,7 +128,7 @@ public sealed class TriggerScriptSession
                 case "showDialog":
                     var content = ReadDisplay(ref _address);
                     var display = new DialogueDisplaySession(content.Block, Context.Color, 0, Context.DelayMilliseconds);
-                    if (display.Current.Phase == DialogueDisplayPhase.Completed)
+                    if (display.Current.Phase == DialogueDisplayPhase.Completed && !display.Current.ClearDisplay)
                     {
                         Context = Context with { Color = display.TextColor, DelayMilliseconds = display.DelayMilliseconds };
                         break;

@@ -43,10 +43,10 @@ public sealed class DialogueDisplaySession
         _currentDelayMilliseconds = initialDelayMilliseconds;
         _block = block;
         _currentTextColor = commandColor == 0 ? inheritedColor : commandColor;
-        SetNextLine();
+        bool clearDisplay = SetNextLine();
         _current = _partIndex >= _block.Parts.Count
             ? Snapshot(DialogueDisplayPhase.Completed, clearDisplay: true)
-            : Snapshot(DialogueDisplayPhase.Typing);
+            : Snapshot(DialogueDisplayPhase.Typing, clearDisplay);
     }
 
     public void Update(uint elapsedMilliseconds, bool advancePressed, bool accelerateHeld)
@@ -150,14 +150,15 @@ public sealed class DialogueDisplaySession
         else _current = Snapshot(DialogueDisplayPhase.Typing);
     }
 
-    private void SetNextLine()
+    private bool SetNextLine()
     {
+        bool clearDisplay = false;
         // PAL_ShowDialogText treats a colon-terminated message before the first body line
         // as an immediate title. It changes neither body color/delay nor the body line count.
         while (_lineIndex == 0 && _partIndex < _block.Parts.Count)
         {
-            // PAL_ClearDialog(TRUE) has no key wait when no body line has been shown.
-            if (_block.Parts[_partIndex].IsClear) { _partIndex++; continue; }
+            // No body means no key wait, but script.c still restores the background.
+            if (_block.Parts[_partIndex].IsClear) { clearDisplay = true; _partIndex++; continue; }
             if (_block.Parts[_partIndex].Text is not { Length: > 0 } text || text[^1] is not (':' or '\uFF1A' or '\u2236')) break;
             var title = new System.Text.StringBuilder();
             // PAL_UnescapeText returns the original string unless a backslash is present.
@@ -181,6 +182,7 @@ public sealed class DialogueDisplaySession
             _promptFrame = line.PromptFrame;
         }
         else _promptFrame = 0;
+        return clearDisplay;
     }
 
     private void AdvancePastWait()
