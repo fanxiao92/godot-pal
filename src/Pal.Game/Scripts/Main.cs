@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Linq;
 using Godot;
 using Pal.Core;
 using Pal.Game.Map;
@@ -24,13 +26,14 @@ public partial class Main : Node2D
         try
         {
             GetWindow().MinSize = new Vector2I(320, 200);
-            var (root, profile) = NativeSceneLoader.Arguments(OS.GetCmdlineUserArgs());
+            var (root, profile, staticAcceptance) = NativeSceneLoader.Arguments(OS.GetCmdlineUserArgs());
             scenePath = root + "/Scenes/Scene.tscn";
             profilePath = profile;
             var map = NativeSceneLoader.Load(root);
             try
             {
                 var checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
+                if (staticAcceptance) ValidateStaticAcceptance(map.Data, checkedProfile);
                 input = new ExplorationInput(new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader));
                 map.InitializeScene(input.Current.Plan, checkedProfile.TextureFor);
             }
@@ -42,6 +45,7 @@ public partial class Main : Node2D
             mapScene = map;
             AddChild(map);
             GD.Print($"PAL_MAP_LOADED:{root}/Scenes/Scene.tscn");
+            if (staticAcceptance) GD.Print("PAL_M3_STATIC_ACCEPTANCE:scene4/map10; events are not scheduled");
             GD.Print($"PAL_GAME_READY:{Pal.Core.Startup.Status}");
         }
         catch (Exception e)
@@ -50,6 +54,19 @@ public partial class Main : Node2D
             SetProcess(false);
             GetTree().Quit(1);
         }
+    }
+
+    private static void ValidateStaticAcceptance(PalSceneData scene, CheckedExplorationProfile profile)
+    {
+        if (scene.SceneId != 4 || scene.MapId != 10 || scene.Objects.Count != 32)
+            throw new InvalidDataException("M3 static acceptance requires scene 4 / map 10 and all 32 original objects");
+        var owner = scene.Objects.SingleOrDefault(item => item.Id == 60);
+        if (owner == null || owner.X != 1216 || owner.Y != 1344 || owner.WSpriteNum != 207
+            || owner.SState != 2 || owner.SVanishTime != 0)
+            throw new InvalidDataException("M3 static acceptance owner 60 identity/initial state mismatch");
+        if (profile.Leader.X != 1232 || profile.Leader.Y != 1336 || profile.Leader.Direction != 0
+            || profile.Leader.Layer != 0 || profile.Leader.StepPhase != 0)
+            throw new InvalidDataException("M3 static acceptance profile must use start (1232,1336), South0, layer0/phase0, role0");
     }
 
     public override void _Input(InputEvent @event)

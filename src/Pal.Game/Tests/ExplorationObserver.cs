@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Pal.Game.Profiles;
+using Pal.Game.Map;
 using System.Threading.Tasks;
 using Godot;
 using Pal.Core;
@@ -31,7 +32,8 @@ public partial class ExplorationObserver : Node
             Focus(true); // Public Window signal injection, not an assertion about OS focus.
             Trace("start");
             string scenario = OS.GetEnvironment("PAL_EXPLORATION_CASE");
-            if (scenario == "scene2-input-priority") await Scene2InputPriority();
+            if (scenario == "static-scene4-input") await StaticScene4Input();
+            else if (scenario == "scene2-input-priority") await Scene2InputPriority();
             else if (scenario == "integration-scene2") await IntegrationScene2();
             else if (scenario == "default-scene2") await DefaultScene2();
             else if (scenario.StartsWith("alias-", StringComparison.Ordinal)) await Aliases(scenario[6..]);
@@ -61,6 +63,38 @@ public partial class ExplorationObserver : Node
         {
             foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, false);
         }
+    }
+
+    // Synthetic scene4 route exercises the actual Main input callback and owner60 collision.
+    private async Task StaticScene4Input()
+    {
+        var data = main.GetChildren().OfType<PalMapScene>().Single().Data;
+        Check(data.SceneId == 4 && data.MapId == 10 && data.Objects.Count == 32, "scene4/map10 complete native fixture");
+        var owner = data.Objects.Single(o => o.Id == 60);
+        Check((owner.X, owner.Y, owner.WSpriteNum, owner.SState, owner.SVanishTime) == (1216, 1344, 207, 2, 0),
+            "owner60 retains original identity and initial state");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y, main.Exploration.Plan.CameraX,
+            main.Exploration.Plan.CameraY) == (1232, 1336, 1072, 1224), "independent start and reference camera anchor");
+        Bindings("south", 0);
+        var before = main.Exploration;
+        KeyEvent(Key.Down, true);
+        await NextFrame();
+        await Until(() => !ReferenceEquals(before, main.Exploration), "blocked owner collision update");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (1232, 1336),
+            "owner60 collision blocks South0 neighbor");
+        KeyEvent(Key.Down, false);
+        await NextFrame();
+        Bindings("east", 3);
+        KeyEvent(Key.Right, true);
+        await Until(() => (main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (1248, 1344),
+            "legal east neighbor movement");
+        KeyEvent(Key.Right, false);
+        await NextFrame();
+        await Until(() => !main.Exploration!.IsWalking, "released static-scene movement stands");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (1248, 1344),
+            "legal neighbor retained after release");
+        Check(data.Objects.Count == 32 && data.Objects.Single(o => o.Id == 60) == owner,
+            "all objects remain present and owner60 record is unchanged");
     }
 
     // Shipped scene2/default profile only: real input, Window signals and Main process deadlines.

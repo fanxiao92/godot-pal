@@ -52,6 +52,34 @@ The preparation-only `tests/Fixtures/VerifyNativeScene.gd` checks native PackedS
 Artificial GPU literal pixels and static-frame checks are opt-in through `PAL_STATIC_GPU_EVIDENCE` in the existing observer; they are not part of headless CI. Real scene2/profile and non-headless GPU evidence are local, ignored and never uploaded. Neither is physical OS presentation, operator interaction or remote CI acceptance. These fixtures are exploration test entries, not original spawn/save/story data; no movement/input/scripts are authorized by static rendering.
 
 
+## M3 scene 4 static acceptance mode
+
+The normal M2 route remains the default (`res://Assets/Scenes/Scene.tscn` and the default exploration profile). A separately prepared scene 4 package can be selected explicitly, without startup extraction or fallback:
+
+```powershell
+& $env:GODOT_BIN --path src/Pal.Game -- --m3-static-resources res://Assets/StaticScene4 `
+  --m3-static-profile res://Assets/StaticScene4/Profiles/Scene4Static.tres
+```
+
+Both `--m3-static-resources` and `--m3-static-profile` are mandatory, must be supplied together, and cannot be mixed with M2 flags. Main validates scene 4/map 10, all 32 source objects, owner 60 at (1216,1344) with sprite 207/state 2/vanish 0, and the independent profile start (1232,1336), South0/layer0/phase0/role0. Profile loading retains the same source identity, texture, collision, neighbor and role0 walk-frame checks as M2. Startup emits `PAL_M3_STATIC_ACCEPTANCE`; it schedules no scene event. The selected origin is a test start, not the original story spawn. Owner 57 has a hotspot covering this location in ordinary scene behavior, so this mode is not scene 4 free exploration; it does not enable trigger search or dialogue. Camera placement continues to be derived by the existing scene plan from its (160,112) reference anchor.
+
+Use `extract-scene --scene 4 --palette <explicit id> --lighting <day|night>` into a new, unique M1 output directory outside every repository, then `Prepare-GameScene.ps1` into the new ignored `src/Pal.Game/Assets/StaticScene4` directory. Do not reuse an existing output. For example, substitute a freshly generated GUID path for `<unique-temp>` and choose the palette explicitly (it is never inferred from scene ID):
+
+```powershell
+$godot = 'C:/Users/xiaofan/scoop/apps/godot-mono/4.7.2/godot-mono.console.exe'
+$bundle = Join-Path ([IO.Path]::GetTempPath()) ('pal-scene4-' + [guid]::NewGuid().ToString('N'))
+$paletteId = 0 # Explicit local selection; choose deliberately, never infer from scene ID.
+dotnet run --project tools/Pal.Extract --no-build -- extract-scene `
+  --input C:/Users/xiaofan/Repos/godot-pal/data/raw/sdlpal --output $bundle `
+  --scene 4 --palette $paletteId --lighting day
+./scripts/Prepare-GameScene.ps1 -InputPath $bundle `
+  -OutputPath src/Pal.Game/Assets/StaticScene4 -GodotPath $godot
+./scripts/Write-StaticScene4Profile.ps1 `
+  -DataMkf C:/Users/xiaofan/Repos/godot-pal/data/raw/sdlpal/DATA.MKF -GodotPath $godot
+```
+
+The profile author step is the supported local authoring procedure. It reads role0 `rgwWalkFrames` as the raw WORD at byte offset 768 of DATA.MKF chunk 3 (the existing M1 source layout requires the 900-byte PLAYERROLES record), computes DATA.MKF's full SHA-256, and refuses to proceed unless it matches the prepared `data.mkf` source identity. It verifies prepared scene/map IDs, 32 objects, owner60 identity/state, writes only the documented profile URI without overwrite, then reloads the saved profile and checks bundle/source provenance and the independent start. The raw archive is opened read-only; do not manually substitute a walk-frame value. Both generated package and profile remain local/ignored. Review the extraction manifest, generated profile metadata, and their identities before launching the M3 command above. CI uses artificial resources and does not depend on this local data.
+
 ## Desktop focus and exploration behavior
 
 SDLPal's application-background events set `g_bRenderPaused`, which gates video presentation; its

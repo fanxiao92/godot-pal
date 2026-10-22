@@ -9,11 +9,12 @@ namespace Pal.Game.Map;
 
 internal static class NativeSceneLoader
 {
-    internal static (string Root, string Profile) Arguments(string[] arguments)
+    internal static (string Root, string Profile, bool StaticAcceptance) Arguments(string[] arguments)
     {
-        const string usage = "expected unique --m2-resources <Assets URI> and --m2-profile <project URI> arguments";
+        const string usage = "expected unique --m2-resources/--m2-profile or --m3-static-resources/--m3-static-profile arguments";
         string root = "res://Assets", profile = NativeExplorationProfile.DefaultUri;
         bool hasRoot = false, hasProfile = false;
+        string? selectedMode = null;
         for (int i = 0; i < arguments.Length; i += 2)
         {
             string flag = arguments[i];
@@ -21,15 +22,24 @@ internal static class NativeSceneLoader
                 throw new InvalidDataException(usage + ": missing value for " + flag);
             switch (flag)
             {
-                case "--m2-resources" when !hasRoot: root = arguments[i + 1]; hasRoot = true; break;
-                case "--m2-profile" when !hasProfile: profile = arguments[i + 1]; hasProfile = true; break;
-                default: throw new InvalidDataException(usage + ": duplicate or unknown " + flag);
+                case "--m2-resources" when !hasRoot && (selectedMode == null || selectedMode == "m2"):
+                    root = arguments[i + 1]; hasRoot = true; selectedMode = "m2"; break;
+                case "--m2-profile" when !hasProfile && (selectedMode == null || selectedMode == "m2"):
+                    profile = arguments[i + 1]; hasProfile = true; selectedMode = "m2"; break;
+                case "--m3-static-resources" when !hasRoot && (selectedMode == null || selectedMode == "m3-static"):
+                    root = arguments[i + 1]; hasRoot = true; selectedMode = "m3-static"; break;
+                case "--m3-static-profile" when !hasProfile && (selectedMode == null || selectedMode == "m3-static"):
+                    profile = arguments[i + 1]; hasProfile = true; selectedMode = "m3-static"; break;
+                default: throw new InvalidDataException(usage + ": duplicate, mixed, or unknown " + flag);
             }
         }
         ValidateRoot(root);
         try { NativeExplorationProfile.ValidateUri(profile); }
         catch (InvalidDataException e) { throw new InvalidDataException("--m2-profile " + profile + ": " + e.Message, e); }
-        return (root, profile);
+        bool staticAcceptance = selectedMode == "m3-static";
+        if (staticAcceptance && (!hasRoot || !hasProfile))
+            throw new InvalidDataException("M3 static acceptance requires both --m3-static-resources and --m3-static-profile");
+        return (root, profile, staticAcceptance);
     }
 
     private static void ValidateRoot(string root)

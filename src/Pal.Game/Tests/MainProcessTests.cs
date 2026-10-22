@@ -1,9 +1,11 @@
 using System;
+using System.IO;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using GdUnit4;
 using Godot;
+using Pal.Game.Map;
 using static GdUnit4.Assertions;
 
 namespace Pal.Game.Tests;
@@ -11,6 +13,56 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class MainProcessTests
 {
+    [TestCase]
+    public void MainArgumentsKeepM2DefaultAndRequireExplicitCompleteStaticMode()
+    {
+        var defaults = NativeSceneLoader.Arguments([]);
+        AssertThat(defaults.Root).IsEqual("res://Assets");
+        AssertThat(defaults.Profile).IsEqual(Pal.Game.Profiles.NativeExplorationProfile.DefaultUri);
+        AssertThat(defaults.StaticAcceptance).IsFalse();
+
+        var selected = NativeSceneLoader.Arguments(["--m3-static-resources", "res://Assets/StaticScene4",
+            "--m3-static-profile", "res://Tests/Scene4.tres"]);
+        AssertThat(selected.Root).IsEqual("res://Assets/StaticScene4");
+        AssertThat(selected.Profile).IsEqual("res://Tests/Scene4.tres");
+        AssertThat(selected.StaticAcceptance).IsTrue();
+        bool incompleteRejected = false;
+        try { NativeSceneLoader.Arguments(["--m3-static-resources", "res://Assets/StaticScene4"]); }
+        catch (InvalidDataException) { incompleteRejected = true; }
+        AssertThat(incompleteRejected).IsTrue();
+        bool mixedRejected = false;
+        try { NativeSceneLoader.Arguments(["--m2-resources", "res://Assets", "--m3-static-profile", "res://Tests/Scene4.tres"]); }
+        catch (InvalidDataException) { mixedRejected = true; }
+        AssertThat(mixedRejected).IsTrue();
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task StaticModeLoadsValidScene4FixtureAndReportsStandaloneAcceptance()
+    {
+        using var fixture = new NativeProfileFixture();
+        fixture.ConfigureStaticScene4();
+        fixture.SavePacked();
+        var result = await RunMain("--m3-static-resources", fixture.ResourceRoot,
+            "--m3-static-profile", fixture.Uri);
+        AssertThat(result.ExitCode).IsEqual(0);
+        AssertThat(result.Text.Contains("PAL_M3_STATIC_ACCEPTANCE:scene4/map10; events are not scheduled", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("PAL_GAME_READY:Core ready", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("ERROR:", StringComparison.Ordinal)).IsFalse();
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task StaticModeRejectsMismatchedFixtureWithoutFallingBackToM2()
+    {
+        using var fixture = new NativeProfileFixture();
+        fixture.SavePacked();
+        var result = await RunMain("--m3-static-resources", fixture.ResourceRoot,
+            "--m3-static-profile", fixture.Uri);
+        AssertThat(result.ExitCode).IsEqual(1);
+        AssertThat(result.Text.Contains("M3 static acceptance requires scene 4 / map 10", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
+        AssertThat(result.Text.Contains("PAL_M3_STATIC_ACCEPTANCE", StringComparison.Ordinal)).IsFalse();
+    }
+
     [TestCase(Timeout = 20000)]
     public async Task RealMainLoadsSelectedNativeSceneBeforeCoreReady()
     {
