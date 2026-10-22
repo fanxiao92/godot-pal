@@ -28,6 +28,7 @@ public sealed class EventCliTests : IDisposable
     public async Task Export_events_preserves_complete_script_and_rebuilds_original_chunk4()
     {
         byte[] original = ReadChunk4();
+        byte[] originalArchive = File.ReadAllBytes(Path.Combine(input, "SSS.MKF"));
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
         Assert.Empty(export.Stdout);
@@ -64,6 +65,7 @@ public sealed class EventCliTests : IDisposable
         Assert.Empty(rebuild.Stdout);
         Assert.Empty(rebuild.Stderr);
         Assert.Equal(original, File.ReadAllBytes(rebuilt));
+        Assert.Equal(originalArchive, File.ReadAllBytes(Path.Combine(input, "SSS.MKF")));
     }
 
     [Fact]
@@ -117,6 +119,50 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("cover every source address", result.Stderr);
         Assert.False(File.Exists(rebuilt));
+    }
+
+    [Fact]
+    public async Task Rebuild_events_rejects_duplicate_json_keys_and_invalid_contract_values()
+    {
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.Equal(0, export.ExitCode);
+        string indexPath = Path.Combine(exported, "index.json");
+        string originalIndex = File.ReadAllText(indexPath);
+        File.WriteAllText(indexPath, originalIndex.Replace("\"formatVersion\": 1", "\"formatVersion\": 1,\n  \"formatVersion\": 1", StringComparison.Ordinal));
+        var duplicate = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(1, duplicate.ExitCode);
+        Assert.Contains("duplicate JSON key", duplicate.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(rebuilt));
+
+        File.WriteAllText(indexPath, originalIndex);
+        string eventPath = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(eventPath))!.AsObject();
+        events["commands"]![0]!["portraitId"] = 65536;
+        File.WriteAllText(eventPath, events.ToJsonString());
+        var outOfRange = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(1, outOfRange.ExitCode);
+        Assert.Contains("overflow", outOfRange.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(rebuilt));
+    }
+
+    [Fact]
+    public async Task Rebuild_events_supports_full_word_address_space_and_wraps_next_to_zero()
+    {
+        byte[] fullScript = new byte[65536 * 8];
+        for (int index = 0; index < 65536; index++)
+            BinaryPrimitives.WriteUInt16LittleEndian(fullScript.AsSpan(index * 8), 0x0086);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 0, 0, 0), Words(0, 0, 0, 0), [], fullScript);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        using var events = JsonDocument.Parse(File.ReadAllText(Path.Combine(exported, "shared.json")));
+        var commands = events.RootElement.GetProperty("commands");
+        Assert.Equal(65536, commands.GetArrayLength());
+        Assert.Equal("L0000", commands[65535].GetProperty("next").GetString());
+        Assert.Equal("LFFFF", commands[65534].GetProperty("next").GetString());
+
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(0, rebuild.ExitCode);
+        Assert.Equal(fullScript, File.ReadAllBytes(rebuilt));
     }
 
     private static System.Text.Json.Nodes.JsonObject JsonNodeForEdit(JsonElement root)
