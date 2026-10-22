@@ -21,6 +21,10 @@ public partial class PalDialogueDisplay : Control
     private int _lastPaletteRotation;
 
     public event Action<Color[]>? ActivePaletteChanged;
+    public event Action? BackgroundRestoreRequested;
+    // Emitted at the end of the actual update, after palette restoration and redraw scheduling.
+    public event Action? UpdateCompleted;
+    public DialogueDisplaySession? Session => _session;
     public DialogueDisplaySnapshot? Current => _session?.Current;
 
     public void Start(
@@ -36,43 +40,74 @@ public partial class PalDialogueDisplay : Control
         int inheritedColor)
     {
         ArgumentNullException.ThrowIfNull(language);
-        ArgumentNullException.ThrowIfNull(font);
         ArgumentNullException.ThrowIfNull(portrait);
+        DialogueMessageBlock block = language.ToCorePackage().Resolve(startMessageId, span);
+        ValidateContent(block, inheritedColor, font, portrait, prompts, currentScenePalette);
+        Attach(new DialogueDisplaySession(block, inheritedColor, commandColor), font, portrait, prompts, currentScenePalette, portraitId);
+    }
+
+    public void Start(TriggerDialogueRequest request, PalDialogueFont font, PalDialogueIndexedImage? portrait,
+        PalDialogueIndexedImage[] prompts, Color[] currentScenePalette)
+    {
+        ValidateContent(request.Content, request.Context.Color, font, portrait, prompts, currentScenePalette);
+        Attach(request.Display, font, portrait, prompts, currentScenePalette, request.Context.PortraitId);
+    }
+
+    internal static void ValidateContent(DialogueMessageBlock block, int color, PalDialogueFont font,
+        PalDialogueIndexedImage? portrait, PalDialogueIndexedImage[] prompts, Color[] currentScenePalette)
+    {
+        ArgumentNullException.ThrowIfNull(font);
         ArgumentNullException.ThrowIfNull(prompts);
         if (prompts.Length != 3 || prompts.Any(prompt => prompt is null)) throw new InvalidDataException("Dialogue requires prompt frames 0, 1, and 2.");
         if (currentScenePalette.Length != 256) throw new InvalidDataException("Dialogue rendering requires the active 256-color scene palette.");
-        portrait.Validate();
-        foreach (PalDialogueIndexedImage prompt in prompts) prompt.Validate();
-        DialogueMessageBlock block = language.ToCorePackage().Resolve(startMessageId, span);
+        if (portrait is not null) ValidateImage(portrait);
+        foreach (PalDialogueIndexedImage prompt in prompts) ValidateImage(prompt);
         // Reuse the Core display rules for preflight instead of interpreting title punctuation
         // as body controls. No input/time is applied to the actual playback session here.
-        var preview = new DialogueDisplaySession(block, inheritedColor, commandColor);
+        var preview = new DialogueDisplaySession(block, color, 0);
         var checkedGlyphs = new System.Collections.Generic.HashSet<int>();
         while (preview.Current.Phase != DialogueDisplayPhase.Completed)
         {
             string text = preview.Current.TitleText + string.Concat(preview.Current.VisibleLines
                 .SelectMany(line => line.Runs).Select(run => run.Text));
             foreach (Rune rune in text.EnumerateRunes())
-                if (checkedGlyphs.Add(rune.Value)) font.GetGlyph(rune.Value);
+                if (checkedGlyphs.Add(rune.Value))
+                {
+                    try { font.GetGlyph(rune.Value).IsSet(0, 0); }
+                    catch (InvalidDataException error) { throw new InvalidDataException($"{font.ResourcePath}: {error.Message}", error); }
+                }
             preview.Update(0, advancePressed: true, accelerateHeld: true);
         }
+    }
+
+    private static void ValidateImage(PalDialogueIndexedImage image)
+    {
+        try { image.Validate(); }
+        catch (InvalidDataException error) { throw new InvalidDataException($"{image.ResourcePath}: {error.Message}", error); }
+    }
+
+    private void Attach(DialogueDisplaySession session, PalDialogueFont font, PalDialogueIndexedImage? portrait,
+        PalDialogueIndexedImage[] prompts, Color[] currentScenePalette, int portraitId)
+    {
+        _advanceEvents = 0;
         _font = font;
         _portrait = portrait;
         _prompts = prompts.ToArray();
         _palette = currentScenePalette.ToArray();
         _activePalette = _palette.ToArray();
         _portraitId = portraitId;
-        _session = new DialogueDisplaySession(block, inheritedColor, commandColor);
+        _session = session;
         _lastPaletteRotation = 0;
         ActivePaletteChanged?.Invoke(_activePalette.ToArray());
         FocusMode = FocusModeEnum.All;
         GrabFocus();
-        QueueRedraw();
+        ApplySnapshot();
     }
 
     public override void _Input(InputEvent @event)
     {
-        if (@event is InputEventKey { Pressed: true, Echo: false } key && IsDialogueAdvanceKey(key.Keycode))
+        if (_session is not null && _session.Current.Phase != DialogueDisplayPhase.Completed
+            && @event is InputEventKey { Pressed: true, Echo: false } key && IsDialogueAdvanceKey(key.Keycode))
         {
             _advanceEvents++;
             GetViewport().SetInputAsHandled();
@@ -81,7 +116,7 @@ public partial class PalDialogueDisplay : Control
 
     public override void _Process(double delta)
     {
-        if (_session is null) return;
+        if (_session is null || _session.Current.Phase == DialogueDisplayPhase.Completed) return;
         bool advance = _advanceEvents > 0;
         _advanceEvents = 0;
         bool accelerate = IsAdvanceKeyDown();
@@ -99,15 +134,22 @@ public partial class PalDialogueDisplay : Control
             _activePalette = _palette.ToArray();
             ActivePaletteChanged?.Invoke(_activePalette.ToArray());
         }
+        ApplySnapshot();
+        UpdateCompleted?.Invoke();
+    }
+
+    private void ApplySnapshot()
+    {
+        if (_session!.Current.ClearDisplay) BackgroundRestoreRequested?.Invoke();
         QueueRedraw();
     }
 
     public override void _Draw()
     {
-        if (_session is null || _font is null || _portrait is null || _prompts.Length != 3 || _activePalette.Length != 256) return;
+        if (_session is null || _font is null || _prompts.Length != 3 || _activePalette.Length != 256) return;
         DialogueDisplaySnapshot snapshot = _session.Current;
         if (snapshot.Phase == DialogueDisplayPhase.Completed) return;
-        if (_portraitId > 0)
+        if (_portraitId > 0 && _portrait is not null)
         {
             int x = Math.Max(0, 48 - _portrait.Width / 2);
             int y = Math.Max(0, 55 - _portrait.Height / 2);

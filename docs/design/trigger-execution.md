@@ -46,8 +46,10 @@ if (request is not null)
     var preview = new DialogueDisplaySession(request.Content, request.Context.Color, 0,
         request.Context.DelayMilliseconds);
 
+    // 装配时先消费初始 Current.ClearDisplay（包括已完成请求）。
     // 将 request.Display 本身交给显示适配器；只允许一个所有者每实际更新推进一次。
-    request.Display.Update(elapsedMilliseconds, advancePressed, accelerateHeld);
+    if (request.Display.Current.Phase != DialogueDisplayPhase.Completed)
+        request.Display.Update(elapsedMilliseconds, advancePressed, accelerateHeld);
     DialogueDisplaySnapshot snapshot = request.Display.Current;
     // 由适配器渲染 snapshot，连接完整场景调色板变化及背景恢复。
     if (snapshot.Phase == DialogueDisplayPhase.Completed)
@@ -62,12 +64,40 @@ if (request is not null)
 
 `TriggerDialogueRequest` 提供：唯一 `Id`、不可变 `Context`、精确 `MessageReferences`（每范围的源位置/start/span）、`Content`（所有有序显示条目）、实际 `Display` 会话。Content 是为显示拼接的容器，其 start/end 元数据使用第一个范围；不得把它误当作不连续消息的新的原始范围。原始引用以 MessageReferences 为准。字体预检和显示装配不必访问私有状态或重新解析事件。
 
-已有 `PalDialogueDisplay.Start` 自行创建显示会话；后续 Godot 适配器需要增加接收此 request/既有 `Display` 的接合方式，不能先更新一个会话却渲染另一个。保留原公开 Start 调用兼容性。实际时间、键盘、字体/画像资源、调色板和背景由外层提供；不得在 Core 之外复制逐字算法。
+`PalDialogueDisplay.Start(request, font, portrait, prompts, palette)` 直接装配 `request.Display` 本身；旧的 language/start/span 重载继续创建独立显示会话并保持源调用兼容。实际时间、键盘、字体/画像资源、调色板和背景由外层提供；不得在 Core 之外复制逐字算法。
 
-`AcknowledgeDisplay(id)` 仅在 id 匹配当前请求且**该真实 Display 已 Completed** 时返回 true，并继续执行到下一个真正显示边界或完成。提前、重复、陈旧、跨调用/跨执行器回执返回 false，不修改状态。等待中 Start 另一调用会明确抛错。仅名称或无正文的 CLEAR 没有正文等待，会在同一次 Start 中直接完成，不人为要求输入回执；已有正文后的 CLEAR 则仍由显示会话等待输入后清屏。
+`AcknowledgeDisplay(id)` 仅在 id 匹配当前请求且**该真实 Display 已 Completed** 时返回 true，并继续执行到下一个显示请求或完成。提前、重复、陈旧、跨调用/跨执行器回执返回 false，不修改状态。请求未回执时 Start 另一调用会明确抛错。
+
+首条正文前的 CLEAR 没有玩家等待，但初始 `Display.Current.ClearDisplay` 为 true，宿主必须在首次推进正文前实际恢复背景。仅名称、clear-only 等初始已 Completed 的显示也可能携带恢复效果：**仍发布真实请求**，宿主装配、应用 `ClearDisplay` 后立即回执，并同步排空后续已完成请求，直到真正需要时间/输入的显示或脚本 Completed。不能因 Display 已 Completed 就丢弃其恢复效果，不能为这些请求增加玩家输入或引擎帧等待。`BlocksSceneUpdates` 在请求未回执时为 true；正常宿主在 Start 返回前同步处理无等待请求，不把它们变成场景暂停帧。已有正文后的 CLEAR 仍先等待输入再清屏。名称不计正文行，初始颜色/延迟及旧三参数显示构造保持不变。
+
+## Godot / I/O 宿主
+
+`TriggerEventLoader.Load(indexPath)` 只读取现代 UTF-8 index 和其清单中的**全部**同目录 `<fileId>.json`（支持 `res://`、绝对路径及 Windows 分隔符），再交给 Core 严格校验；文件 ID 先验证再拼接路径。不会读取 MKF/SLF、离线 M1 包或调用提取器。未选定的 raw 仍存档，选定 raw 明确拒绝。
+
+`PalTriggerDialogue.Initialize(display, indexPath, dialogueDirectory, currentScenePalette, sceneData, language="zh-Hans")` 绑定已有显示节点、完整事件集合、一个已准备的原生对话目录和实际场景元数据。目录使用 #23 准备器已有命名：`Language.zh-Hans.tres` / `Language.en.tres`、`Font.tres`、`Portrait-059.tres`（按请求画像 ID 格式化）、`Prompt-00.tres`～`Prompt-02.tres`。只加载所选语言，不 fallback。原生来源身份不得为空；所选语言身份、版本、消息、字形位图、画像/提示平面及256色 palette 均需有效。运行前以独立 Core preview 检查整个选定链和全部显示资源，不推进真实请求。
+
+`Start(fileId, entryId, caller)` 校验所选 scene/eventObject owner 和 slot/sourceAddress 与绑定的实际 `PalSceneData` 一致；object union 调用尚不支持。caller 不拿 owner 代替。实例复用保留 last caller。整个 `Start` 同步执行至第一个真正等待或完成；所有已完成但携带恢复效果的请求都先绑定实际显示、消费恢复并立即回执。实际显示后续由 **PalDialogueDisplay._Process 唯一推进**；协调器没有第二个 `_Process`，不直接调用 `Display.Update`。`UpdateCompleted` 在实际显示更新的末端、完整 palette/背景恢复与 QueueRedraw 后发送；协调器在该边界回执并装配新请求，但不将本次按键/elapsed 转交新请求。宿主不要在活跃 trigger 外另行 Start/Update 同一个显示节点。
+
+显示节点只在活跃显示中接收参考按键，每次装配清空旧瞬时队列，一批按键只形成一次 advance；held 仍按原规则加速，不跨等待自动确认。没有 focus 门禁。`ActivePaletteChanged` 继续提供完整 palette；`BackgroundRestoreRequested` 在装配初始 CLEAR、翻页和完成时要求宿主恢复保留的场景背景。Godot 对话覆盖层本身通过当前快照和重绘撤销旧内容，不复制像素/字形规则。`UpdateCompleted` 是业务更新完成边界，不是 GPU draw 完成信号。
+
+正常消费者（`display` 已入树，`sceneData`、`currentScenePalette`、`RestoreSavedSceneBackground` 和 `ApplyScenePalette` 来自当前宿主；本组件不替代 #25 场景搜索）：
+
+```csharp
+var dialogue = new PalTriggerDialogue();
+AddChild(dialogue);
+display.ActivePaletteChanged += ApplyScenePalette;
+display.BackgroundRestoreRequested += RestoreSavedSceneBackground;
+dialogue.Initialize(display, eventsIndexPath, nativeDialogueDirectory,
+    currentScenePalette, sceneData); // 默认 zh-Hans；显式末参 "en" 选择英文
+// 当前范围可在 Initialize 后由源入口元数据选择 file/entry；这里是正常原生命名示例。
+dialogue.Start("shared", "event-object-60-trigger", caller: 60);
+// 使用 dialogue.Session 的 Phase / BlocksSceneUpdates / ReturnEntry / CurrentPosition。
+// 不自己调用显示 Update 或 AcknowledgeDisplay；请求和回执已接合。
+// #25 在 Completed 后回写 ReturnEntry、结束50ms延迟并清探索瞬时输入。
+```
 
 ## 本组件证据边界
 
-人工 Core 测试覆盖完整/跨文件集合、所有基础字段映射、WORD 回绕和零禁用、选定闭包先拒绝、0188..018B 人工形状、连续/不连续/重复 ID、语言行数与 CLEAR、内部入口、时间截止前/截止时/晚到、颜色/速度继承与恢复、caller、重复调用/陈旧回执及消费者内容预检。既有 `DialogueDisplaySessionTests` 继续验证逐字、页面、提示和调色板时间边界；没有 Sleep、反射、私有状态修改或替代生产显示逻辑。
+Core 确定性时间/入口/回执与完整集合验证独立于 Godot。人工 `TriggerDialogueFixtureTests` 从磁盘加载完整396地址、两个跨文件现代 JSON 和原生 A/B 位图/画像/提示/语言，真实 `Input.ParseInputEvent` 驱动等待、完成和再次调用；不同翻译行数不改 PC。状态在实际显示 `UpdateCompleted` 边界保存，不以协程恢复/观测耗时判断业务截止。新增负例覆盖缺文件、跨文件坏引用、raw、缺语言/身份不符、缺画像/损坏平面、owner不符、坏UTF-8/重复键和缺字形；无等待 CLEAR/名称请求的同步排空与真实背景恢复有单独人工覆盖。合成资源无真实游戏文字、字形或画像，自己的 GUID 变体只按 fixture 正常生命周期清理。
 
-本组件未执行真实完整事件集合、实际 Godot/GdUnit、资源准备、solution、GPU、map10/Main 或人工键盘验收。事件 JSON→实际 Godot 对话 fixture、资源失败传播、输入与实际更新连接、整票独立审查由后续适配器及父集成安排；不能由 Core 测试通过推定通过。
+本组件不改 Main/搜索/独立探索模式，不执行真实 map10、真实事件/资源提取、sharedgate/solution、GPU或物理键盘/桌面验收。相关 #23 三项 headless fixture 回归与完整 Core 回归需随组件证据核对；不把这些结果当作真实 GPU、#25 闭环、远端 CI 或整票独立审查通过。
