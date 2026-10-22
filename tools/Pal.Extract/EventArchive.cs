@@ -44,16 +44,8 @@ internal static class EventArchive
             ["entries"] = entries, ["commands"] = commands
         };
         Directory.CreateDirectory(destination);
-        try
-        {
-            WriteJson(Path.Combine(destination, "shared.json"), eventsDocument);
-            WriteJson(Path.Combine(destination, "index.json"), indexDocument);
-        }
-        catch
-        {
-            try { Directory.Delete(destination, recursive: true); } catch (IOException) { }
-            throw;
-        }
+        WriteJson(Path.Combine(destination, "shared.json"), eventsDocument);
+        WriteJson(Path.Combine(destination, "index.json"), indexDocument);
     }
 
     internal static bool Rebuild(string input, string output)
@@ -81,15 +73,20 @@ internal static class EventArchive
         var fileIds = filesNode.Select(node => node?.GetValue<string>() ?? throw new InvalidDataException("index.json: file id must be a string.")).ToArray();
         if (fileIds.Length == 0 || !fileIds.SequenceEqual(fileIds.Order(StringComparer.Ordinal)) || fileIds.Distinct(StringComparer.Ordinal).Count() != fileIds.Length || fileIds.Any(id => !Identifier.IsMatch(id)))
             throw new InvalidDataException("index.json: files must be unique, valid, and sorted file ids.");
-        var allCommands = new SortedDictionary<int, JsonObject>();
-        var definedLabels = new HashSet<string>(StringComparer.Ordinal);
+        var allCommands = new SortedDictionary<int, (string FileId, JsonObject Command)>();
+        var labelsByFile = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
+        var allEntries = new List<(string FileId, JsonObject Entry)>();
         foreach (string fileId in fileIds)
         {
             var file = ParseJson(Path.Combine(sourceDirectory, fileId + ".json"));
             ValidateKeys(file, fileId, "formatVersion", "profile", "fileId", "entries", "commands");
             if (Int(file, "formatVersion") != 1 || String(file, "profile") != "faithful" || String(file, "fileId") != fileId)
                 throw new InvalidDataException($"{fileId}.json: invalid version, profile, or fileId.");
-            ValidateEntries(RequiredArray(file, "entries"), count);
+            var entries = RequiredArray(file, "entries");
+            ValidateEntries(entries, count);
+            allEntries.AddRange(entries.Select(node => (fileId, node!.AsObject())));
+            var labels = new Dictionary<string, int>(StringComparer.Ordinal);
+            labelsByFile.Add(fileId, labels);
             int previousAddress = -1;
             foreach (var node in RequiredArray(file, "commands"))
             {
@@ -98,34 +95,43 @@ internal static class EventArchive
                 int address = Int(Required(command, "source"), "index");
                 if (address <= previousAddress) throw new InvalidDataException($"{fileId}.json: commands must be ordered by source.index.");
                 previousAddress = address;
-                if (String(command, "label") != LabelAt(address)) throw new InvalidDataException($"{fileId}.json: label does not match source address {address:X4}.");
-                if (!allCommands.TryAdd(address, command)) throw new InvalidDataException($"{fileId}.json: duplicate source address {address:X4}.");
-                if (!definedLabels.Add(String(command, "label"))) throw new InvalidDataException($"{fileId}.json: duplicate command label.");
+                string label = String(command, "label");
+                if (!labels.TryAdd(label, address)) throw new InvalidDataException($"{fileId}.json: duplicate command label '{label}'.");
+                if (!allCommands.TryAdd(address, (fileId, command))) throw new InvalidDataException($"{fileId}.json: duplicate source address {address:X4}.");
             }
         }
         if (allCommands.Count != count || allCommands.Keys.Where((address, ordinal) => address != ordinal).Any())
             throw new InvalidDataException("Event commands must cover every source address exactly once.");
-        var addresses = allCommands.Keys.ToHashSet();
         var expectedFiles = fileIds.Select(id => id + ".json").Append("index.json").ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (string path in Directory.GetFiles(sourceDirectory))
             if (!expectedFiles.Remove(Path.GetFileName(path))) throw new InvalidDataException($"Unexpected event collection file: {Path.GetFileName(path)}.");
         if (expectedFiles.Count != 0) throw new InvalidDataException("Event collection is missing an indexed file.");
-        var labelsByAddress = allCommands.ToDictionary(pair => pair.Key, pair => String(pair.Value, "label"));
-        foreach (var command in allCommands.Values)
+        foreach (var (fileId, command) in allCommands.Values)
         {
             string? next = NullableString(command, "next");
             int sourceIndex = Int(Required(command, "source"), "index");
             int nextIndex = (sourceIndex + 1) & 0xffff;
-            string? expected = count == 65536 || nextIndex < count ? LabelAt(nextIndex) : null;
-            if (next != expected) throw new InvalidDataException($"{String(command, "label")}: next does not match WORD-order successor.");
-            if (next is not null && (!labelsByAddress.TryGetValue(nextIndex, out var nextLabel) || nextLabel != next))
-                throw new InvalidDataException($"{String(command, "label")}: next reference is unresolved.");
+            bool hasSuccessor = count == 65536 || nextIndex < count;
+            if (!hasSuccessor)
+            {
+                if (next is not null) throw new InvalidDataException($"{String(command, "label")}: next must be null at the true end of the chunk.");
+                continue;
+            }
+            if (next is null || ResolveReference(next, fileId, labelsByFile, $"{String(command, "label")}.next") != nextIndex)
+                throw new InvalidDataException($"{String(command, "label")}: next does not resolve to its WORD-order successor.");
+        }
+        foreach (var (fileId, entry) in allEntries)
+        {
+            string? target = NullableString(entry, "target");
+            int sourceAddress = Int(entry, "sourceAddress");
+            if (target is null) continue;
+            if (ResolveReference(target, fileId, labelsByFile, $"{String(entry, "id")}.target") != sourceAddress)
+                throw new InvalidDataException($"{String(entry, "id")}: target does not resolve to sourceAddress {sourceAddress:X4}.");
         }
         var bytes = new byte[length];
-        foreach (var pair in allCommands) Encode(pair.Value, bytes.AsSpan(pair.Key * 8, 8));
+        foreach (var pair in allCommands) Encode(pair.Value.Command, bytes.AsSpan(pair.Key * 8, 8));
         string expectedHash = String(source, "sha256");
         if (!Regex.IsMatch(expectedHash, "^[0-9a-f]{64}$", RegexOptions.CultureInvariant)) throw new InvalidDataException("index.json: sha256 must be lowercase hexadecimal.");
-        _ = addresses;
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         using var outputStream = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         outputStream.Write(bytes);
@@ -219,11 +225,11 @@ internal static class EventArchive
     private static void ValidateCommand(JsonObject command, string fileId, int count)
     {
         string label = String(command, "label");
-        if (!Identifier.IsMatch(label) || !label.StartsWith('L')) throw new InvalidDataException($"{fileId}.json: invalid command label.");
+        if (!Identifier.IsMatch(label)) throw new InvalidDataException($"{fileId}.json: invalid command label.");
         string op = String(command, "op");
         if (op is not ("raw" or "end" or "setDialog" or "showDialog")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
         string? next = NullableString(command, "next");
-        if (next is not null && !Identifier.IsMatch(next)) throw new InvalidDataException($"{label}: invalid next reference.");
+        if (next is not null) ValidateReferenceSyntax(next, $"{label}.next");
         var source = Required(command, "source");
         ValidateKeys(source, "source", "index", "opcode", "operands");
         int index = Int(source, "index"), opcodeValue = Int(source, "opcode");
@@ -267,9 +273,41 @@ internal static class EventArchive
             int address = Int(entry, "sourceAddress");
             if (address is < 0 or > 65535 || address != 0 && address >= count) throw new InvalidDataException($"{id}: sourceAddress is invalid.");
             string? target = NullableString(entry, "target");
-            if ((address == 0) != (target is null) || target is not null && target != LabelAt(address))
-                throw new InvalidDataException($"{id}: target must resolve to sourceAddress; zero uses null.");
+            if ((address == 0) != (target is null)) throw new InvalidDataException($"{id}: zero sourceAddress uses null target and nonzero addresses require a target.");
+            if (target is not null) ValidateReferenceSyntax(target, $"{id}.target");
         }
+    }
+
+    private static int ResolveReference(string reference, string currentFile, IReadOnlyDictionary<string, Dictionary<string, int>> labelsByFile, string context)
+    {
+        int separator = reference.IndexOf('#');
+        string fileId = currentFile;
+        string label = reference;
+        if (separator >= 0)
+        {
+            if (separator == 0 || separator == reference.Length - 1 || reference.IndexOf('#', separator + 1) >= 0)
+                throw new InvalidDataException($"{context}: malformed file#label reference '{reference}'.");
+            fileId = reference[..separator];
+            label = reference[(separator + 1)..];
+        }
+        if (!Identifier.IsMatch(fileId) || !Identifier.IsMatch(label))
+            throw new InvalidDataException($"{context}: malformed reference '{reference}'.");
+        if (!labelsByFile.TryGetValue(fileId, out var labels) || !labels.TryGetValue(label, out int address))
+            throw new InvalidDataException($"{context}: dangling reference '{reference}'.");
+        return address;
+    }
+
+    private static void ValidateReferenceSyntax(string reference, string context)
+    {
+        int separator = reference.IndexOf('#');
+        if (separator < 0)
+        {
+            if (!Identifier.IsMatch(reference)) throw new InvalidDataException($"{context}: malformed reference '{reference}'.");
+            return;
+        }
+        if (separator == 0 || separator == reference.Length - 1 || reference.IndexOf('#', separator + 1) >= 0
+            || !Identifier.IsMatch(reference[..separator]) || !Identifier.IsMatch(reference[(separator + 1)..]))
+            throw new InvalidDataException($"{context}: malformed file#label reference '{reference}'.");
     }
 
     private static JsonObject ParseJson(string path)

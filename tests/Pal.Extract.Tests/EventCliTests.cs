@@ -90,6 +90,96 @@ public sealed class EventCliTests : IDisposable
     }
 
     [Fact]
+    public async Task Rebuild_events_resolves_local_and_cross_file_references_after_splitting_commands()
+    {
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.Equal(0, export.ExitCode);
+        string sharedPath = Path.Combine(exported, "shared.json");
+        var shared = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(sharedPath))!.AsObject();
+        var indexPath = Path.Combine(exported, "index.json");
+        var index = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(indexPath))!.AsObject();
+        index["files"] = new System.Text.Json.Nodes.JsonArray("scene-001", "shared");
+        File.WriteAllText(indexPath, index.ToJsonString());
+
+        var scene = new System.Text.Json.Nodes.JsonObject
+        {
+            ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "scene-001",
+            ["entries"] = shared["entries"]!.DeepClone(),
+            ["commands"] = new System.Text.Json.Nodes.JsonArray()
+        };
+        shared["entries"] = new System.Text.Json.Nodes.JsonArray();
+        var commands = shared["commands"]!.AsArray();
+        var all = commands.Select(node => node!.DeepClone().AsObject()).ToArray();
+        commands.Clear();
+        string[] labels = ["zero", "one", "two", "three"];
+        for (int address = 0; address < all.Length; address++)
+        {
+            var command = all[address];
+            command["label"] = labels[address];
+            bool currentIsShared = address < 2;
+            command["next"] = address == all.Length - 1 ? null
+                : ((address + 1 < 2) == currentIsShared ? labels[address + 1]
+                    : ((address + 1 < 2) ? "shared#" : "scene-001#") + labels[address + 1]);
+            (currentIsShared ? shared["commands"]!.AsArray() : scene["commands"]!.AsArray()).Add(command);
+        }
+        foreach (var node in scene["entries"]!.AsArray())
+        {
+            var entry = node!.AsObject();
+            entry["target"] = entry["sourceAddress"]!.GetValue<int>() == 0 ? null : "shared#one";
+        }
+        File.WriteAllText(sharedPath, shared.ToJsonString());
+        File.WriteAllText(Path.Combine(exported, "scene-001.json"), scene.ToJsonString());
+
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(ReadChunk4(), File.ReadAllBytes(rebuilt));
+    }
+
+    [Theory]
+    [InlineData("dangling-next")]
+    [InlineData("duplicate-address")]
+    [InlineData("dangling-entry")]
+    [InlineData("malformed-next")]
+    [InlineData("duplicate-label")]
+    [InlineData("entry-address-mismatch")]
+    public async Task Rebuild_events_rejects_dangling_or_duplicate_global_references(string mutation)
+    {
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.Equal(0, export.ExitCode);
+        string eventPath = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(eventPath))!.AsObject();
+        if (mutation == "dangling-next") events["commands"]![0]! ["next"] = "missing#L0001";
+        else if (mutation == "duplicate-address")
+        {
+            var duplicate = events["commands"]!.AsArray()[0]!.DeepClone();
+            events["commands"]!.AsArray().Add(duplicate);
+        }
+        else if (mutation == "duplicate-label") events["commands"]![1]!["label"] = "L0000";
+        else if (mutation == "malformed-next") events["commands"]![0]!["next"] = "shared##L0001";
+        else if (mutation == "entry-address-mismatch") events["entries"]!.AsArray()[0]!["sourceAddress"] = 2;
+        else events["entries"]!.AsArray()[0]!["target"] = "missing#L0001";
+        File.WriteAllText(eventPath, events.ToJsonString());
+        var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(1, result.ExitCode);
+        Assert.NotEmpty(result.Stderr);
+        Assert.False(File.Exists(rebuilt));
+    }
+
+    [Fact]
+    public async Task Export_events_preserves_preexisting_empty_output_on_invalid_archive()
+    {
+        string outputDirectory = Path.Combine(root, "preexisting-empty");
+        Directory.CreateDirectory(outputDirectory);
+        byte[] original = File.ReadAllBytes(Path.Combine(input, "SSS.MKF"));
+        File.WriteAllBytes(Path.Combine(input, "SSS.MKF"), [1, 2, 3]);
+        var result = await CliProcess.Run(root, "export-events", "--input", input, "--output", outputDirectory);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outputDirectory));
+        Assert.True(Directory.Exists(outputDirectory));
+        File.WriteAllBytes(Path.Combine(input, "SSS.MKF"), original);
+    }
+
+    [Fact]
     public async Task Rebuild_events_rejects_unknown_fields_and_does_not_create_output()
     {
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
