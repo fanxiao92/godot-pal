@@ -12,7 +12,7 @@
 
 实际 profile URI 由显式 author 的新文件决定；不自动生成、复制、提取或补配置。参数唯一、成对，缺值/重复/未知/混用 M2 或 m3-static 均失败；语言只接受 `zh-Hans`、`en`。不带新参数时仍为原 M2 Main；`--m3-static-resources/--m3-static-profile` 仍是无事件的旧独立静态入口。清洁检出不含真实资源。
 
-方向键/WASD 的 InputMap、别名、优先级、100ms离散节拍、晚到不补走、碰撞、相机锚点(160,112)、遮挡及整数缩放不变。搜索为 Return/Space/KP Enter/左Ctrl；参考 Windows `EnableKeyRepeat=false`，只接受非echo按下，不自建按住重开聊计时器。显示仍独占其参考推进集合及 `Echo=false` 边界，按住仅加速正文、不自动翻等待。方向的真实 press/release 在所有阶段继续交付；无focus暂停、清held或fresh-press门禁。逻辑输入不证明 OS/物理键盘的释放行为。
+方向键/WASD 的 InputMap、别名、优先级、100ms离散节拍、晚到不补走、碰撞、相机锚点(160,112)、遮挡及整数缩放不变。搜索为 Return/Space/KP Enter/左Ctrl；参考 Windows `EnableKeyRepeat=false`，只接受非echo按下，不自建按住重开聊计时器。正文仅新非echo Search/Menu press锁存至当前glyph字后延时截止才触发skip，之后保持至等待，启动held不再使用；等待接受所有参考逻辑映射键，短按锁存到累计100ms检查边界。显示只消费Search/Menu事件，方向/别名不能被吞而丢Main的held记账，Right Ctrl不属于搜索。方向的真实 press/release 在所有阶段继续交付；无focus暂停、清held或fresh-press门禁。逻辑输入不证明 OS/物理键盘的释放行为。
 
 ## 组合原生配置（v1）
 

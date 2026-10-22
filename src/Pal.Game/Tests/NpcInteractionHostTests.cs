@@ -226,6 +226,19 @@ public class NpcInteractionHostTests
         AssertThat(result.Text.Contains("ERROR:")).IsFalse();
     }
 
+    [TestCase(Timeout = 20000)]
+    public async Task Actual_Main_preserves_direction_pressed_to_end_wait_through_return_and_processes_release()
+    {
+        using var fixture = new NpcInteractionFixture();
+        var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
+            "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri],
+            new System.Collections.Generic.Dictionary<string, string?> { ["PAL_DIALOGUE_HELD_WAIT_TEST"] = "1" });
+        foreach (string line in result.Text.Split('\n')) GD.Print("Held wait child: " + line);
+        AssertThat(result.ExitCode).IsEqual(0);
+        AssertThat(result.Text.Contains("PAL_WAIT_DIRECTION_HELD:actualMain=true:first-return-step=1248,1344:release-processed=true")).IsTrue();
+        AssertThat(result.Text.Contains("ERROR:")).IsFalse();
+    }
+
     [TestCase("zh-Hans", Timeout = 20000)]
     [TestCase("en", Timeout = 20000)]
     public async Task Actual_Main_search_executes_full_event_returns_and_repeats(string language)

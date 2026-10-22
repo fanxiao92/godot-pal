@@ -40,9 +40,9 @@ public class NpcInteractionSessionTests
         Assert.Equal(0x0188, trigger.ReturnEntry);
         Assert.False(session.CompleteTrigger(request.Id, trigger, 1));
         var display = trigger.PendingDisplay!;
-        display.Display.Update(0, true, false);
+        display.Display.Update(24, false, true);
         Assert.False(session.CompleteTrigger(request.Id, trigger, 1));
-        display.Display.Update(0, true, false);
+        display.Display.Update(100, true, false);
         Assert.True(trigger.AcknowledgeDisplay(display.Id));
         Assert.False(session.CompleteTrigger(Guid.NewGuid(), trigger, 1));
         Assert.True(session.CompleteTrigger(request.Id, trigger, 100));
@@ -314,7 +314,7 @@ public class NpcInteractionSessionTests
     {
         for (int i = 0; i < 10 && trigger.PendingDisplay is { } request; i++)
         {
-            request.Display.Update(0, true, false);
+            request.Display.Update(100, true, true);
             if (request.Display.Current.Phase == DialogueDisplayPhase.Completed)
                 Assert.True(trigger.AcknowledgeDisplay(request.Id));
         }

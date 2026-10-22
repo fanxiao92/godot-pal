@@ -17,7 +17,8 @@ public partial class PalDialogueDisplay : Control
     private Color[] _palette = [];
     private Color[] _activePalette = [];
     private int _portraitId;
-    private int _advanceEvents;
+    private bool _advancePressed;
+    private bool _acceleratePressed;
     private int _lastPaletteRotation;
 
     public event Action<Color[]>? ActivePaletteChanged;
@@ -76,7 +77,7 @@ public partial class PalDialogueDisplay : Control
                     try { font.GetGlyph(rune.Value).IsSet(0, 0); }
                     catch (InvalidDataException error) { throw new InvalidDataException($"{font.ResourcePath}: {error.Message}", error); }
                 }
-            preview.Update(0, advancePressed: true, accelerateHeld: true);
+            preview.Update(preview.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, advancePressed: true, acceleratePressed: true);
         }
     }
 
@@ -89,7 +90,8 @@ public partial class PalDialogueDisplay : Control
     private void Attach(DialogueDisplaySession session, PalDialogueFont font, PalDialogueIndexedImage? portrait,
         PalDialogueIndexedImage[] prompts, Color[] currentScenePalette, int portraitId)
     {
-        _advanceEvents = 0;
+        _advancePressed = false;
+        _acceleratePressed = false;
         _font = font;
         _portrait = portrait;
         _prompts = prompts.ToArray();
@@ -106,20 +108,25 @@ public partial class PalDialogueDisplay : Control
 
     public override void _Input(InputEvent @event)
     {
-        if (_session is not null && _session.Current.Phase != DialogueDisplayPhase.Completed
-            && @event is InputEventKey { Pressed: true, Echo: false } key && IsDialogueAdvanceKey(key.Keycode))
-        {
-            _advanceEvents++;
-            GetViewport().SetInputAsHandled();
-        }
+        if (_session is null || _session.Current.Phase == DialogueDisplayPhase.Completed
+            || @event is not InputEventKey { Pressed: true, Echo: false } key) return;
+        bool searchOrMenu = IsSearchOrMenuKey(key);
+        if (_session.Current.Phase == DialogueDisplayPhase.WaitingForAdvance)
+            _advancePressed |= IsMappedKey(key);
+        else
+            _acceleratePressed |= searchOrMenu;
+        // Main must also receive direction/alias presses for held movement after return.
+        // Consume only Search/Menu, which Main deliberately ignores while triggering.
+        if (searchOrMenu) GetViewport().SetInputAsHandled();
     }
 
     public override void _Process(double delta)
     {
         if (_session is null || _session.Current.Phase == DialogueDisplayPhase.Completed) return;
-        bool advance = _advanceEvents > 0;
-        _advanceEvents = 0;
-        bool accelerate = IsAdvanceKeyDown();
+        bool advance = _advancePressed;
+        bool accelerate = _acceleratePressed;
+        _advancePressed = false;
+        _acceleratePressed = false;
         uint elapsed = (uint)Math.Clamp((long)Math.Round(delta * 1000.0), 0L, uint.MaxValue);
         _session.Update(elapsed, advance, accelerate);
         if (_lastPaletteRotation != _session.Current.PaletteRotation)
@@ -215,11 +222,12 @@ public partial class PalDialogueDisplay : Control
         return active;
     }
 
-    private bool IsAdvanceKeyDown() =>
-        Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.Space) || Input.IsKeyPressed(Key.KpEnter)
-        || Input.IsKeyPressed(Key.Ctrl) || Input.IsKeyPressed(Key.Escape) || Input.IsKeyPressed(Key.Insert)
-        || Input.IsKeyPressed(Key.Alt) || Input.IsKeyPressed(Key.Kp0);
+    private static bool IsSearchOrMenuKey(InputEventKey key) => key.Keycode is
+        Key.Enter or Key.Space or Key.KpEnter or Key.Escape or Key.Insert or Key.Alt or Key.Kp0
+        || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right;
 
-    private static bool IsDialogueAdvanceKey(Key key) => key is
-        Key.Enter or Key.Space or Key.KpEnter or Key.Ctrl or Key.Escape or Key.Insert or Key.Alt or Key.Kp0;
+    private static bool IsMappedKey(InputEventKey key) => IsSearchOrMenuKey(key) || key.Keycode is
+        Key.Up or Key.Kp8 or Key.Down or Key.Kp2 or Key.Left or Key.Kp4 or Key.Right or Key.Kp6
+        or Key.Pageup or Key.Kp9 or Key.Pagedown or Key.Kp3 or Key.Home or Key.Kp7 or Key.End or Key.Kp1
+        or Key.R or Key.A or Key.D or Key.E or Key.W or Key.Q or Key.F or Key.S;
 }

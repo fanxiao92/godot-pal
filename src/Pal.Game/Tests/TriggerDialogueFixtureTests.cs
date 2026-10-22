@@ -61,6 +61,7 @@ public class TriggerDialogueFixtureTests
         AssertThat(trigger.Session.BlocksSceneUpdates).IsTrue();
         ulong waitingFrame = updateFrame;
         await Key(runner, Godot.Key.Space, true);
+        await Until(runner, () => scriptPhase == TriggerScriptPhase.Completed);
         AssertThat(updateFrame > waitingFrame).IsTrue();
         AssertThat(scriptPhase).IsEqual(TriggerScriptPhase.Completed);
         AssertThat(updated!.ClearDisplay).IsTrue();
@@ -76,6 +77,7 @@ public class TriggerDialogueFixtureTests
         AssertThat(trigger.Session.PendingDisplay!.Display.Current.Phase).IsEqual(DialogueDisplayPhase.Typing);
         await Until(runner, () => updated?.Phase == DialogueDisplayPhase.WaitingForAdvance);
         await Key(runner, Godot.Key.Escape, true);
+        await Until(runner, () => scriptPhase == TriggerScriptPhase.Completed);
         AssertThat(scriptPhase).IsEqual(TriggerScriptPhase.Completed);
         AssertThat(trigger.Session.ReturnEntry).IsEqual(0x0188);
     }
@@ -94,6 +96,51 @@ public class TriggerDialogueFixtureTests
         AssertThat(error.Contains("scene-004.json") && error.Contains("L0189") && error.Contains("0189")).IsTrue();
         AssertThat(display.Session is null).IsTrue();
         AssertThat(trigger.Session!.Phase).IsEqual(TriggerScriptPhase.Ready);
+    }
+
+    [TestCase(Timeout = 15000)]
+    public void Undersized_glyph_row_stride_is_rejected_before_display_attachment()
+    {
+        using var files = new SyntheticFiles();
+        files.Edit("Font.tres", text => text.Replace("Width = 8", "Width = 16"));
+        using var runner = ISceneRunner.Load("res://Tests/DialogueDisplayFixture.tscn", true);
+        var display = (PalDialogueDisplay)runner.Scene()!;
+        var trigger = new PalTriggerDialogue(); display.AddChild(trigger);
+        using var scene = Scene();
+        trigger.Initialize(display, files.Root + "/index.json", files.Root, Palette(), scene);
+        InvalidDataException? failure = null;
+        try { trigger.Start("scene-004", "npc", 60); }
+        catch (InvalidDataException error) { failure = error; }
+        // Synchronous preflight only: never wait for a malformed glyph to reach _Draw.
+        AssertThat(failure is not null).IsTrue();
+        AssertThat(failure!.Message.Contains(files.Root + "/Font.tres")).IsTrue();
+        AssertThat(failure.Message.Contains("scene-004.json") && failure.Message.Contains("0189")).IsTrue();
+        AssertThat(failure.InnerException?.InnerException?.GetType() == typeof(InvalidDataException)).IsTrue();
+        AssertThat(failure.InnerException!.InnerException!.Message).IsEqual("Dialogue glyph U+0041 has invalid bitmap dimensions.");
+        AssertThat(display.Session is null).IsTrue();
+        AssertThat(trigger.Session!.Phase).IsEqual(TriggerScriptPhase.Ready);
+    }
+
+    [TestCase(8, 1, Timeout = 15000)]
+    [TestCase(9, 2, Timeout = 15000)]
+    [TestCase(16, 2, Timeout = 15000)]
+    public void Valid_glyph_row_stride_boundaries_pass_normal_trigger_preflight(int width, int rowBytes)
+    {
+        using var files = new SyntheticFiles();
+        files.Edit("Font.tres", text => System.Text.RegularExpressions.Regex.Replace(
+            text.Replace("Width = 8", $"Width = {width}").Replace("RowBytes = 1", $"RowBytes = {rowBytes}"),
+            @"Bitmap = PackedByteArray\([^)]*\)",
+            "Bitmap = PackedByteArray(" + string.Join(", ", Enumerable.Repeat("255", rowBytes * 15)) + ")"));
+        using var runner = ISceneRunner.Load("res://Tests/DialogueDisplayFixture.tscn", true);
+        var display = (PalDialogueDisplay)runner.Scene()!;
+        var trigger = new PalTriggerDialogue(); display.AddChild(trigger);
+        using var scene = Scene();
+        trigger.Initialize(display, files.Root + "/index.json", files.Root, Palette(), scene);
+        trigger.Start("scene-004", "npc", 60);
+        AssertThat(display.Session is not null).IsTrue();
+        AssertThat(trigger.Session!.Phase).IsEqual(TriggerScriptPhase.WaitingForDisplay);
+        var font = ResourceLoader.Load<PalDialogueFont>(files.Root + "/Font.tres");
+        AssertThat(font.GetGlyph(65).IsSet(width - 1, 14)).IsTrue();
     }
 
     [TestCase(Timeout = 15000)]
@@ -133,6 +180,7 @@ public class TriggerDialogueFixtureTests
         AssertThat(surface.GetRenderedPixel(0, 0)).IsEqual(Colors.Green);
         AssertThat(trigger.Session!.Phase).IsEqual(TriggerScriptPhase.WaitingForDisplay);
         await Key(runner, Godot.Key.Space, true);
+        await Until(runner, () => updated?.Phase == DialogueDisplayPhase.Completed);
         AssertThat(updated!.Phase).IsEqual(DialogueDisplayPhase.Completed);
         AssertThat(trigger.Session.Phase).IsEqual(TriggerScriptPhase.Completed);
         AssertThat(restores).IsEqual(2);
@@ -194,6 +242,7 @@ public class TriggerDialogueFixtureTests
         SendKey(Godot.Key.Space, false); SendKey(Godot.Key.Escape, false);
         await Until(runner, () => updated?.Phase == DialogueDisplayPhase.WaitingForAdvance && updatedRequest != first);
         await Key(runner, Godot.Key.Space, true);
+        await Until(runner, () => trigger.Session.Phase == TriggerScriptPhase.Completed);
         AssertThat(trigger.Session.Phase).IsEqual(TriggerScriptPhase.Completed);
     }
 
@@ -359,6 +408,7 @@ public class TriggerDialogueFixtureTests
         AssertThat(trigger.Session.CurrentPosition!.SourceAddress).IsEqual(0x018E);
         await Until(runner, () => updated?.Phase == DialogueDisplayPhase.WaitingForAdvance);
         await Key(runner, Godot.Key.Space, true);
+        await Until(runner, () => trigger.Session.Phase == TriggerScriptPhase.Completed);
         AssertThat(trigger.Session.Phase).IsEqual(TriggerScriptPhase.Completed);
         AssertThat(restores).IsEqual(3);
     }

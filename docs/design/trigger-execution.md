@@ -51,7 +51,7 @@ if (request is not null)
     // 装配时先消费初始 Current.ClearDisplay（包括已完成请求）。
     // 将 request.Display 本身交给显示适配器；只允许一个所有者每实际更新推进一次。
     if (request.Display.Current.Phase != DialogueDisplayPhase.Completed)
-        request.Display.Update(elapsedMilliseconds, advancePressed, accelerateHeld);
+        request.Display.Update(elapsedMilliseconds, advancePressed, acceleratePressed);
     DialogueDisplaySnapshot snapshot = request.Display.Current;
     // 由适配器渲染 snapshot，连接完整场景调色板变化及背景恢复。
     if (snapshot.Phase == DialogueDisplayPhase.Completed)
@@ -76,11 +76,11 @@ if (request is not null)
 
 `TriggerEventLoader.Load(indexPath)` 只读取现代 UTF-8 index 和其清单中的**全部**同目录 `<fileId>.json`（支持 `res://`、绝对路径及 Windows 分隔符），再交给 Core 严格校验；文件 ID 先验证再拼接路径。不会读取 MKF/SLF、离线 M1 包或调用提取器。未选定的 raw 仍存档，选定 raw 明确拒绝。
 
-`PalTriggerDialogue.Initialize(display, indexPath, dialogueDirectory, currentScenePalette, sceneData, language="zh-Hans")` 绑定已有显示节点、完整事件集合、一个已准备的原生对话目录和实际场景元数据。目录使用 #23 准备器已有命名：`Language.zh-Hans.tres` / `Language.en.tres`、`Font.tres`、`Portrait-059.tres`（按请求画像 ID 格式化）、`Prompt-00.tres`～`Prompt-02.tres`。只加载所选语言，不 fallback。原生来源身份不得为空；所选语言身份、版本、消息、字形位图、画像/提示平面及256色 palette 均需有效。运行前以独立 Core preview 检查整个选定链和全部显示资源，不推进真实请求。
+`PalTriggerDialogue.Initialize(display, indexPath, dialogueDirectory, currentScenePalette, sceneData, language="zh-Hans")` 绑定已有显示节点、完整事件集合、一个已准备的原生对话目录和实际场景元数据。目录使用 #23 准备器已有命名：`Language.zh-Hans.tres` / `Language.en.tres`、`Font.tres`、`Portrait-059.tres`（按请求画像 ID 格式化）、`Prompt-00.tres`～`Prompt-02.tres`。只加载所选语言，不 fallback。原生来源身份不得为空；所选语言身份、版本、消息、字形位图、画像/提示平面及256色 palette 均需有效。运行前以独立 Core preview 检查整个选定链和全部显示资源，不推进真实请求。独立preview沿公开Update，在typing以支持的最大int字后延时推进、waiting以100ms跨越guard，不再用零时间无限循环；真实播放仍只有显示_Process驱动。
 
 `Start(fileId, entryId, caller)` 校验所选 scene/eventObject owner 和 slot/sourceAddress 与绑定的实际 `PalSceneData` 一致；object union 调用尚不支持。caller 不拿 owner 代替。实例复用保留 last caller。整个 `Start` 同步执行至第一个真正等待或完成；所有已完成但携带恢复效果的请求都先绑定实际显示、消费恢复并立即回执。实际显示后续由 **PalDialogueDisplay._Process 唯一推进**；协调器没有第二个 `_Process`，不直接调用 `Display.Update`。`UpdateCompleted` 在实际显示更新的末端、完整 palette/背景恢复与 QueueRedraw 后发送；协调器在该边界回执并装配新请求，但不将本次按键/elapsed 转交新请求。宿主不要在活跃 trigger 外另行 Start/Update 同一个显示节点。
 
-显示节点只在活跃显示中接收参考按键，每次装配清空旧瞬时队列，一批按键只形成一次 advance；held 仍按原规则加速，不跨等待自动确认。没有 focus 门禁。`ActivePaletteChanged` 继续提供完整 palette；`BackgroundRestoreRequested` 在装配初始 CLEAR、翻页和完成时要求宿主恢复保留的场景背景。Godot 对话覆盖层本身通过当前快照和重绘撤销旧内容，不复制像素/字形规则。`UpdateCompleted` 是业务更新完成边界，不是 GPU draw 完成信号。
+显示节点只在活跃显示中接收参考按键，每次装配清空旧瞬时输入，一批按键只形成一次 advance。正文仅由新非echo Search/Menu press触发skip，短按释放后仍锁存到当前glyph字后延时截止，才设置skip并跨正文行保持，进入等待时重置；启动交谈的held不重新加速。等待接受所有参考逻辑映射键，锁存新press并只在累计100ms边界（先轮转palette后检查）处理；不将输入/elapsed带入新页或新请求。方向/别名仍交付Main的held记账，Right Ctrl/未映射/echo不推进。没有 focus 门禁。`ActivePaletteChanged` 继续提供完整 palette；`BackgroundRestoreRequested` 在装配初始 CLEAR、翻页和完成时要求宿主恢复保留的场景背景。Godot 对话覆盖层本身通过当前快照和重绘撤销旧内容，不复制像素/字形规则。`UpdateCompleted` 是业务更新完成边界，不是 GPU draw 完成信号。
 
 正常消费者（`display` 已入树，`sceneData`、`currentScenePalette`、`RestoreSavedSceneBackground` 和 `ApplyScenePalette` 来自当前宿主；本组件不替代 #25 场景搜索）：
 

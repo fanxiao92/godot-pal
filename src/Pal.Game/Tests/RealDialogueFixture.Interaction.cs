@@ -204,7 +204,6 @@ public partial class RealDialogueFixture
                     Require(ReferenceEquals(_main.Dialogue!.Session!.PendingDisplay!.Display, _display.Session), "One real request.Display must own updates.");
                     Require(_main.Dialogue.Session.CurrentPosition!.SourceAddress == 0x018B, "Both original messages must execute to PC018B before wait.");
                     Require(ReferenceEquals(_blockedState, npc.Current), "Ordinary dialogue must block exploration updates.");
-                    SendInteractionKey(Key.Down, true);
                     if (_observed.Phase == DialogueDisplayPhase.WaitingForAdvance)
                     {
                         // A short legal line may finish on its first actual update. It does
@@ -213,13 +212,14 @@ public partial class RealDialogueFixture
                         _stage = 5;
                         break;
                     }
+                    SendInteractionKey(Key.Down, true); // Typing directions do not request acceleration.
                     if (_graphical && _observed.VisibleText.Length == 0) break;
                     if (_graphical && !_typingCaptured) { CaptureInteraction("typing", _observed); _typingCaptured = true; }
                     _batchLine = _observed.LineIndex; _batchFrame = _displayFrame;
                     SendInteractionKey(Key.Space, true); SendInteractionKey(Key.Enter, true);
                     _stage = 4;
                     break;
-                case 4 when _displayFrame > _batchFrame:
+                case 4 when _displayFrame > _batchFrame && _observed!.LineIndex > _batchLine:
                     KeyEvent(false); SendInteractionKey(Key.Enter, false);
                     Require(_observed!.LineIndex == _batchLine + 1, "One actual update may complete only the current body part.");
                     string completed = string.Concat(_observed.VisibleLines[_batchLine].Runs.Select(r => r.Text));
@@ -243,7 +243,8 @@ public partial class RealDialogueFixture
                 case 6 when _observed is { Phase: DialogueDisplayPhase.WaitingForAdvance } snapshot && snapshot.PaletteRotation != _waitingRotation:
                     if (_graphical) CaptureInteraction("waiting-rotated", snapshot);
                     SendInteractionKey(Key.Down, false);
-                    SendInteractionKey(Key.Space, true); SendInteractionKey(Key.Enter, true);
+                    if (OS.GetEnvironment("PAL_DIALOGUE_HELD_WAIT_TEST") == "1") SendInteractionKey(Key.Right, true);
+                    else { SendInteractionKey(Key.Space, true); SendInteractionKey(Key.Enter, true); }
                     _stage = 7;
                     break;
                 case 7 when _completionObserved:
@@ -253,6 +254,15 @@ public partial class RealDialogueFixture
                     _stage = 8;
                     break;
                 case 8 when npc.Phase == NpcInteractionPhase.Exploring && !ReferenceEquals(_blockedState, npc.Current):
+                    if (OS.GetEnvironment("PAL_DIALOGUE_HELD_WAIT_TEST") == "1")
+                    {
+                        Require(npc.Current.Leader is { X: 1248, Y: 1344, Direction: 3 } && npc.Current.IsWalking,
+                            "A direction freshly pressed during wait must remain held for the first normal exploration update after return50ms.");
+                        SendInteractionKey(Key.Right, false);
+                        _blockedState = npc.Current;
+                        _stage = 9;
+                        break;
+                    }
                     Require(npc.Current.Leader.X == 1232 && npc.Current.Leader.Y == 1336 && !npc.Current.IsWalking,
                         "Released direction must not stick through dialogue; ending input must not reopen it.");
                     Require(_main.Dialogue!.Session!.Phase == TriggerScriptPhase.Completed, "No transient search may leak into exploration.");
@@ -270,6 +280,12 @@ public partial class RealDialogueFixture
                     }
                     _completionObserved = false; _observed = null;
                     KeyEvent(true); _stage = 2;
+                    break;
+                case 9 when !ReferenceEquals(_blockedState, npc.Current):
+                    Require(npc.Current.Leader is { X: 1248, Y: 1344 } && !npc.Current.IsWalking,
+                        "Direction release must reach actual Main bookkeeping after dialogue return.");
+                    GD.Print("PAL_WAIT_DIRECTION_HELD:actualMain=true:first-return-step=1248,1344:release-processed=true");
+                    _finished = true; GetTree().Quit(0);
                     break;
             }
         }

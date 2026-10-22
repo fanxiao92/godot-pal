@@ -35,13 +35,13 @@ dotnet run --project tools/Pal.Extract -- extract-dialogue `
 
 ## Core 显示会话
 
-`DialogueLanguagePackage.Resolve(startMessageId, span)` 仅做原始引用解析；它不驱动事件命令。`DialogueDisplaySession` 在 Core 内以显式毫秒时间和显式输入参数推进一个已解析块，24ms 默认字间隔、逐条显示、加速、CLEAR 等待、结束输入和 100ms 调色板轮转均可确定性验证。`-`、`'`、`@` 与 `"` 分别切换 cyan `0x8D`、red `0x1A`、alternate red `0x17` 与 yellow `0x2D`，关闭相同控制符时回到参考默认色 `0x4F`；dialog 命令颜色值0表示继承传入的当前调色板索引（索引0本身有效，不映射为默认色）。色彩状态及 `$NN` 延时跨行持续；源码的默认延时3单位为 `3*8=24ms`，`$NN` 将延时设为 `(NN*10/7)*8ms`（整数除法顺序与 C 一致）。反斜线转义下一控制字符；`)`、`(` 选定提示帧1、2，默认帧0。`PAL_ShowDialogText` 每行重置提示帧，不自动动画帧1/2。
+`DialogueLanguagePackage.Resolve(startMessageId, span)` 仅做原始引用解析；它不驱动事件命令。`DialogueDisplaySession` 在 Core 内以显式毫秒时间和显式输入参数推进一个已解析块，默认24ms字后延时、逐条显示、加速、CLEAR 等待、结束输入和100ms调色板轮转均可确定性验证。首字在首次Update0即可见，随后才等待该字延时；末字也保留字后延时，$NN/零延时/继承速度沿同一规则。Search/Menu新press（非held/echo）先锁存至当前glyph字后延时截止才生效，之后skip跨正文行保持，等待时清除。等待新press锁存，先等满累计100ms、轮转palette后再检查输入；不将上一正文/等待的按键或elapsed转交下一请求。`-`、`'`、`@` 与 `"` 分别切换 cyan `0x8D`、red `0x1A`、alternate red `0x17` 与 yellow `0x2D`，关闭相同控制符时回到参考默认色 `0x4F`；dialog 命令颜色值0表示继承传入的当前调色板索引（索引0本身有效，不映射为默认色）。色彩状态及 `$NN` 延时跨行持续；源码的默认延时3单位为 `3*8=24ms`，`$NN` 将延时设为 `(NN*10/7)*8ms`（整数除法顺序与 C 一致）。反斜线转义下一控制字符；`)`、`(` 选定提示帧1、2，默认帧0。`PAL_ShowDialogText` 每行重置提示帧，不自动动画帧1/2。
 
 首条正文出现前，以 `:`、`U+FF1A` 或 `U+2236` 结尾的消息按 `PAL_ShowDialogText` 识别为说话人名称：立即显示、不消耗正文行数或逐字时间，也不改变继承的正文颜色和速度。名称按 `PAL_UnescapeText` 处理：不含反斜线时原样保留；含反斜线时保留被转义的字符，同时移除未转义的 `- ' @ " $ ~ ) (`（只移除控制符本身，不消费其后数字）。这不是执行正文颜色/速度控制。有画像时名称锚点为(80,8)、固定颜色`0x8C`，正文起点仍为(96,26)；无画像时名称/正文起点分别为(12,8)/(44,26)。原始消息引用及条目数不变，不能把目标的“名称＋正文”当成两条正文。公开快照保留既有`VisibleText`/`VisibleRuns`当前文字语义，另以`TitleText`和不可变`VisibleLines`表达应持续呈现的名称与页面正文；等待提示使用末条可见正文的位置，而不是已递增的下一行计数。CLEAR/翻页恢复时清除正文页面并保留名称，完成时清除名称、正文和画像覆盖层。
 
 SDLPal `~NN` 在普通消息中先延时 `NN*80/7ms`，然后提前返回并重置当前行；这条带时序/返回状态的控制在本窄切片中明确拒绝，不声称支持。#23 目标 start61/span1 两语言消息中均未出现 `~` 控制（离线核对只读取控制计数，未输出消息内容）。Core 不访问文件、Godot 输入、纹理或节点。
 
-SDLPal 依据：`text.c` 的 `PAL_ReadMessageFile` / `PAL_GetMsgNum` 保留消息索引跨度和 CLEAR；`script.c` 的 `MESSAGE_GetSpan` 把相邻连续 `0xFFFF` 命令归入块；`PAL_ShowDialogText` 调用 `TEXT_DisplayText(..., FALSE)`，后者决定逐字、颜色控制、默认延迟、按键加速和翻页；等待状态每100ms轮转调色板索引 `0xF9..0xFE`，任何输入后恢复原调色板。`font.c` 的字形取位、字宽/行高、阴影和 `PAL_StartDialogWithOffset` 的头像/文字锚点是显示层来源；`input.c` 将 Return/Space/keypad Enter/Left Ctrl 映射为搜索，Escape/Insert/Alt/keypad 0 映射为菜单。不能用 `ui_accept` 替代此输入集合。
+SDLPal 依据：`text.c` 的 `PAL_ReadMessageFile` / `PAL_GetMsgNum` 保留消息索引跨度和 CLEAR；`script.c` 的 `MESSAGE_GetSpan` 把相邻连续 `0xFFFF` 命令归入块；`PAL_ShowDialogText` 调用 `TEXT_DisplayText(..., FALSE)`，后者决定逐字、颜色控制、默认延迟、按键加速和翻页；等待状态每100ms轮转调色板索引 `0xF9..0xFE`，在该检查边界遇到任何参考映射逻辑键的新press后恢复原调色板。`font.c` 的字形取位、字宽/行高、阴影和 `PAL_StartDialogWithOffset` 的头像/文字锚点是显示层来源；`input.c` 将 Return/Space/keypad Enter/Left Ctrl 映射为搜索，Escape/Insert/Alt/keypad 0 映射为菜单。正文加速仅搜索/菜单；等待还包括方向及keypad对应键、PageUp/PageDown/Home/End及r/a/d/e/w/q/f/s。未映射键/echo/Right Ctrl不推进。不能用 `ui_accept` 替代此输入集合。
 
 Godot `PalDialogueDisplay.ActivePaletteChanged` 提供一个显式 consumer seam：参数是已经轮转或恢复后的完整256色调色板副本，宿主把它送给场景调色板使用者。Fixture 的 `PalDialoguePaletteSurface` 用合成原生索引图像实际建立 `ImageTexture` 并在 `_Draw` 中绘制；测试读取该 target 的调色板像素观察等待轮转与输入恢复。此 seam 不自动修改真实地图/主场景 palette，也不声称已接入 map10；这种连接属于下游宿主集成。
 
