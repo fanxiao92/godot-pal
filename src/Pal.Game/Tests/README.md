@@ -108,9 +108,11 @@ measurements.
 `TriggerDialogueFixtureTests` uses the existing display scene, actual modern JSON files and native
 manual resources in `Tests/Fixtures/TriggerDialogue`. It drives `PalTriggerDialogue.Initialize/Start`,
 not a hand-authored UI command sequence; `request.Display` is the actual rendered/updated Core session.
-The new suite has 18 cases: two language/repeat loops, font preflight, leading CLEAR with real background
+The suite has 20 cases: two language/repeat loops, font preflight, leading CLEAR with real background
 and palette consumers, a two-request input/context boundary, ten resource/entry negatives, two completed
-restore cases (CLEAR/name), and synchronous multiple-restore draining before body text. The existing
+restore cases (CLEAR/name), synchronous multiple-restore draining before body text, and two initialization
+diagnostic cases. The latter require exact resource-path-prefixed messages for an invalid Prompt-01 plane
+and language format version, with the original InvalidDataException and its reason retained as the inner exception. The existing
 three `DialogueDisplayFixtureTests` remain unchanged and run in the same targeted validation.
 
 Run with the existing exact engine/packages/runsettings, serially after the usual PID/Name preflight:
@@ -121,7 +123,7 @@ dotnet build src/Pal.Game --no-restore
 dotnet test src/Pal.Game --no-build --no-restore `
   --filter 'FullyQualifiedName~TriggerDialogueFixtureTests|FullyQualifiedName~DialogueDisplayFixtureTests' `
   --logger 'trx;LogFileName=trigger-dialogue.trx' --results-directory $logs
-# This slice: 21 completed passes; validate actual exit, Summary/RunInfo and all result counts.
+# This slice: 23 completed passes; validate actual exit, Summary/RunInfo and all result counts.
 ```
 
 Snapshots used for runtime assertions are saved from `PalDialogueDisplay.UpdateCompleted`, emitted at

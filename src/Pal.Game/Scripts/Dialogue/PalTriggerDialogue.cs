@@ -35,10 +35,16 @@ public partial class PalTriggerDialogue : Node
         var events = TriggerEventLoader.Load(indexPath.Replace('\\', '/'));
         var nativeLanguage = Load<PalDialogueLanguage>($"Language.{language}.tres");
         if (nativeLanguage.Language != language) throw new InvalidDataException($"{nativeLanguage.ResourcePath}: selected language identity differs from {language}.");
-        var package = nativeLanguage.ToCorePackage();
+        DialogueLanguagePackage package;
+        try { package = nativeLanguage.ToCorePackage(); }
+        catch (InvalidDataException error) { throw new InvalidDataException($"{nativeLanguage.ResourcePath}: {error.Message}", error); }
         var font = Load<PalDialogueFont>("Font.tres");
         var prompts = Enumerable.Range(0, 3).Select(frame => Load<PalDialogueIndexedImage>($"Prompt-{frame:D2}.tres")).ToArray();
-        foreach (var prompt in prompts) prompt.Validate();
+        foreach (var prompt in prompts)
+        {
+            try { prompt.Validate(); }
+            catch (InvalidDataException error) { throw new InvalidDataException($"{prompt.ResourcePath}: {error.Message}", error); }
+        }
         _events = events;
         _language = package;
         _font = font;

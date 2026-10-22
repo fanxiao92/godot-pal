@@ -240,6 +240,30 @@ public class TriggerDialogueFixtureTests
         AssertThat(trigger.Session is null || trigger.Session.Phase == TriggerScriptPhase.Ready).IsTrue();
     }
 
+    [TestCase("Prompt-01.tres", "Dialogue indexed image has invalid dimensions or planes.", Timeout = 15000)]
+    [TestCase("Language.zh-Hans.tres", "Dialogue language resource has an unsupported version or identity.", Timeout = 15000)]
+    public void Invalid_initialization_resource_reports_exact_path_reason_and_inner_exception(string fileName, string reason)
+    {
+        using var files = new SyntheticFiles();
+        files.Edit(fileName, text => fileName == "Prompt-01.tres"
+            ? text.Replace("Width = 1", "Width = 2")
+            : text.Replace("Language = \"zh-Hans\"", "FormatVersion = 2\nLanguage = \"zh-Hans\""));
+        using var runner = ISceneRunner.Load("res://Tests/DialogueDisplayFixture.tscn", true);
+        var display = (PalDialogueDisplay)runner.Scene()!;
+        var trigger = new PalTriggerDialogue(); display.AddChild(trigger);
+        using var scene = Scene();
+        InvalidDataException? failure = null;
+        try { trigger.Initialize(display, files.Root + "/index.json", files.Root, Palette(), scene); }
+        catch (InvalidDataException error) { failure = error; }
+
+        AssertThat(failure is not null).IsTrue();
+        AssertThat(failure!.Message).IsEqual($"{files.Root}/{fileName}: {reason}");
+        AssertThat(failure.InnerException?.GetType() == typeof(InvalidDataException)).IsTrue();
+        AssertThat(failure.InnerException?.Message).IsEqual(reason);
+        AssertThat(display.Session is null).IsTrue();
+        AssertThat(trigger.Session is null).IsTrue();
+    }
+
     [TestCase("clear", Timeout = 15000)]
     [TestCase("name", Timeout = 15000)]
     public void No_wait_restore_content_is_applied_and_receipted_synchronously(string content)
