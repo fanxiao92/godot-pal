@@ -46,6 +46,34 @@
 
 其它脚本的进程封装不因本规则被宣称已修复；本次边界改动只覆盖该函数。完整门会单独执行此预检，其运行不能与定点验证混记或自动授权。
 
+## 完整门的固定串行批次
+
+完整入口仍为 `scripts/Test-M0.ps1`，本地和 Windows CI 共用，不建立第二门框架。保留 solution restore/build；测试改为显式串行 Core328 → CLI330＋两个原具名 skip → Prepare52 → Game 首轮，不能再用一次未拆批的 solution test 替代。Prepare 的真实 build/import 必须先于 Game adapter runner。
+
+Game 在 `solution`、`game`、`game-repeat` **三轮各自**执行下列完整类分区，批次之间不并行：
+
+| 批次 | 完整测试类 | 正例 |
+|---|---|---:|
+| process | MainProcessTests、ExplorationProcessTests | 66 |
+| scene-dialogue | ExplorationSceneTests、MainSceneTests、NpcInteractionHostTests、DialogueDisplayFixtureTests、TriggerDialogueFixtureTests | 79 |
+| native-map | NativeExplorationProfileTests、PalMapSceneTests、ViewportTests | 97 |
+
+每轮共242正例，三轮共9个 Game 会话，另有245项 discovery和3个单独失败控制，最后保留原 native startup及清理检查。runsettings 的120000ms会话上限、单例/编译/连接/启动预算、固定SDK/引擎/包及CI20分钟总限时不变。拆批增加宿主启动，并重置批间共享状态；保留类内及显式后续场景隔离用例，不将三批完整覆盖称为单会话全套或性能改善，不预先保证各批/CI耗时。
+
+`GameTestBatches.ps1` 只处理源码、文本和XML元数据：从当前C#属性独立冻结245项完整身份/显示名，验证66/79/97互斥并集242及三个具名控制；不以通过结果生成预期。当前源码语法或solution项目分类无法识别时失败，新增类/项目/案例必须同步分区，不能静默略过。CLI filter覆盖项目默认filter，因此正例必须显式限定完整类，控制使用完整FQN精确选择。
+
+每批要求实际exit0、Summary Completed、无错误RunInfo/坏计数、全部Passed，并将完整FQN集合与该批源码预期精确比较；Results/Definitions/Entries的testId、executionId和非空名字逐项对应。通用TRX身份使用唯一ID：xUnit参数显示可能截断而同名，不能用显示名代替案例ID；Game另按完整源码FQN要求唯一。每轮单独核三批及242并集，不跨轮、跨旧partial补齐。所有15份TRX另核唯一runId和全局唯一executionId；两个CLI skip只能为原具名案例，三个控制须各exit1、恰好一个具名指定失败且无无关RunInfo错误。任一失败即停，保存原件，不自动重试、续跑、换组或提高时限。
+
+沿用原平面 `solution/*.trx`、`game/*.trx`、`game-repeat/*.trx`：每批唯一文件名，连同Core/CLI/Prepare和三个控制共15份。`game-batch-plan.json`保存源码预期，`game-batches.json`增量保存已完整核过的批次，原日志/commands/test-results/discovery继续保留；现有CI证据通配无需扩大到资源或包缓存。
+
+纯离线回归（不调用SDK、引擎、CIM或网络）：
+
+```powershell
+pwsh -NoProfile -File tests/Pal.Game.Tests/GameBatches.Tests.ps1
+```
+
+人工小型源码/XML/文本fixture验证漏例、同数换例、重号、未知类/项目、未识别discovery行、会话中止及跨批重叠均被拒绝；离线通过不等于真实门禁通过，实际运行结论仍按精确身份另记。
+
 ## 迁移与验收
 
 - 先冻结原职责映射、预期集合、筛选命令、构建/缓存口径和运行次数；逐变体覆盖下沉时说明 Core、场景和进程代表各能证明什么。替代验证成功后移除被替代的旧自动入口，保留仍被使用的观察能力及必要进程契约。

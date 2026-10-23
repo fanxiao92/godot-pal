@@ -1,12 +1,50 @@
-# M3 分层验收检查点（当前局部验证完成，完整门与 CI 待授权）
+# M3 分层验收检查点（固定串行拆批完整门通过，CI与发布分列）
 
 ## 当前统一收尾候选
 
-隔离分支 `task/m3-finalize` 从本地 main52afa6c 与 committed M3 794b078统一，并移入已审共享初始化/SceneRunner增量；不是把全部M3合入主工作树。保留M3已批准焦点策略、main独有normal-deadline Fact和profile-cleanup合同，及M3独有NPC/display失败合同。本地合并候选 `00f3c64` 的P2前独立源码库存为Core328、Game240 positives/243含controls；已完成Core87及获准拆批的Game66+77定点验证。用户随后要求补修三项P2，P2补丁的静态要求为Core328、CLI330+2既有skip、Game242 positives/245含controls；新旧结果与限制分列如下。静态库存不是全套通过结果，尚无新版完整门、精确候选CI或发布结论。
+隔离分支 `task/m3-finalize` 从本地 main52afa6c 与 committed M3 794b078统一，并移入已审共享初始化/SceneRunner增量；不是把全部M3合入主工作树。保留M3已批准焦点策略、main独有normal-deadline Fact和profile-cleanup合同，及M3独有NPC/display失败合同。本地合并候选 `00f3c64` 的P2前独立源码库存为Core328、Game240 positives/243含controls；已完成Core87及获准拆批的Game66+77定点验证。用户随后要求补修三项P2，P2补丁的静态要求为Core328、CLI330+2既有skip、Game242 positives/245含controls；新旧结果与限制分列如下。静态库存不是全套通过结果。P2修复已在本地提交 `0ee8204`；随后第一次拆批完整入口在新增CLI身份核验处误报停止；用户批准持续修复到主线交付后，修复并完成了新的完整入口，15份TRX全部核验通过。CI、主线和Issue交付另列，失败原件不改判。
 
 历史 [CI39884910037](https://github.com/fanxiao92/godot-pal/actions/runs/39884910037) 在794b078、attempt1上为completed/cancelled：Game120s会话中止，仅210/239结果，平台20分钟取消，solution实际退出未知。该失败不因后来局部回归而改判；继承pipe writer的合成反例也不是它的已证实根因。
 
 Test-M0仅修复dotnet函数的root+双流EOF共享600s预算和额外最多5s失败显式清理等待，保留真实退出/不完整输出失败/早期持久化和原始双流。合成回归的8s每例防挂不限制游戏资源加载；不承诺整个调用含OS/I/O硬实时。两次旧回归失败原件保留：首次UTF8解码回归已修正；后一次stderr-held全调用2.93s触发不属于原规格的2.5s硬断言，未将它当M3业务缺陷。用户明确选方案1校准该判据；修订后8例已单次通过，不等于完整门、稳定性或旧CI修复。
+
+### 2026-10-23 固定串行拆批：修复后完整入口通过
+
+用户明确授权继续处理后续故障，完成M3主线合入及相关Issue关闭。通用TRX图改按testId/executionId识别案例，保留非空名字和逐项对应；xUnit允许不同案例显示同名，Game仍按独立源码FQN强制唯一。新增合法同显示名/不同ID回归先RED（准确duplicate identity），修后12组纯离线回归GREEN；旧原CLI332结果只读重放通过，不重签旧门结果。
+
+实际身份为 `task/m3-finalize@0ee82045320a9793ec64ca63ca7bf3cf5fda2baf` 加未提交的门禁/文档补丁；新完整入口UTC **2026-10-23T16:16:31.518922Z–16:30:11.282978Z**，实际exit0、**819.764秒**，无outer timeout。独立空NuGet包/HTTP缓存，保留bin/.godot；固定SDK10.0.402、Godot4.7.2及原API/adapter不变。不是clean checkout，不证明零概率故障消除或历史CI根因。
+
+| 层 | 本次实际完整结果 |
+|---|---|
+| 元数据及真实边界预检 | 12组离线metadata、8个真实自有进程boundary均完整通过；owned退出已知、无outer guard |
+| Core / CLI / Prepare | 328P；330P＋原2具名skip；52P，各exit0/Completed。CLI仅两个对应skip的Warning RunInfo，其余正例无RunInfo |
+| Game三轮 | solution、standalone、repeat各66＋79＋97＝242P，九会话全部exit0/Completed、0skip，无错误RunInfo；每批完整FQN与独立源码预期精确一致，每轮互斥并集242，不跨轮补齐 |
+| discovery | 独立源码245项显示身份与实际245唯一发现精确一致，含原三个控制 |
+| 三个控制 | 分别exit1、1个具名指定失败；断言差异、500ms单例超时和READY异常诊断准确，无无关会话错误 |
+| native startup | version/import/fixture-build/prepare/profile/startup六阶段全部exit0、未超时；实际Main加载选定合成原生map并输出Core ready |
+| 整体完整性 | 主dotnet19条，前16exit0、后3指定exit1；15个完整TRX、15个唯一runId、1441个唯一executionId，1436P＋2原skip＋3指定F；Results/Definitions/Entries逐条对应，Summary/Counters/RunInfo/Times核过 |
+
+源码1064文件在运行区间SHA/长度/mtime全不变，后续只同步证据文档；原main958/integration1058源/Git状态及5278资源精确保护。最终受限进程快照为空；不恢复Observer、不采未知详情、不推断所有历史后代生命周期。本次headless不新增GPU/物理键盘/人工结果，继续按原身份复用适用的双语GPU及用户Windows反馈。原143中止、前次CLI核验误报和CI39884910037取消均保留。
+
+原件在本机 `C:/Users/xiaofan/.pi/m3-closeout-02/gate-01/`、`gate-01-run/`、`gate-01-audit.json`和源码/保护快照；不是清洁检出依赖或应上传的真实资源。本次完整门通过不自动等于CI、合main或Issue关闭；后续按用户已给交付授权分别记录。
+
+### 历史：2026-10-23 固定串行拆批第一次完整入口未通过
+
+用户确认保留120秒、工具链、全部案例与三轮，按完整类固定拆为66/79/97；[固定规则](../../testing/game-test-layers.md#完整门的固定串行批次)已实现于共享入口及小型元数据辅助，保留solution restore/build，显式串行Core/CLI/Prepare，避免再次未拆批solution test。纯离线11组回归、语法、245项独立源码库存及历史格式核对通过，不作为运行通过证据。
+
+实际身份为 `task/m3-finalize@0ee82045320a9793ec64ca63ca7bf3cf5fda2baf` 加本轮未提交门禁/说明补丁；唯一入口UTC **2026-10-23T15:51:15.872817Z–15:52:44.536975Z**，实际exit1、88.664秒，无outer timeout。首五条主dotnet命令全部exit0：SDK info（10.0.402）、独立空NuGet包/HTTP缓存restore、solution build、Core及CLI。保留已有bin/.godot，不称clean build/clean checkout。
+
+| 实际阶段 | 原始证据与结论 |
+|---|---|
+| 边界预检 | 8/8真实自有进程案例完整通过，所有owned退出已知、无outer guard；本轮新执行，非复用P2结果 |
+| Core | 328P、exit0、Summary Completed，无RunInfo，328份Results/Definitions/Entries及ID对应 |
+| CLI | 330P＋2个原具名skip、exit0、Summary Completed，332份Results/Definitions/Entries；两个Warning RunInfo仅为相应skip。testId/executionId各332唯一、逐项关联正确 |
+| 门禁失败 | 新增 `Read-TestRunIdentity` 对所有框架错误要求显示名唯一；xUnit byte-array MemberData截断显示产生2组同名（分别6/2例），但案例ID不同且关联正确。当前helper因此误报duplicate identity。这是本轮新增脚本误判，不是CLI功能失败、历史问题归因或120秒会话中止 |
+| 未运行 | Prepare、9个Game批次、discovery、3个控制及startup；未产生PASS.txt，不能以两个完整TRX替代15份完整门，也未验证拆批运行效果 |
+
+完整入口额度已使用一次，失败后只读核验并停链，未修helper、自动重试、从Prepare续跑或修改时限。完整源在运行区间SHA/长度/mtime均不变；原main/integration源/Git状态和5278资源精确保护，退出受限进程快照为空。未启动实际Godot、CI、GPU/人工、提交/合main/推送/Issue写。原件保存在本机 `C:/Users/xiaofan/.pi/m3-batched-gate-01/` 的 `full-gate/`、`gate/`、`gate-audit.json`、`source-before.json`、`source-after-run.json`、`runtime-manifest.json`及保护记录。
+
+下一步建议而非已执行：按testId/executionId核通用TRX图，保留非空显示名和逐项对应，仅对Game源码完整FQN要求唯一；补xUnit合法同名反例与不合法重号/错连回归，再另获一次全新证据目录的完整入口许可，不拼接本次partial阶段。该历史核验缺陷及后续修复、完整门结果以上一节为准，不用成功结果覆盖本次原失败。
 
 ### 2026-10-23 P2补修及定点回归
 
