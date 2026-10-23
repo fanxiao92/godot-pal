@@ -18,16 +18,35 @@ public partial class Main : Node2D
     private PalMapScene? mapScene;
     private Window? window;
     private bool focusSignalsConnected;
+    private GameSceneConfiguration? configuration;
+    private bool initializationAttempted;
+    private bool exited;
     public ExplorationState? Exploration => input?.Current;
+    public string? Failure { get; private set; }
+    public event Action<string>? Failed;
+    // Emitted only after this real Main callback and renderer update have completed.
+    public event Action? UpdateCompleted;
+
+    /// <summary>Configure once before tree entry. The host owns this node even on failure.
+    /// Initialization occurs in _Ready; failed or removed scenes must be freed, not reused.</summary>
+    public void Configure(GameSceneConfiguration selection)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        if (IsInsideTree() || configuration is not null || initializationAttempted || exited || Failure is not null)
+            throw new InvalidOperationException("Configure the scene exactly once before entering the tree.");
+        configuration = selection;
+    }
 
     public override void _Ready()
     {
+        if (initializationAttempted || exited || Failure is not null) return;
+        initializationAttempted = true;
         string? scenePath = null, profilePath = null;
         try
         {
             window = GetWindow();
-            window.MinSize = new Vector2I(320, 200);
-            var (root, profile) = NativeSceneLoader.Arguments(OS.GetCmdlineUserArgs());
+            var selected = configuration ?? throw new InvalidOperationException("Configure the scene before entering the tree.");
+            string root = selected.Root, profile = selected.Profile;
             scenePath = root + "/Scenes/Scene.tscn";
             profilePath = profile;
             var map = NativeSceneLoader.Load(root);
@@ -53,9 +72,7 @@ public partial class Main : Node2D
         }
         catch (Exception e)
         {
-            GD.PrintErr($"Static scene startup failed (scene={scenePath ?? "unselected"}, profile={profilePath ?? "unselected"}): {e.Message}");
-            SetProcess(false);
-            GetTree().Quit(1);
+            Fail($"Static scene startup failed (scene={scenePath ?? "unselected"}, profile={profilePath ?? "unselected"}): {e.Message}");
         }
     }
 
@@ -63,6 +80,12 @@ public partial class Main : Node2D
     private void OnFocusExited() => input?.SetFocused(false);
 
     public override void _ExitTree()
+    {
+        exited = true;
+        DisconnectFocus();
+    }
+
+    private void DisconnectFocus()
     {
         if (window == null || !focusSignalsConnected) return;
         window.FocusEntered -= OnFocusEntered;
@@ -72,7 +95,7 @@ public partial class Main : Node2D
 
     public override void _Input(InputEvent @event)
     {
-        if (input == null || @event is not InputEventKey key) return;
+        if (Failure is not null || exited || input == null || @event is not InputEventKey key) return;
         for (int i = 0; i < DirectionKeys.Length; i++)
         {
             if (key.Keycode != DirectionKeys[i] || !key.IsAction(DirectionActions[i / 2])) continue;
@@ -84,17 +107,27 @@ public partial class Main : Node2D
 
     public override void _Process(double delta)
     {
-        if (input == null || mapScene == null) return;
+        if (Failure is not null || exited || input == null || mapScene == null) return;
         try
         {
             if (input.Update(unchecked((uint)Time.GetTicksMsec())))
                 mapScene.UpdateScene(input.Current.Plan);
+            UpdateCompleted?.Invoke();
         }
         catch (Exception e)
         {
-            SetProcess(false);
-            GD.PrintErr($"Exploration update failed: {e.Message}");
-            GetTree().Quit(1);
+            Fail($"Exploration update failed: {e.Message}");
         }
+    }
+
+    protected void Fail(string message)
+    {
+        if (Failure is not null || exited) return;
+        Failure = message;
+        ProcessMode = ProcessModeEnum.Disabled;
+        SetProcess(false);
+        SetProcessInput(false);
+        DisconnectFocus();
+        Failed?.Invoke(message);
     }
 }

@@ -1,5 +1,7 @@
 # Static exploration / Main integration tests
 
+For new or migrated cases, follow [Game test layers and SceneRunner](../../../docs/testing/game-test-layers.md): Core for deterministic rules/time, real scenes for input/update wiring, and minimal real processes for argv/diagnostic/exit/READY/isolation. This is not a blanket migration of every process test.
+
 Approved seam: real native `PackedScene` / `Resource` / `Texture2D`, real scene-tree entry and frames, checked Core draw plans rendered by Godot, viewport transforms, and child-process exit/diagnostics from the shipped Main. No mocks or internal-only test interfaces. This does not replace graphical/desktop pixel acceptance.
 
 Tests live in the existing Godot assembly, matching the #12 proven arrangement; no second Godot project or Core test migration. Fixed packages: gdUnit4.api 5.1.0-rc6.pal.a5f20fb8.1, gdUnit4.test.adapter 3.2.0-pal.a5f20fb8.1, Microsoft.NET.Test.Sdk 18.0.1. See [pinned source-package bootstrap and provenance](../../../docs/testing/gdunit-source-packages.md); direct dotnet commands require bootstrap first. Godot.NET.Sdk 4.7.2 / net10.0 and repository global.json remain authoritative.
@@ -43,7 +45,7 @@ Shared local/Windows CI acceptance (PowerShell 7):
   -EvidenceDirectory 'C:/external/new-empty-evidence-directory'
 ```
 
-This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 129, CLI 300 + 2 named platform skips, Prepare 52 and Game 170; lists 173 unique Godot cases and repeats the 170 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
+This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 130, CLI 300 + 2 named platform skips, Prepare 52 and Game 170; lists 173 unique Godot cases and repeats the 170 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. These are current source requirements: main170 minus four duplicate Arrow entries plus four M2 initialization contracts remains170/173; the eight moved cases are replacements, not additions. Core130 adds one explicit normal release/restart deadline case to the original129. Historical M2 full-gate results retain their original129/170/173 identity; no revised full gate or discovery is implied. The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
 
 `Test-GameStartup.ps1 -GodotPath <exe>` remains independently callable. It uses the sole `M1Bundle.Write` fixture in an external temporary input, explicitly prepares a unique Assets subroot and a matching typed artificial native profile (raw WORD0, start320,320, South0/layer0/phase0), then checks the actual Main's selected map URI plus Core ready and exit0. It only removes its own recorded, unchanged synthetic trees. Optional `-ResourceRoot res://Assets/<prepared-root>` uses caller-owned native resources without writing/deleting them. Add `-ProfileUri res://<selected-profile>.tres` to select a caller-owned native profile explicitly. With caller resources and no ProfileUri, Main retains its independent default `res://Assets/Profiles/Exploration.tres`; a changed resource root does not relocate it. ProfileUri alone is rejected before synthetic preparation. Synthetic output cleanup is snapshotted only after profile authoring. Neither script populates the default real Assets root; ordinary game startup with missing resources still fails. Timeout or error is a failure, not a fallback. Headless automation is not GPU pixel or human desktop acceptance.
 
@@ -77,3 +79,85 @@ Its unchanged 650ms wait is a liveness guard: missing samples are incomplete obs
 captured wrong first update is a functional failure. No production clocks/state or callbacks are set
 or invoked by the observer. This scoped sampler does not change the separate opt-in scene2/GPU modes
 and is not OS keyboard/focus or graphical acceptance. No cases or gate counts are added.
+
+
+## Shared Main initialization
+
+`new Main()` → `Configure(GameSceneConfiguration.FromArguments(...))` →
+`ISceneRunner.Load(main, autoFree: true)` is the embedded public seam. Configuration
+is immutable and accepted exactly once before tree entry. Real `_Ready` owns the
+same M2 native loading, profile validation, exploration and renderer assembly as
+normal startup. Shipped `Main.tscn` uses `GameStartup : Main`: its tree-out constructor
+selects actual argv, and its outer policy alone sets window minimum and turns shared
+failure into the original diagnostic/exit1. Selected scene/profile, MAP/READY and
+normal resource defaults are unchanged.
+
+`Failure`/`Failed` retain/report the first initialization or update failure once;
+the scene disables subtree/input/process and disconnects its Window focus signals,
+without quitting an embedded host. Host owns all nodes on success or failure and
+must free them. Removed/failed nodes cannot be reconfigured or reused. Unexpected
+scene failure must fail the test rather than be mistaken for successful READY.
+
+`MainSceneTests` has four M2 contracts: missing/repeated/late configuration; selected
+resource failure; walking-frame failure followed by healthy/new and cached-resource
+scenes; and invalid profile after native map loading followed by healthy interaction.
+No NPC, event or dialogue runtime is added. `ExplorationProcessTests` retains focus,
+priority, aliases, repeat, collision, dynamic renderer and runtime-exit duties;
+`MainProcessTests` retains argv/resource/normal-startup exit and diagnostic matrices.
+Only the eight logical-binding cases move to the scene layer, and the four entirely
+duplicate Arrow-only entries are removed. Still-used Observer/manual/GPU modes stay.
+
+## Eight exploration SceneRunner routes
+
+`ExplorationSceneTests.LogicalBindingsMoveHoldReleaseAndRestartActualMain` replaces
+four directions × Arrow/WASD process cases, with no extra business Godot per case.
+The fixed adapter still starts editor/runtime hosts. Run serially with both engine
+environment variables, bootstrap/build/import as required, and a PID/Name-only
+Godot preflight (pause on existing processes):
+
+```powershell
+dotnet test src/Pal.Game --no-build --no-restore `
+  --settings tests/Pal.Game.Tests/game.runsettings `
+  --filter 'FullyQualifiedName~ExplorationSceneTests.LogicalBindingsMoveHoldReleaseAndRestartActualMain' `
+  --results-directory $logs --logger 'trx;LogFileName=exploration-scene.trx'
+# Exactly eight completed passes, exit0, no skip or abnormal RunInfo.
+```
+
+Each unique native fixture configures an independent Main before Load. M2 focus
+freeze/clear/fresh-press remains production behavior: healthy embedded hosts emit
+public Window FocusExited then FocusEntered and check Error.Ok before input. This
+establishes a fresh-press gate independently of headless OS focus. It does not claim
+physical window focus or desktop input acceptance.
+
+InputEventKey reaches real `_Input`/InputMap. A synchronous `Main.UpdateCompleted`
+observer checks the FIRST actual update unconditionally, then literal held second
+and third steps, releases at third, checks stop/idle/raw WORD0, restarts at idle,
+and releases at restart. Position, direction, phase, frame, first camera, (160,112)
+anchor, logical InputMap aliases and three echo events remain checked. Samples and
+control occur in that completion, not when an awaiting coroutine happens to resume.
+Assertion exceptions stay in the test channel, not Main's failure channel. The650ms
+per-boundary guard is liveness protection, never a business deadline assertion.
+
+Old70ms/short-frame wall-clock predicates map to deterministic Core tests:
+`Each_key_moves_one_literal_world_step_only_on_update`,
+`Echoes_and_duplicate_presses_do_not_reorder_add_held_aliases_or_accelerate`,
+`Fresh_press_after_focus_resets_old_deadline_then_uses_100ms_wrap_and_no_catchup`,
+`Press_release_idle_and_restart_respect_exact_normal_deadlines`,
+`Update_is_due_at_equality_wraps_uint_ticks_and_reschedules_from_now_without_catchup`,
+`Every_idle_step_toggles_stop_phase_without_moving_or_animating_standing`, and
+`Restart_foot_depends_on_how_many_idle_steps_elapsed`. Explicit public time covers
+99/100ms, wrap, late no-catchup, release, restart and focus reset; scene integration
+cannot replace that deterministic proof with external scheduling observations.
+
+Finally, tests explicitly release their own input and subscriptions, Dispose runner
+with autoFree true, assert old Main invalid, fallback-free owned nodes even on an
+assertion, restore window/GUI focus and Engine settings, and delete only their GUID
+fixtures. Same-URI/new-node interaction plus file hashes check shared-resource
+isolation; no global ResourceLoader/InputMap clearing. Fixed runner defaults to
+NOT freeing nodes and changes TimeScale/physics settings; this is why explicit
+ownership and restoration matter. No TimeFactor/virtual delta/manual `_Process`
+is used. Negative controls must fail for their specified functional assertion,
+not compilation/resource absence/crash/timeout. Verify actual runtime-directory
+Core DLL identity after each rebuild/restore, not only source bytes, and never
+rewind source mtime. A local port is not a performance comparison: no new main
+baseline or performance benefit, whole-suite/CI/GPU/manual acceptance is claimed.

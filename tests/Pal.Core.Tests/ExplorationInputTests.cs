@@ -36,6 +36,37 @@ public class ExplorationInputTests
             initial.Leader.Direction, initial.Leader.StepPhase));
     }
 
+    [Fact]
+    public void Press_release_idle_and_restart_respect_exact_normal_deadlines()
+    {
+        var input = new ExplorationInput(new ExplorationSession(new StaticSceneRules(DrawMap()), Leader()));
+        input.Press(ExplorationKey.EastPrimary);
+        Assert.True(input.Update(0));
+        AssertState(input, 336, 248, 3, 1, 10, true);
+        var first = input.Current;
+        Assert.False(input.Update(99));
+        Assert.Same(first, input.Current);
+        Assert.True(input.Update(100));
+        AssertState(input, 352, 256, 3, 2, 9, true);
+        input.Release(ExplorationKey.EastPrimary);
+        var held = input.Current;
+        Assert.False(input.Update(199));
+        Assert.Same(held, input.Current);
+        Assert.True(input.Update(200));
+        AssertState(input, 352, 256, 3, 0, 9, false);
+        var stopped = input.Current;
+        Assert.False(input.Update(299));
+        Assert.Same(stopped, input.Current);
+        Assert.True(input.Update(300));
+        AssertState(input, 352, 256, 3, 2, 9, false);
+        input.Press(ExplorationKey.EastPrimary);
+        var idle = input.Current;
+        Assert.False(input.Update(399));
+        Assert.Same(idle, input.Current);
+        Assert.True(input.Update(400));
+        AssertState(input, 368, 264, 3, 3, 11, true);
+    }
+
     [Theory]
     [InlineData(false, 320, 240, 1, 3, 304, 288)]
     [InlineData(true, 352, 240, 2, 6, 336, 320)]

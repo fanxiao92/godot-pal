@@ -31,6 +31,8 @@
 
 ## 测试
 
+- 新增或迁移 Game 集成测试前先读 [Game 测试分层与 SceneRunner](docs/testing/game-test-layers.md)：按职责选择 Core、真实场景或必要进程层，沿用共用初始化及每例隔离规则。
+
 ### 执行与证据
 
 - 先核对当前分支的共享验收脚本和 runsettings，再选择与改动匹配的检查；实际 Godot、GdUnit、资源准备及包含它们的 solution 测试全局串行。工作树只隔离文件，不隔离进程或共享管道；发现已有 Godot 进程时暂停，确认归属，不擅自结束未知进程。

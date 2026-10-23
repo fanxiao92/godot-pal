@@ -128,7 +128,7 @@ try {
     # Prepare launches Game builds/imports; it must finish before the adapter generates its runner.
     $solutionResults = Join-Path $evidence 'solution'
     $null = Invoke-DotnetChecked @('test', 'GodotPal.sln', '--no-build', '--no-restore', '--logger', 'trx', '--results-directory', $solutionResults)
-    Assert-Trx $solutionResults @(129, 300, 52, 170) @(0, 2, 0, 0)
+    Assert-Trx $solutionResults @(130, 300, 52, 170) @(0, 2, 0, 0)
     $list = Invoke-DotnetChecked @('test', 'src/Pal.Game', '--no-build', '--no-restore', '--list-tests')
     $list | Set-Content (Join-Path $evidence 'discovery.log')
     # This adapter's list-tests output uses short display names, including :index parameter cases.
@@ -155,7 +155,7 @@ try {
     }
     & (Join-Path $PSScriptRoot 'Test-GameStartup.ps1') -GodotPath $GodotPath -LogDirectory (Join-Path $evidence 'godot')
     Save-ProcessSnapshot 'processes-final'
-    'PASS: empty-cache restore/build; Core 129; CLI 300 + 2 existing platform skips; Prepare 52; Godot discovery 173 / positives 170 repeated; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
+    'PASS: empty-cache restore/build; Core 130; CLI 300 + 2 existing platform skips; Prepare 52; Godot discovery 173 / positives 170 repeated; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
         Set-Content (Join-Path $evidence 'PASS.txt')
     Write-Host 'PASS: automated M0/M2 acceptance completed. Graphical/manual acceptance is separate.'
 } finally {

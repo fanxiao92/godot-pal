@@ -23,32 +23,6 @@ public class ExplorationProcessTests
         AssertThat(result.Text.Contains("ERROR:", StringComparison.Ordinal)).IsFalse();
     }
 
-    [TestCase("south", Timeout = 20000)]
-    [TestCase("west", Timeout = 20000)]
-    [TestCase("north", Timeout = 20000)]
-    [TestCase("east", Timeout = 20000)]
-    public async Task ArrowsHoldReleaseAndRestartUseActualClock(string direction)
-    {
-        using var fixture = new ExplorationFixture();
-        fixture.Native.SavePacked();
-        await CheckObservation(fixture, "arrow-" + direction);
-    }
-
-    [TestCase("south", "arrow", Timeout = 20000)]
-    [TestCase("west", "arrow", Timeout = 20000)]
-    [TestCase("north", "arrow", Timeout = 20000)]
-    [TestCase("east", "arrow", Timeout = 20000)]
-    [TestCase("south", "wasd", Timeout = 20000)]
-    [TestCase("west", "wasd", Timeout = 20000)]
-    [TestCase("north", "wasd", Timeout = 20000)]
-    [TestCase("east", "wasd", Timeout = 20000)]
-    public async Task LogicalBindingsMoveHoldReleaseAndRestartActualMain(string direction, string layout)
-    {
-        using var fixture = new ExplorationFixture();
-        fixture.Native.SavePacked();
-        await CheckObservation(fixture, "key-" + direction + "-" + layout);
-    }
-
     [TestCase("three", Timeout = 20000)]
     [TestCase("four", Timeout = 20000)]
     public async Task DirectionGroupsUseLatestPressAndReleaseFallbackInActualMain(string count)
