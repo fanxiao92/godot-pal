@@ -16,6 +16,8 @@
 
 **M2 Windows 单领队探索里程碑已完成（2026-10-22）。** 功能、自动/人工验收及收尾文档独立双轴终审均已接受；成果已合入并通过 SSH 推送到 `main`，已验证交付提交为 `a76f83bf08c421e83892cc9515cbdd4c032014ec`。[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)、[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 和后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，[远端完整 Windows CI](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过。场景 2 / 地图 12 的静态对象、单领队离散行走/碰撞/遮挡、320×200 整数缩放、方向键/WASD 与失焦恢复已交付。入口与独立原生配置见 [M2 计划](docs/milestones/m2/plan.md)，分层证据与限制见 [M2 验收记录](docs/milestones/m2/acceptance.md)。其余表现层/外壳层能力按后续阶段设计。[事件 JSON 契约](docs/design/events-schema.md) 已确定原版忠实低层转写策略、v1 文件结构与基础命令,全量 opcode 映射及工具/运行时尚未实现。独立 CLI 已提供只读 MKF 检查、Windows YJ2/图像解码、地图/精灵导出及带 v1 来源清单的完整静态场景包。
 
+**Game 集成测试已按职责分层。** 四方向×Arrow/WASD 的八项交互测试使用 SceneRunner，普通启动与测试共用真实 Main 初始化及失败传播，必要 argv/诊断/退出契约仍使用真实进程；M2 原有焦点冻结、清键和 fresh-press 行为保持。这批独立移植经 Core 20 项、Game 19 项匹配验证及三类指定错误反例验证，不包含 M3，不代表新版完整门、远端 CI、GPU 或人工验收通过，也不将此前 integration 的性能数字当作本分支实测。长期规则见[Game 测试分层与 SceneRunner](docs/testing/game-test-layers.md)，覆盖映射和运行入口见 [Game 测试说明](src/Pal.Game/Tests/README.md)。
+
 用户数据已放入 `data/raw/sdlpal/`,初步核对符合 Windows 数据分支。[M1 计划](docs/milestones/m1/plan.md) 范围已确认：只提取地图、瓦片、精灵、调色板与场景对象初始数据。[实施任务 #6～#10](https://github.com/fanxiao92/godot-pal/issues/6) 已完成本地验收和独立双轴审查，结果与收尾说明见对应 Issue。场景 2 的两次完整导出 416 文件字节一致，原始数据散列/长度/mtime 不变；M1 当轮 Debug/Release 构建测试与 Godot headless 启动通过，当轮未重跑 clean-cache/桌面/远程 CI 验收。M2 负责 Godot 场景构建与探索；事件、对话、语言包和字库独立留到 M3，不阻塞场景构建。后续阶段见 [总体路线](docs/design/development-plan.md)。
 
 ## 技术栈与开发环境
@@ -46,6 +48,10 @@ dotnet run --project tools/Pal.Extract --no-build -- --help
 ```
 
 完整回归优先使用下方 `Test-M0.ps1`，它在内部 bootstrap 并设置 `GODOT_BIN` / `PAL_TEST_GODOT`。单独执行 Game 或 solution 测试前须按 [Game 测试说明](src/Pal.Game/Tests/README.md)设置这两个引擎路径变量、完成必要导入并核对 `tests/Pal.Game.Tests/game.runsettings`（headless、串行、会话超时及零测试失败）；默认测试过滤三个故意失败控制，完整门禁会分别验证它们。Godot、Prepare、Game 与 solution 检查全局串行。
+
+### 测试职责
+
+纯规则与精确时间使用 Core 公开接口；真实资源、输入、信号和更新连接默认使用 GdUnit4Net SceneRunner；argv、诊断、退出、READY 和必要进程隔离保留最小真实进程代表。SceneRunner 每例承载独立生产场景、入树前配置、在实际更新完成边界断言，并清理自有输入、订阅、节点及改动的全局状态；迁移替换旧入口而非长期叠加重复测试。新增或改写 Game 集成测试前先读[分层规范](docs/testing/game-test-layers.md)。
 
 只读检查原始场景归档（不解压、不写文件）：
 

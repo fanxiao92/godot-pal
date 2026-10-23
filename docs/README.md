@@ -29,6 +29,12 @@
 
 后续计划放在 `docs/milestones/<里程碑>/plan.md`。具体任务规格、讨论和结果留在 GitHub Issues。
 
+## 测试规范与入口：`testing/`
+
+- [Game 测试分层与 SceneRunner](testing/game-test-layers.md)：新增或改写集成测试、迁移进程用例前阅读；直接列出选层、共用初始化、实际更新边界、清理隔离及反例/测量要求，无需追读历史任务正文。
+- [Game 测试说明](../src/Pal.Game/Tests/README.md)：当前入口、运行命令、覆盖映射及实际验证范围。
+- [固定 GdUnit 源码包](testing/gdunit-source-packages.md)：包来源、固定源码及 bootstrap。
+
 ## 历史归档：`archive/`
 
 仅在排障、环境升级或追溯历史结论时查阅，不是新会话或后续实现的默认必读材料。
