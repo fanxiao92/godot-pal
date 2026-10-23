@@ -2,7 +2,19 @@
 
 ## 当前统一收尾候选
 
-### 2026-10-23 夹具ACK修复与最终本地完整门
+### 2026-10-23 夹具日志并发读取修复与最新完整门
+
+[CI39994276642](https://github.com/fanxiao92/godot-pal/actions/runs/39994276642)精确fa5c4a4、attempt1仍为failure：normal/expected/unexpected/error/timeout五例完整通过，stdout-held在监督端读取正在写的`commands.json`时抛共享冲突IOException/exit90，未生成该例result或进入主测试；不补造其owned退出/partial结果。原日志及产物本机保留。此前ACK修复后的正常案例在本次不再等待ACK，但一次通过不证明所有系统延迟已消除。
+
+新增file-only `journal-check`直接调用实际Journal读取器：独占锁反例先准确IOException/exit90，修后确认运行中共享/锁冲突及半写JSON仅为pending，解锁后的最终快照必须读到真实记录，最终锁定或损坏仍抛异常。只在明确inFlight时处理Windows共享/锁冲突32/33和JsonException，其他I/O错误不豁免；最终读取默认strict。集成前置永久执行此回归，再跑原八个真实进程案例；生产封装、所有退出/流判据及预算不变，无临时probe。
+
+新独立完整门在`task/m3-finalize@fa5c4a4fd71d82aa22ac13bf6cd060bab6e2b07a`加读取器/前置回归补丁运行，UTC **2026-10-23T17:26:39.629120Z–17:36:13.458793Z**，own pwsh PID54856，实际**exit0/573.830秒**、无outer timeout。metadata12组、strict journal回归、boundary8及全部后续阶段从头完整：Core328P、CLI330P＋2原skip、Prepare52P；Game66/79/97三轮各242P，discovery245；3控制各指定失败/exit1，startup六stage exit0；15完整TRX/15runId/1441executionId、1436P＋2原skip＋3指定F，19主dotnet均完整、前16exit0后三个指定exit1。独立审计核逐条图/状态/诊断与源码期望，不拼此前成功。
+
+1064候选源在运行区间SHA/长度/mtime全恒定，运行结束先仅说明同步；原main958/integration1058源/Git状态及5278资源保护全同，最终受限进程快照空。固定工具/预算、独立空NuGet两缓存并保留bin/.godot，非clean checkout，无新GPU/人工/真实资源准备。原件`C:/Users/xiaofan/.pi/m3-closeout-02/gate-03/`、`gate-03-run/`、`gate-03-audit.json`和`journal-fix-01/`。三次本轮失败CI及旧失败均不改判，精确远端与主线交付仍按页首#26/#20入口分列。
+
+随后Spec增量复核发现journal-check失败先抛错、跳过平面复制的P1。只调整前置证据顺序：保存实际退出码，先复制原日志与存在的结果，再按原退出码阻断；失败缺结果不补造。实际AST块＋真实fixture指定失败先RED（缺平面日志），修后failure/success两路均GREEN、原日志/已有JSON字节相同且失败仍exit90/不伪造结果，重跑该前置及原八例也通过。这是gate03之后的小型采证排序修复，不倒签gate03为新脚本完整门；最终精确候选CI另行签全部阶段。
+
+### 历史：2026-10-23 夹具ACK修复与完整本地门
 
 用户已授权持续诊断/修复至M3主线交付及相关Issue关闭；固定工具、全部案例、120秒会话和隐私/资源保护保持。最终远端候选CI、main合入/推送及按依赖关闭的精确身份和URL以[#26交付回填](https://github.com/fanxiao92/godot-pal/issues/26)和[#20](https://github.com/fanxiao92/godot-pal/issues/20)为准，本节只签实际已执行的本地层，不预填未来远端成功。
 
@@ -160,7 +172,7 @@ GPU具有全部1049 tracked与Core/Game DLL/PDB的fresh pre-GPU/post-GPU hash/si
 ## 远端与发布回填入口
 
 - 当前持续交付授权和最新本地完整结果见页首；精确候选CI、main提交/推送和各Issue依赖闭合以[#26](https://github.com/fanxiao92/godot-pal/issues/26)/[#20](https://github.com/fanxiao92/godot-pal/issues/20)实际回填为准，核completed状态、真实结论及完整产物后签对应层。
-- 历史CI39884910037仍cancelled，本次39988957557/39990595247仍failure；局部或新门成功不改判它们。Observer私密原件限制及非M3功能门边界保持。
+- 历史CI39884910037仍cancelled，本次39988957557/39990595247/39994276642仍failure；局部或新门成功不改判它们。Observer私密原件限制及非M3功能门边界保持。
 
 ### Windows 人工清单（用户反馈已完成）
 

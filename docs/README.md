@@ -26,7 +26,7 @@
   - [M2 分层验收记录](milestones/m2/acceptance.md)：本地规则/headless、GPU、操作者反馈、主干交付及 #19 修复后远端 CI 的分层证据和未验收范围；追溯 #11/#17/#19 时阅读。
   - [固定 GdUnit 源码包](testing/gdunit-source-packages.md)：#18 包身份、发布与 bootstrap；直接还原/构建或排查包来源时阅读。
 - [M3 独立真实 NPC 对话](milestones/m3/plan.md)：scene4/map10/owner60闭环已实现，完成本地、GPU及用户Windows人工分层验证；不是正常剧情或全量事件系统。
-  - [M3 分层验收检查点](milestones/m3/acceptance.md)：最新完整门569.930秒/exit0、15TRX、Game三轮各242；记录双轴复核、双语GPU及人工反馈原身份，保留CLI误报、旧143中止、旧取消CI及本次两个边界夹具失败CI。ACK等待依赖已用指定反例修复，预算及生产封装不变。精确候选CI/main/Issue交付按[#26](https://github.com/fanxiao92/godot-pal/issues/26)和[#20](https://github.com/fanxiao92/godot-pal/issues/20)最终回填核对；规格外Observer停用，私密原件限制不变。
+  - [M3 分层验收检查点](milestones/m3/acceptance.md)：最新完整门573.830秒/exit0、15TRX、Game三轮各242；记录双轴复核、双语GPU及人工反馈原身份，保留CLI误报、旧143中止、旧取消CI及本次三个边界夹具失败CI。ACK等待和日志并发读取均有指定反例/修复，预算及生产封装不变。精确候选CI/main/Issue交付按[#26](https://github.com/fanxiao92/godot-pal/issues/26)和[#20](https://github.com/fanxiao92/godot-pal/issues/20)最终回填核对；规格外Observer停用，私密原件限制不变。
   - [对话资源与显示](design/dialogue-display.md)、[trigger 执行](design/trigger-execution.md)、[搜索/返回规则](design/npc-interaction.md)、[Godot 宿主与启动配置](design/npc-interaction-host.md)：当前实际接口与支持/拒绝范围。
 
 后续计划放在 `docs/milestones/<里程碑>/plan.md`。具体任务规格、讨论和结果留在 GitHub Issues。

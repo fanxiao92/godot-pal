@@ -62,6 +62,15 @@ if (-not $DriverDll) {
     $DriverDll = Join-Path (Split-Path $project) 'bin/Debug/net10.0/DotnetBoundary.dll'
 }
 $DriverDll = (Resolve-Path $DriverDll).Path
+# Deterministic file-sharing/partial-write regression at the actual journal reader.
+& dotnet exec $DriverDll journal-check (Join-Path $root 'journal-check') *> (Join-Path $root 'journal-check.log')
+$journalExit = $LASTEXITCODE
+if ($EvidenceDirectory) {
+    Copy-Item (Join-Path $root 'journal-check.log') (Join-Path (Split-Path $root) 'boundary-journal-check.log')
+    $journalResult = Join-Path $root 'journal-check/result.json'
+    if (Test-Path $journalResult) { Copy-Item $journalResult (Join-Path (Split-Path $root) 'boundary-journal-check.json') }
+}
+if ($journalExit -ne 0) { throw "Boundary journal regression failed (exit=$journalExit); inspect $root/journal-check.log" }
 $pwsh = (Get-Process -Id $PID).Path # This process's own executable, not a global query.
 $modes = if ($OnlyInheritedWriter) { @('stdout-held') } else {
     @('normal', 'expected', 'unexpected', 'error', 'timeout', 'stdout-held', 'stderr-held', 'isolated')

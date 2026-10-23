@@ -57,6 +57,7 @@ internal static class Program
                 "case" => await Supervise(args),
                 "root" => await Root(args),
                 "writer" => await Writer(args),
+                "journal-check" => CheckJournal(),
                 _ => throw new ArgumentException("unknown synthetic role")
             };
         }
@@ -149,7 +150,7 @@ internal static class Program
         }
         foreach (var process in owned.Values) process.Observe();
     }
-    private static JsonElement? Journal()
+    private static JsonElement? Journal(bool inFlight = false)
     {
         string path = Path.Combine(directory, "commands.json");
         if (!File.Exists(path)) return null;
@@ -158,7 +159,36 @@ internal static class Program
             using var d = JsonDocument.Parse(File.ReadAllText(path));
             return (d.RootElement.ValueKind == JsonValueKind.Array ? d.RootElement[0] : d.RootElement).Clone();
         }
-        catch (JsonException) { return null; } // Concurrent update may be in flight; not a success signal.
+        // Only an explicitly in-flight read may treat a torn write or Windows
+        // sharing/lock conflict as pending. Stable final reads remain strict.
+        catch (JsonException) when (inFlight) { return null; }
+        catch (IOException error) when (inFlight && (error.HResult & 0xffff) is 32 or 33) { return null; }
+    }
+    private static int CheckJournal()
+    {
+        if (Directory.Exists(directory)) throw new IOException("refuse to reuse evidence");
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "commands.json");
+        File.WriteAllText(path, "[{\"exitKnown\":true,\"exitCode\":0}]");
+        using (var held = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            if (Journal(true) is not null) throw new InvalidOperationException("locked snapshot must be pending");
+            bool rejected = false;
+            try { _ = Journal(); }
+            catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33) { rejected = true; }
+            if (!rejected) throw new InvalidOperationException("final locked snapshot must fail");
+        }
+        if (!Flag(Journal(), "exitKnown")) throw new InvalidOperationException("unlocked snapshot must be readable");
+        File.WriteAllText(path, "{");
+        if (Journal(true) is not null) throw new InvalidOperationException("partial snapshot must be pending");
+        bool malformed = false;
+        try { _ = Journal(); }
+        catch (JsonException) { malformed = true; }
+        if (!malformed) throw new InvalidOperationException("final malformed snapshot must fail");
+        Save("result.json", new { expected = true, lockedPollPending = true, lockedFinalRejected = true,
+            unlockedFinalReadable = true, partialPollPending = true, malformedFinalRejected = true });
+        Console.WriteLine("PASS: journal sharing/partial polls are pending; final snapshots remain strict.");
+        return 0;
     }
     private static bool Flag(JsonElement? record, string name) => record is JsonElement r && r.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.True;
     private static bool CaptureStatusIs(JsonElement? record, string name, string status) => record is JsonElement r &&
@@ -182,7 +212,7 @@ internal static class Program
             {
                 Receive(owned);
                 if (owned.TryGetValue("root", out var root) && root.Exit == 0 &&
-                    owned.TryGetValue("writer", out var writer) && writer.Exit is null && Flag(Journal(), "exitKnown")) earlyExitRecord = true;
+                    owned.TryGetValue("writer", out var writer) && writer.Exit is null && Flag(Journal(true), "exitKnown")) earlyExitRecord = true;
                 if (Elapsed(start) > 8000)
                 {
                     outerGuard = true; wrapper.Kill();
