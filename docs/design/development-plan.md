@@ -35,13 +35,13 @@
 
 ### M3 · 事件与对话垂直切片
 
-状态：**已批准并本地集成至 `dab79ad8`；原自动门PASS、用户人工确认通过，当前CI待验证**。双轴复核已关闭原六项source finding，精确 `5bf481f`同tree匹配双语GPU各10零差/2calls；精确 `dab79ad8` 原完整共享门经独立证据复核支持。本对话用户确认 Windows 完整人工清单通过（含两语言/物理输入/Alt-Tab/缩放关闭），非agent独立实测。规格外 Observer 已停用，历史工具P1和 verifier not-satisfied 保留但非 M3 功能门，不宣称修复或隐私风险消除；当前integration人工资源Windows CI待验证，#20整体收尾及发布回填仍待结果/权限。具体范围见 [M3 计划](../milestones/m3/plan.md)，证据与待门项见 [分层检查点](../milestones/m3/acceptance.md)。M2 完成不自动证明 M3 验收。
+状态：**独立切片已实现，完成本地、GPU及用户Windows人工分层验证（2026-10-23）**。原dab79ad8双轴/完整门、5bf481f匹配双语GPU各10零差/2calls及用户两语言/物理输入/Alt-Tab/缩放关闭反馈按各自原身份保留；统一main52afa6c与M3后，三项P2、串行拆批及夹具ACK修复已完成，最新完整本地门569.930秒/exit0、15TRX、Game三轮各242。用户授权持续交付，精确候选CI、main发布和Issue关闭分别以[#26](https://github.com/fanxiao92/godot-pal/issues/26)及[#20](https://github.com/fanxiao92/godot-pal/issues/20)最终回填为准，不以本地PASS签远端。Observer停用，历史P1/verifier not-satisfied及所有失败原件不改判。范围见[M3计划](../milestones/m3/plan.md)，证据及限制见[分层检查点](../milestones/m3/acceptance.md)。
 
 - 已接通独立 scene4/map10/owner60 的“完整事件转换 → 搜索 → trigger → 双语对话 → 返回探索/再次交谈”；不绑定 M2 场景2，不改原始对象/脚本。
 - 完整 faithful 集合保存与重建、具名字段重新编码及严格加载验证已实现；运行时仅支持切片所需 setDialog/showDialog/end，raw 或其他未支持闭包明确拒绝。全量 opcode、auto、条件/调用及正常场景调度不在此切片。
 - 已接入显式准备的原生语言/画像/提示/字形资源，默认简中、启动时可选英文，保留原始消息引用；对话提示 F9–FE 轮转/恢复不是 M7 通用水火动画。
 - 共享探索已按参考取消额外失焦冻结/清键/fresh-press，保留100ms离散行走/晚到不补走；逻辑输入不证明物理键盘/OS焦点交付。
-- **目标仍是一个真实事件闭环，不是场景4正常自由探索或完整原版剧情。** 本地组件/headless/GPU、已完成原共享门、用户Windows人工反馈与当前远端人工资源CI待验证分层记录；Observer历史缺陷独立保留，自动门PASS不外推整体验收，后续doc提交不冒称已跑CPU/GPU。
+- **目标仍是一个真实事件闭环，不是场景4正常自由探索或完整原版剧情。** 本地组件/headless/GPU、完整共享门、用户Windows人工反馈及远端人工资源CI按实际提交分层记录；Observer历史缺陷独立保留，自动门PASS不外推整体验收，后续doc提交不冒称已跑CPU/GPU。
 
 ### M4 · 战斗垂直切片
 - 事件能触发一场战斗。

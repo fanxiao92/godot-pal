@@ -1,6 +1,25 @@
-# M3 分层验收检查点（固定串行拆批完整门通过，CI与发布分列）
+# M3 分层验收检查点（本地、CI及主线交付分列）
 
 ## 当前统一收尾候选
+
+### 2026-10-23 夹具ACK修复与最终本地完整门
+
+用户已授权持续诊断/修复至M3主线交付及相关Issue关闭；固定工具、全部案例、120秒会话和隐私/资源保护保持。最终远端候选CI、main合入/推送及按依赖关闭的精确身份和URL以[#26交付回填](https://github.com/fanxiao92/godot-pal/issues/26)和[#20](https://github.com/fanxiao92/godot-pal/issues/20)为准，本节只签实际已执行的本地层，不预填未来远端成功。
+
+新增失败原件：[CI39988957557](https://github.com/fanxiao92/godot-pal/actions/runs/39988957557)精确fc70570、attempt1为failure，边界前7例通过，isolated在1500ms预算内root未退出，ProcessTimeout并清理root/writer，未进入Core/Game；[定点探针CI39990595247](https://github.com/fanxiao92/godot-pal/actions/runs/39990595247)精确7dab88c同为failure，normal/expected/unexpected通过，error明确抛出`owned-handle registration`，不是预期ERROR标记。root入口至监督ACK约802ms，触发750ms握手限制。探针结果说明观察者等待是实际可失败前置，但不能倒证第一个isolated的精确分段或旧CI39884910037根因。
+
+句柄已通过DuplicateHandle保留在监督进程，并原子发布；即使源进程先退出，监督端仍可读取其真实退出，受测子进程无须等待观察者ACK。先移除监督端发ACK，旧Register在首normal准确exit90/注册超时，complete且非outer guard；再去掉子进程ACK等待，全部八例GREEN。此无ACK监督端永久保留，既有normal等例可捕获重新引入的ACK依赖；writer真实存活、两流取消、清理/退出所有原断言保持，生产函数未改，1500work/1000cleanup/4000writerTTL/8000guard不变。临时阶段探针已全部移除。该修复不保证OS启动性能或未来零概率故障。
+
+全新目录完整入口在`task/m3-finalize@7dab88caf3816f0fa174d4548c84493cf424e91a`加仅夹具修复运行，UTC **2026-10-23T17:01:26.089079Z–17:10:56.018901Z**，own pwsh PID38716，实际**exit0/569.930秒**、无outer timeout。SDK10.0.402/Godot4.7.2/固定API与adapter不变，独立空NuGet包及HTTP缓存，保留bin/.godot，非clean checkout。完整重复全部阶段，不拼接此前入口：
+
+- metadata12组与真实boundary8完整通过；Core328P、CLI330P＋2原具名skip、Prepare52P。
+- Game按66/79/97三批×solution/standalone/repeat三轮，各轮242P、零skip、精确独立源码FQN并集；discovery245准确。
+- 3个控制各exit1且仅指定失败；version/import/fixture-build/prepare/profile/startup六阶段均exit0/未超时。
+- 19主dotnet命令完整，前16exit0后三个指定exit1；15完整TRX、15唯一runId、1441唯一executionId，1436P＋2原skip＋3指定F；Results/Definitions/Entries、Summary/Counters/RunInfo/Times逐条核对。
+
+1064候选源在完整运行区间SHA/长度/mtime全恒定，之后只同步文档；原main958/integration1058源、Git状态及5278资源原样，最终受限进程快照为空。原main5份用户未提交文档另有独立可恢复备份，合main时保留，不混入提交。没有新GPU/物理键盘/真实资源准备，继续按原身份使用下文已有GPU及用户Windows反馈。完整本机原件在`C:/Users/xiaofan/.pi/m3-closeout-02/gate-02/`、`gate-02-run/`、`gate-02-audit.json`和`ci-boundary-diagnostic-01/`；前两CI原件均留存且仍失败，不上传真实资源或私密Observer记录。
+
+### 首次统一候选与历史收尾背景
 
 隔离分支 `task/m3-finalize` 从本地 main52afa6c 与 committed M3 794b078统一，并移入已审共享初始化/SceneRunner增量；不是把全部M3合入主工作树。保留M3已批准焦点策略、main独有normal-deadline Fact和profile-cleanup合同，及M3独有NPC/display失败合同。本地合并候选 `00f3c64` 的P2前独立源码库存为Core328、Game240 positives/243含controls；已完成Core87及获准拆批的Game66+77定点验证。用户随后要求补修三项P2，P2补丁的静态要求为Core328、CLI330+2既有skip、Game242 positives/245含controls；新旧结果与限制分列如下。静态库存不是全套通过结果。P2修复已在本地提交 `0ee8204`；随后第一次拆批完整入口在新增CLI身份核验处误报停止；用户批准持续修复到主线交付后，修复并完成了新的完整入口，15份TRX全部核验通过。CI、主线和Issue交付另列，失败原件不改判。
 
@@ -138,10 +157,10 @@ GPU具有全部1049 tracked与Core/Game DLL/PDB的fresh pre-GPU/post-GPU hash/si
 
 正式受限Godot/明确repo executor快照仅支持**当时为空**，不证明所有后代归属/释放或observer隐私全程合规。可能采到非任务进程数据；`owned-processes.json` 原件仅本地私密保留，不打开/转录未知commandLine、不上传/入库，不修改/删除/重跑历史helper。该工具已停用，不修复、不再运行、不自动重测；敏感原件仅按上述限制保留，任何处置须另获明确决定。本记录不关闭历史工具P1，也不以人工反馈补齐历史进程未知值。
 
-## 待完成（当前 CI 与发布回填）
+## 远端与发布回填入口
 
-- 历史CI39884910037已查询，实际为cancelled/未通过，细节见本页当前候选段；旧“仅有main CI/尚未查询integration”的记录已过时。当前统一候选仍需分别获准执行完整共享门与精确提交CI；没有push/dispatch授权，历史绿不替代M3。
-- #20/#26 结果发布回填、推送/dispatch/关票及main合入仍须相应明确授权；当前仅获准统一候选的局部验证、独立双审与候选本地提交，不宣称 M3 整体验收全部完成。辅助工具的私密原件限制见上节，非 M3 功能阻断。
+- 当前持续交付授权和最新本地完整结果见页首；精确候选CI、main提交/推送和各Issue依赖闭合以[#26](https://github.com/fanxiao92/godot-pal/issues/26)/[#20](https://github.com/fanxiao92/godot-pal/issues/20)实际回填为准，核completed状态、真实结论及完整产物后签对应层。
+- 历史CI39884910037仍cancelled，本次39988957557/39990595247仍failure；局部或新门成功不改判它们。Observer私密原件限制及非M3功能门边界保持。
 
 ### Windows 人工清单（用户反馈已完成）
 

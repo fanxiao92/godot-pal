@@ -25,8 +25,8 @@
 - [M2 Godot 场景构建与探索](milestones/m2/plan.md)：Windows 单领队、静态对象、原生资源/独立 `.tres` profile、320×200 整数缩放、键盘与焦点处理已实现，自动/人工验收及收尾文档独立终审已完成，成果已合入并推送 main，远端完整 Windows headless CI 已通过；#11/#17/#19 均已关闭。计划提供真实入口/配置与任务表。
   - [M2 分层验收记录](milestones/m2/acceptance.md)：本地规则/headless、GPU、操作者反馈、主干交付及 #19 修复后远端 CI 的分层证据和未验收范围；追溯 #11/#17/#19 时阅读。
   - [固定 GdUnit 源码包](testing/gdunit-source-packages.md)：#18 包身份、发布与 bootstrap；直接还原/构建或排查包来源时阅读。
-- [M3 独立真实 NPC 对话](milestones/m3/plan.md)：已批准并本地集成至 `dab79ad8`，整体验收未完成；scene4/map10/owner60 的独立上下文，不是正常剧情或全量事件系统。
-  - [M3 分层验收检查点](milestones/m3/acceptance.md)：双轴复核/机械合入、匹配双语GPU及精确 `dab79ad8` 原自动门PASS；本对话用户确认 Windows 人工清单通过（含两语言/物理输入/Alt-Tab/缩放关闭），非agent独立实测；历史CI39884910037仍cancelled/未通过；当前隔离收尾候选统一main52afa6c与M3，P2补修后静态Core328/CLI330+2既有skip/Game242+3，已完成相关定点回归与P2增量双轴复核并提交0ee8204；新66/79/97三批×三轮门禁修复通用显示名误判后已完整通过（15份TRX、三轮各242）；前次失败不改判，精确候选CI、主线合入及Issue收尾按用户新增授权分别留证。规格外 Observer 已停用，历史缺陷及 verifier not-satisfied 保留但非 M3 功能门；含人工来源与复现指南，不宣称整体验收全部完成。
+- [M3 独立真实 NPC 对话](milestones/m3/plan.md)：scene4/map10/owner60闭环已实现，完成本地、GPU及用户Windows人工分层验证；不是正常剧情或全量事件系统。
+  - [M3 分层验收检查点](milestones/m3/acceptance.md)：最新完整门569.930秒/exit0、15TRX、Game三轮各242；记录双轴复核、双语GPU及人工反馈原身份，保留CLI误报、旧143中止、旧取消CI及本次两个边界夹具失败CI。ACK等待依赖已用指定反例修复，预算及生产封装不变。精确候选CI/main/Issue交付按[#26](https://github.com/fanxiao92/godot-pal/issues/26)和[#20](https://github.com/fanxiao92/godot-pal/issues/20)最终回填核对；规格外Observer停用，私密原件限制不变。
   - [对话资源与显示](design/dialogue-display.md)、[trigger 执行](design/trigger-execution.md)、[搜索/返回规则](design/npc-interaction.md)、[Godot 宿主与启动配置](design/npc-interaction-host.md)：当前实际接口与支持/拒绝范围。
 
 后续计划放在 `docs/milestones/<里程碑>/plan.md`。具体任务规格、讨论和结果留在 GitHub Issues。

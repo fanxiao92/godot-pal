@@ -1,6 +1,6 @@
 # M3 实现计划：独立真实 NPC 对话切片
 
-> 当前收尾：隔离候选task/m3-finalize统一main52afa6c、M3 committed794b078和已审共享初始化/SceneRunner增量；P2补修后静态Core328、CLI330+2既有skip、Game242/245；事件CLI27、显示10及进程边界8例定点通过；此前Core87和获准拆批Game66+77已各完整通过，先前Game143整组120秒中止仍为失败，不是已跑全套。历史CI39884910037已cancelled/未通过，不再标记尚未查询；P2增量双轴复核后已本地提交0ee8204；新66/79/97三批×三轮门禁修复通用显示名误判后已完成新的完整入口：819.764秒/exit0，Core328、CLI330+2既有skip、Prepare52、Game三轮各242、15份完整TRX和startup均通过。第一次CLI核验误报原件保留。用户已授权持续修复到主线及Issue收尾，精确候选CI、合main/推送/关票仍按实际分别记录，不由本地PASS推导。已有GPU/人工按原身份复用；最新分层事实与旧失败边界见[验收检查点](acceptance.md#当前统一收尾候选)。
+> 当前交付检查点（2026-10-23）：统一候选包含main52afa6c、M3 committed794b078、已审SceneRunner及P2修复。固定66/79/97×三轮门禁和xUnit身份核验已完整验证；本次两个CI在合成夹具边界失败后，移除不必要的观察者ACK等待，保留生产封装及1500/1000/4000/8000预算。无ACK反例旧版准确失败，修后8例通过；最新全新目录完整门569.930秒/exit0，Core328、CLI330+2原skip、Prepare52、Game三轮各242、discovery245、15TRX及startup完整。所有旧失败不改判，GPU/用户Windows反馈仅按原身份适用。用户已授权持续交付，精确候选CI、main合入/推送和按依赖关闭Issue分别以[#26](https://github.com/fanxiao92/godot-pal/issues/26)/[#20](https://github.com/fanxiao92/godot-pal/issues/20)最终回填为准，不由本地PASS推导；详[验收检查点](acceptance.md#当前统一收尾候选)。
 
 > 历史检查点（实际integration）：#21/#22/#23/#24/#27/#25/#26已本地集成至 `dab79ad85a4a352826a31eb0569a58e1f17eca88`，tree `b4fb69689d6820727b31ce6909117b1904a5b540`。全M3候选双轴初审及修后定点复核已关闭原六项source finding；精确 `5bf481f` 匹配双语GPU通过，机械merge同tree；精确 `dab79ad8` 原完整自动门PASS获独立evidence review支持。**原自动门PASS、用户人工确认通过；此处历史结果不代表当前收尾候选完成，当前CI状态以上段为准。** 本对话用户确认两语言/物理输入/Alt-Tab/缩放关闭的完整清单正常，非agent独立实测。规格外 Observer 已停用，历史缺陷及 verifier not-satisfied 保留但非 M3 功能门，不宣称修复或隐私风险消除。 已批准规格、实测身份、保护及限制见[验收检查点](acceptance.md)。GitHub于2026-10-23重新只读核对正文/评论/直接依赖，与规划快照一致：#20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED；本地集成不自动关票或代表已推送。
 
@@ -135,11 +135,11 @@ Godot/GdUnit/Prepare/solution 全局串行；运行前读 [测试异常说明](.
 
 T1/T2 的逻辑依赖独立，不代表批准并行写同一工作树或并行运行引擎。每次实施按具体授权进入任务并核对依赖；本地已实现不自动关闭仍 OPEN 的票。
 
-## 8. 当前证据与下一步
+## 8. 原integration证据（当前交付检查点见页首）
 
 - 已批准的独立切片已本地实现：完整事件转换/重建、现代双语资源/字形/画像/提示、可暂停 trigger、实际 Main 搜索/返回/再次交谈及参考焦点修正。
 - 精确 `dab79ad8` 原Test-M0完整门正常exit0/约479s：Core327P、CLI322P＋2准确历史Windows skip、Prepare52P（仅M2 synthetic链）、Game solution/standalone/repeat各239P/Completed，discovery242unique与独立source239完整FQN集合逐轮一致；三个精确失败控制和六个startup stage完整。自动门PASS与独立evidence复核支持不等于后续doc HEAD已跑测试。
 - 全M3双轴初审/两阶段修复及定点复核、固定候选机械合入已完成；完整共享门已用1/2，旧lifecycle修后1/2独立保留。外部observer PID复用/handle race导致主6 PID/UTC及部分内部退出缺失，历史工具P1未修复、verifier criterion-1=`not-satisfied`原样保留；工具为agent追加的规格外条件，已停用，不修/不再运行、不倒填或自动补跑，不再作为M3功能验收阻断，隐私原件限制见验收记录。
 - 精确 `5bf481f` /同tree的匹配双语map10/profile GPU各10×64000零差、各2calls/资源身份匹配，旧无profile zh-Hans6零差独立保留；原1.1/255每通道容差不变。GPU fresh pre/post source/DLL恒定不外推到不同worktree的gate DLL，gate没有fresh postbuild/pretest清单。旧67f证据保持历史边界；这些都不是物理键盘、Alt-Tab、人工桌面/关闭或当前远端CI。
 - 真实资源只在本地 ignored 目录，复用已准备产物；不重提取/覆盖/改profile，不上传 CI。普通运行命令与 profile 契约见 [宿主说明](../../design/npc-interaction-host.md)。本机 integration 的实际命令留工程外任务交接记录，不能把该路径当作清洁检出自带资源。
-- [Windows人工清单（用户反馈已完成）](acceptance.md#windows-人工清单用户反馈已完成)记录本对话用户两次原话及整体清单确认，含两语言/物理输入/Alt-Tab/缩放关闭；非agent独立实测，无新增日志/截图/耗时测量，不要求用户重复验收。原命令/清单保留作复现指南，不补历史进程数据或证明工具修复。当前只doc回填，源码资源契约未改，不为doc提交重跑CPU/GPU。历史CI39884910037仍未通过；新版完整门/精确候选CI及发布回填仍需权限，不擅自dispatch/push/关票。
+- [Windows人工清单（用户反馈已完成）](acceptance.md#windows-人工清单用户反馈已完成)记录本对话用户两次原话及整体清单确认，含两语言/物理输入/Alt-Tab/缩放关闭；非agent独立实测，无新增日志/截图/耗时测量，不要求用户重复验收。原命令/清单保留作复现指南，不补历史进程数据或证明工具修复。这些反馈不因后续文档/门禁变化而变成新增CPU/GPU运行。历史CI39884910037仍未通过；新版完整门、失败CI及夹具修复见页首/验收记录，持续交付授权与最终CI/main/Issue回填分列，不沿用旧额度或改判旧失败。
