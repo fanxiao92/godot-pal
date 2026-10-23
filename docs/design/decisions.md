@@ -40,7 +40,7 @@ brainstorming 已完成:可行性、目标、版本、移植方式、两阶段�
 
 **M2 历史设计及后续修正**：单领队探索、静态对象、独立测试配置与显式资源准备、320×200 整数缩放、键盘和参考步进见 [M2 计划](../milestones/m2/plan.md)。其失焦暂停曾作为 M2 扩展交付；#21 当前将该扩展从共享探索链路移除，不改写 M2 的历史验收记录。功能、Windows 自动/人工验收及文档独立双轴终审均已接受；各切片和整体验收最终提交/收尾记录见 [#17](https://github.com/fanxiao92/godot-pal/issues/17) / [父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)。#11/#17 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 已关闭，成果已合入并推送 main，远端完整 Windows headless CI 已通过；这不扩大音频、导出包和其他平台的验收范围。实际证据与当前任务状态以验收记录和 GitHub 为准。
 
-**当前 M3**：已批准的独立 scene4/map10/owner60 对话切片已在本地候选实现，包含现代资源、完整事件转写/重建与有限执行、搜索/等待/返回及再次交互；默认简中、显式英文。组合原生 profile 与失败路径见 [宿主契约](npc-interaction-host.md)。这是既有批准的落实，不是新架构决定；owner57 等行为不调度、原对象不修改，不宣称正常场景自由探索。本地已集成 `dab79ad8`；双轴复核关闭原六项source finding，`5bf481f`同tree匹配双语GPU各10零差/2calls，精确 `dab79ad8` 原完整自动门PASS获独立证据复核支持。父追加严格逐进程capture NOT SATISFIED/P1仍BLOCK；人工桌面/物理键盘/OS释放与当前integration远端CI未做，whole M3未验收，不新增架构决定或降低标准，见 [M3 检查点](../milestones/m3/acceptance.md)。其余表现层/外壳、全量 opcode/auto 及其他游戏系统仍未完成。
+**当前 M3**：已批准的独立 scene4/map10/owner60 对话切片已在本地候选实现，包含现代资源、完整事件转写/重建与有限执行、搜索/等待/返回及再次交互；默认简中、显式英文。组合原生 profile 与失败路径见 [宿主契约](npc-interaction-host.md)。这是既有批准的落实，不是新架构决定；owner57 等行为不调度、原对象不修改，不宣称正常场景自由探索。本地已集成 `dab79ad8`；双轴复核关闭原六项source finding，`5bf481f`同tree匹配双语GPU各10零差/2calls，精确 `dab79ad8` 原完整自动门PASS获独立证据复核支持。本对话用户已确认 Windows 人工清单通过（含两语言/物理输入/Alt-Tab/缩放关闭），非agent独立实测；当前integration人工资源Windows CI待验证，#20整体收尾及发布回填仍待结果/权限。规格外 Observer 为agent追加工具，已停用；历史缺陷及 verifier not-satisfied 保留但不作为 M3 功能门，不宣称工具修复或隐私豁免，不新增架构决定，见 [M3 检查点](../milestones/m3/acceptance.md)。其余表现层/外壳、全量 opcode/auto 及其他游戏系统仍未完成。
 
 ## 曾经考虑过、已否决的方向
 

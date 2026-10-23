@@ -16,7 +16,7 @@
 
 **M2 Windows 单领队探索里程碑已完成（2026-10-22）。** 功能、自动/人工验收及收尾文档独立双轴终审均已接受；成果已合入并通过 SSH 推送到 `main`，已验证交付提交为 `a76f83bf08c421e83892cc9515cbdd4c032014ec`。[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)、[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 和后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，[远端完整 Windows CI](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过。场景 2 / 地图 12 的静态对象、单领队离散行走/碰撞/遮挡、320×200 整数缩放、方向键/WASD 与失焦恢复已交付。入口与独立原生配置见 [M2 计划](docs/milestones/m2/plan.md)，分层证据与限制见 [M2 验收记录](docs/milestones/m2/acceptance.md)。其余表现层/外壳层能力按后续阶段设计。[事件 JSON 契约](docs/design/events-schema.md) 已确定原版忠实低层转写策略、v1 文件结构与基础命令,全量 opcode 映射尚未实现；当前 M3 有限执行与工具进度见下。独立 CLI 已提供只读 MKF 检查、Windows YJ2/图像解码、地图/精灵导出及带 v1 来源清单的完整静态场景包。
 
-**M3 独立真实 NPC 对话候选已在本地实现，尚未完成里程碑验收。** [#20](https://github.com/fanxiao92/godot-pal/issues/20) 批准的 scene 4 / map 10 / owner 60 切片现已接通完整 faithful 事件转换、现代双语显示资源、trigger 执行、真实搜索与返回/再次交谈。共享探索已取消 M2 额外的失焦冻结/清键/fresh-press；普通对话阻塞探索不等于失焦暂停。它不是原版出生或场景 4 正常自由探索，不支持全量 VM/auto/其他对象剧情。本地已集成至 `dab79ad8`：双轴审查及修后复核关闭原六项source finding，`5bf481f`同tree匹配双语GPU各10零差/2calls，精确 `dab79ad8` 原完整自动门PASS获独立证据复核支持；**父追加严格逐进程capture NOT SATISFIED/P1仍BLOCK**，物理键盘/OS释放、人工桌面及当前远端CI未做，不签无保留整体验收。实测身份、保护及一次性人工清单见 [M3 计划](docs/milestones/m3/plan.md)和[验收检查点](docs/milestones/m3/acceptance.md)。M2 历史规格/接受/失败原件保持不变。
+**M3 独立真实 NPC 对话候选已在本地实现，尚未完成里程碑验收。** [#20](https://github.com/fanxiao92/godot-pal/issues/20) 批准的 scene 4 / map 10 / owner 60 切片现已接通完整 faithful 事件转换、现代双语显示资源、trigger 执行、真实搜索与返回/再次交谈。共享探索已取消 M2 额外的失焦冻结/清键/fresh-press；普通对话阻塞探索不等于失焦暂停。它不是原版出生或场景 4 正常自由探索，不支持全量 VM/auto/其他对象剧情。本地已集成至 `dab79ad8`：双轴审查及修后复核关闭原六项source finding，`5bf481f`同tree匹配双语GPU各10零差/2calls，精确 `dab79ad8` 原完整自动门PASS获独立证据复核支持；**用户已在本对话确认 Windows 人工清单通过，当前 integration 人工资源 Windows CI 待验证**，#20 整体收尾仍待 CI 与发布回填权限。Observer 是 agent 追加的规格外辅助工具，已停用；历史工具 P1 与 verifier `not-satisfied` 保留，不作为 M3 功能验收门，也不宣称修复或隐私风险消除。实测身份、保护及人工反馈来源/复现指南见 [M3 计划](docs/milestones/m3/plan.md)和[验收检查点](docs/milestones/m3/acceptance.md)。M2 历史规格/接受/失败原件保持不变。
 
 用户数据已放入 `data/raw/sdlpal/`,初步核对符合 Windows 数据分支。[M1 计划](docs/milestones/m1/plan.md) 范围已确认：只提取地图、瓦片、精灵、调色板与场景对象初始数据。[实施任务 #6～#10](https://github.com/fanxiao92/godot-pal/issues/6) 已完成本地验收和独立双轴审查，结果与收尾说明见对应 Issue。场景 2 的两次完整导出 416 文件字节一致，原始数据散列/长度/mtime 不变；M1 当轮 Debug/Release 构建测试与 Godot headless 启动通过，当轮未重跑 clean-cache/桌面/远程 CI 验收。M2 负责 Godot 场景构建与探索；事件、对话、语言包和字库是 M3 的独立增量，不是 M1/M2 场景构建的前置条件。后续阶段见 [总体路线](docs/design/development-plan.md)。
 
@@ -111,7 +111,7 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
   -GodotPath "C:/path/to/godot-mono.console.exe"
 ```
 
-该入口使用全新 NuGet 包/HTTP 缓存，执行还原、构建、Core/CLI/Prepare/Game 测试、发现/重复/指定失败控制和人工资源的 headless 导入/启动；日志路径会打印到终端，不清空既有 `.godot` 缓存。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；历史 M2 本地/远端结果见 [M2 验收记录](docs/milestones/m2/acceptance.md)；M3 的实际自动门PASS、严格采证P1 BLOCK及未做人工/CI项见 [M3 验收检查点](docs/milestones/m3/acceptance.md)，不得拿历史 CI 代替当前 M3。
+该入口使用全新 NuGet 包/HTTP 缓存，执行还原、构建、Core/CLI/Prepare/Game 测试、发现/重复/指定失败控制和人工资源的 headless 导入/启动；日志路径会打印到终端，不清空既有 `.godot` 缓存。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；历史 M2 本地/远端结果见 [M2 验收记录](docs/milestones/m2/acceptance.md)；M3 的实际自动门PASS、用户人工确认通过、已停用 Observer 的历史缺陷与当前 CI 待验证项见 [M3 验收检查点](docs/milestones/m3/acceptance.md)，不得拿历史 CI 代替当前 M3。
 
 技术版本记录在此，检查由测试和 CI 执行，任务结果记录在 GitHub Issue 中；不要求每次检查另写一份报告。M0 的详细历史记录保留在 [归档](docs/archive/m0/acceptance.md)，仅在排障或追溯时查阅。
 
@@ -139,6 +139,6 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
 
 > 请先读取 `AGENTS.md`，遵循其中的工作流；读取 `GLOSSARY.md`、`docs/design/` 下全部 Markdown 文件、`reference/README.md`、相关 ADR 以及 `docs/milestones/m3/plan.md`，核对当前里程碑和 GitHub 状态，再确认下一项已批准任务。
 >
-> M0/M1/M2 已完成；历史 Windows CI 已通过，#11/#17/#19 已关闭。M3 #20～#27 已批准并本地集成；截至既有读取除 #22 外各票仍 OPEN（本轮文档未新查远端）。先核当前分支/提交、Issue 正文评论/直接依赖和 M3 验收检查点，不据旧路线重复已完成组件。当前只支持显式独立 NPC 对话切片：精确 dab79ad8 原完整自动门PASS，严格逐进程采证NOT SATISFIED/P1仍BLOCK；物理键盘/Alt-Tab/桌面关闭及当前integration远端CI未做，不提前勾M3完成或将后续doc HEAD说成已实测。真实资源仅显式准备并本地复用，不上传、不自动同步。提交、推送、合并和 Issue 关闭按明确授权执行。
+> M0/M1/M2 已完成；历史 Windows CI 已通过，#11/#17/#19 已关闭。M3 #20～#27 已批准并本地集成；截至既有读取除 #22 外各票仍 OPEN（本轮文档未新查远端）。先核当前分支/提交、Issue 正文评论/直接依赖和 M3 验收检查点，不据旧路线重复已完成组件。当前只支持显式独立 NPC 对话切片：精确 dab79ad8 原完整自动门PASS；本对话用户确认两语言/物理输入/Alt-Tab/缩放关闭的 Windows 人工清单通过，非agent独立实测。规格外 Observer 已停用，历史缺陷及 verifier not-satisfied 保留但非 M3 功能门；当前integration远端人工资源CI待验证，发布回填仍需权限，不提前勾M3整体完成或将后续doc HEAD说成已实测。真实资源仅显式准备并本地复用，不上传、不自动同步。提交、推送、合并和 Issue 关闭按明确授权执行。
 
 `reference/README.md` 是参考源码导航，不要求通读整个 SDLPal；实现具体任务时再读取相关源码。`docs/archive/` 仅在排障、环境升级或追溯历史结论时查阅。

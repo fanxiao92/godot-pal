@@ -1,6 +1,6 @@
 # M3 实现计划：独立真实 NPC 对话切片
 
-> 当前检查点（实际integration）：#21/#22/#23/#24/#27/#25/#26已本地集成至 `dab79ad85a4a352826a31eb0569a58e1f17eca88`，tree `b4fb69689d6820727b31ce6909117b1904a5b540`。全M3候选双轴初审及修后定点复核已关闭原六项source finding；精确 `5bf481f` 匹配双语GPU通过，机械merge同tree；精确 `dab79ad8` 原完整自动门PASS获独立evidence review支持。**父追加严格逐进程capture NOT SATISFIED/P1仍BLOCK，人工桌面/物理键盘/OS释放与当前CI未做，whole M3未验收。** 已批准规格、实测身份、保护及限制见[验收检查点](acceptance.md)。GitHub仅截至既有读取：#20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED；本轮未新查，本地集成不自动关票或代表已推送。
+> 当前检查点（实际integration）：#21/#22/#23/#24/#27/#25/#26已本地集成至 `dab79ad85a4a352826a31eb0569a58e1f17eca88`，tree `b4fb69689d6820727b31ce6909117b1904a5b540`。全M3候选双轴初审及修后定点复核已关闭原六项source finding；精确 `5bf481f` 匹配双语GPU通过，机械merge同tree；精确 `dab79ad8` 原完整自动门PASS获独立evidence review支持。**自动门PASS、用户人工确认通过，当前integration人工资源Windows CI待验证，#20整体收尾仍待CI与发布回填权限。** 本对话用户确认两语言/物理输入/Alt-Tab/缩放关闭的完整清单正常，非agent独立实测。规格外 Observer 已停用，历史缺陷及 verifier not-satisfied 保留但非 M3 功能门，不宣称修复或隐私风险消除。 已批准规格、实测身份、保护及限制见[验收检查点](acceptance.md)。GitHub仅截至既有读取：#20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED；本轮未新查，本地集成不自动关票或代表已推送。
 
 以下保留既有批准范围与调查依据；涉及“尚未验证”的原始调查描述只描述批准时点，当前分层结果以上述检查点为准。M0/M1/M2 已完成，不重做已关闭的 #1～#19；M2 的历史接受记录不因当前焦点策略修正而失效。
 
@@ -136,8 +136,8 @@ T1/T2 的逻辑依赖独立，不代表批准并行写同一工作树或并行�
 ## 8. 当前证据与下一步
 
 - 已批准的独立切片已本地实现：完整事件转换/重建、现代双语资源/字形/画像/提示、可暂停 trigger、实际 Main 搜索/返回/再次交谈及参考焦点修正。
-- 精确 `dab79ad8` 原Test-M0完整门正常exit0/约479s：Core327P、CLI322P＋2准确历史Windows skip、Prepare52P（仅M2 synthetic链）、Game solution/standalone/repeat各239P/Completed，discovery242unique与独立source239完整FQN集合逐轮一致；三个精确失败控制和六个startup stage完整。自动门PASS与独立evidence复核支持不等于严格采证通过。
-- 全M3双轴初审/两阶段修复及定点复核、固定候选机械合入已完成；完整共享门已用1/2，旧lifecycle修后1/2独立保留。外部observer PID复用/handle race导致主6 PID/UTC及部分内部退出缺失，新P1仍BLOCK、verifier criterion-1=`not-satisfied`；不倒填、不补跑、不降低标准或关闭P1。
+- 精确 `dab79ad8` 原Test-M0完整门正常exit0/约479s：Core327P、CLI322P＋2准确历史Windows skip、Prepare52P（仅M2 synthetic链）、Game solution/standalone/repeat各239P/Completed，discovery242unique与独立source239完整FQN集合逐轮一致；三个精确失败控制和六个startup stage完整。自动门PASS与独立evidence复核支持不等于后续doc HEAD已跑测试。
+- 全M3双轴初审/两阶段修复及定点复核、固定候选机械合入已完成；完整共享门已用1/2，旧lifecycle修后1/2独立保留。外部observer PID复用/handle race导致主6 PID/UTC及部分内部退出缺失，历史工具P1未修复、verifier criterion-1=`not-satisfied`原样保留；工具为agent追加的规格外条件，已停用，不修/不再运行、不倒填或自动补跑，不再作为M3功能验收阻断，隐私原件限制见验收记录。
 - 精确 `5bf481f` /同tree的匹配双语map10/profile GPU各10×64000零差、各2calls/资源身份匹配，旧无profile zh-Hans6零差独立保留；原1.1/255每通道容差不变。GPU fresh pre/post source/DLL恒定不外推到不同worktree的gate DLL，gate没有fresh postbuild/pretest清单。旧67f证据保持历史边界；这些都不是物理键盘、Alt-Tab、人工桌面/关闭或当前远端CI。
 - 真实资源只在本地 ignored 目录，复用已准备产物；不重提取/覆盖/改profile，不上传 CI。普通运行命令与 profile 契约见 [宿主说明](../../design/npc-interaction-host.md)。本机 integration 的实际命令留工程外任务交接记录，不能把该路径当作清洁检出自带资源。
-- 一次性人工命令/清单已集中在[验收检查点](acceptance.md#一次性-windows-人工清单尚未执行)，尚未执行，不要求用户补已完成工程测试。严格采证补执行/标准改变/敏感原件处置/无保留签字均需另获明确决定；当前只诚实doc回填，源码资源契约未改，不为doc提交重跑CPU/GPU。远端CI尚无当前integration结果及发布授权，不擅自dispatch/push/关票。
+- [Windows人工清单（用户反馈已完成）](acceptance.md#windows-人工清单用户反馈已完成)记录本对话用户两次原话及整体清单确认，含两语言/物理输入/Alt-Tab/缩放关闭；非agent独立实测，无新增日志/截图/耗时测量，不要求用户重复验收。原命令/清单保留作复现指南，不补历史进程数据或证明工具修复。当前只doc回填，源码资源契约未改，不为doc提交重跑CPU/GPU。当前integration人工资源Windows CI待验证，发布回填仍需权限，不擅自dispatch/push/关票。

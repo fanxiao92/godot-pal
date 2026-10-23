@@ -1,10 +1,10 @@
-# M3 分层验收检查点（自动门 PASS，严格采证及整体验收 BLOCK）
+# M3 分层验收检查点（自动门 PASS、用户人工确认通过，当前 CI 待验证）
 
 ## 状态与范围
 
 #26 以本地 integration `6c2e036f984dac1479b22697f73488fa2499f37d` 为起点，阶段1修正两项字形/标识符边界，阶段2修正四项reference显示输入/时序偏差及直接调用方/fixtures。固定全M3候选经过 Standards/Spec 两轴初审、修复后定点复核，原六项source finding均关闭，无新有效源码问题；最终候选 `5bf481fba44f7f278f555daad046e11ed1eb4eea` 已完成匹配双语GPU，并机械no-ff合入实际 integration `dab79ad85a4a352826a31eb0569a58e1f17eca88`，两者tree均为 `b4fb69689d6820727b31ce6909117b1904a5b540`。本地合入不等于整体验收或已推送。
 
-**三项结论并列：A 原项目完整自动门 PASS，经独立 evidence review 支持；B 父追加的严格完整逐进程采证 NOT SATISFIED，新外部采证 P1 仍 BLOCK，verifier criterion-1 保持 `not-satisfied`；C 物理键盘/OS释放、人工桌面及当前远端CI未做，whole M3/#20仍未验收。** 文档回填不关闭P1、不降低标准、不代签无保留验收。以下GitHub状态仅截至既有读取：#20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED；本轮没有新网络查询、关票或推送。
+**当前结论：原项目完整自动门 PASS，经独立 evidence review 支持；本对话用户已确认 Windows 人工清单通过；当前 integration 人工资源 Windows CI 待验证，#20 整体验收及发布回填仍待相应结果和权限。** Observer 是 agent 自行追加、规格外的辅助采证工具，现已停用，其缺陷不作为 M3 功能验收门；历史 verifier criterion-1 仍为 `not-satisfied`，不改写历史报告、不宣称工具修复或隐私风险消除。以下GitHub状态仅截至既有读取：#20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED；本轮没有新网络查询、关票或推送。
 
 批准范围见 [计划](plan.md)；普通运行与资源身份见 [NPC 宿主契约](../../design/npc-interaction-host.md)。这是 scene4/map10/owner60/0188 的显式独立上下文，不是原版出生、正常自由探索或全量 VM/auto。owner57 热点未改 state，只是不在此上下文调度；32原始对象保留显示/碰撞。默认简中，英文只在启动时显式选择。不带 M3 参数仍走 M2 Main，独立静态模式保留。运行时只读准备好的原生资源和现代事件 JSON，不读原始 MKF/SLF/M.MSG/M1 JSON/参考头文件，不自动提取或补配置。
 
@@ -51,21 +51,22 @@ GPU具有全部1049 tracked与Core/Game DLL/PDB的fresh pre-GPU/post-GPU hash/si
 
 真实273帧的非透明像素不含F9–FE：真实地图/对象/领队在等待轮转时应不变，人工F9/FA/alpha消费者测试另证实际颜色变化。map-before-dialogue仅是背景恢复oracle，不是完整地图独立渲染器。真实GPU为逻辑帧回读＋程序化输入，不是人工OS屏幕验收。
 
-## 严格采证 P1：NOT SATISFIED / BLOCK
+## Observer 采证缺陷：工具已停用，非 M3 功能门
 
-这是新外部采证缺口，与已由双轴关闭的六项source finding分账。外部 `observe.ps1` 存在PID复用身份模型与短命进程handle race；主命令6缺唯一可靠PID/UTC，部分内部退出unknown，build-server退出未观察。463条观察不是463次可靠完整执行记录，不能倒填归属/数字退出，也不能从测试PASS推导所有后代退出。verifier criterion-1=`not-satisfied`，独立evidence review支持保留自动门PASS但不签无保留验收。
+重新全文核对 #20/#26 批准规格，并与 agent 的 `task-final-gate.md` 执行交接区分后：批准规格要求的是既有完整门的实际退出码、完整 TRX/控制诊断、资源保护、全局串行及受限进程隐私；新增 Observer 与完整内部子孙 PID/UTC/exit 台账是 agent 追加的执行条件，不是 M3 规格要求。此前将 agent 追加的严格采证不足反向阻断 whole M3 的当前摘要在此纠正；这不是用户授权全面豁免隐私要求。历史工具 P1 未修复，与已由双轴关闭的六项source finding分账。外部 `observe.ps1` 存在PID复用身份模型与短命进程handle race；主命令6缺唯一可靠PID/UTC，部分内部退出unknown，build-server退出未观察。463条观察不是463次可靠完整执行记录，不能倒填归属/数字退出，也不能从测试PASS推导所有后代退出。历史 verifier criterion-1=`not-satisfied` 原样保留，独立evidence review支持自动门PASS；不把移出规格外条件写成已满足完整capture。
 
-正式受限Godot/明确repo executor快照仅支持**当时为空**，不证明所有后代归属/释放或observer隐私全程合规。可能采到非任务进程数据；`owned-processes.json` 原件仅本地私密保留，不打开/转录未知commandLine、不上传/入库，不修改/删除/重跑历史helper。诚实doc-only回填无需新operator决定；补充执行、改变严格标准、处置敏感原件或签无保留整体验收必须另获明确决定，本记录不关闭P1。
+正式受限Godot/明确repo executor快照仅支持**当时为空**，不证明所有后代归属/释放或observer隐私全程合规。可能采到非任务进程数据；`owned-processes.json` 原件仅本地私密保留，不打开/转录未知commandLine、不上传/入库，不修改/删除/重跑历史helper。该工具已停用，不修复、不再运行、不自动重测；敏感原件仅按上述限制保留，任何处置须另获明确决定。本记录不关闭历史工具P1，也不以人工反馈补齐历史进程未知值。
 
-## 待完成（不勾通过）
+## 待完成（当前 CI 与发布回填）
 
-- 严格采证P1仍BLOCK；本次文档回填还须独立小审，不自动续跑工程lane。
-- 物理键盘、真实OS Alt-Tab释放/回焦交付、人工桌面/resize/正常关闭未做；whole M3/#20未验收，不关票、不推送。
-- 当前integration远端人工资源Windows CI未执行。截至既有只读查询仅见main历史CI（含 `97ec55a` 的39744713759与M2交付39738074108），没有当前integration对应结果；本轮未新查，不称实时。没有push/dispatch授权，历史绿不替代M3。
+- 当前integration远端人工资源Windows CI待验证。截至既有只读查询仅见main历史CI（含 `97ec55a` 的39744713759与M2交付39738074108），没有当前integration对应结果；本轮未新查，不称实时。没有push/dispatch授权，历史绿不替代M3。
+- #20/#26 结果发布回填、推送/dispatch/关票及main合入仍须相应明确授权；本次仅本地文档提交并交独立短审，不宣称 M3 整体验收全部完成。辅助工具的私密原件限制见上节，非 M3 功能阻断。
 
-### 一次性 Windows 人工清单（尚未执行）
+### Windows 人工清单（用户反馈已完成）
 
-从此integration仓库根运行，复用既有本机真实 `res://Assets/NpcInteractionReal25/Profile.tres`，不重新Prepare/author/复制资源。所有engine已释放后再人工运行，不能与自动lane并行；下列为普通非headless命令，用户参数在 `--` 后：
+**来源：本对话用户反馈，非 agent 独立实测。** 用户先明确“现在人工 Windows 操作验证 按空格已经可以出现对话了”；随后在收到完整清单（释放后 fresh Space 加速、等待继续；结束后头像文字撤销、背景恢复/移动；再次 Space 与同 NPC 完整交谈；英文显示、Alt-Tab 后台释放/回焦、整数缩放、正常关闭）后回复“这些都正常”。据此记录整体清单用户人工验收通过，含两语言、物理输入、Alt-Tab、缩放与关闭；不是逐项仪器记录，没有新增日志/截图、时间戳或耗时测量，也不是新的 GPU/CI 证据，不证明 Observer 修复或补齐历史进程数据。不要求用户重复验收。
+
+以下原命令与清单保留为复现指南，不是待执行任务。从此integration仓库根运行，复用既有本机真实 `res://Assets/NpcInteractionReal25/Profile.tres`，不重新Prepare/author/复制资源。所有engine已释放后再人工运行，不能与自动lane并行；下列为普通非headless命令，用户参数在 `--` 后：
 
 ```powershell
 & 'C:/Users/xiaofan/scoop/apps/godot-mono/4.7.2/godot-mono.console.exe' --path src/Pal.Game -- `
@@ -78,7 +79,7 @@ GPU具有全部1049 tracked与Core/Game DLL/PDB的fresh pre-GPU/post-GPU hash/si
 1. 两语言分别从初始站位搜索面前owner60（Return/Space/KP Enter/左Ctrl），核地图/32对象/领队与遮挡、NPC转向站立、名称/画像/正文布局、字形阴影。启动搜索键按住不应重复skip或自动重开聊；释放后新的Search/Menu press加速正文，等待提示出现后新press继续，核背景/颜色恢复、返回探索及再次完整交谈。
 2. 用实际物理方向键/WASD核移动、碰撞、返回后的press/release；调整窗口核320×200整数缩放/letterbox。记录实际桌面表现和任何异常，不要求上传真实资源或图片。
 3. 实际Alt-Tab并在后台释放方向键、回焦，记录按下/释放/交付与最终状态；不预定后台一定移动或停止。Alt本身映射Menu，可能合法加速/确认，不误归为focus错误。
-4. 正常关闭窗口并记录是否正常退出/有无错误；默认无M3参数仍为M2入口，但本清单不要求用户补已完成工程测试。人工结果与自动/GPU及CI分列，不能单独关闭严格采证P1。
+4. 正常关闭窗口并记录是否正常退出/有无错误；默认无M3参数仍为M2入口，但本清单不要求用户补已完成工程测试。人工结果与自动/GPU及CI分列，不说明历史 Observer P1 已修复。
 
 ## 保护与异常纪律
 
