@@ -1,6 +1,6 @@
 # M3 实现计划：独立真实 NPC 对话切片
 
-> 当前收尾：隔离候选task/m3-finalize统一main52afa6c、M3 committed794b078和已审共享初始化/SceneRunner增量；静态Core328、Game240/243；Core87和获准拆批Game66+77已各完整通过，先前Game143整组120秒中止仍为失败，不是已跑全套。历史CI39884910037已cancelled/未通过，不再标记尚未查询；新版完整门、精确候选CI与发布未执行。已有GPU/人工按原身份复用；最新分层事实与旧失败边界见[验收检查点](acceptance.md#当前统一收尾候选)。
+> 当前收尾：隔离候选task/m3-finalize统一main52afa6c、M3 committed794b078和已审共享初始化/SceneRunner增量；P2补修后静态Core328、CLI330+2既有skip、Game242/245；事件CLI27、显示10及进程边界8例定点通过；此前Core87和获准拆批Game66+77已各完整通过，先前Game143整组120秒中止仍为失败，不是已跑全套。历史CI39884910037已cancelled/未通过，不再标记尚未查询；新版完整门、精确候选CI与发布未执行。已有GPU/人工按原身份复用；最新分层事实与旧失败边界见[验收检查点](acceptance.md#当前统一收尾候选)。
 
 > 历史检查点（实际integration）：#21/#22/#23/#24/#27/#25/#26已本地集成至 `dab79ad85a4a352826a31eb0569a58e1f17eca88`，tree `b4fb69689d6820727b31ce6909117b1904a5b540`。全M3候选双轴初审及修后定点复核已关闭原六项source finding；精确 `5bf481f` 匹配双语GPU通过，机械merge同tree；精确 `dab79ad8` 原完整自动门PASS获独立evidence review支持。**原自动门PASS、用户人工确认通过；此处历史结果不代表当前收尾候选完成，当前CI状态以上段为准。** 本对话用户确认两语言/物理输入/Alt-Tab/缩放关闭的完整清单正常，非agent独立实测。规格外 Observer 已停用，历史缺陷及 verifier not-satisfied 保留但非 M3 功能门，不宣称修复或隐私风险消除。 已批准规格、实测身份、保护及限制见[验收检查点](acceptance.md)。GitHub于2026-10-23重新只读核对正文/评论/直接依赖，与规划快照一致：#20/#21/#23/#24/#25/#26/#27 OPEN，仅 #22 CLOSED；本地集成不自动关票或代表已推送。
 

@@ -165,6 +165,8 @@ internal static class Program
         catch (JsonException) { return null; } // Concurrent update may be in flight; not a success signal.
     }
     private static bool Flag(JsonElement? record, string name) => record is JsonElement r && r.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.True;
+    private static bool CaptureStatusIs(JsonElement? record, string name, string status) => record is JsonElement r &&
+        r.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String && p.GetString() == status;
 
     private static async Task<int> Supervise(string[] args)
     {
@@ -219,7 +221,10 @@ internal static class Program
                 "error" => threw && recordedExit == 0 && failure == "LoggedError",
                 "timeout" => threw && failure == "ProcessTimeout" && Flag(journal, "timedOut") && Flag(journal, "cleanupComplete"),
                 "stdout-held" or "stderr-held" => threw && recordedExit == 0 && failure == "OutputDrainTimeout" &&
-                    !Flag(journal, "outputComplete") && earlyExitRecord && returnedBeforeWriter,
+                    !Flag(journal, "outputComplete") && earlyExitRecord && returnedBeforeWriter &&
+                    Flag(journal, "timedOut") && Flag(journal, "cancellationRequested") && Flag(journal, "cleanupComplete") &&
+                    CaptureStatusIs(journal, mode == "stdout-held" ? "stdoutCaptureStatus" : "stderrCaptureStatus", "Canceled") &&
+                    CaptureStatusIs(journal, mode == "stdout-held" ? "stderrCaptureStatus" : "stdoutCaptureStatus", "RanToCompletion"),
                 "isolated" => !threw && recordedExit == 0 && returnedBeforeWriter,
                 _ => false
             });

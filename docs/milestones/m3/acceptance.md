@@ -2,13 +2,27 @@
 
 ## 当前统一收尾候选
 
-隔离分支 `task/m3-finalize` 从本地 main52afa6c 与 committed M3 794b078统一，并移入已审共享初始化/SceneRunner增量；不是把全部M3合入主工作树。保留M3已批准焦点策略、main独有normal-deadline Fact和profile-cleanup合同，及M3独有NPC/display失败合同。独立源码库存为Core328、Game240 positives/243含controls；本包已完成Core87及获准拆批的Game66+77定点验证，结果与限制如下。静态库存不是全套通过结果，尚无新版完整门、精确候选CI或发布结论。
+隔离分支 `task/m3-finalize` 从本地 main52afa6c 与 committed M3 794b078统一，并移入已审共享初始化/SceneRunner增量；不是把全部M3合入主工作树。保留M3已批准焦点策略、main独有normal-deadline Fact和profile-cleanup合同，及M3独有NPC/display失败合同。本地合并候选 `00f3c64` 的P2前独立源码库存为Core328、Game240 positives/243含controls；已完成Core87及获准拆批的Game66+77定点验证。用户随后要求补修三项P2，P2补丁的静态要求为Core328、CLI330+2既有skip、Game242 positives/245含controls；新旧结果与限制分列如下。静态库存不是全套通过结果，尚无新版完整门、精确候选CI或发布结论。
 
 历史 [CI39884910037](https://github.com/fanxiao92/godot-pal/actions/runs/39884910037) 在794b078、attempt1上为completed/cancelled：Game120s会话中止，仅210/239结果，平台20分钟取消，solution实际退出未知。该失败不因后来局部回归而改判；继承pipe writer的合成反例也不是它的已证实根因。
 
 Test-M0仅修复dotnet函数的root+双流EOF共享600s预算和额外最多5s失败显式清理等待，保留真实退出/不完整输出失败/早期持久化和原始双流。合成回归的8s每例防挂不限制游戏资源加载；不承诺整个调用含OS/I/O硬实时。两次旧回归失败原件保留：首次UTF8解码回归已修正；后一次stderr-held全调用2.93s触发不属于原规格的2.5s硬断言，未将它当M3业务缺陷。用户明确选方案1校准该判据；修订后8例已单次通过，不等于完整门、稳定性或旧CI修复。
 
-### 2026-10-23 当前候选的局部验证
+### 2026-10-23 P2补修及定点回归
+
+本轮仅在 `task/m3-finalize`、`00f3c64` 之上修复三项有效P2，不修改原main/integration、真实资源、Godot/GdUnit版本或时限；本节记录局部行为验证，不作为main发布证据。
+
+| P2 | 修复及本轮证据 |
+|---|---|
+| 显示fixture异常时残留自有Space/Escape | 小型fixture私有按键作用域把真实press、等待及断言放入 `try/finally`，正常路径顺序不变。无finally的指定反例两例均正常Failed（实际仍按下）；加入finally后完整显示类10P，exit0/Completed，无skip或异常RunInfo。反例自身另有兜底释放，不污染下例 |
+| held-writer持久判据未核取消/清理 | 保留所有旧退出/早期记录/存活writer/输出不完整判据，新增deadline、cancellationRequested、cleanupComplete、相关流Canceled及另一路RanToCompletion硬断言；原八个真实自有进程案例全部通过。逐字提取新旧实际验收表达式的纯谓词核对另检2个真实状态和14个单字段反例：旧表达式均误收、新表达式均拒绝；这不是生产函数取消失败的运行证据 |
+| 事件JSON容错UTF8替换 | index/shared统一严格UTF8解码，非法字节报明确文件名及编码错误，保留可选UTF8 BOM，不自动接受UTF16。先以非法字节、截断序列和UTF16 BOM共6例证实旧CLI错误exit0；修复后事件CLI全类27P，包括合法中文/字面U+FFFD及有/无UTF8 BOM往返、失败无输出及输入不变 |
+
+上述GREEN均完整exit0；两个RED均是指定断言失败，不以会话中止替代，TRX中的预期Error RunInfo逐项对应指定断言日志。共执行CLI restore一次、CLI显式build两次、Game显式build两次、boundary fixture build一次、纯谓词核对小项目build一次（其本地无包restore包含在build中）；未重新跑Core、旧Game143/66/77、Prepare、import、完整门、CI或桌面/GPU。Game前后有效全局Godot PID/Name快照为空，未检查未知进程详情或清理进程。CLI两次build均有1条 `xUnit2031` warning（`DialogueLanguageCliTests.cs:53`），build exit0/0 errors；本轮未处理该warning，未把代码位置未改当作其归因证据。
+
+独立源码计数保留全部旧案例，再增加CLI8例与Game2例；门禁要求和使用说明同步为Core328、CLI330+2既有skip、Prepare52、Game242/245。这些是源码库存，不是全套通过。原 `allowFrameHeader` 恒真参数仅为可选整理，非有效契约缺陷，本轮不作无关重构。本轮定点证据独立保存在本机 `C:/Users/xiaofan/.pi/m3-p2-fixes-01/`；旧合并候选及其审查/失败记录不改判；上述修复验证阶段未做独立双轴审查、提交、合入main、推送或Issue写入，后续复核及提交单独记录，不回填为新增测试。
+
+### 2026-10-23 P2前统一候选的局部验证
 
 运行身份为上述两父提交的未提交统一候选，测试时tree `626b9005fe3819e1324586475d7f37f0d94004f4`；后续仅同步本页等文档，不将记录冒称为新提交上的完整门。
 

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -9,6 +10,7 @@ namespace Pal.Extract;
 internal static class EventArchive
 {
     private const int MaximumChunkBytes = 64 * 1024 * 1024;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly Regex Identifier = new(@"^[A-Za-z_][A-Za-z0-9_-]*\z", RegexOptions.CultureInvariant);
 
     internal static void Export(string input, string output)
@@ -313,7 +315,16 @@ internal static class EventArchive
     private static JsonObject ParseJson(string path)
     {
         if (!File.Exists(path)) throw new InvalidDataException($"Missing event file: {Path.GetFileName(path)}.");
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        ReadOnlySpan<byte> bytes = File.ReadAllBytes(path);
+        // Keep optional UTF-8 BOM compatibility without auto-detecting other encodings.
+        if (bytes.StartsWith(Encoding.UTF8.Preamble)) bytes = bytes[Encoding.UTF8.Preamble.Length..];
+        string json;
+        try { json = StrictUtf8.GetString(bytes); }
+        catch (DecoderFallbackException exception)
+        {
+            throw new InvalidDataException($"{Path.GetFileName(path)} is not valid UTF-8.", exception);
+        }
+        using var doc = JsonDocument.Parse(json);
         RejectDuplicateKeys(doc.RootElement, Path.GetFileName(path));
         return JsonNode.Parse(doc.RootElement.GetRawText())?.AsObject() ?? throw new InvalidDataException($"{Path.GetFileName(path)}: root must be object.");
     }

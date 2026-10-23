@@ -49,23 +49,25 @@ public class DialogueDisplayFixtureTests
             await runner.SimulateFrames(1);
         AssertThat(display.Current!.PaletteRotation >= 1 && display.Current.PaletteRotation <= 5).IsTrue();
         AssertThat(surface.GetRenderedPixel(0, 0)).IsEqual(Colors.Green);
-        await Press(runner, Key.Space, true);
-        await WaitFor(runner, display, DialogueDisplayPhase.Completed);
-        AssertThat(surface.GetRenderedPixel(0, 0)).IsEqual(Colors.Red);
-        AssertThat(display.Current!.Phase).IsEqual(DialogueDisplayPhase.Completed);
-        AssertThat(display.Current.ClearDisplay).IsTrue();
-        AssertThat(display.Current.PaletteRotation).IsEqual(0);
-
-        await Press(runner, Key.Space, false);
+        await WithPressedKey(runner, Key.Space, async () =>
+        {
+            await WaitFor(runner, display, DialogueDisplayPhase.Completed);
+            AssertThat(surface.GetRenderedPixel(0, 0)).IsEqual(Colors.Red);
+            AssertThat(display.Current!.Phase).IsEqual(DialogueDisplayPhase.Completed);
+            AssertThat(display.Current.ClearDisplay).IsTrue();
+            AssertThat(display.Current.PaletteRotation).IsEqual(0);
+        });
         AssertThat(new DialogueLanguageSelection("en").Select(chinese.ToCorePackage(), english.ToCorePackage()).Language).IsEqual("en");
         display.Start(english,
             font, portrait, prompts, palette, 61, 1, 59, 0, 79);
         await WaitFor(runner, display, DialogueDisplayPhase.WaitingForAdvance);
         AssertThat(display.Current!.VisibleText).IsEqual("B");
         AssertThat(display.Current.PromptFrame).IsEqual(2);
-        await Press(runner, Key.Escape, true);
-        AssertThat(display.Current!.Phase).IsEqual(DialogueDisplayPhase.Completed);
-        await Press(runner, Key.Escape, false);
+        await WithPressedKey(runner, Key.Escape, () =>
+        {
+            AssertThat(display.Current!.Phase).IsEqual(DialogueDisplayPhase.Completed);
+            return Task.CompletedTask;
+        });
     }
 
     [TestCase(Timeout = 15000)]
@@ -88,11 +90,42 @@ public class DialogueDisplayFixtureTests
         AssertThat(display.Current.VisibleLines.Count).IsEqual(1);
         AssertThat(display.Current.VisibleLines[0].LineIndex).IsEqual(0);
         AssertThat(display.Current.PromptFrame).IsEqual(1);
-        await Press(runner, Key.Space, true);
-        AssertThat(display.Current!.Phase).IsEqual(DialogueDisplayPhase.Completed);
-        AssertThat(display.Current.TitleText).IsEqual("");
-        AssertThat(display.Current.VisibleLines.Count).IsEqual(0);
-        await Press(runner, Key.Space, false);
+        await WithPressedKey(runner, Key.Space, () =>
+        {
+            AssertThat(display.Current!.Phase).IsEqual(DialogueDisplayPhase.Completed);
+            AssertThat(display.Current.TitleText).IsEqual("");
+            AssertThat(display.Current.VisibleLines.Count).IsEqual(0);
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestCase(Key.Space, Timeout = 15000)]
+    [TestCase(Key.Escape, Timeout = 15000)]
+    public async Task Owned_press_is_released_when_checks_after_the_real_update_throw(Key key)
+    {
+        using var runner = ISceneRunner.Load("res://Tests/DialogueDisplayFixture.tscn", true);
+        var display = (PalDialogueDisplay)runner.Scene()!;
+        StartText(display, "A");
+        await WaitFor(runner, display, DialogueDisplayPhase.WaitingForAdvance);
+        bool observedFailure = false;
+        try
+        {
+            try
+            {
+                await WithPressedKey(runner, key, () =>
+                {
+                    AssertThat(Input.IsKeyPressed(key)).IsTrue();
+                    throw new InvalidOperationException("P2_EXPECTED_CHECK_FAILURE");
+                });
+            }
+            catch (InvalidOperationException exception) when (exception.Message == "P2_EXPECTED_CHECK_FAILURE")
+            {
+                observedFailure = true;
+            }
+            AssertThat(observedFailure).IsTrue();
+            AssertThat(Input.IsKeyPressed(key)).IsFalse();
+        }
+        finally { Send(key, false); }
     }
 
     [TestCase(Timeout = 15000)]
@@ -222,6 +255,16 @@ public class DialogueDisplayFixtureTests
         for (int frame = 0; frame < 120 && display.Current?.Phase != phase; frame++)
             await runner.SimulateFrames(1);
         AssertThat(display.Current?.Phase).IsEqual(phase);
+    }
+
+    private static async Task WithPressedKey(ISceneRunner runner, Key key, Func<Task> checks)
+    {
+        try
+        {
+            await Press(runner, key, true);
+            await checks();
+        }
+        finally { await Press(runner, key, false); }
     }
 
     private static async Task Press(ISceneRunner runner, Key key, bool pressed)

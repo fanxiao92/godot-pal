@@ -232,19 +232,19 @@ try {
     # Prepare launches Game builds/imports; it must finish before the adapter generates its runner.
     $solutionResults = Join-Path $evidence 'solution'
     $null = Invoke-DotnetChecked @('test', 'GodotPal.sln', '--no-build', '--no-restore', '--logger', 'trx', '--results-directory', $solutionResults)
-    Assert-Trx $solutionResults @(328, 322, 52, 240) @(0, 2, 0, 0)
+    Assert-Trx $solutionResults @(328, 330, 52, 242) @(0, 2, 0, 0)
     $list = Invoke-DotnetChecked @('test', 'src/Pal.Game', '--no-build', '--no-restore', '--list-tests')
     $list | Set-Content (Join-Path $evidence 'discovery.log')
     # This adapter's list-tests output uses short display names, including :index parameter cases.
     $discovered = @($list -split "`n" | Where-Object { $_ -match '^    [A-Za-z][A-Za-z0-9_]*(?::\d+ \(.*\))?\s*$' } | ForEach-Object { $_.Trim() })
     $controlNames = @('IntentionalAssertionMismatchPropagates', 'IntentionalTimeoutPropagates', 'NativeReadyExceptionIsNotSwallowed')
-    if ($discovered.Count -ne 243 -or @($discovered | Select-Object -Unique).Count -ne 243 -or
-        @($controlNames | Where-Object { $_ -in $discovered }).Count -ne 3) { throw "Expected 243 unique tests including 3 controls, got $($discovered.Count)." }
+    if ($discovered.Count -ne 245 -or @($discovered | Select-Object -Unique).Count -ne 245 -or
+        @($controlNames | Where-Object { $_ -in $discovered }).Count -ne 3) { throw "Expected 245 unique tests including 3 controls, got $($discovered.Count)." }
     @{ count = $discovered.Count; tests = $discovered } | ConvertTo-Json | Set-Content (Join-Path $evidence 'discovery.json')
     foreach ($run in @('game', 'game-repeat')) {
         $results = Join-Path $evidence $run
         $null = Invoke-DotnetChecked @('test', 'src/Pal.Game', '--no-build', '--no-restore', '--logger', 'trx', '--results-directory', $results)
-        Assert-Trx $results @(240) @(0)
+        Assert-Trx $results @(242) @(0)
     }
     foreach ($control in @('IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
         $results = Join-Path $evidence $control
@@ -259,7 +259,7 @@ try {
     }
     & (Join-Path $PSScriptRoot 'Test-GameStartup.ps1') -GodotPath $GodotPath -LogDirectory (Join-Path $evidence 'godot')
     Save-ProcessSnapshot 'processes-final'
-    'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 328; CLI 322 + 2 existing platform skips; Prepare 52; Godot discovery 243 / positives 240 repeated; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
+    'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 328; CLI 330 + 2 existing platform skips; Prepare 52; Godot discovery 245 / positives 242 repeated; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
         Set-Content (Join-Path $evidence 'PASS.txt')
     Write-Host 'PASS: automated M0/M2/M3 acceptance completed. Graphical/manual acceptance is separate.'
 } finally {

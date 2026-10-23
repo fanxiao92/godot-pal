@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 using System.Text.Json;
 using Xunit;
 
@@ -66,6 +67,67 @@ public sealed class EventCliTests : IDisposable
         Assert.Empty(rebuild.Stderr);
         Assert.Equal(original, File.ReadAllBytes(rebuilt));
         Assert.Equal(originalArchive, File.ReadAllBytes(Path.Combine(input, "SSS.MKF")));
+    }
+
+    [Theory]
+    [InlineData("index.json", "invalid-byte")]
+    [InlineData("shared.json", "invalid-byte")]
+    [InlineData("index.json", "truncated-sequence")]
+    [InlineData("shared.json", "truncated-sequence")]
+    [InlineData("index.json", "utf16-bom")]
+    [InlineData("shared.json", "utf16-bom")]
+    public async Task Rebuild_events_rejects_non_utf8_comment_bytes_without_replacing_or_writing_output(string file, string encoding)
+    {
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, file);
+        string json = File.ReadAllText(path).TrimEnd();
+        string prefix = json[..^1] + ", \"_note\": \"";
+        byte[] bytes = encoding switch
+        {
+            "invalid-byte" => [.. Encoding.UTF8.GetBytes(prefix), 0xff, .. Encoding.UTF8.GetBytes("\"}\n")],
+            "truncated-sequence" => [.. Encoding.UTF8.GetBytes(prefix), 0xe2, 0x82, .. Encoding.UTF8.GetBytes("\"}\n")],
+            _ => [.. Encoding.Unicode.GetPreamble(), .. Encoding.Unicode.GetBytes(prefix + "中文\"}\n")]
+        };
+        File.WriteAllBytes(path, bytes);
+        var before = Directory.GetFiles(exported).ToDictionary(name => name, File.ReadAllBytes);
+        byte[] originalArchive = File.ReadAllBytes(Path.Combine(input, "SSS.MKF"));
+
+        var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(result.Stdout);
+        Assert.Contains(file, result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("not valid UTF-8", result.Stderr, StringComparison.Ordinal);
+        Assert.False(File.Exists(rebuilt));
+        Assert.Equal(before.Keys.Order(), Directory.GetFiles(exported).Order());
+        foreach (var pair in before) Assert.Equal(pair.Value, File.ReadAllBytes(pair.Key));
+        Assert.Equal(originalArchive, File.ReadAllBytes(Path.Combine(input, "SSS.MKF")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rebuild_events_accepts_unicode_comments_and_optional_utf8_bom_without_changing_script(bool bom)
+    {
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        foreach (string path in Directory.GetFiles(exported))
+        {
+            string json = File.ReadAllText(path).TrimEnd();
+            // A literal U+FFFD is valid Unicode; reject malformed bytes, not the character.
+            byte[] text = Encoding.UTF8.GetBytes(json[..^1] + ", \"_note\": \"中文 �\"}\n");
+            File.WriteAllBytes(path, bom ? [.. Encoding.UTF8.GetPreamble(), .. text] : text);
+        }
+        var before = Directory.GetFiles(exported).ToDictionary(name => name, File.ReadAllBytes);
+
+        var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+
+        Assert.True(result.ExitCode == 0, result.Stderr);
+        Assert.Empty(result.Stdout);
+        Assert.Empty(result.Stderr);
+        Assert.Equal(ReadChunk4(), File.ReadAllBytes(rebuilt));
+        foreach (var pair in before) Assert.Equal(pair.Value, File.ReadAllBytes(pair.Key));
     }
 
     [Theory]
