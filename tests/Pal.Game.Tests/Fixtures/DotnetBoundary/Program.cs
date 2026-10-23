@@ -73,7 +73,9 @@ internal static class Program
     private static async Task<int> Root(string[] args)
     {
         string mode = args[2]; int supervisor = int.Parse(args[3]);
+        Event("root-enter", new { frequency = Stopwatch.Frequency });
         await Register(supervisor);
+        Event("root-registered");
         Console.WriteLine("ROOT_STDOUT_中文"); Console.Error.WriteLine("ROOT_STDERR_中文");
         if (mode == "timeout") { await Task.Delay(6000); return 0; }
         if (mode == "expected") return 1;
@@ -101,7 +103,9 @@ internal static class Program
             }
             var info = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (string a in new[] { "exec", typeof(Program).Assembly.Location, "writer", directory, supervisor.ToString() }) info.ArgumentList.Add(a);
+            Event("writer-start-enter");
             writer = Process.Start(info)!;
+            Event("writer-start-returned");
         }
         finally
         {
@@ -123,7 +127,9 @@ internal static class Program
     }
     private static async Task<int> Writer(string[] args)
     {
+        Event("writer-enter");
         await Register(int.Parse(args[2]));
+        Event("writer-registered");
         File.WriteAllText(Path.Combine(directory, "writer.ready"), "ready");
         await Task.Delay(4000);
         return 0;
@@ -150,6 +156,7 @@ internal static class Program
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             owned[name] = new Owned(new IntPtr(document.RootElement.GetProperty("handle").GetInt64()));
             File.WriteAllText(Path.Combine(directory, name + ".ack"), "ack");
+            Event("handle-ack", name);
         }
         foreach (var process in owned.Values) process.Observe();
     }
@@ -228,8 +235,13 @@ internal static class Program
                 "isolated" => !threw && recordedExit == 0 && returnedBeforeWriter,
                 _ => false
             });
+            var phases = new[] { "case", "root", "writer" }.ToDictionary(name => name, name =>
+            {
+                string path = Path.Combine(directory, name + ".events.jsonl");
+                return File.Exists(path) ? File.ReadAllLines(path) : [];
+            });
             Save("result.json", new { mode, expected, outerGuard, complete, earlyExitRecord, returnedBeforeWriter, elapsed,
-                wrapperExit, recordedExit, failure, owned = owned.ToDictionary(p => p.Key, p => p.Value.Exit), journal });
+                wrapperExit, recordedExit, failure, owned = owned.ToDictionary(p => p.Key, p => p.Value.Exit), journal, phases });
             Console.WriteLine($"{mode}: {(expected ? "PASS" : "FAIL")}; root={recordedExit}; failure={failure}; invocation={elapsed:F1}ms");
             // Elapsed is diagnostic, not an OS/I/O hard-real-time contract. The live owned
             // writer and outer guard distinguish bounded cancellation from waiting for EOF.
