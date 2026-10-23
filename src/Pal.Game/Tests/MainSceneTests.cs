@@ -59,6 +59,26 @@ public class MainSceneTests
             await scene.AssertStopped();
         }
         AssertThat(Directory.Exists(ProjectSettings.GlobalizePath(root))).IsFalse();
+        // Fail after the map/display/adapter have been added, not only before any children exist.
+        using var partial = new NpcInteractionFixture();
+        partial.CopyDialogue();
+        string language = ProjectSettings.GlobalizePath(partial.Profile.DialogueDirectory + "/Language.zh-Hans.tres");
+        File.WriteAllText(language, File.ReadAllText(language).Replace("Language = \"zh-Hans\"", "Language = \"en\""));
+        partial.Rehash();
+        Main failed;
+        Pal.Game.Dialogue.PalDialogueDisplay display;
+        using (var scene = new EmbeddedScene(Configured(GameSceneConfiguration.FromArguments("--m3-dialogue-profile", partial.Uri))))
+        {
+            failed = scene.Main;
+            display = failed.Display!;
+            AssertThat(display).IsNotNull();
+            AssertThat(failed.Dialogue).IsNotNull();
+            AssertThat(failed.Failure!.Contains("selected language identity")).IsTrue();
+            AssertThat(scene.Failures.Count).IsEqual(1);
+            await scene.AssertStopped();
+        }
+        AssertThat(GodotObject.IsInstanceValid(failed)).IsFalse();
+        AssertThat(GodotObject.IsInstanceValid(display)).IsFalse();
     }
 
     [TestCase(Timeout = 20000)]
@@ -131,6 +151,50 @@ public class MainSceneTests
             .IsEqual(((short)304, (short)328, 1, 1));
     }
 
+    [TestCase(Timeout = 20000)]
+    public async Task NpcSceneFailureStopsDisplayAndFollowingSceneCanInteract()
+    {
+        using var broken = new NpcInteractionFixture();
+        broken.CopyDialogue();
+        string path = ProjectSettings.GlobalizePath(broken.Profile.DialogueDirectory + "/scene-004.json");
+        var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var command = root["commands"]![0]!;
+        foreach (string key in new[] { "box", "portraitId", "color", "rngWord" }) command.AsObject().Remove(key);
+        command["op"] = "raw"; command["source"]!["opcode"] = 0x7777;
+        File.WriteAllText(path, root.ToJsonString()); broken.Rehash();
+        Main old;
+        using (var scene = new EmbeddedScene(Configured(GameSceneConfiguration.FromArguments("--m3-dialogue-profile", broken.Uri))))
+        {
+            old = scene.Main;
+            scene.AssertHealthy();
+            scene.Press(Key.Enter);
+            await scene.WaitFor(() => old.Failure is not null, "unsupported trigger failure");
+            AssertThat(old.Failure!.Contains("unsupported", StringComparison.OrdinalIgnoreCase)).IsTrue();
+            AssertThat(scene.Failures.Count).IsEqual(1);
+            await scene.AssertStopped();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        using var next = new NpcInteractionFixture();
+        string hash = Godot.FileAccess.GetSha256(next.Uri);
+        using var healthy = new EmbeddedScene(Configured(GameSceneConfiguration.FromArguments("--m3-dialogue-profile", next.Uri)));
+        healthy.Press(Key.Enter);
+        await healthy.WaitFor(() => healthy.Main.Display!.Session is not null, "next scene starts real dialogue");
+        healthy.AssertHealthy();
+        AssertThat(healthy.Main.Interaction!.Phase).IsEqual(NpcInteractionPhase.Trigger);
+        AssertThat(Godot.FileAccess.GetSha256(next.Uri)).IsEqual(hash);
+        // A consumer failure at the actual display boundary must use the same failure channel.
+        Action rejectedReceipt = () => throw new InvalidOperationException("MAIN_SCENE_EXPECTED_DISPLAY_RECEIPT_FAILURE");
+        healthy.Main.Display!.UpdateCompleted += rejectedReceipt;
+        try
+        {
+            await healthy.WaitFor(() => healthy.Main.Failure is not null, "display receipt failure");
+            AssertThat(healthy.Main.Failure).IsEqual("Dialogue update failed: MAIN_SCENE_EXPECTED_DISPLAY_RECEIPT_FAILURE");
+            AssertThat(healthy.Failures.Count).IsEqual(1);
+            await healthy.AssertStopped();
+        }
+        finally { healthy.Main.Display.UpdateCompleted -= rejectedReceipt; }
+    }
+
     private static GameSceneConfiguration Select(NativeProfileFixture fixture) =>
         GameSceneConfiguration.FromArguments("--m2-resources", fixture.ResourceRoot, "--m2-profile", fixture.Uri);
 
@@ -172,15 +236,7 @@ public class MainSceneTests
             focus = window.GuiGetFocusOwner();
             main.Failed += OnFailed;
             main.UpdateCompleted += OnUpdated;
-            try
-            {
-                runner = ISceneRunner.Load(main, autoFree: true);
-                if (main.Failure is null)
-                {
-                    AssertThat(window.EmitSignal(Window.SignalName.FocusExited)).IsEqual(Error.Ok);
-                    AssertThat(window.EmitSignal(Window.SignalName.FocusEntered)).IsEqual(Error.Ok);
-                }
-            }
+            try { runner = ISceneRunner.Load(main, autoFree: true); }
             catch
             {
                 main.Failed -= OnFailed;
@@ -250,6 +306,7 @@ public class MainSceneTests
             AssertThat(Main.ProcessMode).IsEqual(Node.ProcessModeEnum.Disabled);
             AssertThat(Main.IsProcessing()).IsFalse();
             AssertThat(Main.IsProcessingInput()).IsFalse();
+            if (Main.Display is not null) AssertThat(Main.Display.CanProcess()).IsFalse();
             int updates = Updates.Count, failures = Failures.Count;
             var state = Main.Exploration;
             // Frame waits are only an opportunity for forbidden callbacks; state evidence is
@@ -275,7 +332,6 @@ public class MainSceneTests
                 RestoreGlobals();
             }
         }
-
         private void RestoreGlobals()
         {
             window.MinSize = minSize; window.Size = size;

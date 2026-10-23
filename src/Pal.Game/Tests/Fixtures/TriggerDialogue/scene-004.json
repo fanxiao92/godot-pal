@@ -1,0 +1,6 @@
+{"formatVersion":1,"profile":"faithful","fileId":"scene-004","entries":[{"id": "npc", "owner": {"type": "eventObject", "id": 60}, "slot": "wTriggerScript", "kind": "trigger", "target": "L0188", "sourceAddress": 392}],"commands":[
+{"label":"L0188","op":"setDialog","box":"upper","portraitId":59,"color":0,"rngWord":0,"next":"L0189","source":{"index":392,"opcode":60,"operands":[59,0,0]}},
+{"label":"L0189","op":"showDialog","messageId":61,"descriptionLineWord":0,"next":"L018A","source":{"index":393,"opcode":65535,"operands":[61,0,0]}},
+{"label":"L018A","op":"showDialog","messageId":62,"descriptionLineWord":0,"next":"L018B","source":{"index":394,"opcode":65535,"operands":[62,0,0]}},
+{"label":"L018B","op":"end","mode":"keep","next":null,"source":{"index":395,"opcode":0,"operands":[0,0,0]}}
+]}

@@ -1,8 +1,21 @@
 # events.json 契约
 
-状态：**转换策略已确认，v1 封套、引用规则与基础命令契约已定义，尚未实现。** 对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 当前只具名核实过的 `0x0000`、`0x003C` 与 `0xFFFF`；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
+
+## 当前 Pal.Extract 命令子集
+
+```text
+pal-extract export-events --input <原始资源目录> --output <新建或空目录>
+pal-extract rebuild-events --input <events目录> --output <新文件>
+```
+
+`export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
+
+实现的具名映射限于 `0x0000 end(keep)`、`0x003C setDialog(upper)`、`0xFFFF showDialog`；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+
+导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
 ## 1. 转换策略与范围
 
@@ -166,6 +179,16 @@ SLF 不保证一条原始文字指令对应一行翻译。参考 `text.c` 的 `P
 语言包文件格式及字段、消息块的执行位置衔接、trigger/auto 描述分支与清屏指令的具名映射在 M3 对应任务中定义并验证，不能仅靠本节就宣称运行时支持 SLF。名称、描述、字体与布局按参考来源处理；不额外定义对话中途热切换或跨语言逐字进度映射。
 
 这一调整取代尚未实现的“在 `showDialog.text` 内嵌单一语言正文”草案。原始指令一对一保留和 chunk 4 往返范围不变；语言包的正确性需独立测试。
+
+### 语言包现代格式 v1
+
+`pal-extract extract-dialogue --input <原始资源目录> --reference <reference/sdlpal> --output <新建或空目录>` 是显式离线转换入口。它读取 `m_chs.slf`、`m_eng.slf`、`RGM.MKF` 的 chunk 59、`DATA.MKF` 的 chunk 12，以及固定参考中的 `ascii.h` / `fontglyph.h`；运行时不解析这些输入。输出包含简体中文、英文语言包、来源散列、索引图像资源与实际使用的 ISO/Unifont 字形位图。图像保留调色板索引和独立 alpha，由运行时的当前场景调色板着色；头像的 RGM chunk 是直接 RLE，提示图标的 DATA chunk 是带帧表的 RLE，两者使用各自正确的解码入口。
+
+`index.json` 的 v1 字段为 `formatVersion: 1`、`defaultLanguage: "zh-Hans"`、排序后的 `languages: ["en", "zh-Hans"]` 与 `messageReferences: "original-start-message-id-and-span"`。每个语言文件 (`zh-Hans.json`、`en.json`) 含 `formatVersion: 1`、语言 ID、来源文件名及 SHA-256，以及按来源顺序排列的 `messages`。每个消息块记录原始 `startMessageId`、`endMessageId` 和按序 `entries`；`text` 项保留完整 UTF-8 字符串，包括空串、空白和 SDLPal 文本显示控制符，`clear` 项代表 `[CLEAR MESSAGE]`，不能折叠成空文本。块的跨度为 `endMessageId - startMessageId`，不是内容行数。不同语言的行数可不同，事件指令与 ID 不变。
+
+游戏配置须显式选择 `zh-Hans` 或 `en`；默认简中。语言包按所选语言及原始 `(startMessageId, span)` 严格查找，缺失/重复/格式非法内容报错，不回退另一语言、不按文字内容寻找相同文本，也不在对话中热切换。人工数据应覆盖不同译文长度、块内 ID 入口、空行、CLEAR 及缺失资源。转换输出和真实来源不进入仓库或 CI；自动化只用人工消息内容和微型归档夹具。
+
+现代语言包由 Godot 原生资源显式准备/导入，不应在运行时回读 SLF/M.MSG、M1 JSON 或执行 pal-extract。当前命令转换消息文本、目标头像/提示图及消息实际使用的 ISO/Unifont 字形；它不声称支持全游戏显示控制。不能以系统字体替代。新增显示行为仍按固定 SDLPal 参考独立核验。
 
 ### 完整事件文件示例
 

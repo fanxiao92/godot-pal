@@ -1,6 +1,9 @@
 using System;
+using System.IO;
+using System.Linq;
 using Godot;
 using Pal.Core;
+using Pal.Game.Dialogue;
 using Pal.Game.Map;
 using Pal.Game.Profiles;
 using Pal.Game.Resources;
@@ -16,18 +19,16 @@ public partial class Main : Node2D
         [Key.Down, Key.S, Key.Left, Key.A, Key.Up, Key.W, Key.Right, Key.D];
     private ExplorationInput? input;
     private PalMapScene? mapScene;
-    private Window? window;
-    private bool focusSignalsConnected;
+    private NpcInteractionRequest? activeTrigger;
+    private bool awaitingSceneDraw;
+    private bool rendererSubscribed;
     private GameSceneConfiguration? configuration;
     private bool initializationAttempted;
     private bool exited;
-    public ExplorationState? Exploration => input?.Current;
     public string? Failure { get; private set; }
     public event Action<string>? Failed;
-    // Emitted only after this real Main callback and renderer update have completed.
-    public event Action? UpdateCompleted;
 
-    /// <summary>Configure once before tree entry. The host owns this node even on failure.
+    /// <summary>Configure once before entering the tree. The host owns this node, including on failure.
     /// Initialization occurs in _Ready; failed or removed scenes must be freed, not reused.</summary>
     public void Configure(GameSceneConfiguration selection)
     {
@@ -37,6 +38,13 @@ public partial class Main : Node2D
         configuration = selection;
     }
 
+    public ExplorationState? Exploration => Interaction?.Current ?? input?.Current;
+    public NpcInteractionSession? Interaction { get; private set; }
+    public PalTriggerDialogue? Dialogue { get; private set; }
+    public PalDialogueDisplay? Display { get; private set; }
+    // Actual Main callback completion; display completion has its own production boundary.
+    public event Action? UpdateCompleted;
+
     public override void _Ready()
     {
         if (initializationAttempted || exited || Failure is not null) return;
@@ -44,30 +52,65 @@ public partial class Main : Node2D
         string? scenePath = null, profilePath = null;
         try
         {
-            window = GetWindow();
             var selected = configuration ?? throw new InvalidOperationException("Configure the scene before entering the tree.");
-            string root = selected.Root, profile = selected.Profile;
+            string root = selected.Root, profile = selected.Profile, language = selected.Language;
+            bool staticAcceptance = selected.StaticAcceptance;
+            string? dialogueProfile = selected.DialogueProfile;
+            PalNpcInteractionProfile? npc = null;
+            if (dialogueProfile is not null)
+            {
+                profilePath = dialogueProfile;
+                npc = NativeNpcInteractionProfile.Load(dialogueProfile);
+                root = npc.StaticResources; profile = npc.StaticProfile;
+            }
             scenePath = root + "/Scenes/Scene.tscn";
             profilePath = profile;
             var map = NativeSceneLoader.Load(root);
+            CheckedExplorationProfile checkedProfile;
             try
             {
-                var checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
-                input = new ExplorationInput(new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader));
-                map.InitializeScene(input.Current.Plan, checkedProfile.TextureFor);
+                checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
+                if (staticAcceptance || npc is not null) ValidateStaticAcceptance(map.Data, checkedProfile);
+                if (npc is not null)
+                {
+                    ValidateDialogueScene(map.Data, npc);
+                    checkedProfile.SetPalette(map.Data, Palette(map.Data));
+                }
+                if (npc is null) input = new ExplorationInput(new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader));
+                map.InitializeScene(checkedProfile.Plan, checkedProfile.TextureFor);
             }
-            catch
-            {
-                map.Free();
-                throw;
-            }
+            catch { map.Free(); throw; }
             mapScene = map;
             AddChild(map);
-            window.FocusEntered += OnFocusEntered;
-            window.FocusExited += OnFocusExited;
-            focusSignalsConnected = true;
-            input.SetFocused(window.HasFocus());
+            if (npc is not null)
+            {
+                Display = new PalDialogueDisplay();
+                Display.Failed += DisplayFailed;
+                AddChild(Display);
+                Dialogue = new PalTriggerDialogue(); AddChild(Dialogue);
+                Display.ActivePaletteChanged += colors =>
+                {
+                    if (Failure is not null || exited) return;
+                    checkedProfile.SetPalette(map.Data, colors);
+                    map.UpdateScene(Exploration!.Plan);
+                };
+                // Ordinary dialogue blocks exploration. Redraw the retained current scene, not
+                // the initial pose or a screenshot; the display removes its own overlay.
+                Display.BackgroundRestoreRequested += () =>
+                {
+                    if (Failure is null && !exited) map.UpdateScene(Exploration!.Plan);
+                };
+                Dialogue.Initialize(Display, npc.EventsIndex, npc.DialogueDirectory, Palette(map.Data), map.Data, language);
+                var entries = Dialogue.Session!.Entries.Where(e => e.OwnerType == "eventObject" && e.OwnerId == 60 && e.Slot == "wTriggerScript").ToArray();
+                if (entries.Length != 1) throw new InvalidDataException("Independent dialogue requires one owner60 trigger entry");
+                Interaction = new NpcInteractionSession(checkedProfile.Rules, checkedProfile.Leader, entries[0]);
+                Display.UpdateCompleted += CompleteTrigger; // after adapter receipt/restoration
+                RenderingServer.FramePostDraw += StartAfterSceneDraw;
+                rendererSubscribed = true;
+                GD.Print($"PAL_M3_DIALOGUE_ACCEPTANCE:scene4/map10; owner60/0188; language={language}; not normal scene story/free exploration");
+            }
             GD.Print($"PAL_MAP_LOADED:{root}/Scenes/Scene.tscn");
+            if (staticAcceptance) GD.Print("PAL_M3_STATIC_ACCEPTANCE:scene4/map10; events are not scheduled");
             GD.Print($"PAL_GAME_READY:{Pal.Core.Startup.Status}");
         }
         catch (Exception e)
@@ -76,58 +119,135 @@ public partial class Main : Node2D
         }
     }
 
-    private void OnFocusEntered() => input?.SetFocused(true);
-    private void OnFocusExited() => input?.SetFocused(false);
+    private static Color[] Palette(PalSceneData scene) => Enumerable.Range(0, 256).Select(i =>
+        new Color(scene.Palette.Rgb[i * 3] / 255f, scene.Palette.Rgb[i * 3 + 1] / 255f, scene.Palette.Rgb[i * 3 + 2] / 255f)).ToArray();
 
-    public override void _ExitTree()
+    private static void ValidateDialogueScene(PalSceneData scene, PalNpcInteractionProfile profile)
     {
-        exited = true;
-        DisconnectFocus();
+        var owner = scene.Objects.Single(o => o.Id == 60);
+        if (scene.BundleSha256 != profile.BundleSha256 || scene.WScriptOnEnter != 0 || scene.WScriptOnTeleport != 0
+            || owner.WTriggerScript != 0x0188 || owner.WTriggerMode != 3 || owner.WAutoScript != 0)
+            throw new InvalidDataException("Independent dialogue scene/source/owner60 trigger identity mismatch");
+        if (scene.Palette is not { PaletteId: 0, SelectedLighting: "day", Rgb.Length: 768 })
+            throw new InvalidDataException("Independent dialogue requires native palette0/day with 256 colors");
     }
 
-    private void DisconnectFocus()
+    private static void ValidateStaticAcceptance(PalSceneData scene, CheckedExplorationProfile profile)
     {
-        if (window == null || !focusSignalsConnected) return;
-        window.FocusEntered -= OnFocusEntered;
-        window.FocusExited -= OnFocusExited;
-        focusSignalsConnected = false;
+        if (scene.SceneId != 4 || scene.MapId != 10 || scene.Objects.Count != 32)
+            throw new InvalidDataException("M3 static acceptance requires scene 4 / map 10 and all 32 original objects");
+        var owner = scene.Objects.SingleOrDefault(item => item.Id == 60);
+        if (owner == null || owner.X != 1216 || owner.Y != 1344 || owner.WSpriteNum != 207
+            || owner.SState != 2 || owner.SVanishTime != 0)
+            throw new InvalidDataException("M3 static acceptance owner 60 identity/initial state mismatch");
+        if (profile.Leader.X != 1232 || profile.Leader.Y != 1336 || profile.Leader.Direction != 0
+            || profile.Leader.Layer != 0 || profile.Leader.StepPhase != 0)
+            throw new InvalidDataException("M3 static acceptance profile must use start (1232,1336), South0, layer0/phase0, role0");
     }
 
     public override void _Input(InputEvent @event)
     {
-        if (Failure is not null || exited || input == null || @event is not InputEventKey key) return;
-        for (int i = 0; i < DirectionKeys.Length; i++)
+        if (Failure is not null || exited || Exploration is null || @event is not InputEventKey key) return;
+        try
         {
-            if (key.Keycode != DirectionKeys[i] || !key.IsAction(DirectionActions[i / 2])) continue;
-            if (key.Pressed) input.Press((ExplorationKey)i, key.Echo);
-            else input.Release((ExplorationKey)i);
-            return;
+            for (int i = 0; i < DirectionKeys.Length; i++)
+            {
+                if (key.Keycode != DirectionKeys[i] || !key.IsAction(DirectionActions[i / 2])) continue;
+                if (Interaction is { } interaction)
+                {
+                    if (key.Pressed) interaction.Press((ExplorationKey)i, key.Echo);
+                    else interaction.Release((ExplorationKey)i);
+                }
+                else if (key.Pressed) input!.Press((ExplorationKey)i, key.Echo);
+                else input!.Release((ExplorationKey)i);
+                return;
+            }
+            // Windows reference EnableKeyRepeat=false; no held search repeater or fresh-press gate.
+            if (Interaction is { Phase: not NpcInteractionPhase.Trigger } npc && key.Pressed && !key.Echo
+                && (key.Keycode is Key.Enter or Key.Space or Key.KpEnter || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right))
+            {
+                npc.PressSearch();
+                GetViewport().SetInputAsHandled();
+            }
         }
+        catch (Exception error) { Fail($"Exploration input failed: {error.Message}"); }
     }
 
     public override void _Process(double delta)
     {
-        if (Failure is not null || exited || input == null || mapScene == null) return;
+        if (Failure is not null || exited || Exploration is null || mapScene is null) return;
         try
         {
-            if (input.Update(unchecked((uint)Time.GetTicksMsec())))
-                mapScene.UpdateScene(input.Current.Plan);
+            // The headless dummy renderer has no presented frame. Preserve the command/redraw
+            // submission boundary across actual callbacks; graphical runs wait for FramePostDraw.
+            if (awaitingSceneDraw && DisplayServer.GetName() == "headless") StartAfterSceneDraw();
+            if (Failure is not null) return;
+            bool changed = Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
+                ?? input!.Update(unchecked((uint)Time.GetTicksMsec()));
+            if (changed) mapScene.UpdateScene(Exploration.Plan);
+            if (activeTrigger is null && Interaction?.PendingTrigger is { } request)
+            {
+                activeTrigger = request;
+                awaitingSceneDraw = true;
+            }
             UpdateCompleted?.Invoke();
         }
-        catch (Exception e)
-        {
-            Fail($"Exploration update failed: {e.Message}");
-        }
+        catch (Exception e) { Fail($"Exploration update failed: {e.Message}"); }
     }
+
+    private void StartAfterSceneDraw()
+    {
+        if (Failure is not null || exited || !awaitingSceneDraw || activeTrigger is not { } request) return;
+        awaitingSceneDraw = false;
+        try
+        {
+            Dialogue!.Start(request.FileId, request.EntryId, request.Caller);
+            CompleteTrigger(); // Also handles synchronous, no-wait completion.
+        }
+        catch (Exception e) { Fail($"NPC trigger failed: {e.Message}"); }
+    }
+
+    private void CompleteTrigger()
+    {
+        if (Failure is not null || exited || activeTrigger is not { } request || Dialogue?.Session is not { Phase: TriggerScriptPhase.Completed } session) return;
+        // This callback follows the adapter's receipt at the same actual display update, not
+        // a later Main observation frame. Palette/background consumers have already completed.
+        if (!Interaction!.CompleteTrigger(request.Id, session, unchecked((uint)Time.GetTicksMsec())))
+            throw new InvalidOperationException("NPC trigger completion does not match the active search request");
+        activeTrigger = null;
+    }
+
+    private void DisplayFailed(Exception error) => Fail($"Dialogue update failed: {error.Message}");
 
     protected void Fail(string message)
     {
         if (Failure is not null || exited) return;
         Failure = message;
+        awaitingSceneDraw = false;
         ProcessMode = ProcessModeEnum.Disabled;
         SetProcess(false);
         SetProcessInput(false);
-        DisconnectFocus();
+        DisconnectRuntime();
         Failed?.Invoke(message);
+    }
+
+    private void DisconnectRuntime()
+    {
+        if (rendererSubscribed)
+        {
+            RenderingServer.FramePostDraw -= StartAfterSceneDraw;
+            rendererSubscribed = false;
+        }
+        if (Display is not null)
+        {
+            Display.UpdateCompleted -= CompleteTrigger;
+            Display.Failed -= DisplayFailed;
+        }
+    }
+
+    public override void _ExitTree()
+    {
+        exited = true;
+        DisconnectRuntime();
     }
 }

@@ -23,6 +23,52 @@ if (args.Length == 3 && args[0] == "inspect" && args[1] == "--input"
     }
 }
 
+if (args.Length == 7 && args[0] == "extract-dialogue" && args[1] == "--input" && args[3] == "--reference" && args[5] == "--output")
+{
+    try
+    {
+        DialogueLanguageExporter.Export(args[2], args[4], args[6]);
+        return 0;
+    }
+    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine(exception is InvalidDataException ? $"Dialogue extraction failed: {exception.Message}"
+            : $"Dialogue extraction failed: unable to read input or write output ({exception.GetType().Name}).");
+        return 1;
+    }
+}
+
+if (args.Length == 5 && args[0] == "export-events" && args[1] == "--input" && args[3] == "--output")
+{
+    try
+    {
+        EventArchive.Export(args[2], args[4]);
+        return 0;
+    }
+    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine(exception is InvalidDataException ? $"Event export failed: {exception.Message}"
+            : $"Event export failed: unable to read input or write output ({exception.GetType().Name}).");
+        return 1;
+    }
+}
+
+if (args.Length == 5 && args[0] == "rebuild-events" && args[1] == "--input" && args[3] == "--output")
+{
+    try
+    {
+        bool differsFromSource = EventArchive.Rebuild(args[2], args[4]);
+        if (differsFromSource) Console.WriteLine("Rebuilt chunk differs from the recorded source SHA-256; semantic edits were encoded.");
+        return 0;
+    }
+    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Text.Json.JsonException or InvalidOperationException or FormatException or OverflowException)
+    {
+        Console.Error.WriteLine(exception is InvalidDataException ? $"Event rebuild failed: {exception.Message}"
+            : $"Event rebuild failed: unable to read input or write output ({exception.GetType().Name}).");
+        return 1;
+    }
+}
+
 if (args.Length == 11 && args[0] is "export-map" or "export-scene" or "extract-scene")
 {
     var options = new Dictionary<string, string>();
@@ -56,7 +102,7 @@ if (args.Length == 11 && args[0] is "export-map" or "export-scene" or "extract-s
 
 if (args.Length != 0 && (args.Length != 1 || args[0] != "--help"))
 {
-    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" ? $"Unsupported arguments for {args[0]}."
+    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" ? $"Unsupported arguments for {args[0]}."
         : $"Unsupported arguments: {string.Join(" ", args)}");
     Console.Error.WriteLine("Use --help for usage.");
     return 2;
@@ -70,6 +116,9 @@ Console.WriteLine("""
            pal-extract export-map --input <directory> --output <directory> --map <id> --palette <id> --lighting day|night
            pal-extract export-scene --input <directory> --output <directory> --scene <id> --palette <id> --lighting day|night
            pal-extract extract-scene --input <directory> --output <directory> --scene <id> --palette <id> --lighting day|night
+           pal-extract extract-dialogue --input <directory> --reference <reference/sdlpal> --output <new-or-empty-directory>
+           pal-extract export-events --input <directory> --output <directory>
+           pal-extract rebuild-events --input <directory> --output <file>
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
 
@@ -80,6 +129,17 @@ Console.WriteLine("""
       export-scene Export Windows initial SSS/DATA records and static MGO/PAT sprite frames.
                    Requires a new or empty output directory outside input; links are rejected.
                    Script entries remain numeric; scripts are never loaded or executed.
+
+      extract-dialogue Convert the Chinese and English SLF message sections to strict modern JSON packages.
+                       Preserves source message ranges, blank lines, and CLEAR controls; extracts target art and reference glyphs.
+                       Writes a new or empty directory.
+                       Runtime does not read SLF and missing selected-language content is not replaced.
+
+      export-events Convert SSS.MKF chunk 4 into a complete faithful event set; unverified opcodes remain raw.
+                    Writes a new or empty output directory; this offline command does not execute scripts.
+
+      rebuild-events Reconstruct SSS.MKF chunk 4 from a complete faithful event set.
+                     Writes a new file only; edited semantic fields are re-encoded.
 
       extract-scene Compose a complete static scene bundle with a v1 source/artifact manifest.
                     Derives the map from the scene record; requires only six scene MKFs.

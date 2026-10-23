@@ -1,6 +1,6 @@
 # Static exploration / Main integration tests
 
-For new or migrated cases, follow [Game test layers and SceneRunner](../../../docs/testing/game-test-layers.md): Core for deterministic rules/time, real scenes for input/update wiring, and minimal real processes for argv/diagnostic/exit/READY/isolation. This is not a blanket migration of every process test.
+For new or migrated cases, follow [Game test layers and SceneRunner](../../../docs/testing/game-test-layers.md): Core for deterministic rules/time, SceneRunner by default for real scene behavior, and minimal real processes for argv/diagnostic/exit/READY/isolation contracts. This is a responsibility split, not a blanket migration of every process test.
 
 Approved seam: real native `PackedScene` / `Resource` / `Texture2D`, real scene-tree entry and frames, checked Core draw plans rendered by Godot, viewport transforms, and child-process exit/diagnostics from the shipped Main. No mocks or internal-only test interfaces. This does not replace graphical/desktop pixel acceptance.
 
@@ -16,10 +16,10 @@ dotnet build src/Pal.Game
 & $env:GODOT_BIN --headless --path src/Pal.Game --editor --import
 $env:PAL_TEST_GODOT = $env:GODOT_BIN
 dotnet test src/Pal.Game --no-build --list-tests
-# Expected: 173 discovered = 170 positive cases + 3 deliberate failure controls.
+# Source requirement: 243 discovered = 240 positive cases + 3 deliberate failure controls.
 dotnet test src/Pal.Game --no-build --results-directory $logs `
   --logger 'trx;LogFileName=game.trx'
-# Expected: 170 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
+# Expected: 240 passed, 0 failed/skipped; exit0. Repeat should have identical counts.
 
 # Each command below must fail: 1 executed, 1 failed, 0 skipped; exit1.
 foreach ($control in @('IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
@@ -45,7 +45,7 @@ Shared local/Windows CI acceptance (PowerShell 7):
   -EvidenceDirectory 'C:/external/new-empty-evidence-directory'
 ```
 
-This starts with empty NuGet package/HTTP caches, restores/builds the solution, checks Core 130, CLI 300 + 2 named platform skips, Prepare 52 and Game 170; lists 173 unique Godot cases and repeats the 170 positive cases, verifies each of the three controls with numeric exit1 and exactly one failed test, and runs the existing import/Main startup regression. These are current source requirements: main170 minus four duplicate Arrow entries plus four M2 initialization contracts remains170/173; the eight moved cases are replacements, not additions. Core130 adds one explicit normal release/restart deadline case to the original129. Historical M2 full-gate results retain their original129/170/173 identity; no revised full gate or discovery is implied. The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
+This first runs the eight real-process .NET boundary prechecks, then uses empty NuGet package/HTTP caches to restore/build the solution. Current source requirements are Core328, CLI322 + 2 named platform skips, Prepare52 and Game240; discovery243 includes three controls. It repeats the positives, verifies each control with numeric exit1 and exactly one designated failure, and runs import/Main startup. The unified M3 candidate preserves the unique main normal-deadline Fact and both profile-cleanup and NPC/display-failure contracts: five Main contracts, not four. Static counts are not pass results; the revised full gate has not run. The original full gate actually passed on integration `dab79ad85a4a352826a31eb0569a58e1f17eca88` (tree `b4fb69689d6820727b31ce6909117b1904a5b540`): Core327P, CLI322P+2 exact historical skips, Prepare52P, Game239P/Completed in solution/standalone/repeat, discovery242 unique matching an independently source-derived239 FQN set each round, three exact controls and six startup stages complete. Independent evidence review supports that automation result. **The user confirmed the Windows manual checklist (both languages, physical input, Alt-Tab release/refocus, integer scaling and normal close). Historical CI39884910037 on794b078 ended cancelled after a Game session abort; no new exact-candidate CI has run.** This is user feedback, not agent-independent measurement or new GPU evidence. The agent-added ancillary process Observer is outside the approved M3 functional gate and has been discontinued, not repaired: PID reuse/handle race, missing primary command6 PID/UTC and unknown internal/build-server exits remain historical limitations; the verifier's criterion-1 stays `not-satisfied`. Restricted process snapshots were empty at their observation times; they do not prove all descendants' ownership/exit or observer privacy compliance. Private originals remain local with no unknown command-line inspection, upload, commit, alteration or deletion; no automatic rerun. This scope correction does not waive privacy requirements. See the M3 checkpoint for the manual-feedback source, private-evidence restrictions, pending CI and publication authority. This documentation commit was not itself tested. Prepare52 retains the M2 static preparation chain; it does not cover the new dialogue importer (its separate existing preparation evidence is listed in the [M3 evidence checkpoint](../../../docs/milestones/m3/acceptance.md)). The two existing Windows CLI case-ambiguity skips are explicitly identified; Game/Prepare/Core may not skip or execute zero tests. Raw logs, numeric results, discovery and process snapshots are retained. CI uploads only those evidence files, not package caches or any Assets.
 
 `Test-GameStartup.ps1 -GodotPath <exe>` remains independently callable. It uses the sole `M1Bundle.Write` fixture in an external temporary input, explicitly prepares a unique Assets subroot and a matching typed artificial native profile (raw WORD0, start320,320, South0/layer0/phase0), then checks the actual Main's selected map URI plus Core ready and exit0. It only removes its own recorded, unchanged synthetic trees. Optional `-ResourceRoot res://Assets/<prepared-root>` uses caller-owned native resources without writing/deleting them. Add `-ProfileUri res://<selected-profile>.tres` to select a caller-owned native profile explicitly. With caller resources and no ProfileUri, Main retains its independent default `res://Assets/Profiles/Exploration.tres`; a changed resource root does not relocate it. ProfileUri alone is rejected before synthetic preparation. Synthetic output cleanup is snapshotted only after profile authoring. Neither script populates the default real Assets root; ordinary game startup with missing resources still fails. Timeout or error is a failure, not a fallback. Headless automation is not GPU pixel or human desktop acceptance.
 
@@ -54,110 +54,241 @@ The preparation-only `tests/Fixtures/VerifyNativeScene.gd` checks native PackedS
 Artificial GPU literal pixels and static-frame checks are opt-in through `PAL_STATIC_GPU_EVIDENCE` in the existing observer; they are not part of headless CI. Real scene2/profile and non-headless GPU evidence are local, ignored and never uploaded. Neither is physical OS presentation, operator interaction or remote CI acceptance. These fixtures are exploration test entries, not original spawn/save/story data; no movement/input/scripts are authorized by static rendering.
 
 
-## Focus recovery: processing boundary versus business time
+## M3 scene 4 static acceptance mode
 
-`ExplorationObserver.FocusRecovery` uses its own test-only `_Process` callback in the same default
-main-thread process group, with priority `Main.ProcessPriority + 1`. Godot 4.7.2's `Node.ProcessPriority`
-and `_Process` documentation specify lower priorities run first; `SceneTree.ProcessFrame` is emitted
-**before** node processing and is not evidence that Main has completed an update.
-
-In the sampler's post-Main callback, `Input.ParseInputEvent` and `Input.FlushBufferedEvents` deliver the
-fresh logical key through normal `_Input`/InputMap. The first following post-Main callback unconditionally
-captures and checks that completed update: it must no longer be the frozen state and must match the
-literal first position/direction/phase/frame/camera. Subsequent changed states are captured and checked
-as the literal held step and released standing frame, with normal duplicate Window focus/echo events.
-Snapshots are retained in the callback; a late awaiting coroutine never substitutes a later live state.
-The local await-frame counter is not Main's process-frame identity. Buffered boundary diagnostics use
-`Engine.GetProcessFrames`; timestamps are diagnostic, not performance or cooldown assertions.
-
-The existing Core test `Fresh_press_after_focus_resets_old_deadline_then_uses_100ms_wrap_and_no_catchup`
-uses explicit public `Update(ticks)` inputs for reset-before-old-deadline, 99/100ms, wrap and no-catchup.
-These exact business-time boundaries cannot be inferred from integration observer latency: a delayed
-first engine update can make both a correct implementation and a wrong cooldown appear to move.
-The integration sampler instead verifies actual wiring and the first completed-update literal trace.
-Its unchanged 650ms wait is a liveness guard: missing samples are incomplete observation, while a
-captured wrong first update is a functional failure. No production clocks/state or callbacks are set
-or invoked by the observer. This scoped sampler does not change the separate opt-in scene2/GPU modes
-and is not OS keyboard/focus or graphical acceptance. No cases or gate counts are added.
-
-
-## Shared Main initialization
-
-`new Main()` → `Configure(GameSceneConfiguration.FromArguments(...))` →
-`ISceneRunner.Load(main, autoFree: true)` is the embedded public seam. Configuration
-is immutable and accepted exactly once before tree entry. Real `_Ready` owns the
-same M2 native loading, profile validation, exploration and renderer assembly as
-normal startup. Shipped `Main.tscn` uses `GameStartup : Main`: its tree-out constructor
-selects actual argv, and its outer policy alone sets window minimum and turns shared
-failure into the original diagnostic/exit1. Selected scene/profile, MAP/READY and
-normal resource defaults are unchanged.
-
-`Failure`/`Failed` retain/report the first initialization or update failure once;
-the scene disables subtree/input/process and disconnects its Window focus signals,
-without quitting an embedded host. Host owns all nodes on success or failure and
-must free them. Removed/failed nodes cannot be reconfigured or reused. Unexpected
-scene failure must fail the test rather than be mistaken for successful READY.
-
-`MainSceneTests` has four M2 contracts: missing/repeated/late configuration; selected
-resource failure; walking-frame failure followed by healthy/new and cached-resource
-scenes; and invalid profile after native map loading followed by healthy interaction.
-No NPC, event or dialogue runtime is added. `ExplorationProcessTests` retains focus,
-priority, aliases, repeat, collision, dynamic renderer and runtime-exit duties;
-`MainProcessTests` retains argv/resource/normal-startup exit and diagnostic matrices.
-Only the eight logical-binding cases move to the scene layer, and the four entirely
-duplicate Arrow-only entries are removed. Still-used Observer/manual/GPU modes stay.
-
-## Eight exploration SceneRunner routes
-
-`ExplorationSceneTests.LogicalBindingsMoveHoldReleaseAndRestartActualMain` replaces
-four directions × Arrow/WASD process cases, with no extra business Godot per case.
-The fixed adapter still starts editor/runtime hosts. Run serially with both engine
-environment variables, bootstrap/build/import as required, and a PID/Name-only
-Godot preflight (pause on existing processes):
+The normal M2 route remains the default (`res://Assets/Scenes/Scene.tscn` and the default exploration profile). A separately prepared scene 4 package can be selected explicitly, without startup extraction or fallback:
 
 ```powershell
-dotnet test src/Pal.Game --no-build --no-restore `
-  --settings tests/Pal.Game.Tests/game.runsettings `
-  --filter 'FullyQualifiedName~ExplorationSceneTests.LogicalBindingsMoveHoldReleaseAndRestartActualMain' `
-  --results-directory $logs --logger 'trx;LogFileName=exploration-scene.trx'
-# Exactly eight completed passes, exit0, no skip or abnormal RunInfo.
+& $env:GODOT_BIN --path src/Pal.Game -- --m3-static-resources res://Assets/StaticScene4 `
+  --m3-static-profile res://Assets/StaticScene4/Profiles/Scene4Static.tres
 ```
 
-Each unique native fixture configures an independent Main before Load. M2 focus
-freeze/clear/fresh-press remains production behavior: healthy embedded hosts emit
-public Window FocusExited then FocusEntered and check Error.Ok before input. This
-establishes a fresh-press gate independently of headless OS focus. It does not claim
-physical window focus or desktop input acceptance.
+Both `--m3-static-resources` and `--m3-static-profile` are mandatory, must be supplied together, and cannot be mixed with M2 flags. Main validates scene 4/map 10, all 32 source objects, owner 60 at (1216,1344) with sprite 207/state 2/vanish 0, and the independent profile start (1232,1336), South0/layer0/phase0/role0. Profile loading retains the same source identity, texture, collision, neighbor and role0 walk-frame checks as M2. Startup emits `PAL_M3_STATIC_ACCEPTANCE`; it schedules no scene event. The selected origin is a test start, not the original story spawn. Owner 57 has a hotspot covering this location in ordinary scene behavior, so this mode is not scene 4 free exploration; it does not enable trigger search or dialogue. Camera placement continues to be derived by the existing scene plan from its (160,112) reference anchor.
 
-InputEventKey reaches real `_Input`/InputMap. A synchronous `Main.UpdateCompleted`
-observer checks the FIRST actual update unconditionally, then literal held second
-and third steps, releases at third, checks stop/idle/raw WORD0, restarts at idle,
-and releases at restart. Position, direction, phase, frame, first camera, (160,112)
-anchor, logical InputMap aliases and three echo events remain checked. Samples and
-control occur in that completion, not when an awaiting coroutine happens to resume.
-Assertion exceptions stay in the test channel, not Main's failure channel. The650ms
-per-boundary guard is liveness protection, never a business deadline assertion.
+Use `extract-scene --scene 4 --palette <explicit id> --lighting <day|night>` into a new, unique M1 output directory outside every repository, then `Prepare-GameScene.ps1` into the new ignored `src/Pal.Game/Assets/StaticScene4` directory. Do not reuse an existing output. For example, substitute a freshly generated GUID path for `<unique-temp>` and choose the palette explicitly (it is never inferred from scene ID):
 
-Old70ms/short-frame wall-clock predicates map to deterministic Core tests:
-`Each_key_moves_one_literal_world_step_only_on_update`,
-`Echoes_and_duplicate_presses_do_not_reorder_add_held_aliases_or_accelerate`,
-`Fresh_press_after_focus_resets_old_deadline_then_uses_100ms_wrap_and_no_catchup`,
-`Press_release_idle_and_restart_respect_exact_normal_deadlines`,
-`Update_is_due_at_equality_wraps_uint_ticks_and_reschedules_from_now_without_catchup`,
+```powershell
+$godot = 'C:/Users/xiaofan/scoop/apps/godot-mono/4.7.2/godot-mono.console.exe'
+$bundle = Join-Path ([IO.Path]::GetTempPath()) ('pal-scene4-' + [guid]::NewGuid().ToString('N'))
+$paletteId = 0 # Explicit local selection; choose deliberately, never infer from scene ID.
+dotnet run --project tools/Pal.Extract --no-build -- extract-scene `
+  --input C:/Users/xiaofan/Repos/godot-pal/data/raw/sdlpal --output $bundle `
+  --scene 4 --palette $paletteId --lighting day
+./scripts/Prepare-GameScene.ps1 -InputPath $bundle `
+  -OutputPath src/Pal.Game/Assets/StaticScene4 -GodotPath $godot
+./scripts/Write-StaticScene4Profile.ps1 `
+  -DataMkf C:/Users/xiaofan/Repos/godot-pal/data/raw/sdlpal/DATA.MKF -GodotPath $godot
+```
+
+The profile author step is the supported local authoring procedure. It reads role0 `rgwWalkFrames` as the raw WORD at byte offset 768 of DATA.MKF chunk 3 (the existing M1 source layout requires the 900-byte PLAYERROLES record), computes DATA.MKF's full SHA-256, and refuses to proceed unless it matches the prepared `data.mkf` source identity. It verifies prepared scene/map IDs, 32 objects, owner60 identity/state, writes only the documented profile URI without overwrite, then reloads the saved profile and checks bundle/source provenance and the independent start. The raw archive is opened read-only; do not manually substitute a walk-frame value. Both generated package and profile remain local/ignored. Review the extraction manifest, generated profile metadata, and their identities before launching the M3 command above. CI uses artificial resources and does not depend on this local data.
+
+## Desktop focus and exploration behavior
+
+SDLPal's application-background events set `g_bRenderPaused`, which gates video presentation; its
+ordinary game loop and keyboard polling continue through `PAL_ProcessEvent` / `PAL_UpdateKeyboardState`.
+The inspected SDLPal source has no desktop window-focus business pause. The Godot Main therefore has no
+focus signal subscriptions, and `Pal.Core.ExplorationInput` has no focus state or reset path. Main keeps
+its ordinary input, public Core update, and 100ms schedule; the change does not synthesize or suppress key
+release events.
+
+`WindowFocusSignalsDoNotFreezeExplorationOrClearHeldInput` injects public Window focus signals around
+normal logical key input to the shipped Main. Each injection temporarily subscribes a public observation
+callback, requires `Error.Ok` and exactly one callback, and unsubscribes in `finally`; Godot 4.7.2 can return
+`Unavailable` for a valid signal with no subscribers, so an unchecked emit does not prove delivery.
+The two key aliases must reach literal walking states at actual Main updates both after `FocusExited`
+and after `FocusEntered`, then stand after explicit key release. This checks that focus signals neither
+freeze updates nor clear logical held input; input remains governed by ordinary delivery. It does **not**
+simulate desktop focus loss, establish OS/Godot key-release behavior, or
+prove what keys are delivered on return. No Windows/other-platform claim or manual Alt-Tab acceptance
+follows from this headless signal injection. Core timing boundaries remain covered through explicit
+`ExplorationSession.Update(ticks)` tests; Godot observer waits are bounded liveness guards, not timing
+measurements.
+
+
+## M3 modern trigger/display fixture (#24)
+
+`TriggerDialogueFixtureTests` uses the existing display scene, actual modern JSON files and native
+manual resources in `Tests/Fixtures/TriggerDialogue`. It drives `PalTriggerDialogue.Initialize/Start`,
+not a hand-authored UI command sequence; `request.Display` is the actual rendered/updated Core session.
+The current suite has24 cases, including four later reference input/timing regressions. Its original20 cases cover: two language/repeat loops, font preflight, leading CLEAR with real background
+and palette consumers, a two-request input/context boundary, ten resource/entry negatives, two completed
+restore cases (CLEAR/name), synchronous multiple-restore draining before body text, and two initialization
+diagnostic cases. The latter require exact resource-path-prefixed messages for an invalid Prompt-01 plane
+and language format version, with the original InvalidDataException and its reason retained as the inner exception. The existing
+eight `DialogueDisplayFixtureTests` run in the same targeted validation; the original three preceded the later reference regressions.
+
+Run with the existing exact engine/packages/runsettings, serially after the usual PID/Name preflight:
+
+```powershell
+dotnet build src/Pal.Game --no-restore
+& $env:GODOT_BIN --headless --path src/Pal.Game --editor --import
+dotnet test src/Pal.Game --no-build --no-restore `
+  --filter 'FullyQualifiedName~TriggerDialogueFixtureTests|FullyQualifiedName~DialogueDisplayFixtureTests' `
+  --logger 'trx;LogFileName=trigger-dialogue.trx' --results-directory $logs
+# Current source slice: 32 cases; validate actual exit, Summary/RunInfo and exact results.
+# The original #24 validation had23 completed passes on its historical source.
+```
+
+Snapshots used for runtime assertions are saved from `PalDialogueDisplay.UpdateCompleted`, emitted at
+the end of the actual display `_Process` after palette/background restoration and before return.
+The coordinator subscribes first and handles receipts before the fixture saves its state. This avoids
+assuming a `SceneTree.ProcessFrame` coroutine resumed after the display callback, or measuring a
+scheduler delay as a business deadline. The new request is observed at that exact completion boundary:
+its initial typing snapshot must be empty even when two advance keys were delivered in the same batch.
+A controlled erroneous second `_Process(0)` after receipt is caught as WaitingForAdvance instead of
+Typing. Core retains deterministic millisecond cutoff coverage; fixture frame bounds are liveness
+protection only. Logical focus signals are delivered with an explicit subscriber and must not stop
+normal dialogue updates; this is not an OS focus/physical-keyboard test.
+
+The restoration fixture binds `BackgroundRestoreRequested` to restore an independently loaded native
+background into the actual indexed surface and `ActivePaletteChanged` to its texture palette. It checks
+real target pixels, not just ClearDisplay flags. These are headless resource/state/texture checks, not
+GPU screen pixels. Main/search/map10 are connected in the explicit #25 mode documented below; physical keyboard and
+shared-gate acceptance remain separate #26 responsibilities. The original display fixture is not map10 acceptance. See [the runtime contract](../../../docs/design/trigger-execution.md).
+
+## M3 independent NPC interaction host (#25)
+
+Normal Main explicitly accepts `--m3-dialogue-profile res://.../Profile.tres`, optionally
+`--m3-dialogue-language en` (default `zh-Hans`). The composite native profile references the existing
+static profile as the sole origin/walk-frame source, the complete modern events, and seven native
+dialogue resources with file identity locks. No automatic preparation, M2/static replacement, or
+ordinary scene4 story scheduling is performed. Full authoring/startup and lifecycle details:
+[Godot host contract](../../../docs/design/npc-interaction-host.md).
+
+`NpcInteractionHostTests` has32 cases at the approved native resource/normal Main process seams:
+explicit arguments, exact native search metadata, indexed tile/object/leader textures, resource/owner/
+identity/unsupported-entry rejection, two-language search-to-return/repeat and synchronous no-wait
+return. Its child sessions reuse `RealDialogueFixture`, load the shipped Main, deliver real logical
+input, and observe actual Main/Display completion boundaries. The adapter receipts first, Main must
+already be Returning in the same display completion callback, with caller60/ReturnEntry0188. A
+controlled delayed-Main-receipt counterexample is caught there. Core deterministic49/50ms tests
+remain authoritative for exact deadlines; engine scheduling/observer durations are not that proof.
+Short artificial English can legally finish on the first update; it does not prove visible typing or
+acceleration. Batches finish only the current native body part without consuming a later wait.
+
+Real map GPU uses the same `Test-RealDialogueGpu.ps1` with optional `-InteractionProfileUri` and a new
+external evidence directory. Each language completes two full actual-search sessions and ten64000-pixel
+checks at paired completed-update/FramePostDraw boundaries. It independently composes portrait/name/
+body/shadows/prompt from native inputs and literal layout. Map prestate is only a restoration oracle,
+not an independent whole-map renderer. The real scene's273 indexed frames have no opaqueF9–FE pixels;
+they correctly stay unchanged while full scene palettes are still delivered. Artificial indexed
+texture checks cover actual F9/FA changes and alpha separately. Neither GPU nor headless is physical
+keyboard, OS Alt-Tab, human desktop/close feedback, remote CI or final shared-gate acceptance.
+
+## #26 reference display timing/input regression checkpoint
+
+Typing consumes fresh non-echo Search/Menu presses, never the held key that initiated interaction. The short press latches until the current glyph post-delay completes; skip then remains active over body lines until a wait resets it. Waiting accepts every mapped reference logical key (including arrows/keypad, PageUp/PageDown/Home/End and r/a/d/e/w/q/f/s); right Ctrl, unmapped keys and echo do not advance. Non-confirm direction presses remain visible to Main for held movement after return50ms, with release processed normally.
+
+The first glyph is visible on Update0, followed by its delay; the last glyph also owns its post-draw delay. Waiting latches a short press but checks it only on the accumulated100ms boundary, after palette rotation. Deterministic Core tests cover exact deadlines and late updates; engine tests capture UpdateCompleted snapshots and do not replace those deadlines with wall-clock observations. One controlled consume-all-mapped-input mutant is rejected by the actual Main held-direction/return/release regression. Existing immediate-completion fixtures now wait for the real guarded completion callback, without enlarging timeouts or accepting arbitrary phases.
+
+Current unified-source requirements are Core328 (the M3 327 plus main's normal-deadline Fact), CLI322+2 existing skips, Game240 positives and discovery243 including the three unchanged controls. Five shared-initialization contracts preserve both branches' unique failure/cleanup coverage. #30 replaces the eight `ExplorationProcessTests.LogicalBindingsMoveHoldReleaseAndRestartActualMain` cases with the same method in `ExplorationSceneTests`: four directions × Arrow/WASD, still eight cases, not eight additional cases. Native fixtures, real logical key input and 20000ms case timeouts remain; precise timing assertions belong to the existing explicit-time Core tests, while scene state is captured at actual Main.UpdateCompleted boundaries (details below). The observer's `arrow-*` and `key-*` routes remain compatible for explicitly retained uses; other process tests are unchanged. The revised full gate has not been run; targeted validation cannot establish240 full-suite passes or a CI fix. The integration gate above remains historical evidence for its original 239/242 matrix, not the revised source. Historical matched GPU verification on wt26 exact `5bf481f`/the same source tree completed zh-Hans and en map10/profile runs: each10 checks of64000 pixels with0 differences, two complete Main calls and consumed-resource identity matched; the separate legacy no-profile zh-Hans run has six0-difference checks, not Main/profile coverage. Original1.1/255 per-channel tolerance is unchanged, not byte/float identity. GPU fresh pre/post tracked and DLL/PDB manifests were constant; the gate used a different worktree/DLL hash and has only pre-build/post-gate manifests, no fresh post-build/pre-test attestation. Old67f results retain their historical identity. Those automated results do not sign physical keys/OS release/desktop/close/current CI or repair the historical Observer P1. The separate user manual confirmation and retained reproduction checklist are in the [M3 checkpoint](../../../docs/milestones/m3/acceptance.md#windows-人工清单用户反馈已完成); current CI and publication authority remain pending, and the discontinued specification-extra Observer is not an M3 functional acceptance condition.
+
+
+## Shared Main initialization (#29)
+
+`Main.Configure(GameSceneConfiguration.FromArguments(...))` must be called exactly once
+before the node enters the tree. `Main._Ready` owns the single resource-loading and
+assembly path for normal exploration, static acceptance and independent NPC dialogue.
+`GameStartup` (the script on shipped `Main.tscn`, still a `Main`) selects process argv
+in its tree-out constructor; only that outer policy sets the window minimum and
+turns the shared failure notification into the original diagnostic and exit1.
+An embedded host uses `new Main()`, configures it, then
+`ISceneRunner.Load(main, autoFree: true)`; it must inspect `Failure`/subscribe `Failed`
+and fail the test on unexpected errors, not just wait for READY.
+
+Missing configuration and initialization/runtime errors set the first `Failure` and
+notify `Failed` once. The entire scene subtree stops processing/input; renderer and
+Main completion subscriptions disconnect. A failure does not free the node or quit
+an embedded host. The host owns all instantiated nodes, including partial startup;
+free the whole scene on success or failure. A removed/failed scene is not reusable.
+Repeated or late Configure calls throw instead of reassembling.
+
+`MainSceneTests` has five contracts: configuration/lifecycle, resource failure,
+walking-update failure followed by fresh/cached-resource scenes, profile-validation
+failure freeing the already-loaded map, and NPC/display failure followed by an
+independently initialized interactive scene. At the #29 handoff, these were not
+the #30 eight-route migration: all eight original process cases and Observer paths
+remained unchanged. #30 now replaces only those eight automatic process entries;
+the Observer and every other process test remain. The baseline is one no-build eight-case run; the single
+selected compatibility group includes the original four new contracts. These are historical integration results, not
+results for the current five-contract union or its240/243 source inventory.
+
+Embedded tests explicitly release their own parsed key events, unsubscribe handlers,
+use autoFree and verify node invalidation, restore window/engine/focus state and
+delete only GUID-owned artificial fixtures. They never clear ResourceLoader caches
+or global InputMap. Actual state samples come from Main.UpdateCompleted, not from
+assuming a runner frame-wait return means Main ran. No virtual clock/TimeFactor or
+manual production callback invocation is used.
+
+## Eight exploration SceneRunner routes (#30)
+
+`ExplorationSceneTests.LogicalBindingsMoveHoldReleaseAndRestartActualMain` keeps the
+method filter stable while moving its class identity. Each GUID-owned native fixture
+configures a new `Main` before `ISceneRunner.Load(main, autoFree: true)`. The eight
+logical cases no longer launch business child Godot processes; the fixed adapter
+still launches its own editor and GdUnit runtime host. Run serially, using the same
+fixed toolchain, existing prepared package/import caches and PID/Name preflight:
+
+```powershell
+dotnet build src/Pal.Game --no-restore
+dotnet test src/Pal.Game --no-build --no-restore `
+  --settings tests/Pal.Game.Tests/game.runsettings `
+  --filter 'FullyQualifiedName~LogicalBindingsMoveHoldReleaseAndRestartActualMain' `
+  --results-directory $logs --logger 'trx;LogFileName=exploration-scene.trx'
+# Expected: exactly eight completed passes, no skip/RunInfo and exit0.
+```
+
+The first actual Main completion after input is checked unconditionally, not selected
+by waiting for walking. A narrow synchronous completion observer checks the literal
+position/direction/phase/frame, first camera and fixed (160,112) anchor, holds through
+second/third steps, releases at the third completion, checks stop/idle/raw WORD0,
+then restarts at the idle completion and releases at the restart completion. Three
+real InputEventKey echoes and both exact logical InputMap aliases remain covered.
+Input control occurs at that boundary so late test-coroutine resumption cannot skip
+a state or cause extra walking. Assertion exceptions are recorded inside the observer
+and rethrown by the test, not allowed to become Main's business-failure channel.
+A frame wait only yields; it is not evidence that Main ran. The inherited 650ms
+per-boundary guard is liveness protection, not a timing assertion.
+
+The old <70ms/short-frame observations map to unchanged Core tests:
+`ExplorationInputTests.Input_uses_the_normal_100ms_schedule_across_wrap_and_late_updates`,
+`Echoes_and_duplicate_presses_do_not_reorder_add_held_aliases_or_accelerate`, and
+`Initially_idle_and_all_released_keep_the_sessions_normal_stop_phase`, together with
+`ExplorationSessionTests.Update_is_due_at_equality_wraps_uint_ticks_and_reschedules_from_now_without_catchup`,
 `Every_idle_step_toggles_stop_phase_without_moving_or_animating_standing`, and
-`Restart_foot_depends_on_how_many_idle_steps_elapsed`. Explicit public time covers
-99/100ms, wrap, late no-catchup, release, restart and focus reset; scene integration
-cannot replace that deterministic proof with external scheduling observations.
+`Restart_foot_depends_on_how_many_idle_steps_elapsed`. These independently cover
+99/100ms, wrap, late updates without catch-up, echo, stop and restart phase;
+SceneRunner does not supply a synthetic business clock or prove exact deadlines.
 
-Finally, tests explicitly release their own input and subscriptions, Dispose runner
-with autoFree true, assert old Main invalid, fallback-free owned nodes even on an
-assertion, restore window/GUI focus and Engine settings, and delete only their GUID
-fixtures. Same-URI/new-node interaction plus file hashes check shared-resource
-isolation; no global ResourceLoader/InputMap clearing. Fixed runner defaults to
-NOT freeing nodes and changes TimeScale/physics settings; this is why explicit
-ownership and restoration matter. No TimeFactor/virtual delta/manual `_Process`
-is used. Negative controls must fail for their specified functional assertion,
-not compilation/resource absence/crash/timeout. Verify actual runtime-directory
-Core DLL identity after each rebuild/restore, not only source bytes, and never
-rewind source mtime. A local port is not a performance comparison: no new main
-baseline or performance benefit, whole-suite/CI/GPU/manual acceptance is claimed.
+The helper always releases its own key, unsubscribes, disposes its runner, asserts
+old Main invalidation and explicitly frees any surviving owned Main in finally,
+including on assertion failure. Window size/minimum, valid focus owner and engine
+time/physics settings are restored. A subsequent new Main loads the same URI and
+checks the initial position and first actual input/update; resource file hashes and
+authoring raw WORD/frame count remain unchanged. No global InputMap/cache clearing.
+
+Responsibilities remain distinct: `ExplorationProcessTests` retains collision,
+priority/aliases/focus/static/dynamic/runtime-exit routes; `MainProcessTests` retains
+argv, READY, resource/assembly and exit contracts; `NpcInteractionHostTests` retains
+its existing parser/resource and real search/display/process matrix. Only these
+eight exploration cases moved. The unified candidate adds main's unique profile
+cleanup contract, so static totals are240 positives /243 including controls;
+this is not evidence that the revised full gate or failed CI passed.
+The #29 baseline and #30 final comparison each ran once with the same no-build filter,
+fixed toolchain and disclosed reused-cache conditions: command wall 17.9371793s to
+11.6042306s, summed case durations 9.570s to 5.209s, extra business Godot starts 8 to 0;
+the fixed editor and runtime host still start separately. Selected compatibility completed
+12 passes. The time and disposal mutants failed on their designated assertions; the original
+Press-disconnection run was contaminated by a residual time-mutant Core DLL and is not
+clean isolation evidence. A separately user-authorized, one-run clean South Arrow supplement
+returned normal exit1/Failed1 with the exact first-actual-update assertion, using the correct
+Core DLL. Independent Standards/Spec follow-up reviews accepted this evidence gap as closed;
+the historical execution deviation and originals are retained, not reclassified as valid.
+All mutations are restored; source and Game/Core DLL/PDB bytes match the prior final run,
+with normally refreshed mtimes. No second final measurement or revised full gate was run.
+These timings belong to the original uncommitted M3 integration patch. A separate
+M2-only port was reviewed and delivered on local main at ab1d64c/52afa6c, with
+#29/#30/#28 closed; it was not pushed and does not sign this unified M3 candidate.
+Current M3 delivery/Issue status must still be checked separately. A single pair is not
+a performance distribution, GPU/desktop validation, a failed-CI repair or authorization to
+migrate another matrix.

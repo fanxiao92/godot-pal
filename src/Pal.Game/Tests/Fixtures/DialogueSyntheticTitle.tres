@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="PalDialogueLanguage" load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueLanguage.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueMessageRange.cs" id="2"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueMessageEntry.cs" id="3"]
+
+[sub_resource type="Resource" id="Title"]
+script = ExtResource("3")
+Text = "A\\B-@:"
+
+[sub_resource type="Resource" id="Body"]
+script = ExtResource("3")
+Text = "B)"
+
+[sub_resource type="Resource" id="Range"]
+script = ExtResource("2")
+StartMessageId = 61
+EndMessageId = 62
+Entries = Array[Resource]([SubResource("Title"), SubResource("Body")])
+
+[resource]
+script = ExtResource("1")
+Language = "zh-Hans"
+SourceIdentity = "synthetic-fixture-title"
+Messages = Array[Resource]([SubResource("Range")])

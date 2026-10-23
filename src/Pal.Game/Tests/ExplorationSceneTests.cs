@@ -97,9 +97,6 @@ public class ExplorationSceneTests
                 Main.UpdateCompleted += OnUpdated;
                 runner = ISceneRunner.Load(Main, autoFree: true);
                 Check(Main.Failure is null, "initialization: " + Main.Failure);
-                // Public signals establish M2's fresh-press gate independent of headless OS focus.
-                Check(window.EmitSignal(Window.SignalName.FocusExited) == Error.Ok, "focus-exited delivered");
-                Check(window.EmitSignal(Window.SignalName.FocusEntered) == Error.Ok, "focus-entered delivered");
                 var initial = Main.Exploration!;
                 Check((initial.Leader.X, initial.Leader.Y, initial.Leader.StepPhase) == (320, 320, 0),
                     "independent scene starts at literal fixture position/phase");

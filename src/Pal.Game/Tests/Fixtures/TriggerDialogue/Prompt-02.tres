@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="PalDialogueIndexedImage" format=3]
+
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueIndexedImage.cs" id="1"]
+
+[resource]
+script = ExtResource("1")
+Width = 1
+Height = 1
+SourceIdentity = "synthetic-fixture-prompt-2"
+PaletteIndices = PackedByteArray(12)
+Alpha = PackedByteArray(255)

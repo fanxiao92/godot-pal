@@ -12,6 +12,20 @@ namespace Pal.Game.Tests;
 public class ExplorationProcessTests
 {
     [TestCase(Timeout = 20000)]
+    public async Task Scene4StaticModeProcessesActualInputAndPreservesOwnerCollision()
+    {
+        using var fixture = new NativeProfileFixture();
+        fixture.ConfigureStaticScene4();
+        fixture.SavePacked();
+        var result = await Observe(fixture, "static-scene4-input", staticMode: true);
+        foreach (string line in result.Text.Split('\n')) GD.Print("Static scene4 child: " + line.TrimEnd('\r'));
+        AssertThat(result.ExitCode).IsEqual(0);
+        AssertThat(result.Text.Contains("PAL_EXPLORATION_OBSERVED:static-scene4-input", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("PAL_M3_STATIC_ACCEPTANCE:scene4/map10; events are not scheduled", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("ERROR:", StringComparison.Ordinal)).IsFalse();
+    }
+
+    [TestCase(Timeout = 20000)]
     public async Task SouthArrowMovesActualMainAndReleaseStands()
     {
         using var fixture = new ExplorationFixture();
@@ -52,14 +66,14 @@ public class ExplorationProcessTests
         await CheckObservation(fixture, "repeat");
     }
 
+    [TestCase("south-primary", Timeout = 20000)]
     [TestCase("south-alternate", Timeout = 20000)]
-    [TestCase("north-primary", Timeout = 20000)]
-    public async Task WindowFocusSignalsFreezeUntilFreshPressThenResumeImmediatelyWithoutCatchup(string fresh)
+    public async Task WindowFocusSignalsDoNotFreezeExplorationOrClearHeldInput(string keyAlias)
     {
         using var fixture = new ExplorationFixture();
         fixture.AddDynamicCoverExample();
         fixture.Native.SavePacked();
-        await CheckObservation(fixture, "focus-" + fresh);
+        await CheckObservation(fixture, "focus-signal-no-op-" + keyAlias);
     }
 
     [TestCase(0, Timeout = 20000)]
@@ -128,16 +142,20 @@ public class ExplorationProcessTests
         AssertThat(result.Text.Contains("ERROR:", StringComparison.Ordinal)).IsFalse();
     }
 
-    private static async Task<(int ExitCode, string Text)> Observe(NativeProfileFixture fixture, string scenario = "south")
+    private static async Task<(int ExitCode, string Text)> Observe(NativeProfileFixture fixture, string scenario = "south", bool staticMode = false)
     {
         var info = new ProcessStartInfo(OS.GetExecutablePath())
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         info.Environment["PAL_EXPLORATION_CASE"] = scenario;
         bool gpu = scenario == "dynamic" && !string.IsNullOrEmpty(OS.GetEnvironment("PAL_EXPLORATION_GPU_EVIDENCE"));
         string[] display = gpu ? [] : ["--headless"];
-        string[] arguments = [.. display, "--path", ProjectSettings.GlobalizePath("res://"),
-            "--max-fps", "120", "res://Tests/ExplorationObserver.tscn", "--", "--m2-resources", fixture.ResourceRoot,
-            "--m2-profile", fixture.Uri];
+        string[] arguments = staticMode
+            ? [.. display, "--path", ProjectSettings.GlobalizePath("res://"), "--max-fps", "120",
+                "res://Tests/ExplorationObserver.tscn", "--", "--m3-static-resources", fixture.ResourceRoot,
+                "--m3-static-profile", fixture.Uri]
+            : [.. display, "--path", ProjectSettings.GlobalizePath("res://"), "--max-fps", "120",
+                "res://Tests/ExplorationObserver.tscn", "--", "--m2-resources", fixture.ResourceRoot,
+                "--m2-profile", fixture.Uri];
         foreach (string arg in arguments) info.ArgumentList.Add(arg);
         using var process = Process.Start(info) ?? throw new InvalidOperationException("Godot did not start");
         GD.Print($"OWNED_CHILD:pid={process.Id}:parent={OS.GetProcessId()}:created={process.StartTime.ToUniversalTime():O}:exe={info.FileName}:arguments={string.Join(' ', arguments)}");

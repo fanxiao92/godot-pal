@@ -209,6 +209,29 @@ public class NativeExplorationProfileTests
     }
 
     [TestCase]
+    public void Scene4StaticStartKeepsIndependentIdentityCoordinatesAndReferenceNeighborOrder()
+    {
+        using var f = new NativeProfileFixture();
+        f.Scene.SceneId = 4;
+        f.Scene.MapId = f.Scene.Map.MapId = f.Scene.Map.Tiles.MapId = 10;
+        f.Profile.SceneId = 4;
+        f.Profile.Start.X = 1232; f.Profile.Start.Y = 1336;
+        f.Profile.Start.Direction = 0; f.Profile.Start.Layer = 0; f.Profile.Start.StepPhase = 0;
+        var result = NativeExplorationProfile.Load(f.Uri, f.Save());
+        AssertThat(result.Leader.X).IsEqual((short)1232);
+        AssertThat(result.Leader.Y).IsEqual((short)1336);
+        AssertThat(result.Leader.Direction).IsEqual(0);
+        AssertThat(result.Leader.Layer).IsEqual((ushort)0);
+        AssertThat(result.Leader.StepPhase).IsEqual(0);
+        AssertThat(result.Plan.CameraX).IsEqual(1072);
+        AssertThat(result.Plan.CameraY).IsEqual(1224);
+        AssertThat(result.Rules.IsBlocked(1232, 1336)).IsFalse();
+        AssertThat(result.Neighbors.ToArray()).IsEqual(new[] {
+            new StartNeighbor(0, 1216, 1344, false), new StartNeighbor(1, 1216, 1328, false),
+            new StartNeighbor(2, 1248, 1328, false), new StartNeighbor(3, 1248, 1344, false) });
+    }
+
+    [TestCase]
     public void CheckedStartReportsFourCoreCollisionFactsInReferenceDirectionOrder()
     {
         using var f = new NativeProfileFixture();

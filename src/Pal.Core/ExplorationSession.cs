@@ -4,7 +4,8 @@ public sealed record ExplorationState(StaticLeader Leader, bool IsWalking, Stati
 
 public sealed class ExplorationSession
 {
-    private readonly StaticSceneRules rules;
+    private StaticSceneRules rules;
+    public IReadOnlyList<SceneObject> Objects => rules.Objects;
     private bool hasUpdated;
     private uint nextDeadline;
     public ExplorationState Current { get; private set; }
@@ -15,11 +16,22 @@ public sealed class ExplorationSession
         Current = new(initialLeader, false, rules.BuildPlan(initialLeader));
     }
 
-    internal void ResetSchedule()
+    internal SceneSearchMatch? FindSearchTarget() => rules.FindSearchTarget(Current.Leader);
+
+    internal void PrepareSearch(ushort objectId)
     {
-        hasUpdated = false;
-        nextDeadline = 0;
+        var obj = rules.Objects.Single(o => o.Id == objectId);
+        if (obj.SpriteFrames * 4 <= obj.CurrentFrame) return;
+        var facing = obj with { CurrentFrame = 0, Direction = (ushort)((Current.Leader.Direction + 2) % 4) };
+        var posed = rules.WithObjects(rules.Objects.Select(o => o.Id == objectId ? facing : o));
+        // PAL_Search explicitly uses direction * 3 for the party, not its walking stride.
+        var plan = posed.BuildPlan(Current.Leader, Current.Leader.Direction * 3);
+        rules = posed;
+        Current = new(Current.Leader, false, plan);
     }
+
+    internal void SaveTriggerEntry(ushort objectId, ushort returnEntry) =>
+        rules = rules.WithObjects(rules.Objects.Select(o => o.Id == objectId ? o with { TriggerEntry = returnEntry } : o));
 
     public bool Update(uint ticksMilliseconds, int? direction)
     {

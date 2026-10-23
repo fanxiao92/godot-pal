@@ -1,0 +1,20 @@
+{
+  "formatVersion": 1,
+  "language": "zh-Hans",
+  "source": {
+    "file": "m_chs.slf",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "messages": [
+    {
+      "startMessageId": 61,
+      "endMessageId": 62,
+      "entries": [
+        {
+          "kind": "text",
+          "text": "A"
+        }
+      ]
+    }
+  ]
+}

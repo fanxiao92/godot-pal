@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Pal.Game.Profiles;
+using Pal.Game.Map;
 using System.Threading.Tasks;
 using Godot;
 using Pal.Core;
@@ -17,9 +18,6 @@ public partial class ExplorationObserver : Node
     private Main main = null!;
     private int frame;
     private ExplorationState? last;
-    private Action? sampleFocusProcess;
-
-    public override void _Process(double delta) => sampleFocusProcess?.Invoke();
     private static readonly Key[] Arrows = [Key.Down, Key.Left, Key.Up, Key.Right];
     private static readonly Key[] Letters = [Key.S, Key.A, Key.W, Key.D];
 
@@ -34,12 +32,13 @@ public partial class ExplorationObserver : Node
             Focus(true); // Public Window signal injection, not an assertion about OS focus.
             Trace("start");
             string scenario = OS.GetEnvironment("PAL_EXPLORATION_CASE");
-            if (scenario == "scene2-input-priority") await Scene2InputPriority();
-            else if (scenario == "scene2-input-focus") await Scene2InputFocus();
+            if (scenario == "static-scene4-input") await StaticScene4Input();
+            else if (scenario == "scene2-input-priority") await Scene2InputPriority();
             else if (scenario == "integration-scene2") await IntegrationScene2();
             else if (scenario == "default-scene2") await DefaultScene2();
             else if (scenario.StartsWith("alias-", StringComparison.Ordinal)) await Aliases(scenario[6..]);
-            else if (scenario.StartsWith("focus-", StringComparison.Ordinal)) await FocusRecovery(scenario[6..]);
+            else if (scenario.StartsWith("focus-signal-no-op-", StringComparison.Ordinal))
+                await FocusSignalNoOp(scenario.EndsWith("south-primary", StringComparison.Ordinal) ? Key.Down : Key.S);
             else if (scenario == "repeat") await Repeats();
             else if (scenario.StartsWith("priority-", StringComparison.Ordinal)) await Priority(scenario == "priority-four");
             else if (scenario == "dynamic") await Dynamic();
@@ -64,6 +63,38 @@ public partial class ExplorationObserver : Node
         {
             foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, false);
         }
+    }
+
+    // Synthetic scene4 route exercises the actual Main input callback and owner60 collision.
+    private async Task StaticScene4Input()
+    {
+        var data = main.GetChildren().OfType<PalMapScene>().Single().Data;
+        Check(data.SceneId == 4 && data.MapId == 10 && data.Objects.Count == 32, "scene4/map10 complete native fixture");
+        var owner = data.Objects.Single(o => o.Id == 60);
+        Check((owner.X, owner.Y, owner.WSpriteNum, owner.SState, owner.SVanishTime) == (1216, 1344, 207, 2, 0),
+            "owner60 retains original identity and initial state");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y, main.Exploration.Plan.CameraX,
+            main.Exploration.Plan.CameraY) == (1232, 1336, 1072, 1224), "independent start and reference camera anchor");
+        Bindings("south", 0);
+        var before = main.Exploration;
+        KeyEvent(Key.Down, true);
+        await NextFrame();
+        await Until(() => !ReferenceEquals(before, main.Exploration), "blocked owner collision update");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (1232, 1336),
+            "owner60 collision blocks South0 neighbor");
+        KeyEvent(Key.Down, false);
+        await NextFrame();
+        Bindings("east", 3);
+        KeyEvent(Key.Right, true);
+        await Until(() => (main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (1248, 1344),
+            "legal east neighbor movement");
+        KeyEvent(Key.Right, false);
+        await NextFrame();
+        await Until(() => !main.Exploration!.IsWalking, "released static-scene movement stands");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y) == (1248, 1344),
+            "legal neighbor retained after release");
+        Check(data.Objects.Count == 32 && data.Objects.Single(o => o.Id == 60) == owner,
+            "all objects remain present and owner60 record is unchanged");
     }
 
     // Shipped scene2/default profile only: real input, Window signals and Main process deadlines.
@@ -136,52 +167,6 @@ public partial class ExplorationObserver : Node
         Scene2InputComplete(evidence, data, objects);
     }
 
-    private async Task Scene2InputFocus()
-    {
-        var (evidence, data, objects) = Scene2InputStart();
-        KeyEvent(Key.S, true);
-        await Step(720, 696, 0, 1, 1, 560, 584);
-        Check(Input.IsActionPressed("exploration_south"), "S resolves actual south InputMap");
-        Focus(false);
-        var frozen = main.Exploration!;
-        await IntegrationCapture(evidence, "A-south-blurred");
-        KeyEvent(Key.W, true);
-        KeyEvent(Key.S, false);
-        KeyEvent(Key.W, false);
-        await Scene2InputFrozen(frozen, 240, evidence, "background-press-release");
-        Focus(true);
-        await Scene2InputFrozen(frozen, 220, evidence, "focus-no-input");
-        foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, true, echo: true);
-        await Scene2InputFrozen(frozen, 220, evidence, "only-echo");
-        await IntegrationCapture(evidence, "B-focused-no-fresh-input");
-        ulong freshTick = Time.GetTicksMsec();
-        KeyEvent(Key.Up, true);
-        await Step(736, 688, 2, 2, 6, 576, 576);
-        Check(Time.GetTicksMsec() - freshTick < 85, "fresh north steps on next real frames without cooldown/catchup");
-        IntegrationState(evidence, "fresh-north-first");
-        var first = main.Exploration!;
-        ulong firstTick = Time.GetTicksMsec();
-        do
-        {
-            KeyEvent(Key.Up, true, echo: true);
-            await NextFrame();
-            Check(ReferenceEquals(first, main.Exploration), "resumed north cannot catch up or accelerate");
-        } while (Time.GetTicksMsec() - firstTick < 50);
-        await Step(752, 680, 2, 3, 8, 592, 568);
-        Check(Time.GetTicksMsec() - firstTick >= 85, "resumed held north retains ordinary 100ms cadence");
-        Focus(false); // Freeze the sampled walking frame using only the normal focus policy.
-        Scene2InputLiteral(752, 680, 2, 3, 8, 592, 568, true);
-        await IntegrationCapture(evidence, "C-north-two-blurred");
-        KeyEvent(Key.Up, false);
-        Focus(true);
-        KeyEvent(Key.Up, true); // Fresh edge followed by release permits an idle update, not movement.
-        KeyEvent(Key.Up, false);
-        await Until(() => !main.Exploration!.IsWalking, "fresh release returns to ordinary idle");
-        Scene2InputLiteral(752, 680, 2, 0, 6, 592, 568, false);
-        IntegrationState(evidence, "fresh-release-idle");
-        Scene2InputComplete(evidence, data, objects);
-    }
-
     private (string Evidence, PalSceneData Data, string Objects) Scene2InputStart()
     {
         Check(OS.GetCmdlineUserArgs().Length == 0, "scene2 input modes require shipped defaults without custom arguments");
@@ -212,21 +197,6 @@ public partial class ExplorationObserver : Node
             s.Plan.CameraX, s.Plan.CameraY, s.IsWalking, s.Leader.WalkFramesWord, s.Leader.Layer)
             == (x, y, direction, phase, bitmap, cameraX, cameraY, walking, 0, 0),
             $"scene2 literal ({x},{y}) direction={direction} phase={phase} frame={bitmap} camera=({cameraX},{cameraY}) walking={walking}");
-    }
-
-    private async Task Scene2InputFrozen(ExplorationState frozen, ulong duration, string evidence, string label)
-    {
-        var commands = frozen.Plan.Commands.ToArray();
-        ulong tick = Time.GetTicksMsec();
-        do
-        {
-            await NextFrame();
-            Check(ReferenceEquals(frozen, main.Exploration) && ReferenceEquals(frozen.Plan, main.Exploration!.Plan),
-                "scene2 whole Current/Plan remains frozen: " + label);
-            Scene2InputLiteral(720, 696, 0, 1, 1, 560, 584, true);
-            Check(commands.SequenceEqual(main.Exploration!.Plan.Commands), "all frozen draw commands/objects unchanged");
-        } while (Time.GetTicksMsec() - tick < duration);
-        IntegrationState(evidence, label);
     }
 
     private static void Scene2InputComplete(string evidence, PalSceneData data, string objects)
@@ -413,143 +383,18 @@ public partial class ExplorationObserver : Node
             "echo-only deadline retains literal standing position/phase/frame");
     }
 
-    private async Task FocusRecovery(string fresh)
+    private async Task FocusSignalNoOp(Key key)
     {
-        KeyEvent(Key.Down, true);
+        KeyEvent(key, true);
         await Step(304, 328, 0, 1, 1, 144, 216);
-        var frozen = main.Exploration!;
         Focus(false);
-        Focus(false);
-        foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, true);
-        KeyEvent(Key.Down, false);
-        await Frozen(frozen, 240, "unfocused across two old deadlines ignores background inputs");
+        await Step(288, 336, 0, 2, 0, 128, 224);
         Focus(true);
-        await Frozen(frozen, 220, "focus entered with no fresh input does not resume even idle phase");
-        foreach (var key in Arrows.Concat(Letters)) KeyEvent(key, true, echo: true);
-        await Frozen(frozen, 220, "old and unheld echo alone cannot resume after focus entered");
-        Key keyFresh = fresh == "south-alternate" ? Key.S : Key.Up;
-        await ObserveFocusUpdates(keyFresh, frozen);
-    }
-
-    // Same main-thread process group; lower ProcessPriority callbacks finish first.
-    // Flush after Main's current callback, then sample the first following Main callback, not ProcessFrame.
-    private async Task ObserveFocusUpdates(Key key, ExplorationState frozen)
-    {
-        Check(main.IsProcessing() && main.ProcessThreadGroup == ProcessThreadGroupEnum.Inherit
-            && ProcessThreadGroup == ProcessThreadGroupEnum.Inherit, "focus sampler shares Main's default process group");
-        int originalPriority = ProcessPriority;
-        ProcessPriority = main.ProcessPriority + 1;
-        int stage = 0;
-        bool complete = false;
-        Exception? failure = null;
-        ulong deliveredFrame = 0;
-        var samples = new List<ExplorationState>();
-        var boundaries = new List<string>();
-        void Capture(string label, ExplorationState state)
-        {
-            samples.Add(state); // Retain the completed update even if the awaiting observer resumes much later.
-            boundaries.Add($"FOCUS_PROCESS:{label}:process={Engine.GetProcessFrames()}:ticks={Time.GetTicksMsec()}:xy={state.Leader.X},{state.Leader.Y}:phase={state.Leader.StepPhase}:camera={state.Plan.CameraX},{state.Plan.CameraY}:bitmap={state.Plan.LeaderFrameIndex}");
-        }
-        sampleFocusProcess = () =>
-        {
-            try
-            {
-                if (stage == 0)
-                {
-                    KeyEvent(key, true);
-                    Input.FlushBufferedEvents(); // ParseInputEvent -> normal _Input/InputMap before the next Main._Process.
-                    deliveredFrame = Engine.GetProcessFrames();
-                    boundaries.Add($"FOCUS_PROCESS:delivered:process={deliveredFrame}:ticks={Time.GetTicksMsec()}");
-                    Check(ReferenceEquals(frozen, main.Exploration), "input delivery alone cannot advance Main");
-                    stage = 1;
-                    return;
-                }
-                var current = main.Exploration!;
-                if (stage == 1)
-                {
-                    Check(Engine.GetProcessFrames() > deliveredFrame, "sample follows the flushed input's process frame");
-                    Capture("first", current);
-                    Check(!ReferenceEquals(frozen, current), "first Main process after flushed fresh press must advance, not eventual motion");
-                    CheckFocusSample(current, key, 0);
-                    stage = 2;
-                }
-                else if (stage == 2 && !ReferenceEquals(samples[0], current))
-                {
-                    Capture("held", current);
-                    CheckFocusSample(current, key, 1);
-                    KeyEvent(key, false);
-                    Input.FlushBufferedEvents();
-                    stage = 3;
-                    return;
-                }
-                else if (stage == 3)
-                {
-                    if (ReferenceEquals(samples[1], current)) return;
-                    Capture("released", current);
-                    CheckFocusSample(current, key, 2);
-                    complete = true;
-                    sampleFocusProcess = null;
-                    return;
-                }
-                // Real repeated signals/echo must preserve held input; the next changed state must be the literal held step.
-                Focus(true);
-                KeyEvent(key, true, echo: true);
-                Input.FlushBufferedEvents();
-                Check(ReferenceEquals(current, main.Exploration), "duplicate focus/echo events cannot advance state themselves");
-            }
-            catch (Exception e)
-            {
-                failure = e;
-                complete = true;
-                sampleFocusProcess = null;
-            }
-        };
-        try
-        {
-            await Until(() => complete, "focus update sampling incomplete (liveness), not a cooldown assertion");
-            if (failure != null) throw failure;
-            Check(samples.Count == 3, "captured first, held and released completed updates");
-        }
-        finally
-        {
-            sampleFocusProcess = null;
-            ProcessPriority = originalPriority;
-            foreach (string boundary in boundaries) GD.Print(boundary);
-        }
-    }
-
-    private static void CheckFocusSample(ExplorationState state, Key key, int update)
-    {
-        var expected = (key, update) switch
-        {
-            (Key.S, 0) => (288, 336, 0, 2, 0, 128, 224, true),
-            (Key.S, 1) => (272, 344, 0, 3, 2, 112, 232, true),
-            (Key.S, 2) => (272, 344, 0, 0, 0, 112, 232, false),
-            (Key.Up, 0) => (320, 320, 2, 2, 6, 160, 208, true),
-            (Key.Up, 1) => (336, 312, 2, 3, 8, 176, 200, true),
-            (Key.Up, 2) => (336, 312, 2, 0, 6, 176, 200, false),
-            _ => throw new InvalidOperationException("unknown focus literal")
-        };
-        Check((state.Leader.X, state.Leader.Y, state.Leader.Direction, state.Leader.StepPhase,
-            state.Plan.LeaderFrameIndex, state.Plan.CameraX, state.Plan.CameraY, state.IsWalking) == expected,
-            "completed focus update has literal position/direction/phase/frame/camera/walking: " + update);
-    }
-
-    private async Task Frozen(ExplorationState state, ulong duration, string message)
-    {
-        ulong start = Time.GetTicksMsec();
-        do
-        {
-            await NextFrame();
-            var current = main.Exploration!;
-            Check(ReferenceEquals(state, current) && ReferenceEquals(state.Plan, current.Plan), message);
-            Check((current.Leader.X, current.Leader.Y, current.Leader.Direction,
-                current.Leader.StepPhase, current.Plan.LeaderFrameIndex,
-                current.Plan.CameraX, current.Plan.CameraY, current.IsWalking)
-                == (304, 328, 0, 1, 1, 144, 216, true), "frozen literal walking frame/camera/phase stays intact");
-            Check(current.Plan.Commands.SequenceEqual(state.Plan.Commands), "all frozen draw commands/objects unchanged");
-        } while (Time.GetTicksMsec() - start < duration);
-        Trace("frozen-" + duration);
+        await Step(272, 344, 0, 3, 2, 112, 232);
+        KeyEvent(key, false);
+        await Until(() => !main.Exploration!.IsWalking, "released key stands on the ordinary next update");
+        Check((main.Exploration!.Leader.X, main.Exploration.Leader.Y, main.Exploration.Leader.StepPhase)
+            == (272, 344, 0), "focus signals do not clear held input or alter the ordinary schedule");
     }
 
     private async Task Step(int x, int y, int direction, int phase, int bitmap, int cameraX, int cameraY)
@@ -900,8 +745,24 @@ public partial class ExplorationObserver : Node
 
     private void Focus(bool focused)
     {
-        var result = GetWindow().EmitSignal(focused ? Window.SignalName.FocusEntered : Window.SignalName.FocusExited);
-        GD.Print($"FOCUS_INJECTED:render={frame}:ticks={Time.GetTicksMsec()}:focused={focused}:result={result}:osHasFocus={GetWindow().HasFocus()}");
+        var window = GetWindow();
+        int observed = 0;
+        void Observe() => observed++;
+        // Godot can return Unavailable for a valid signal without subscribers. Observe real delivery.
+        if (focused) window.FocusEntered += Observe;
+        else window.FocusExited += Observe;
+        try
+        {
+            var result = window.EmitSignal(focused ? Window.SignalName.FocusEntered : Window.SignalName.FocusExited);
+            GD.Print($"FOCUS_INJECTED:render={frame}:ticks={Time.GetTicksMsec()}:focused={focused}:result={result}:observed={observed}:osHasFocus={window.HasFocus()}");
+            Check(result == Error.Ok, $"public Window focus signal delivery succeeds (focused={focused}, result={result})");
+            Check(observed == 1, $"public Window focus signal observed exactly once (focused={focused}, observed={observed})");
+        }
+        finally
+        {
+            if (focused) window.FocusEntered -= Observe;
+            else window.FocusExited -= Observe;
+        }
     }
 
     private void KeyEvent(Key key, bool pressed, bool echo = false)
