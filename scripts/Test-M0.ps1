@@ -234,12 +234,14 @@ try {
     . (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
     & (Join-Path $repository 'tests/Pal.Game.Tests/GameBatches.Tests.ps1')
     $gamePlan = Get-GameBatchPlan $repository
+    $gameProject = @($gamePlan.projects | Where-Object name -CEQ 'game')
+    if ($gameProject.Count -ne 1) { throw 'Expected exactly one Game project identity.' }
     $gamePlan | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $evidence 'game-batch-plan.json')
     function Invoke-GameRound([string]$Round, [string]$Directory) {
         $roundResults = [Collections.Generic.List[object]]::new()
         foreach ($batch in $gamePlan.batches) {
             $fileName = "game-$($batch.name).trx"
-            $null = Invoke-DotnetChecked @('test', 'src/Pal.Game', '--no-build', '--no-restore', '--filter', $batch.filter,
+            $null = Invoke-DotnetChecked @('test', $gameProject.path, '--no-build', '--no-restore', '--filter', $batch.filter,
                 '--logger', "trx;LogFileName=$fileName", '--results-directory', $Directory)
             Assert-Trx $Directory @($batch.count) @(0) -FileName $fileName
             $identity = Assert-GameBatch (Join-Path $Directory $fileName) $batch.expected
@@ -258,18 +260,14 @@ try {
     # Prepare builds/imports Game. Explicit serial projects finish it before any adapter runner.
     # Keep solution restore/build, but never reintroduce an unbatched solution test here.
     $solutionResults = Join-Path $evidence 'solution'
-    $projects = @(
-        @{ path = $gamePlan.projects[0]; name = 'core'; passed = 328; skipped = 0 }
-        @{ path = $gamePlan.projects[1]; name = 'cli'; passed = 330; skipped = 2 }
-        @{ path = $gamePlan.projects[2]; name = 'prepare'; passed = 52; skipped = 0 }
-    )
+    $projects = @($gamePlan.projects | Where-Object name -CNE 'game')
     foreach ($project in $projects) {
         $fileName = "$($project.name).trx"
         $null = Invoke-DotnetChecked @('test', $project.path, '--no-build', '--no-restore', '--logger', "trx;LogFileName=$fileName", '--results-directory', $solutionResults)
         Assert-Trx $solutionResults @($project.passed) @($project.skipped) -FileName $fileName
     }
     Invoke-GameRound 'solution' $solutionResults
-    $list = Invoke-DotnetChecked @('test', 'src/Pal.Game', '--no-build', '--no-restore', '--list-tests')
+    $list = Invoke-DotnetChecked @('test', $gameProject.path, '--no-build', '--no-restore', '--list-tests')
     $list | Set-Content (Join-Path $evidence 'discovery.log')
     # This pinned adapter lists short names; match every source-derived display identity, not counts alone.
     $discovered = @(Assert-GameDiscovery $list $gamePlan)
@@ -282,7 +280,7 @@ try {
         $results = Join-Path $evidence $control
         $controlCase = @($gamePlan.controls | Where-Object { $_.display.StartsWith($control, [StringComparison]::Ordinal) })
         if ($controlCase.Count -ne 1) { throw "Ambiguous control identity: $control" }
-        $text = Invoke-DotnetChecked -Arguments @('test', 'src/Pal.Game', '--no-build', '--no-restore', '--filter', "FullyQualifiedName=$($controlCase[0].name)", '--logger', 'trx', '--results-directory', $results) -ExpectedExit 1
+        $text = Invoke-DotnetChecked -Arguments @('test', $gameProject.path, '--no-build', '--no-restore', '--filter', "FullyQualifiedName=$($controlCase[0].name)", '--logger', 'trx', '--results-directory', $results) -ExpectedExit 1
         Assert-Trx $results @(0) @(0) -Failed 1
         $controlTrx = @(Get-ChildItem -LiteralPath $results -Filter '*.trx')[0].FullName
         $controlIdentity = Read-TestRunIdentity $controlTrx
@@ -299,11 +297,11 @@ try {
     $trxFiles = foreach ($directory in @('solution', 'game', 'game-repeat', 'IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
         Get-ChildItem -LiteralPath (Join-Path $evidence $directory) -Filter '*.trx' | ForEach-Object FullName
     }
-    if ($checks.Count -ne 15 -or $completedBatches.Count -ne 9) { throw 'Incomplete gate: expected 15 TRX and 9 Game batches.' }
+    if ($checks.Count -ne 16 -or $completedBatches.Count -ne 9) { throw 'Incomplete gate: expected 16 TRX and 9 Game batches.' }
     Assert-ExactTestNames @($trxFiles) @($checks.trx) 'Complete gate TRX files'
     & (Join-Path $PSScriptRoot 'Test-GameStartup.ps1') -GodotPath $GodotPath -LogDirectory (Join-Path $evidence 'godot')
     Save-ProcessSnapshot 'processes-final'
-    'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 328; CLI 330 + 2 existing platform skips; Prepare 52; Godot source/discovery 245; positives 242 as serial 66/79/97 in each of three complete rounds; 15 identity-verified TRX; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
+    'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 328; CLI unit 142; CLI integration 188 + 2 existing platform skips; Prepare 52; Godot source/discovery 245; positives 242 as serial 66/79/97 in each of three complete rounds; 16 identity-verified TRX; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
         Set-Content (Join-Path $evidence 'PASS.txt')
     Write-Host 'PASS: automated M0/M2/M3 acceptance completed. Graphical/manual acceptance is separate.'
 } finally {
