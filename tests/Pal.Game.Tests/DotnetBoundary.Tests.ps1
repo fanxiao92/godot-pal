@@ -21,15 +21,22 @@ if ($CaseDirectory) {
         $Name | Add-Content (Join-Path $evidence 'snapshot-noop.log')
     }
     $tokens = $null; $parseErrors = $null
-    $source = Join-Path $repository 'scripts/Test-M0.ps1'
+    $source = Join-Path $repository 'scripts/DotnetCheckedDefinition.ps1'
+    $productionSource = Join-Path $repository 'scripts/Test-M0.ps1'
     $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count) { throw 'Production script parse error.' }
     $functions = @($ast.FindAll({ param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-DotnetChecked'
     }, $true))
-    if ($functions.Count -ne 1) { throw 'Expected the single actual production boundary.' }
+    if ($functions.Count -ne 1) { throw 'Expected the single actual production boundary helper.' }
     $functions[0].Extent.Text | Set-Content (Join-Path $evidence 'function-source.ps1')
-    Invoke-Expression $functions[0].Extent.Text
+    $m0Tokens = $null; $m0Errors = $null
+    $m0Ast = [Management.Automation.Language.Parser]::ParseFile($productionSource, [ref]$m0Tokens, [ref]$m0Errors)
+    $m0Functions = @($m0Ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-DotnetChecked' }, $true))
+    if ($m0Errors.Count -or $m0Functions.Count -ne 0) { throw 'M0 must only dot-source the unique boundary helper.' }
+    $helperHash = (Get-FileHash $source -Algorithm SHA256).Hash
+    $productionHash = (Get-FileHash $productionSource -Algorithm SHA256).Hash
+    . $source
     $expected = if ($Mode -eq 'expected') { 1 } else { 0 }
     $parameters = @{ Arguments = @('exec', $DriverDll, 'root', $evidence, $Mode, "$SupervisorPid"); ExpectedExit = $expected }
     # The old function is run unmodified for RED: its root exits promptly, EOF is what blocks.
@@ -42,7 +49,7 @@ if ($CaseDirectory) {
     try { $text = Invoke-DotnetChecked @parameters }
     catch { $threw = $true; $text = $_.Exception.Message }
     @{ threw = $threw; text = [string]$text; elapsedMs = $clock.Elapsed.TotalMilliseconds;
-       sourceSha256 = (Get-FileHash $source -Algorithm SHA256).Hash; actualFunction = $true } |
+       sourceSha256 = $productionHash; helperSha256 = $helperHash; actualFunction = $true } |
         ConvertTo-Json -Depth 5 | Set-Content (Join-Path $evidence 'invocation.json')
     exit 0
 }

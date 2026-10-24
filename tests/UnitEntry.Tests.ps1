@@ -64,7 +64,7 @@ try {
     foreach ($c in $report.commands) {
         if ($c.exitCode -ne 0 -or -not $c.exitKnown -or -not $c.stdoutComplete -or -not $c.stderrComplete -or $null -eq $c.elapsedMs -or $c.elapsedMs -le 0 -or $c.status -cne 'completed') { throw 'Incomplete command / invented measurement' }
     }
-    if (-not $report.sdk -or -not $report.sourceIdentity.Count -or $report.toolIdentity.Count -ne 3 -or $report.elapsedMs -le 0) { throw 'Missing code/environment/timing identity' }
+    if (-not $report.sdk -or -not $report.sourceIdentity.Count -or $report.toolIdentity.Count -ne 4 -or $report.elapsedMs -le 0) { throw 'Missing code/environment/timing identity' }
     $core = Get-Content -LiteralPath (Join-Path $output 'core.discovery.json') -Raw | ConvertFrom-Json
     $cli = Get-Content -LiteralPath (Join-Path $output 'cli-unit.discovery.json') -Raw | ConvertFrom-Json
     if (@($core.cases.FullyQualifiedName) -cne 'Artificial.CoreCases.One' -or @($cli.cases | Where-Object FullyQualifiedName -CNE 'Artificial.CliCases.Value').Count -or $cli.cases.Count -ne 2) { throw 'Wrong independent method selection' }
