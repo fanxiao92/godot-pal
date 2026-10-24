@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 $utf8 = [Text.UTF8Encoding]::new($false)
 . (Join-Path $PSScriptRoot 'GameTestBatches.ps1') # Definitions only; never Get-GameBatchPlan.
+. (Join-Path $PSScriptRoot 'TestRunDefinitions.ps1')
 $paths = @{ core = 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj'; 'cli-unit' = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj' }
 $journal = [Collections.Generic.List[object]]::new()
 $projects = [Collections.Generic.List[object]]::new()
@@ -18,7 +19,7 @@ $ownsOutput = $false
 $report = [ordered]@{ schemaVersion = 1; runId = [guid]::NewGuid().ToString(); status = 'incomplete'; repositoryRoot = $RepositoryRoot; selection = $Project; startedUtc = [DateTime]::UtcNow.ToString('o'); finishedUtc = $null; elapsedMs = $null; sdk = $null; sourceIdentity = @(); projects = @(); commands = @(); failure = $null; cache = 'Ordinary current-user NuGet cache and existing build outputs; not empty-cache evidence. No engine/resources/fixed-package inputs supplied by this command.' }
 $report.environment = @{ os = [Environment]::OSVersion.VersionString; runtime = [Runtime.InteropServices.RuntimeInformation]::FrameworkDescription; architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString(); powershell = $PSVersionTable.PSVersion.ToString() }
 $report.head = $null
-$report.toolIdentity = @(foreach ($file in @($PSCommandPath, (Join-Path $PSScriptRoot 'GameTestBatches.ps1'), (Join-Path $PSScriptRoot 'Test-UnitBoundary.ps1'))) { @{ path = $file; sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash } })
+$report.toolIdentity = @(foreach ($file in @($PSCommandPath, (Join-Path $PSScriptRoot 'GameTestBatches.ps1'), (Join-Path $PSScriptRoot 'Test-UnitBoundary.ps1'), (Join-Path $PSScriptRoot 'TestRunDefinitions.ps1'))) { @{ path = $file; sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash } })
 $whole = [Diagnostics.Stopwatch]::StartNew()
 function Fail([string]$Code, [string]$Message) { throw "[unit:$Code] $Message" }
 function Save-Report {
@@ -75,81 +76,25 @@ function Invoke-UnitCommand([string]$Name, [string]$File, [string[]]$Arguments) 
     return $text.Trim()
 }
 function Read-UnitDiscovery([string]$Name, [string]$Assembly) {
-    $diag = Join-Path $out "$Name.discovery.diag.log"
-    if (-not [IO.File]::Exists($diag)) { Fail 'discovery' "Missing discovery diagnostics: $diag" }
-    $cases = [Collections.Generic.List[object]]::new()
-    $completed = $null
-    $warnings = [Collections.Generic.List[string]]::new()
-    foreach ($line in [IO.File]::ReadLines($diag, $utf8)) {
-        if ($line -notmatch 'TestRequestSender.OnDiscoveryMessageReceived: Received message: (.*)$') { continue }
-        $message = $Matches[1] | ConvertFrom-Json
-        if ($message.Version -ne 7) { Fail 'discovery' 'Unsupported VSTest diagnostic protocol (expected Version 7)' }
-        switch -CaseSensitive ($message.MessageType) {
-            'TestDiscovery.TestFound' {
-                if ($null -ne $completed) { Fail 'discovery' 'Cases arrived after discovery completion' }
-                foreach ($case in $message.Payload) { $cases.Add($case) }
-            }
-            'TestDiscovery.Completed' {
-                if ($null -ne $completed -or $message.Payload.IsAborted -ne $false) { Fail 'discovery' 'Duplicate or aborted discovery completion' }
-                $completed = $message.Payload
-                foreach ($case in $completed.LastDiscoveredTests) { $cases.Add($case) }
-            }
-            'TestSession.Message' { if ($message.Payload.MessageLevel -ne 0) { $warnings.Add($message.Payload.Message) } }
-            default { Fail 'discovery' "Unrecognized discovery message: $($message.MessageType)" }
-        }
+    try {
+        $frozen = Read-Version7Discovery -Name $Name -DiagnosticPath (Join-Path $out "$Name.discovery.diag.log") -Assembly $Assembly
+    } catch {
+        if ($_.Exception.Message -match 'Zero discovery') { Fail 'zero-discovery' "$Name discovered zero tests" }
+        Fail 'discovery' $_.Exception.Message
     }
-    if ($null -eq $completed -or $cases.Count -ne $completed.TotalTests) { Fail 'discovery' 'Missing/incomplete discovery completion or count mismatch' }
-    if ($cases.Count -eq 0) { Fail 'zero-discovery' "$Name discovered zero tests; no execution can count as success" }
-    if ($warnings.Count) { Fail 'discovery' ("Discovery warning/error: " + ($warnings -join '; ')) }
-    $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($case in $cases) {
-        $id = [guid]::Empty
-        $serialization = @($case.Properties | Where-Object { $_.Key.Id -ceq 'XunitTestCaseSerialization' })
-        $unique = @($case.Properties | Where-Object { $_.Key.Id -ceq 'XunitTestCaseUniqueID' })
-        if (-not [guid]::TryParse($case.Id, [ref]$id) -or $id -eq [guid]::Empty -or -not $ids.Add($case.Id) -or
-            -not $case.FullyQualifiedName -or -not $case.DisplayName -or [IO.Path]::GetFullPath($case.Source) -cne $Assembly -or
-            $case.ExecutorUri -cne 'executor://xunit/VsTestRunner3/netcore/' -or $serialization.Count -ne 1 -or -not $serialization[0].Value -or $unique.Count -ne 1 -or -not $unique[0].Value) { Fail 'discovery' 'Invalid/incomplete case identity, duplicate ID or unexpected assembly/adapter' }
-    }
-    $frozen = [ordered]@{ assembly = $Assembly; sha256 = (Get-FileHash -LiteralPath $Assembly -Algorithm SHA256).Hash; total = $cases.Count; completed = $completed; cases = $cases.ToArray() }
     [IO.File]::WriteAllText((Join-Path $out "$Name.discovery.json"), ($frozen | ConvertTo-Json -Depth 30), $utf8)
     return $frozen
 }
 function Assert-UnitRun([string]$Name, $Discovery) {
     $path = Join-Path $out "$Name/results.trx"
     if (-not [IO.File]::Exists($path)) { Fail 'results-missing' "$Name did not produce the current run's TRX file: $path" }
-    try { $identity = Read-TestRunIdentity $path } catch { Fail 'results' "$Name invalid TRX/identity graph: $($_.Exception.Message)" }
-    $doc = $identity.document; $ns = $identity.ns
-    foreach ($element in @('Times','Results','TestDefinitions','TestEntries','ResultSummary')) {
-        if ($doc.SelectNodes("/t:TestRun/t:$element", $ns).Count -ne 1) { Fail 'results' "$Name missing/duplicate TRX element: $element" }
+    try { $run = Assert-Version7TrxRun -Path $path -Discovery $Discovery }
+    catch {
+        if ($_.Exception.Message -match '(?i)Access to the path|Could not find the file') { Fail 'results-missing' "$Name did not produce the current run's TRX file: $path" }
+        if ($_.Exception.Message -match '(?i)case IDs differ|case IDs missing|TRX execution count differs') { Fail 'identity' $_.Exception.Message }
+        Fail 'results' $_.Exception.Message
     }
-    $guid = [guid]::Empty
-    foreach ($id in @($identity.runId) + @($identity.executionIds)) {
-        if (-not [guid]::TryParse($id, [ref]$guid) -or $guid -eq [guid]::Empty) { Fail 'identity' "$Name invalid run/execution GUID" }
-    }
-    $times = $doc.SelectSingleNode('/t:TestRun/t:Times', $ns)
-    foreach ($attribute in @('creation','queuing','start','finish')) {
-        $stamp = [DateTimeOffset]::MinValue
-        if (-not [DateTimeOffset]::TryParse($times.GetAttribute($attribute), [ref]$stamp)) { Fail 'results' "$Name missing/invalid session timestamp: $attribute" }
-    }
-    if ([DateTimeOffset]::Parse($times.GetAttribute('finish')) -lt [DateTimeOffset]::Parse($times.GetAttribute('start'))) { Fail 'results' "$Name session finishes before start" }
-    $summary = $doc.SelectSingleNode('/t:TestRun/t:ResultSummary', $ns)
-    $counters = $summary.SelectSingleNode('t:Counters', $ns)
-    if ($summary.GetAttribute('outcome') -cne 'Completed' -or -not $counters -or $summary.SelectNodes('t:RunInfos/t:RunInfo', $ns).Count) { Fail 'results' "$Name incomplete summary or unexpected RunInfo" }
-    foreach ($required in @('total','executed','passed','failed','error','timeout','aborted','inconclusive','passedButRunAborted','notRunnable','notExecuted','disconnected','warning','completed','inProgress','pending')) {
-        $expected = if ($required -in @('total','executed','passed')) { $Discovery.total } else { 0 }
-        if (-not $counters.HasAttribute($required) -or $counters.GetAttribute($required) -cnotmatch '^\d+$' -or [long]$counters.GetAttribute($required) -ne $expected) { Fail 'results' "$Name invalid counter: $required" }
-    }
-    foreach ($attribute in $counters.Attributes) { if ($attribute.Name -notin @('total','executed','passed') -and $attribute.Value -cne '0') { Fail 'results' "$Name unexpected nonzero counter: $($attribute.Name)" } }
-    $rows = @($doc.SelectNodes('/t:TestRun/t:Results/t:UnitTestResult', $ns))
-    if ($rows.Count -ne $Discovery.total) { Fail 'identity' "$Name executed/discovered case sets differ" }
-    foreach ($case in $Discovery.cases) {
-        $row = @($rows | Where-Object { $_.GetAttribute('testId') -ceq $case.Id })
-        $definition = @($doc.SelectNodes('/t:TestRun/t:TestDefinitions/t:UnitTest', $ns) | Where-Object { $_.GetAttribute('id') -ceq $case.Id })
-        if ($row.Count -ne 1 -or $definition.Count -ne 1 -or $row[0].GetAttribute('testName') -cne $case.DisplayName -or $row[0].GetAttribute('outcome') -cne 'Passed') { Fail 'identity' "$Name missing/changed/nonpassing case: $($case.Id)" }
-        $method = $definition[0].SelectSingleNode('t:TestMethod', $ns)
-        if (($method.GetAttribute('className') + '.' + $method.GetAttribute('name')) -cne $case.FullyQualifiedName -or [IO.Path]::GetFullPath($method.GetAttribute('codeBase')) -cne $Discovery.assembly) { Fail 'identity' "$Name definition method/assembly mismatch" }
-    }
-    return $identity
+    return $run.identity
 }
 try {
     $seen = @{}
