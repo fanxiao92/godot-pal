@@ -72,6 +72,7 @@ try {
 - `trx` 是每个命令明确列出的本轮产物，`runId` 可选但推荐固定。`test` 类别及真实 `dotnet test`（不含 `--list-tests`）缺 TRX 时不成功；缺键、null、空数组或无有效 path 的引用均不算已有结果；一条旧 solution 命令可列多份 TRX，新拆分程序集可对应各自命令/TRX。不限制程序集名或总数。
 - TRX 使用已有 `Read-TestRunIdentity` 核验 results/definitions/entries；案例以 testId/executionId 关联，**同显示名不同 ID 保留为不同案例**。记录 assembly/class/method/displayName/testId/executionId、原结果和 duration。跨文件 run/execution ID 重用或重复路径不计为完整成功。
 - TRX Times 必须位于所关联命令 `startedUtc..finishedUtc` 内，时间需有时区；缺少可绑定时间、旧轮、错 runId、缺图/摘要/计数、零执行、坏会话计数或 Summary/RunInfo 异常标 `incomplete`。不与旧轮拼齐。结构完整的失败结果仍为 `failed`，不会因文件名或原命令 exit0 变绿。
+- 已由原记录明确声明并实际完成的预期非零退出，可报告为 `expected-failure`。只有该命令已满足此分类、TRX Summary 为 `Failed` 且存在真实失败行时，才允许 `RunInfo/Error` 的唯一非空 `Text` 与失败行 `Output/ErrorInfo/Message` 在 Trim 后 **Ordinal 精确相等**；不以大小写不敏感匹配、整个 Output/StackTrace 或任意 Error 白名单代替。此时 TRX/案例仍保留失败，任务可为 `completed-with-expected-failures`。不匹配、缺消息、崩溃/中止/会话超时及原退出/完成异常继续失败封闭；普通非致命 Warning 保持原报告行为。该成本分类不证明指定负控制的业务预期，完整门仍负责其精确身份、原因和覆盖验收。
 - `context`、`task` 可缺失。代码/机器/工具链/范围/缓存/构建身份缺失为 `null`；不从程序集路径推断 checkout，不用当前分支给旧产物签名。可在输入/原任务记录说明 dirty patch、PR head/候选/实际 checkout 身份；必须有独立来源。
 - `task` 只填写明确自有任务记录的数字退出、完成状态和整条命令墙钟；没有该记录就省略/填 null。完成状态须为单个字符串 `completed/cancelled/unknown/incomplete`，不接受数组/布尔/数字隐式等值。命令完成须有实际 bool=true 的 `rootExited/stdoutComplete/stderrComplete/outputComplete/cleanupComplete` 和标量 `phase=completed`；存在的 `exitKnown/cancellationRequested/timedOut` 也须为实际布尔值且与完成一致。旧记录缺项或错型仍保守报告 incomplete，保留原命令/退出和已观察成本；声明不是独立 gate 证据。不能把日志中一条 PASS 或多个子命令退出当原外层数字退出。
 

@@ -4,18 +4,86 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
-  group: m0-${{ github.workflow }}-${{ github.ref }}
+  group: m0-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  acceptance:
+  quick-unit:
+    if: github.event_name == 'pull_request'
     runs-on: windows-2022
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout exact event candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          persist-credentials: false
+          lfs: false
+      - name: Install the repository SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Record and validate candidate identity
+        id: quick-candidate
+        shell: pwsh
+        env:
+          CI_TOKEN: ${{ github.token }}
+          CI_EVENT_PATH: ${{ github.event_path }}
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_SHA: ${{ github.sha }}
+          CI_RUN_ID: ${{ github.run_id }}
+          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+          CI_API_URL: ${{ github.api_url }}
+          CI_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          Copy-Item -LiteralPath $env:CI_EVENT_PATH -Destination "$env:RUNNER_TEMP/original-event.json"
+          $event = Get-Content -LiteralPath "$env:RUNNER_TEMP/original-event.json" -Raw | ConvertFrom-Json -Depth 60
+          $mode = if ($event.pull_request.draft) { 'draft-quick' } else { 'ready-full' }
+          $input = "$env:RUNNER_TEMP/quick-candidate-input"
+          $params = @{ OutputDirectory=$input; RepositoryRoot=$env:GITHUB_WORKSPACE; EventName=$env:CI_EVENT_NAME; Action='event-derived'; Mode=$mode; GithubSha=$env:CI_SHA; RunId=$env:CI_RUN_ID; RunAttempt=[int]$env:CI_RUN_ATTEMPT; WorkflowRef=$env:CI_WORKFLOW_REF; ApiUrl=$env:CI_API_URL; PrNumber=$env:CI_PR_NUMBER; EventJsonPath="$env:RUNNER_TEMP/original-event.json" }
+          & ./scripts/New-CiCandidateInputs.ps1 @params; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./scripts/Test-CiCandidate.ps1 -EventPath "$input/event.json" -MetadataPath "$input/metadata.json" -RepositoryRoot $env:GITHUB_WORKSPACE -ServerSnapshotPath "$input/snapshot.json" -EvidenceDirectory "$env:RUNNER_TEMP/quick-candidate-proof"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item "$env:RUNNER_TEMP/quick-candidate-proof/candidate-identity.json" "$env:RUNNER_TEMP/ci-identity.json"
+      - name: Run unit feedback
+        shell: pwsh
+        run: ./scripts/Test-Unit.ps1 -OutputDirectory "$env:RUNNER_TEMP/unit-evidence"
+      - name: Run source engineering checks
+        shell: pwsh
+        run: ./scripts/Test-Engineering.ps1 -Mode Source -EvidenceDirectory "$env:RUNNER_TEMP/source-evidence"
+      - name: Upload quick evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
+        with:
+          name: ci-quick-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/ci-identity.json
+            ${{ runner.temp }}/original-event.json
+            ${{ runner.temp }}/quick-candidate-input/**
+            ${{ runner.temp }}/quick-candidate-proof/**
+            ${{ runner.temp }}/unit-evidence/**
+            ${{ runner.temp }}/source-evidence/**
+
+  full-gate:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    runs-on: windows-2022
+    outputs:
+      proof_status: ${{ steps.full-proof.outputs.status }}
+      proof_run_id: ${{ steps.full-proof.outputs.run_id }}
+      proof_attempt: ${{ steps.full-proof.outputs.attempt }}
+      proof_candidate: ${{ steps.full-proof.outputs.candidate }}
+      proof_code: ${{ steps.full-proof.outputs.code }}
     timeout-minutes: 20
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
@@ -31,25 +99,210 @@ jobs:
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
+      - name: Record and validate start candidate identity
+        id: candidate-start
+        shell: pwsh
+        env:
+          CI_TOKEN: ${{ github.token }}
+          CI_EVENT_PATH: ${{ github.event_path }}
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_SHA: ${{ github.sha }}
+          CI_RUN_ID: ${{ github.run_id }}
+          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+          CI_API_URL: ${{ github.api_url }}
+          CI_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          Copy-Item -LiteralPath $env:CI_EVENT_PATH -Destination "$env:RUNNER_TEMP/original-event.json"
+          $event = Get-Content -LiteralPath "$env:RUNNER_TEMP/original-event.json" -Raw | ConvertFrom-Json -Depth 60
+          $mode = if ($env:CI_EVENT_NAME -eq 'pull_request') { if ($event.pull_request.draft) { 'draft-quick' } else { 'ready-full' } } elseif ($env:CI_EVENT_NAME -eq 'push') { 'push-main' } else { 'manual-full' }
+          $input = "$env:RUNNER_TEMP/candidate-start"
+          $params = @{
+            OutputDirectory=$input; RepositoryRoot=$env:GITHUB_WORKSPACE; EventName=$env:CI_EVENT_NAME; Action='event-derived'; Mode=$mode; GithubSha=$env:CI_SHA; RunId=$env:CI_RUN_ID; RunAttempt=[int]$env:CI_RUN_ATTEMPT; WorkflowRef=$env:CI_WORKFLOW_REF; ApiUrl=$env:CI_API_URL; EventJsonPath="$env:RUNNER_TEMP/original-event.json"
+          }
+          if ($env:CI_EVENT_NAME -eq 'pull_request') { $params.PrNumber=$env:CI_PR_NUMBER }
+          & ./scripts/New-CiCandidateInputs.ps1 @params; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./scripts/Test-CiCandidate.ps1 -EventPath "$input/event.json" -MetadataPath "$input/metadata.json" -RepositoryRoot $env:GITHUB_WORKSPACE -ServerSnapshotPath "$input/snapshot.json" -EvidenceDirectory $env:RUNNER_TEMP/candidate-proof; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $snapshot = Get-Content -LiteralPath "$input/snapshot.json" -Raw | ConvertFrom-Json
+          $validated = Get-Content -LiteralPath "$env:RUNNER_TEMP/candidate-proof/candidate-identity.json" -Raw | ConvertFrom-Json
+          [ordered]@{ sha=$env:CI_SHA; checkout=$snapshot.actualCheckout; runId=$env:CI_RUN_ID; attempt=[int]$env:CI_RUN_ATTEMPT; candidate=$snapshot.candidateSha; workflowRef=$env:CI_WORKFLOW_REF; eventName=$env:CI_EVENT_NAME; action=$validated.action } | ConvertTo-Json | Set-Content -Encoding utf8 "$env:RUNNER_TEMP/ci-identity.json"
       - name: Download and verify official Godot .NET
         shell: pwsh
         run: |
           $godot = ./scripts/Get-Godot.ps1 -Destination "$env:RUNNER_TEMP/godot-4.7.2"
           "GODOT_CONSOLE=$godot" >> $env:GITHUB_ENV
-      - name: Run shared M0, M2 and M3 acceptance checks
+      - name: Prepare verified fixed GdUnit bundle
         shell: pwsh
         run: |
-          ./scripts/Test-M0.ps1 -GodotPath $env:GODOT_CONSOLE -EvidenceDirectory "$env:RUNNER_TEMP/m0-evidence"
+          $bundle = ./scripts/Get-GdUnitPackages.ps1
+          ./scripts/Test-Engineering.ps1 -Mode Offline -GdUnitInputDirectory $bundle -EvidenceDirectory "$env:RUNNER_TEMP/offline-evidence"
+      - name: Run shared M0, M2 and M3 acceptance checks
+        shell: pwsh
+        env:
+          CI_RUN_ID: ${{ github.run_id }}
+          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CI_SHA: ${{ github.sha }}
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $evidence = Join-Path $env:RUNNER_TEMP 'm0-evidence'
+          # Shared Test-M0 rejects even an EXISTING EMPTY root; it creates its own cache.
+          if (Test-Path -LiteralPath $evidence) { throw "M0 evidence root must not exist: $evidence" }
+          $streamRoot = Join-Path $env:RUNNER_TEMP 'm0-streams'
+          if (Test-Path -LiteralPath $streamRoot) { throw "Task stream root must be new: $streamRoot" }
+          New-Item -ItemType Directory -Path $streamRoot | Out-Null
+          $taskStdout = Join-Path $streamRoot 'task-stdout.log'; $taskStderr = Join-Path $streamRoot 'task-stderr.log'
+          # A native host provides the ORIGINAL task exit, not a stale inner dotnet exit.
+          # All untrusted path/context values stay in inherited environment variables.
+          $command = '$ErrorActionPreference="Stop"; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $OutputEncoding=[Console]::OutputEncoding; & ./scripts/Test-M0.ps1 -GodotPath $env:GODOT_CONSOLE -EvidenceDirectory (Join-Path $env:RUNNER_TEMP "m0-evidence"); if($null -eq $LASTEXITCODE){exit 1}; exit $LASTEXITCODE'
+          $hostPath = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $startInfo = [Diagnostics.ProcessStartInfo]::new($hostPath)
+          $startInfo.UseShellExecute=$false; $startInfo.RedirectStandardOutput=$true; $startInfo.RedirectStandardError=$true
+          foreach ($arg in @('-NoProfile','-NonInteractive','-Command',$command)) { $startInfo.ArgumentList.Add($arg) }
+          $native = [Diagnostics.Process]::new(); $native.StartInfo=$startInfo
+          # Read BaseStream: PowerShell native stderr redirection can transcode bad bytes.
+          $stdoutFile=[IO.File]::Open($taskStdout,[IO.FileMode]::CreateNew); $stderrFile=[IO.File]::Open($taskStderr,[IO.FileMode]::CreateNew)
+          $global:LASTEXITCODE = $null
+          $originalExit = $null; $exitKnown = $false; $captureErrors = [Collections.Generic.List[string]]::new()
+          $startedUtc = [DateTimeOffset]::UtcNow; $clock = [Diagnostics.Stopwatch]::StartNew()
+          try {
+            if (-not $native.Start()) { throw 'Original M0 host did not start.' }
+            $stdoutCopy=$native.StandardOutput.BaseStream.CopyToAsync($stdoutFile); $stderrCopy=$native.StandardError.BaseStream.CopyToAsync($stderrFile)
+            $native.WaitForExit(); $originalExit=$native.ExitCode; $exitKnown=$true
+            $stdoutCopy.GetAwaiter().GetResult(); $stderrCopy.GetAwaiter().GetResult()
+          } catch { [Console]::Error.WriteLine($_.Exception.Message); if ($exitKnown) { $captureErrors.Add($_.Exception.Message) } }
+          finally {
+            $clock.Stop(); $finishedUtc = [DateTimeOffset]::UtcNow
+            $stdoutFile.Dispose(); $stderrFile.Dispose(); $native.Dispose()
+            $canCapture = $false
+            try {
+              if (-not(Test-Path -LiteralPath $evidence)) { New-Item -ItemType Directory -Path $evidence | Out-Null }
+              $entry = Get-Item -LiteralPath $evidence -Force
+              if (-not $entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Original M0 evidence root is not a regular owned directory.' }
+              $canCapture = $true
+            } catch { $captureErrors.Add($_.Exception.Message) }
+            if ($canCapture) {
+            try {
+              foreach ($file in @($taskStdout,$taskStderr)) { [IO.File]::Copy($file,(Join-Path $evidence ([IO.Path]::GetFileName($file))),$false) }
+            } catch { $captureErrors.Add($_.Exception.Message) }
+            try {
+              $taskExitPath = Join-Path $evidence 'task-exit.txt'
+              if (Test-Path -LiteralPath $taskExitPath) { throw 'Current task-exit path already exists.' }
+              [IO.File]::WriteAllText($taskExitPath, $(if ($exitKnown) { [string]$originalExit } else { '' }), [Text.UTF8Encoding]::new($false))
+            } catch { $captureErrors.Add($_.Exception.Message) }
+            $artifacts = [Collections.Generic.List[object]]::new()
+            try {
+              # Like the source AST scanner, reject links BEFORE descending into directories.
+              $pending = [Collections.Generic.Stack[string]]::new(); $pending.Push($evidence)
+              while ($pending.Count) {
+                foreach ($file in @(Get-ChildItem -LiteralPath $pending.Pop() -Force)) {
+                  if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse-point artifact is not allowed: $($file.FullName)" }
+                  if ($file.PSIsContainer) { $pending.Push($file.FullName); continue }
+                  $relative = [IO.Path]::GetRelativePath($evidence, $file.FullName) -replace '\\','/'
+                  if ($relative -eq 'task-measurement.json') { continue }
+                  $artifacts.Add([ordered]@{ path=$relative; sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash; length=[long]$file.Length })
+                }
+              }
+              if (@($artifacts | Where-Object path -eq 'task-exit.txt').Count -ne 1) { throw 'Current M0 task-exit evidence was not captured.' }
+            } catch { $captureErrors.Add($_.Exception.Message) }
+            foreach ($stream in @(@($taskStdout, [Console]::Out), @($taskStderr, [Console]::Error))) {
+              try { if (Test-Path -LiteralPath $stream[0] -PathType Leaf) { $stream[1].Write([IO.File]::ReadAllText($stream[0], [Text.UTF8Encoding]::new($false,$true))) } }
+              catch { $captureErrors.Add("Original output replay failed: $($_.Exception.Message)") }
+            }
+            try {
+              $measurement = [ordered]@{ schemaVersion=1; measured=$true; runId="gha-$env:CI_RUN_ID-$env:CI_RUN_ATTEMPT"; runAttempt=[int]$env:CI_RUN_ATTEMPT; codeIdentity=$env:CI_SHA; startedUtc=$startedUtc.ToString('O'); finishedUtc=$finishedUtc.ToString('O'); wallClockMs=$clock.Elapsed.TotalMilliseconds; exitKnown=[bool]$exitKnown; exitCode=if($exitKnown){$originalExit}else{$null}; evidenceDirectory=$evidence; artifacts=@($artifacts); captureErrors=@($captureErrors) }
+              $measurementPath = Join-Path $evidence 'task-measurement.json'
+              if (Test-Path -LiteralPath $measurementPath) { throw 'Current task-measurement path already exists.' }
+              [IO.File]::WriteAllText($measurementPath, ($measurement | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+            } catch { $captureErrors.Add($_.Exception.Message) }
+            }
+          }
+          foreach ($errorText in $captureErrors) { [Console]::Error.WriteLine("M0 evidence capture failed: $errorText") }
+          $protectedExit = if ($exitKnown) { [int]$originalExit } else { 1 }
+          if ($captureErrors.Count -and $protectedExit -eq 0) { $protectedExit = 1 }
+          exit $protectedExit
+      - name: Validate end candidate freshness
+        if: always()
+        shell: pwsh
+        env:
+          CI_TOKEN: ${{ github.token }}
+          CI_EVENT_PATH: ${{ github.event_path }}
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_SHA: ${{ github.sha }}
+          CI_RUN_ID: ${{ github.run_id }}
+          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+          CI_API_URL: ${{ github.api_url }}
+          CI_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          $mode = if ($env:CI_EVENT_NAME -eq 'pull_request') { 'ready-full' } elseif ($env:CI_EVENT_NAME -eq 'push') { 'push-main' } else { 'manual-full' }
+          $input = "$env:RUNNER_TEMP/candidate-end"
+          $params = @{
+            OutputDirectory=$input; RepositoryRoot=$env:GITHUB_WORKSPACE; EventName=$env:CI_EVENT_NAME; Action='event-derived'; Mode=$mode; GithubSha=$env:CI_SHA; RunId=$env:CI_RUN_ID; RunAttempt=[int]$env:CI_RUN_ATTEMPT; WorkflowRef=$env:CI_WORKFLOW_REF; ApiUrl=$env:CI_API_URL; EventJsonPath="$env:RUNNER_TEMP/original-event.json"
+          }
+          if ($env:CI_EVENT_NAME -eq 'pull_request') { $params.PrNumber=$env:CI_PR_NUMBER }
+          & ./scripts/New-CiCandidateInputs.ps1 @params; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./scripts/Test-CiCandidate.ps1 -EventPath "$input/event.json" -MetadataPath "$input/metadata.json" -RepositoryRoot $env:GITHUB_WORKSPACE -ServerSnapshotPath "$input/snapshot.json" -EvidenceDirectory $env:RUNNER_TEMP/candidate-end-proof; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item "$env:RUNNER_TEMP/candidate-end-proof/candidate-identity.json" "$env:RUNNER_TEMP/candidate-proof/candidate-end-identity.json"
+      - name: Generate current-run cost report
+        if: always()
+        shell: pwsh
+        env:
+          CI_RUN_ID: ${{ github.run_id }}
+          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CI_SHA: ${{ github.sha }}
+        run: |
+          $e = Join-Path $env:RUNNER_TEMP 'm0-evidence'; $input = Join-Path $e 'cost-input.json'
+          $measurement = Get-Content -LiteralPath (Join-Path $e 'task-measurement.json') -Raw | ConvertFrom-Json -Depth 20
+          $taskText = [IO.File]::ReadAllText((Join-Path $e 'task-exit.txt'), [Text.UTF8Encoding]::new($false,$true)); if ($taskText.Trim() -notmatch '^-?\d+$') { throw 'Original task exit is not numeric.' }; $taskExit = [int]$taskText.Trim()
+          $PSNativeCommandUseErrorActionPreference = $false
+          & pwsh -NoProfile -File ./scripts/New-CiCostInput.ps1 -EvidenceDirectory $e -RunId "gha-$env:CI_RUN_ID-$env:CI_RUN_ATTEMPT" -CodeIdentity $env:CI_SHA -TaskExitCode $taskExit -TaskWallClockMs $measurement.wallClockMs -OutputPath $input 1> (Join-Path $e 'cost-input.stdout.log') 2> (Join-Path $e 'cost-input.stderr.log')
+          $builderExit = $LASTEXITCODE; if ($builderExit -ne 0) { throw "Cost input generation failed with exit $builderExit." }
+          $report = Join-Path $e 'cost-report.json'
+          & pwsh -NoProfile -File ./scripts/Get-TestCostReport.ps1 -InputPath $input 1> $report 2> (Join-Path $e 'cost-report.stderr.log')
+          $toolExit = $LASTEXITCODE; if ($toolExit -ne 0) { throw "Cost report generation failed with exit $toolExit." }
+          $reportJson = [IO.File]::ReadAllText($report, [Text.UTF8Encoding]::new($false,$true)) | ConvertFrom-Json -NoEnumerate -Depth 100
+          if ($reportJson -isnot [pscustomobject]) { throw 'Cost report output must be one JSON object.' }
+      - name: Validate current-run full proof
+        id: full-proof
+        if: always()
+        shell: pwsh
+        env:
+          CI_RUN_ID: ${{ github.run_id }}
+          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CI_SHA: ${{ github.sha }}
+          CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+          CI_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          $expectedAction = if ($env:CI_EVENT_NAME -eq 'push') { 'main' } elseif ($env:CI_EVENT_NAME -eq 'workflow_dispatch') { 'manual' } else {
+            $original = Get-Content -LiteralPath "$env:RUNNER_TEMP/original-event.json" -Raw | ConvertFrom-Json -NoEnumerate
+            if ($original.action -isnot [string] -or [string]::IsNullOrWhiteSpace($original.action)) { throw 'Original PR action is missing.' }
+            $original.action
+          }
+          $params = @{ EvidenceDirectory="$env:RUNNER_TEMP"; IdentityPath="$env:RUNNER_TEMP/ci-identity.json"; CandidateProofPath="$env:RUNNER_TEMP/candidate-proof/candidate-identity.json"; EndCandidateProofPath="$env:RUNNER_TEMP/candidate-end-proof/candidate-identity.json"; ExpectedRunId=$env:CI_RUN_ID; ExpectedAttempt=[int]$env:CI_RUN_ATTEMPT; ExpectedCandidate=$env:CI_SHA; ExpectedCodeIdentity=$env:CI_SHA; ExpectedWorkflowRef=$env:CI_WORKFLOW_REF; ExpectedEventName=$env:CI_EVENT_NAME; ExpectedAction=$expectedAction }
+          & ./scripts/Test-CiFullProof.ps1 @params > "$env:RUNNER_TEMP/full-proof.json"
+          $json = Get-Content -LiteralPath "$env:RUNNER_TEMP/full-proof.json" -Raw | ConvertFrom-Json -NoEnumerate
+          if ($json -isnot [pscustomobject] -or $json.status -cne 'complete') { throw 'Full proof must return one complete JSON object.' }
+          "status=$($json.status)" >> $env:GITHUB_OUTPUT; "run_id=$($json.runId)" >> $env:GITHUB_OUTPUT; "attempt=$($json.runAttempt)" >> $env:GITHUB_OUTPUT; "candidate=$($json.candidateSha)" >> $env:GITHUB_OUTPUT; "code=$($json.codeIdentity)" >> $env:GITHUB_OUTPUT
       - name: Upload acceptance evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
-          name: m0-windows-evidence
+          name: m0-windows-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 14
           if-no-files-found: warn
           path: |
+            ${{ runner.temp }}/ci-identity.json
+            ${{ runner.temp }}/original-event.json
+            ${{ runner.temp }}/candidate-start/**
+            ${{ runner.temp }}/candidate-end/**
+            ${{ runner.temp }}/full-proof.json
+            ${{ runner.temp }}/candidate-proof/**
+            ${{ runner.temp }}/candidate-end-proof/**
+            ${{ runner.temp }}/offline-evidence/**
+            ${{ runner.temp }}/m0-streams/**
             ${{ runner.temp }}/m0-evidence/acceptance.log
             ${{ runner.temp }}/m0-evidence/PASS.txt
+            ${{ runner.temp }}/m0-evidence/task-exit.txt
             ${{ runner.temp }}/m0-evidence/*.log
             ${{ runner.temp }}/m0-evidence/*.json
             ${{ runner.temp }}/m0-evidence/solution/*.trx
@@ -60,3 +313,37 @@ jobs:
             ${{ runner.temp }}/m0-evidence/NativeReadyException/*.trx
             ${{ runner.temp }}/m0-evidence/godot/*.log
             ${{ runner.temp }}/m0-evidence/godot/*.json
+
+  full-check:
+    if: always()
+    needs: [quick-unit, full-gate]
+    runs-on: windows-2022
+    steps:
+      - name: Fail closed unless the current full gate completed successfully
+        shell: pwsh
+        env:
+          NEEDS_RESULT: ${{ needs.full-gate.result }}
+          QUICK_RESULT: ${{ needs.quick-unit.result }}
+          PROOF_STATUS: ${{ needs.full-gate.outputs.proof_status }}
+          PROOF_RUN_ID: ${{ needs.full-gate.outputs.proof_run_id }}
+          PROOF_ATTEMPT: ${{ needs.full-gate.outputs.proof_attempt }}
+          PROOF_CANDIDATE: ${{ needs.full-gate.outputs.proof_candidate }}
+          PROOF_CODE: ${{ needs.full-gate.outputs.proof_code }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_ATTEMPT: ${{ github.run_attempt }}
+          CURRENT_SHA: ${{ github.sha }}
+          CURRENT_EVENT_NAME: ${{ github.event_name }}
+          CURRENT_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          foreach ($value in @($env:CURRENT_RUN_ID,$env:CURRENT_ATTEMPT,$env:CURRENT_SHA)) {
+            if ([string]::IsNullOrWhiteSpace($value)) { throw 'Current expected context is missing; no acceptance credential.' }
+          }
+          if ($env:CURRENT_EVENT_NAME -ceq 'pull_request') {
+            if ($env:CURRENT_DRAFT -cne 'false') { throw 'Draft or unknown Draft state cannot receive a full acceptance credential.' }
+            if ($env:QUICK_RESULT -cne 'success') { throw "Current quick-unit result is '$env:QUICK_RESULT'; no acceptance credential." }
+          } elseif ($env:CURRENT_EVENT_NAME -cin @('push','workflow_dispatch')) {
+            if ($env:QUICK_RESULT -cnotin @('success','skipped')) { throw "Unexpected quick-unit result: '$env:QUICK_RESULT'." }
+          } else { throw "Unsupported current event: '$env:CURRENT_EVENT_NAME'." }
+          if ($env:NEEDS_RESULT -cne 'success') { throw "Current full-gate result is '$env:NEEDS_RESULT'; no acceptance credential." }
+          if ($env:PROOF_STATUS -cne 'complete' -or $env:PROOF_RUN_ID -cne $env:CURRENT_RUN_ID -or $env:PROOF_ATTEMPT -cne $env:CURRENT_ATTEMPT -or $env:PROOF_CANDIDATE -cne $env:CURRENT_SHA -or $env:PROOF_CODE -cne $env:CURRENT_SHA) { throw 'Full proof is absent or belongs to another run, attempt or candidate.' }
+          Write-Output 'PASS full-check: current quick/full results, proof identity and evidence matched.'

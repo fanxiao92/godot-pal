@@ -373,6 +373,52 @@ try {
             }
         }
     }
+    Case 'expected-failure accepts only exact RunInfo diagnostics from failed rows' {
+        Reset-Fixture
+        $expected = $inputRecord | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable
+        $expected.selections[0].batch = 'expected-runinfo'
+        $record = $command | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable
+        $record.expectedExit = 7; $record.exitCode = 7; $record.arguments[1] = 'tests/Pal.Extract.Tests/negative.csproj'
+        $record.log = 'expected.log'; $record.phase = 'completed'; $record.failureKind = $null
+        $expected.selections[0].log = 'expected.log'; $expected.selections[0].trx = @(@{ path = 'expected.trx'; runId = 'expected-run' })
+        $failedXml = $valid.Replace('run-a', 'expected-run').Replace('e-a', 'expected-e-a').Replace('e-b', 'expected-e-b').Replace('testId="a"', 'testId="expected-a"').Replace('testId="b"', 'testId="expected-b"').Replace('id="a"', 'id="expected-a"').Replace('id="b"', 'id="expected-b"').Replace('outcome="Passed" duration="00:00:03"', 'outcome="Failed" duration="00:00:03"').Replace('outcome="Completed"', 'outcome="Failed"').Replace('passed="2" failed="0"', 'passed="1" failed="1"')
+        $failedXml = $failedXml.Replace('outcome="Failed" duration="00:00:03"/>', 'outcome="Failed" duration="00:00:03"><Output><ErrorInfo><Message>exact diagnostic</Message></ErrorInfo></Output></UnitTestResult>').Replace('</ResultSummary>', '<RunInfos><RunInfo outcome="Error"><Text>exact diagnostic</Text></RunInfo></RunInfos></ResultSummary>')
+        Write-Json 'commands.json' @($record); Write-Json 'expected.json' $expected
+        [IO.File]::WriteAllText((Join-Path $fixture 'expected.log'), 'expected', [Text.UTF8Encoding]::new($false)); [IO.File]::WriteAllText((Join-Path $fixture 'expected.trx'), $failedXml, [Text.UTF8Encoding]::new($false))
+        $run = Invoke-Report 'expected.json'
+        Assert ($run.exit -eq 0 -and $run.report.commands[0].status -eq 'expected-failure' -and $run.report.taskResult.status -eq 'completed-with-expected-failures') 'Exact expected failure diagnostic was rejected.'
+        foreach ($bad in @('different diagnostic', '')) {
+            $badXml = $failedXml.Replace('<Text>exact diagnostic</Text>', "<Text>$bad</Text>")
+            [IO.File]::WriteAllText((Join-Path $fixture 'expected.trx'), $badXml, [Text.UTF8Encoding]::new($false))
+            $run = Invoke-Report 'expected.json'
+            Assert ($run.report.commands[0].status -eq 'incomplete' -and $run.report.taskResult.status -eq 'incomplete') "Invalid RunInfo diagnostic accepted: [$bad]."
+        }
+        $mutations = [ordered]@{
+            caseMismatch = $failedXml.Replace('<Text>exact diagnostic</Text>', '<Text>EXACT DIAGNOSTIC</Text>')
+            missingMessage = $failedXml.Replace('<Message>exact diagnostic</Message>', '<StackTrace>exact diagnostic</StackTrace>')
+            aggregateOnly = $failedXml.Replace('</Message>', '</Message><StackTrace>extra</StackTrace>').Replace('<Text>exact diagnostic</Text>', '<Text>exact diagnosticextra</Text>')
+            crashEvenWhenMatched = $failedXml.Replace('exact diagnostic', 'test host process crashed')
+            aborted = $failedXml.Replace('RunInfo outcome="Error"', 'RunInfo outcome="Aborted"')
+            timedOut = $failedXml.Replace('RunInfo outcome="Error"', 'RunInfo outcome="Timeout"')
+        }
+        foreach ($name in $mutations.Keys) {
+            [IO.File]::WriteAllText((Join-Path $fixture 'expected.trx'), $mutations[$name], [Text.UTF8Encoding]::new($false))
+            $run = Invoke-Report 'expected.json'
+            Assert ($run.exit -eq 0 -and $run.report.commands[0].status -eq 'incomplete' -and $run.report.taskResult.status -eq 'incomplete') "Invalid expected-failure session accepted: $name."
+        }
+        [IO.File]::WriteAllText((Join-Path $fixture 'expected.trx'), $failedXml, [Text.UTF8Encoding]::new($false))
+        $record.stdoutComplete = $false; Write-Json 'commands.json' @($record)
+        $run = Invoke-Report 'expected.json'
+        Assert ($run.report.taskResult.status -eq 'incomplete') 'A matching diagnostic hid incomplete original output.'
+        $record.stdoutComplete = $true; $record.expectedExit = 0; Write-Json 'commands.json' @($record)
+        $run = Invoke-Report 'expected.json'
+        Assert ($run.report.commands[0].status -eq 'failed' -and $run.report.taskResult.status -eq 'failed') 'A matching diagnostic hid an unexpected original exit.'
+        $record.exitCode = 0; Write-Json 'commands.json' @($record)
+        $warningXml = $valid.Replace('run-a', 'expected-run').Replace('</ResultSummary>', '<RunInfos><RunInfo outcome="Warning"><Text>Ordinary nonfatal report warning</Text></RunInfo></RunInfos></ResultSummary>')
+        [IO.File]::WriteAllText((Join-Path $fixture 'expected.trx'), $warningXml, [Text.UTF8Encoding]::new($false))
+        $run = Invoke-Report 'expected.json'
+        Assert ($run.exit -eq 0 -and $run.report.commands[0].status -eq 'success' -and $run.report.taskResult.status -eq 'success') 'Expected-failure classification rejected an ordinary nonfatal warning.'
+    }
     Case 'missing streams or result mappings and contradictory command completion cannot produce success' {
         Reset-Fixture
         $capture = $command | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable

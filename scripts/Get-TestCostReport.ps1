@@ -197,9 +197,19 @@ try {
                     [long]$counters.executed -le 0 -or [long]$counters.executed -ne ($passed + $failed) -or $rows.Count -ne ($passed + $failed + $skipped) -or
                     [long]$counters.notExecuted -notin @(0, $skipped)) { $trxIssues.Add('TRX result/counter mismatch or zero execution.') }
                 $runInfos = @($summary.SelectNodes('t:RunInfos/t:RunInfo', $ns))
-                if ($summary.outcome -notin @('Completed', 'Failed') -or @($runInfos | Where-Object {
-                    $_.GetAttribute('outcome') -in @('Error', 'Aborted', 'Timeout') -or $_.InnerText -match '(?i)Aborting test run|Test Run Aborted|test run timeout|crashed|Unhandled exception|WindowsStdOutHook'
-                }).Count) { $trxIssues.Add('TRX session not completed cleanly (Summary/RunInfo).') }
+                $failedRows = @($rows | Where-Object { $_.GetAttribute('outcome') -ceq 'Failed' })
+                $expectedFailureDiagnostics = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+                foreach ($failedRow in $failedRows) {
+                    $message = $failedRow.SelectSingleNode('t:Output/t:ErrorInfo/t:Message', $ns)
+                    if ($message -and -not [string]::IsNullOrWhiteSpace($message.InnerText)) { [void]$expectedFailureDiagnostics.Add($message.InnerText.Trim()) }
+                }
+                $unexpectedRunInfo = $false
+                foreach ($runInfo in $runInfos) {
+                    $texts = @($runInfo.SelectNodes('t:Text', $ns) | ForEach-Object { $_.InnerText.Trim() })
+                    $knownExpectedFailure = $status -ceq 'expected-failure' -and $summary.outcome -ceq 'Failed' -and $failedRows.Count -gt 0 -and $runInfo.GetAttribute('outcome') -ceq 'Error' -and $texts.Count -eq 1 -and $expectedFailureDiagnostics.Contains($texts[0])
+                    if ($runInfo.InnerText -match '(?i)Aborting test run|Test Run Aborted|test run timeout|crashed|Unhandled exception|WindowsStdOutHook' -or $runInfo.GetAttribute('outcome') -in @('Aborted', 'Timeout') -or ($runInfo.GetAttribute('outcome') -ieq 'Error' -and -not $knownExpectedFailure)) { $unexpectedRunInfo = $true }
+                }
+                if ($summary.outcome -notin @('Completed', 'Failed') -or $unexpectedRunInfo) { $trxIssues.Add('TRX session not completed cleanly (Summary/RunInfo).') }
                 $durationSum = 0.0; $allDurationsKnown = $true
                 foreach ($row in $rows) {
                     $duration = Get-CostDuration $row.GetAttribute('duration')
