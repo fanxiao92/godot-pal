@@ -22,6 +22,8 @@ PR 触发包含 `opened`、`synchronize`、`reopened`、`ready_for_review`、`co
 
 ## 候选身份链
 
+工作流的两个 checkout 均使用固定 checkout action 的 `fetch-depth: 2`，保留当前提交及其直接父层；候选身份校验因此可读取 merge candidate 的有序两个 parent，同时继续关闭凭据持久化和 LFS。该边界是有限直接父历史，不是全历史下载。
+
 1. 原始 `GITHUB_EVENT_PATH` 通过 env 传入并复制为 `original-event.json`，不把 branch、workflow ref 等数据插进 PowerShell 源码引号。
 2. `New-CiCandidateInputs.ps1` 接收显式 repo/run/attempt/workflow/env 上下文，生成 event、metadata、snapshot。PR 使用只读 API GET 核对实际 head/base/merge candidate 和 Draft；非 PR 使用实际 checkout。`workflow_dispatch.inputs` 必须存在，允许对象或 `null`，不把合法 null 误判为不支持。
 3. `Test-CiCandidate.ps1` 在本地 Git 对照实际 checkout、tree、完整有序 parents；PR 候选须是 base/head 两个正确有序 parent 的 merge candidate，不能以 head 自测替代。metadata／snapshot／event 根须为对象，单元素数组也不能自动展开冒充对象。run、attempt、workflow、event、action、mode、Draft 与快照一致，失败不写成功身份，输出不覆盖已有身份文件。

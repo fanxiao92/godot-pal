@@ -41,6 +41,7 @@ function Read-ActualBlock([string]$Name) {
     return $text
 }
 $blocks = @{
+    quick = Read-ActualBlock 'Record and validate candidate identity'
     start = Read-ActualBlock 'Record and validate start candidate identity'
     end = Read-ActualBlock 'Validate end candidate freshness'
     m0 = Read-ActualBlock 'Run shared M0, M2 and M3 acceptance checks'
@@ -281,6 +282,93 @@ foreach($g in $guardCases) {
         if($g.pass){Assert-That ($r.Exit -eq 0) "Valid final guard failed: $($r.Err)"}
         else{Assert-That ($r.Exit -ne 0 -and $r.Err.Contains($g.reason)) "Final guard should reject $($g.name) for '$($g.reason)', got $($r.Exit): $($r.Err)"}
     }
+}
+# Fixed-style checkout extraction, like Read-ActualBlock; not a YAML evaluator.
+function Read-ActualCheckoutDepth([string]$Job) {
+    $starts = @(for ($i=0; $i -lt $lines.Length; $i++) { if ($lines[$i] -ceq "  ${Job}:") { $i } })
+    Assert-That ($starts.Count -eq 1) "Expected one actual job: $Job"
+    $end=$lines.Length
+    for ($i=$starts[0]+1; $i -lt $lines.Length; $i++) { if ($lines[$i] -match '^  \S') { $end=$i; break } }
+    $body=$lines[$starts[0]..($end-1)] -join "`n"
+    $checkouts=[regex]::Matches($body,'(?ms)^        uses: actions/checkout@(?<sha>[0-9a-f]{40})[^\n]*\n        with:\n(?<with>(?:          [^\n]*\n)+)')
+    Assert-That ($checkouts.Count -eq 1) "Expected one fixed-style checkout in $Job"
+    Assert-That ($checkouts[0].Groups['sha'].Value -ceq '3d3c42e5aac5ba805825da76410c181273ba90b1') 'Checkout action changed; recheck its default-depth contract.'
+    $with=$checkouts[0].Groups['with'].Value
+    foreach ($policy in @('persist-credentials','lfs')) {
+        Assert-That ([regex]::Matches($with,"(?m)^          ${policy}:").Count -eq 1 -and $with -cmatch "(?m)^          ${policy}: false`$") "Checkout $policy policy changed in $Job"
+    }
+    $declared=[regex]::Matches($with,'(?m)^          fetch-depth:')
+    $depth=[regex]::Matches($with,'(?m)^          fetch-depth: ([0-9]+)$')
+    Assert-That ($declared.Count -le 1 -and $declared.Count -eq $depth.Count) "Unsupported checkout depth syntax in $Job"
+    # The pinned action.yml defaults to 1. Exercise that actual bug, not an early grep rejection.
+    if (-not $depth.Count) { return 1 }
+    return [int]$depth[0].Groups[1].Value
+}
+function Invoke-OwnedGit($Case, [string]$Repository, [string[]]$Arguments) {
+    $Case.gitCount=[int]$Case.gitCount+1
+    $prefix=Join-Path $Case.env.RUNNER_TEMP ('owned-git-'+$Case.gitCount)
+    $git=(Get-Command git -CommandType Application | Select-Object -First 1).Source
+    & $git -C $Repository @Arguments 1> "$prefix.stdout" 2> "$prefix.stderr"
+    $exit=$LASTEXITCODE
+    Write-Json "$prefix.command.json" @{argv=@($git,'-C',$Repository)+$Arguments;exit=$exit}
+    Assert-That ($exit -eq 0) "Owned fixture Git failed: $($Arguments -join ' '); see $prefix.stderr"
+    return [IO.File]::ReadAllText("$prefix.stdout",$utf8).Trim()
+}
+function New-ShallowCandidateCase([string]$Name, [int]$Depth, [bool]$Draft) {
+    $case=New-Case $Name 'success' $false; $case.gitCount=0; $seed=$case.dir
+    foreach ($argv in @(@('init','--initial-branch=base'),@('config','user.name','Fixture'),@('config','user.email','fixture@example.invalid'),@('add','scripts'),@('commit','-m','Owned base'),@('checkout','-b','feature'))) { $null=Invoke-OwnedGit $case $seed $argv }
+    Write-Utf8 (Join-Path $seed 'head.txt') 'owned head'
+    foreach ($argv in @(@('add','head.txt'),@('commit','-m','Owned head'))) { $null=Invoke-OwnedGit $case $seed $argv }
+    $head=Invoke-OwnedGit $case $seed @('rev-parse','HEAD')
+    $null=Invoke-OwnedGit $case $seed @('checkout','base'); Write-Utf8 (Join-Path $seed 'base.txt') 'owned base update'
+    foreach ($argv in @(@('add','base.txt'),@('commit','-m','Owned base update'))) { $null=Invoke-OwnedGit $case $seed $argv }
+    $parent=Invoke-OwnedGit $case $seed @('rev-parse','HEAD')
+    $null=Invoke-OwnedGit $case $seed @('merge','--no-ff',$head,'-m','Owned merge')
+    $merge=Invoke-OwnedGit $case $seed @('rev-parse','HEAD'); $tree=Invoke-OwnedGit $case $seed @('show','-s','--format=%T','HEAD')
+    $sourceParents=@((Invoke-OwnedGit $case $seed @('show','-s','--format=%P','HEAD')) -split '\s+' | Where-Object { $_ })
+    Assert-That ($sourceParents.Count -eq 2 -and $sourceParents[0] -ceq $parent -and $sourceParents[1] -ceq $head) 'Owned source must be a real ordered base/head merge before testing shallow checkout.'
+    $clone=Join-Path $seed 'checkout'; $uri=([uri]($seed+[IO.Path]::DirectorySeparatorChar)).AbsoluteUri
+    $null=Invoke-OwnedGit $case $seed @('clone','--no-local','--depth',([string]$Depth),'--branch','base',$uri,$clone)
+    Assert-That ((Invoke-OwnedGit $case $clone @('rev-parse','HEAD')) -ceq $merge) 'Shallow clone changed the candidate.'
+    Assert-That ((Invoke-OwnedGit $case $clone @('rev-parse','--is-shallow-repository')) -ceq 'true') 'Fixture must stay shallow, not silently fetch all history.'
+    Write-Json (Join-Path $seed 'expected-history.json') @{checkout=$merge;tree=$tree;base=$parent;head=$head;parents=@($parent,$head);depth=$Depth}
+    $event=Join-Path $seed 'fixture-event.json'; Write-Json $event @{action='synchronize';pull_request=@{number=39;draft=$Draft;head=@{sha=$head};base=@{sha=$parent};merge_commit_sha=$merge}}
+    $case.dir=$clone; $case.env.GITHUB_WORKSPACE=$clone; $case.env.CI_EVENT_PATH=$event
+    $case.env.CI_SHA=$merge; $case.env.CI_EVENT_NAME='pull_request'; $case.env.CI_PR_NUMBER='39'
+    $case.env.CI_WORKFLOW_REF='fixture/repo/.github/workflows/ci.yml@refs/pull/39/merge'
+    $case.env.GITHUB_REPOSITORY='fixture/repo'; $case.env.CI_API_URL='https://fixture.invalid'; $case.env.CI_TOKEN='explicit-nonsecret-fixture'
+    $case.env.FIXTURE_HEAD=$head; $case.env.FIXTURE_BASE=$parent; $case.env.FIXTURE_DRAFT=$Draft.ToString()
+    return @{case=$case;checkout=$merge;tree=$tree;parents=@($parent,$head)}
+}
+$ownedApi=@'
+function Invoke-RestMethod {
+    param($Method,$Uri,$Headers)
+    if ($Method -cne 'Get' -or $Uri -cne 'https://fixture.invalid/repos/fixture/repo/pulls/39' -or $Headers.Authorization -cne 'Bearer explicit-nonsecret-fixture') { throw 'Only the owned API fixture may be called.' }
+    return [pscustomobject]@{head=[pscustomobject]@{sha=$env:FIXTURE_HEAD};base=[pscustomobject]@{sha=$env:FIXTURE_BASE};merge_commit_sha=$env:CI_SHA;draft=[bool]::Parse($env:FIXTURE_DRAFT)}
+}
+'@
+Assert-Parse $ownedApi
+foreach ($job in @('quick-unit','full-gate')) {
+    Check-Case "actual-$job-shallow-candidate-chain" {
+        $depth=Read-ActualCheckoutDepth $job
+        $fixture=New-ShallowCandidateCase "shallow-$job" $depth ($job -ceq 'quick-unit')
+        $block=if ($job -ceq 'quick-unit') { 'quick' } else { 'start' }
+        $result=Invoke-Block $fixture.case $block $ownedApi
+        Assert-That ($result.Exit -eq 0) "Actual $job candidate failed at configured depth ${depth}: $($result.Err)"
+        $proof=if ($job -ceq 'quick-unit') { 'quick-candidate-proof' } else { 'candidate-proof' }
+        $identity=Get-Content (Join-Path $fixture.case.env.RUNNER_TEMP "$proof/candidate-identity.json") -Raw | ConvertFrom-Json -NoEnumerate
+        Assert-That ($identity.parents -is [array] -and $identity.parents.Count -eq 2 -and $identity.parents[0] -ceq $fixture.parents[0] -and $identity.parents[1] -ceq $fixture.parents[1]) 'Actual public producer/consumer did not retain the ordered base/head parents.'
+        Assert-That ($identity.actualCheckout -ceq $fixture.checkout -and $identity.candidateSha -ceq $fixture.checkout -and $identity.tree -ceq $fixture.tree) 'Actual public identity changed checkout/candidate/tree.'
+        Assert-That ($depth -eq 2) 'Checkout must fetch only the required direct parent layer.'
+    }
+}
+Check-Case 'depth-one-candidate-rejects-for-ordered-parent-loss' {
+    $fixture=New-ShallowCandidateCase 'shallow-negative-depth-one' 1 $true
+    $result=Invoke-Block $fixture.case 'quick' $ownedApi
+    Assert-That ($result.Exit -ne 0 -and $result.Err.Contains('[candidate:2] PR checkout/head/base/merge candidate identity does not match ordered git history.')) 'Depth-one control did not fail for the actual remote parent-loss reason.'
+    $snapshot=Get-Content (Join-Path $fixture.case.env.RUNNER_TEMP 'quick-candidate-input/snapshot.json') -Raw | ConvertFrom-Json -NoEnumerate
+    Assert-That ($snapshot.parents -is [array] -and $snapshot.parents.Count -eq 0 -and $snapshot.actualCheckout -ceq $fixture.checkout) 'Depth-one control did not preserve the original empty-parent snapshot.'
+    Assert-That (-not(Test-Path -LiteralPath (Join-Path $fixture.case.env.RUNNER_TEMP 'quick-candidate-proof/candidate-identity.json'))) 'Rejected shallow checkout emitted a success identity.'
 }
 Write-Json (Join-Path $base 'summary.json') @{synthetic=$true;results=@($results);count=$results.Count;failed=$failures.Count;noSdkOrEngine=$true}
 if ($failures.Count) { throw "Actual workflow regression failed ($($failures.Count)):`n$($failures -join "`n")`nEvidence: $base" }
