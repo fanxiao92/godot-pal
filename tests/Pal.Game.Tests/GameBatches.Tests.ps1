@@ -61,13 +61,28 @@ public class Fixture
     }
     Case 'real source partitions 66/79/97, preserves controls and solution test projects' {
         Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '66,79,97') 'Wrong batch sizes/order.'
-        Assert ($plan.inventory.Count -eq 245 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 4) 'Incomplete source inventory.'
+        Assert ($plan.inventory.Count -eq 245 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+        Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Wrong serial project identities/order.'
+        Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj',
+            'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
+            'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
+        $expectedProjects = @{
+            core = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 328, 0)
+            'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
+            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 188, 2)
+            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 52, 0)
+            game = @('src/Pal.Game/Pal.Game.csproj', 242, 0)
+        }
+        foreach ($project in $plan.projects) {
+            $expectedProject = $expectedProjects[$project.name]
+            Assert ($project.path -ceq $expectedProject[0] -and $project.passed -eq $expectedProject[1] -and $project.skipped -eq $expectedProject[2]) "Wrong binding for $($project.name)."
+        }
         Assert ($plan.batches[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.MainProcessTests.|FullyQualifiedName~Pal.Game.Tests.ExplorationProcessTests.') 'Filter boundary lost.'
         Assert-ExactTestNames @($plan.batches.expected) @($plan.inventory | Where-Object class -NE 'FailureControlTests' | ForEach-Object name) 'all source positives'
     }
     Case 'unassigned source classes and new solution projects fail closed' {
         $fixtureRepo = Join-Path $temp 'repository'
-        foreach ($relative in @($plan.projects + @('src/Pal.Core/Pal.Core.csproj', 'tools/Pal.Extract/Pal.Extract.csproj', 'GodotPal.sln') + @($plan.inventory.source | Select-Object -Unique | ForEach-Object { "src/Pal.Game/Tests/$_" }))) {
+        foreach ($relative in @($plan.projects.path + @('src/Pal.Core/Pal.Core.csproj', 'tools/Pal.Extract/Pal.Extract.csproj', 'GodotPal.sln') + @($plan.inventory.source | Select-Object -Unique | ForEach-Object { "src/Pal.Game/Tests/$_" }))) {
             $destination = Join-Path $fixtureRepo $relative
             New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($destination)) | Out-Null
             [IO.File]::Copy((Join-Path $repository $relative), $destination)
@@ -77,9 +92,27 @@ public class Fixture
         Fails { Get-GameBatchPlan $fixtureRepo } 'Game partition: identity set mismatch'
         Remove-Item -LiteralPath $extra
         $solution = Join-Path $fixtureRepo 'GodotPal.sln'
+        $originalSolution = [IO.File]::ReadAllText($solution)
+        foreach ($project in $plan.projects) {
+            $windowsPath = $project.path.Replace('/', '\')
+            # Game alone has a dependency section; removing its path still tests omission.
+            $omitted = $originalSolution.Replace('"' + $windowsPath + '"', '"omitted-project"')
+            [IO.File]::WriteAllText($solution, $omitted)
+            Fails { Get-GameBatchPlan $fixtureRepo } 'Solution project classification: identity set mismatch'
+            [IO.File]::WriteAllText($solution, $originalSolution + "`nProject(`"ignored`") = `"duplicate`", `"$windowsPath`", `"ignored`"`nEndProject`n")
+            Fails { Get-GameBatchPlan $fixtureRepo } 'Solution project classification: empty or duplicate identity'
+        }
         [IO.File]::WriteAllText((Join-Path $fixtureRepo 'Extra.csproj'), '<Project><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup></Project>')
-        [IO.File]::AppendAllText($solution, '`nProject("ignored") = "Extra", "Extra.csproj", "ignored"')
+        [IO.File]::WriteAllText($solution, $originalSolution + "`nProject(`"ignored`") = `"Extra`", `"Extra.csproj`", `"ignored`"`nEndProject`n")
         Fails { Get-GameBatchPlan $fixtureRepo } 'Solution project classification: identity set mismatch'
+        # Same project count is not sufficient: replace a known identity with an unknown one.
+        [IO.File]::WriteAllText($solution, $originalSolution.Replace('tests\Pal.Extract.UnitTests\Pal.Extract.UnitTests.csproj', 'Extra.csproj'))
+        Fails { Get-GameBatchPlan $fixtureRepo } 'Solution project classification: identity set mismatch'
+        [IO.File]::WriteAllText($solution, $originalSolution)
+        $unitProject = Join-Path $fixtureRepo 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'
+        $unitXml = [IO.File]::ReadAllText($unitProject)
+        [IO.File]::WriteAllText($unitProject, $unitXml.Replace('<IsTestProject>true</IsTestProject>', '<IsTestProject>false</IsTestProject>'))
+        Fails { Get-GameBatchPlan $fixtureRepo } 'Solution test projects: identity set mismatch'
     }
     Case 'discovery exact names, rejects omission/extra/duplicate despite same counts' {
         $smallPlan = @{ inventory = @(@{ display = 'Alpha' }, @{ display = 'Beta' }) }

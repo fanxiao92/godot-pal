@@ -84,8 +84,13 @@ function Get-GameBatchPlan([string]$Repository) {
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object class -CNE 'FailureControlTests' | ForEach-Object name) 'Game partition'
     if ($inventory.Count -ne 245) { throw "Game inventory differs: $($inventory.Count)/245." }
     # Explicit serial project execution replaces solution test, not solution restore/build.
-    $projects = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 'tests/Pal.Extract.Tests/Pal.Extract.Tests.csproj',
-        'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj')
+    $projects = @(
+        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj'; passed = 328; skipped = 0 }
+        [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 142; skipped = 0 }
+        [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 188; skipped = 2 }
+        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 52; skipped = 0 }
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = 242; skipped = 0 }
+    )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {
         $relative = $match.Groups[1].Value.Replace('\', '/')
@@ -93,8 +98,8 @@ function Get-GameBatchPlan([string]$Repository) {
         [xml]$project = [IO.File]::ReadAllText((Join-Path $Repository $relative))
         if (@($project.Project.PropertyGroup.IsTestProject | Where-Object { $_ -eq 'true' }).Count) { $relative }
     }
-    Assert-ExactTestNames @($allProjects) @($projects + @('src/Pal.Core/Pal.Core.csproj', 'tools/Pal.Extract/Pal.Extract.csproj')) 'Solution project classification'
-    Assert-ExactTestNames @($solutionProjects) $projects 'Solution test projects'
+    Assert-ExactTestNames @($allProjects) @($projects.path + @('src/Pal.Core/Pal.Core.csproj', 'tools/Pal.Extract/Pal.Extract.csproj')) 'Solution project classification'
+    Assert-ExactTestNames @($solutionProjects) @($projects.path) 'Solution test projects'
     [pscustomobject]@{ inventory = $inventory; batches = @($batches); controls = $controls; projects = $projects }
 }
 
