@@ -23,7 +23,7 @@
 
 ## 待定问题
 
-- **Q1 其余表现层 / 外壳层能力**：M2 的逻辑步进、键盘输入、缩放与原生资源接入已实现并通过其历史 Windows 分层验收；M2 失焦暂停在 #21 中按参考撤销。历史验收与当前行为区分见 [M2 计划](../milestones/m2/plan.md)、[M2 验收记录](../milestones/m2/acceptance.md)及[Game 测试说明](../../src/Pal.Game/Tests/README.md#desktop-focus-and-exploration-behavior)。#11/#17/#19 已关闭；转场、音视频及其他后续能力仍按对应阶段设计。
+- **Q1 其余表现层 / 外壳层能力**：M2 的逻辑步进、键盘输入、缩放与原生资源接入已实现并通过其历史 Windows 分层验收；M2 失焦暂停在 #21 中按参考撤销。历史验收与当前行为区分见 [M2 计划](../milestones/m2/plan.md)、[M2 验收记录](../milestones/m2/acceptance.md)及[Game 历史运行记录](../archive/m3/game-test-run-history.md#desktop-focus-and-exploration-behavior)。#11/#17/#19 已关闭；转场、音视频及其他后续能力仍按对应阶段设计。
 - **Q2 events.json 契约与实现进度**:忠实转写策略、v1 封套、引用和基础命令已定义,见 [事件契约](events-schema.md)。完整 faithful 导出/重建及有限 trigger 执行已本地实现；具名映射与 raw 保存不等于全量执行。当前契约见 [trigger 执行](trigger-execution.md)，手写新内容的结构化 profile 及完整指令集仍不在当前切片。
 - **Q3 数据来源与其余资源仍待验证**:当前输入在 `data/raw/sdlpal/`,外层归档与对象表符合 Windows 数据分支,但含 SDLPal 翻译内容,未证明与未修改的 98 柔情版完全一致。Windows 静态场景切片的 YJ2/图像/原始记录提取已本地验证，完整包见 [M1 计划](../milestones/m1/plan.md)；M3 已有目标文字/字形的分层本地证据，但不证明未修改发行盘一致性，见 [M3 检查点](../milestones/m3/acceptance.md)。
 - **Q4 符号表方案已确定,待实现**:数字 ID 为真值,游戏可核对名称与可选 `symbols.json` 生成 `_` 注释字段。具体规则见 [事件契约](events-schema.md#7-可读名字),不另建一套剧情标志来替代对象状态和可变入口。
