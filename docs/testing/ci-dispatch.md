@@ -54,7 +54,7 @@ M0 返回后先尽力写 `task-exit.txt`，随即记录原产物的 M0 根相对
 
 ## 成功／失败上传
 
-artifact 名称同时带 run ID 和 attempt，手动重跑不覆盖或混用上一 attempt 的包。always 尽力上传原事件、候选生产输入和 start/end proof、原身份、Offline 证据、task exit/measurement、M0 logs/两流/TRX、成本 index/report/错误日志及完整 proof。报告／上传失败单列工程失败，不能改写原测试退出和日志；缺报告/产物不生成 PASS。步骤还没产生文件时允许上传器明确警告，不将缺失当完整。
+artifact 名称同时带 run ID 和 attempt，手动重跑不覆盖或混用上一 attempt 的包。always 尽力上传原事件、候选生产输入和 start/end proof、原身份、Offline 证据、task exit/measurement、M0 logs/两流/TRX、成本 index/report/错误日志及完整 proof；full-gate 的 acceptance evidence 还上传 `m0-evidence/boundary-tests/**`，保留各 boundary 测试的原始日志、双流、命令、结果和监督记录。该显式子树不包含 `packages` 或 `http-cache`，也不扩大为整个 M0 根目录。报告／上传失败单列工程失败，不能改写原测试退出和日志；缺报告/产物不生成 PASS。步骤还没产生文件时允许上传器明确警告，不将缺失当完整。
 
 只上传任务自有工程证据；不上传 token、真实游戏资源、reference 私有输入或全机观察数据。日志和快照不构成被加载字节的绝对认证。
 

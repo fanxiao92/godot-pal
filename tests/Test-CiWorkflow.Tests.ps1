@@ -242,6 +242,21 @@ Check-Case 'actual-manual-candidate-to-final-proof-chain' {
     Assert-That ($id.action -ceq 'manual' -and $id.candidate -ceq $sha) 'Actual producer action/candidate was not preserved in CI identity.'
     Assert-That ([IO.File]::ReadAllText($case.env.GITHUB_OUTPUT).Contains('status=complete')) 'Actual candidate-to-FullProof chain published no complete output.'
 }
+Check-Case 'full-gate-upload-includes-boundary-evidence' {
+    $starts=@(for($i=0;$i -lt $lines.Length;$i++){if($lines[$i] -ceq '  full-gate:'){$i}}); Assert-That ($starts.Count -eq 1) 'Expected exactly one full-gate job.'
+    $end=$lines.Length; for($i=$starts[0]+1;$i -lt $lines.Length;$i++){if($lines[$i] -match '^  \S'){$end=$i;break}}
+    $stepStarts=@(for($i=0;$i -lt $lines.Length;$i++){if($lines[$i] -ceq '      - name: Upload acceptance evidence'){$i}})
+    $stepStarts=@($stepStarts | Where-Object {$_ -ge $starts[0] -and $_ -lt $end})
+    Assert-That ($stepStarts.Count -eq 1) 'Expected exactly one full-gate Upload acceptance evidence step.'
+    $stepEnd=$end; for($i=$stepStarts[0]+1;$i -lt $end;$i++){if($lines[$i] -match '^      - name:'){$stepEnd=$i;break}}
+    $pathStarts=@(for($i=$stepStarts[0]+1;$i -lt $stepEnd;$i++){if($lines[$i] -ceq '          path: |'){$i}})
+    Assert-That ($pathStarts.Count -eq 1) 'Expected exactly one acceptance upload path block.'
+    $pathEnd=$stepEnd; for($i=$pathStarts[0]+1;$i -lt $stepEnd;$i++){if($lines[$i] -match '^ {0,10}\S'){$pathEnd=$i;break}}
+    $paths=@($lines[($pathStarts[0]+1)..($pathEnd-1)] | ForEach-Object { $_.Trim() })
+    Assert-That ($paths -ccontains '${{ runner.temp }}/m0-evidence/boundary-tests/**') 'Full-gate upload must include the boundary-tests evidence subtree.'
+    Assert-That (@($paths | Where-Object { $_ -match '^\$\{\{ runner\.temp \}\}/m0-evidence/(?:packages|http-cache)(?:/|\*|$)' }).Count -eq 0) 'Boundary upload must not include package or HTTP cache paths.'
+    Assert-That (@($paths | Where-Object { $_ -match '^\$\{\{ runner\.temp \}\}/m0-evidence/?(?:\*+(?:/\*+)*)?$' }).Count -eq 0) 'Acceptance upload must not expand to the entire M0 root.'
+}
 Check-Case 'final-needs-and-evidence-upload-contract' {
     $tail=($lines[[Array]::IndexOf($lines,'  full-check:')..($lines.Length-1)]) -join "`n"
     Assert-That ($tail -match '(?m)^    needs: \[quick-unit, full-gate\]$' -and $tail -match '(?m)^    if: always\(\)$') 'Final check must always consume quick-unit AND full-gate.'

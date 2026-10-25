@@ -303,6 +303,7 @@ jobs:
             ${{ runner.temp }}/offline-evidence/**
             ${{ runner.temp }}/m0-streams/**
             ${{ runner.temp }}/m0-evidence/acceptance.log
+            ${{ runner.temp }}/m0-evidence/boundary-tests/**
             ${{ runner.temp }}/m0-evidence/PASS.txt
             ${{ runner.temp }}/m0-evidence/task-exit.txt
             ${{ runner.temp }}/m0-evidence/*.log
