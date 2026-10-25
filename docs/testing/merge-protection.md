@@ -7,7 +7,7 @@
 配置对象为 `main` 的 classic branch protection，已应用配置的公开回填见 [Issue #38 配置检查点](https://github.com/fanxiao92/godot-pal/issues/38#issuecomment-6399533676)。以下是已回读配置摘要，不替代每次操作前的实时 GET：
 
 - required status check：`full-check`（来源为 Actions App `15368`）；strict=true，要求分支与 base 最新提交同步；checks-only 接口实际生效。
-- enforce_admins=true；普通维护者、管理员和其他适用主体均受该检查要求约束。
+- enforce_admins=true 是已回读配置字段，不是所有主体均已受验证的证明。实际主体、管理员/例外边界及普通拒绝/允许结果，以 Issue #38 已完成的受控证据为准；未测项保持待验。
 - force push 与删除分支均关闭（false）。未增加 review、签名、线性历史、权限或 ruleset 要求。
 - 保护对象是 `main`，不是所有分支；适用主体和 GitHub 权限仍以服务端实时回读为准。
 
