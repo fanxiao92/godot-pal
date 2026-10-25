@@ -35,7 +35,7 @@
 
 ### M3 · 事件与对话垂直切片
 
-状态：**独立切片已实现，完成本地、GPU及用户Windows人工分层验证（2026-10-23）**。原dab79ad8双轴/完整门、5bf481f匹配双语GPU各10零差/2calls及用户两语言/物理输入/Alt-Tab/缩放关闭反馈按各自原身份保留；统一main52afa6c与M3后，三项P2、串行拆批及夹具ACK修复已完成，ACK和日志读取夹具修复后，最新完整本地门573.830秒/exit0、15TRX、Game三轮各242。用户授权持续交付，精确候选CI、main发布和Issue关闭分别以[#26](https://github.com/fanxiao92/godot-pal/issues/26)及[#20](https://github.com/fanxiao92/godot-pal/issues/20)最终回填为准，不以本地PASS签远端。Observer停用，历史P1/verifier not-satisfied及所有失败原件不改判。范围见[M3计划](../milestones/m3/plan.md)，证据及限制见[分层检查点](../milestones/m3/acceptance.md)。
+状态：**已完成并已主线交付**。最终 Issue/CI、历史证据身份和未验收边界统一见[M3 验收页当前状态](../milestones/m3/acceptance.md#当前状态)，批准范围见[M3 计划](../milestones/m3/plan.md)。本路线不复制动态证据台账，也不以本地 PASS 代签远端。
 
 - 已接通独立 scene4/map10/owner60 的“完整事件转换 → 搜索 → trigger → 双语对话 → 返回探索/再次交谈”；不绑定 M2 场景2，不改原始对象/脚本。
 - 完整 faithful 集合保存与重建、具名字段重新编码及严格加载验证已实现；运行时仅支持切片所需 setDialog/showDialog/end，raw 或其他未支持闭包明确拒绝。全量 opcode、auto、条件/调用及正常场景调度不在此切片。
