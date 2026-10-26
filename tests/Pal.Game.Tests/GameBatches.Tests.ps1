@@ -69,7 +69,7 @@ public class Fixture
         $expectedProjects = @{
             core = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 328, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
-            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 188, 2)
+            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 234, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 52, 0)
             game = @('src/Pal.Game/Pal.Game.csproj', 242, 0)
         }

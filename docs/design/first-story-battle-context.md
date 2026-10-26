@@ -56,10 +56,10 @@ Battle context authored: first-mandatory-battle-pre-trigger-v1
 
 - `path`：被解释字段的 JSON 路径，且不得重复；
 - `sourceKind`：`original-base`、`required-precondition` 或 `author-policy`；
-- `sourceAddress`：前置指令 WORD 地址；基表/策略用 `null`；
-- `appliesTo`：角色、当时队伍或世界对象身份。
+- `sourceAddress`：`required-precondition` 必须使用非空 WORD 指令地址；`original-base` / `author-policy` 必须为 `null`；
+- `appliesTo`：必须与路径一致：`roleN`、`team-before-09C3`、`world`、`sceneN` 或 `ownerN`。
 
-v1 至少要求 role0 法术列表的 `@0905` 来源，以及 role1 HP、MP 的原始基表来源。详细真实 author 还应为角色、队伍、经验、装备、状态、cover、场景入口、对象可变字段、调色板、音乐和起点逐项记录来源；author 工具不会把原始表值伪装成已经执行的自然进度。
+每个 scalar 以及空数组容器都必须恰有一条来源；不存在的路径和下划线注释路径均拒绝。role0 的值 345 必须位于 `magics[1]` 并精确使用 `required-precondition/@0905/role0`；role1 HP、MP 必须使用 `original-base/null/role1`。人工 fixture 也使用上述正式来源语义，不存在可用于正式 profile 的 fixture-only 来源种类。详细真实 author 还应为角色、队伍、经验、装备、状态、cover、场景入口、对象可变字段、调色板、音乐和起点逐项记录来源；author 工具不会把原始表值伪装成已经执行的自然进度。
 
 ## 3. Windows 布局与逐字段快照
 
@@ -105,13 +105,13 @@ v1 至少要求 role0 法术列表的 `@0905` 来源，以及 role1 HP、MP 的�
 
 `world` 保存 scene/map、palette/night、探索音乐与必要战斗音乐，以及唯一 leader 坐标源。`leader` 必须有 `x/y/direction/layer/phase`；`direction` 只允许 `north/east/south/west`。`searchProof` 保存 owner28、PAL_Search 的 13 点 sample index 和地图碰撞已通过的事实，不能只凭邻近坐标猜命中。
 
-`sceneEntries` 保存受前置影响的 scene `enterEntry/teleportEntry`。`eventObjects` 以 owner ID 唯一保存 `x/y/direction/state/vanishTime/triggerMode/triggerEntry/autoEntry/autoIdleFrameCount/spriteId/spriteFrames/layer`，包括跨场景被前置改变的对象，不修改静态原包。
+`sceneEntries` 保存受前置影响的 scene `enterEntry/teleportEntry`。`eventObjects` 以 owner ID 唯一保存 SDLPal `EVENTOBJECT` 的全部后续会话可变字段：`x/y/direction/state/vanishTime/triggerMode/triggerEntry/autoEntry/autoIdleFrameCount/spriteId/spriteFrames/currentFrame/scriptIdleFrameCount/spritePtrOffset/autoSpriteFrames/layer`，包括跨场景被前置改变的对象，不修改静态原包。`x/y/direction`、入口、模式、sprite 和四个 frame/counter/offset 字段是 WORD；`state/layer/vanishTime` 是 signed WORD。leader `x/y` 服从现有 `StaticLeader` signed-short seam，`layer` 为 WORD。
 
 owner28 的已冻结身份为：坐标 `(1280,256)`、前置 `@0936` 后 `state=2`、trigger mode 1、trigger `@09C3`、auto 0、sprite 210。author 还必须提供独立核过碰撞和 PAL_Search 命中的 leader 起点；工具记录该证明，但地图几何验证仍由真实资源准备/后续 SceneRunner 承担，不能由一个布尔值替代验收。
 
 ## 4. 完整局部 closure 与后续票所有权
 
-`closure.entry` 固定 `@09C3`。每个 `entries` 项包含唯一 `id`、`category` (`command/resource/validation`)、精确 `identity`、`ownerTicket` (#45–#54) 和 `status` (`prepared/contract-only`)。v1 至少要求以下九项，缺一即拒绝 author：
+`closure.entry` 固定 `@09C3`。每个 `entries` 项包含唯一 `id`、固定 `category` (`command/resource/validation`)、按下表内容结构化并逐字段精确核对的 `identity`、精确且无重复的 `ownerTickets` 集合、`status` 和精确 `resourceIds` 链。v1 必须且只能包含以下九项，缺一、多一或任意字段不符均拒绝 author。当前后续能力均未交付，所以九项 `status` 只能是 `contract-only`；不能仅凭引用或 hash 自称 `prepared`：
 
 | id | 内容边界 | 执行所有权 |
 |---|---|---|
@@ -127,7 +127,7 @@ owner28 的已冻结身份为：坐标 `(1280,256)`、前置 `@0936` 后 `state=
 
 本组件只冻结身份和所有权；`contract-only` 明确表示运行能力尚未交付。Core/Game 在闭包能力齐备前必须于任何显示、对象变化或战斗请求之前拒绝 `@09C3`；不得静态加载成功后偷偷跳到 `@09FE`、换简单战斗或发完成标记。
 
-`resources` 每项固定保存 `id/kind/reference/sha256/ownerTicket`。reference 必须是安全的 forward-slash 相对路径，禁止绝对路径、反斜线和 `..`；SHA-256 必须为小写 64 位十六进制。资源来源身份不替代内容独立核对。
+`resources` 必须且只能包含下列固定 ID/kind/`ownerTickets`：`events/faithful-events/[52,53]`、`battle-data/battle-data/[46,47,48,49,50,53]`、`battle-images/battle-images/[53]`、`dialogue-zh-cn/dialogue-language/[49,53]`、`dialogue-en/dialogue-language/[49,53]`、`glyphs/glyph-atlas/[49,53]`。每项另存 `reference/sha256`；reference 必须是安全的 forward-slash 相对路径，禁止绝对路径、反斜线和 `..`，SHA-256 必须为小写 64 位十六进制。九项 closure 的资源链接逐项冻结：trigger/dynamic 依赖 events；battle command 依赖 events+battle-data；角色钩子依赖 events+battle-data+双语对话+glyphs；装备/成长依赖 battle-data；失败边界依赖 events+双语对话+glyphs；图像和语言项分别链接其精确资源。`battle-team-18.identity` 明确保存 `@09FE`、操作数 `(0012,A073,0000)`、team/object/enemy/count/battlefield、第三操作数 boss/no-flee 特值和语义字段反向编码规则。资源来源身份不替代内容独立核对。
 
 ## 5. 覆盖审计与明确不扩张
 

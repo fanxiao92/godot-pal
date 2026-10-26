@@ -53,7 +53,9 @@ if (args.Length == 5 && args[0] == "export-events" && args[1] == "--input" && ar
     }
 }
 
-if (args.Length == 5 && args[0] == "author-battle-context" && args[1] == "--input" && args[3] == "--output")
+if (args.Length == 5 && args[0] == "author-battle-context" && args[1] == "--input" && args[3] == "--output"
+    && !string.IsNullOrWhiteSpace(args[2]) && !args[2].StartsWith("--", StringComparison.Ordinal)
+    && !string.IsNullOrWhiteSpace(args[4]) && !args[4].StartsWith("--", StringComparison.Ordinal))
 {
     try
     {
