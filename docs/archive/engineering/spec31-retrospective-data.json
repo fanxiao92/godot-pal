@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "kind": "historical-session-retrospective",
+  "capturedUtc": "2026-10-26T12:02:13.209Z",
+  "spec": "https://github.com/fanxiao92/godot-pal/issues/31",
+  "sessionId": "01a16cf2-fcf8-709f-9e05-a24158219d6b",
+  "baseCommit": "979716b1ef6e7051e0eb28a84a22b89ffdcb0735",
+  "time": {
+    "goalCreatedUtc": "2026-10-24T08:12:32.239Z",
+    "auditApprovedUtc": "2026-10-26T10:34:39.484Z",
+    "wallSeconds": 181327.245,
+    "goalReportedActiveSeconds": 98988,
+    "phases": [
+      {
+        "id": "local-implementation-and-review",
+        "startUtc": "2026-10-24T08:12:32.239Z",
+        "endUtc": "2026-10-24T22:12:41Z",
+        "wallSeconds": 50408.761
+      },
+      {
+        "id": "remote-validation-protection-and-docs",
+        "startUtc": "2026-10-24T22:12:41Z",
+        "endUtc": "2026-10-26T06:25:28Z",
+        "wallSeconds": 115967
+      },
+      {
+        "id": "first-closeout-and-rejected-audit",
+        "startUtc": "2026-10-26T06:25:28Z",
+        "endUtc": "2026-10-26T08:34:17.369Z",
+        "wallSeconds": 7729.369
+      },
+      {
+        "id": "audit-repair-and-delivery",
+        "startUtc": "2026-10-26T08:34:17.369Z",
+        "endUtc": "2026-10-26T10:34:39.484Z",
+        "wallSeconds": 7222.115
+      }
+    ],
+    "selectedPausedIntervals": [
+      {
+        "startUtc": "2026-10-24T12:30:20.771Z",
+        "endUtc": "2026-10-24T14:04:22.117Z",
+        "reason": "authorization",
+        "wallSeconds": 5641.346
+      },
+      {
+        "startUtc": "2026-10-24T22:56:11.987Z",
+        "endUtc": "2026-10-25T01:34:20.934Z",
+        "reason": "authorization-and-document-overlap",
+        "wallSeconds": 9488.947
+      },
+      {
+        "startUtc": "2026-10-25T02:38:14.410Z",
+        "endUtc": "2026-10-25T11:10:51.458Z",
+        "reason": "remote-repair-authorization",
+        "wallSeconds": 30757.048
+      },
+      {
+        "startUtc": "2026-10-25T20:19:38.204Z",
+        "endUtc": "2026-10-26T02:25:49.533Z",
+        "reason": "sdk-diagnosis-and-policy-choice",
+        "wallSeconds": 21971.329
+      }
+    ]
+  },
+  "parentSession": {
+    "scope": "Parent JSONL prefix from session start through final auditor approval, including pre-goal setup; excludes retrospective messages and child transcripts.",
+    "firstRecordUtc": "2026-10-24T08:07:06.235Z",
+    "cutoffUtc": "2026-10-26T10:34:39.484Z",
+    "prefixBytes": 48900170,
+    "prefixSha256": "9e5a43bfa92b58b57a200751cda6e0bb82c3debd98368d55e181f0ed915e33a8",
+    "records": 4023,
+    "messageRoles": {
+      "system": 8,
+      "user": 19,
+      "assistant": 1624,
+      "toolResult": 1983
+    },
+    "toolCalls": {
+      "get_goal": 37,
+      "bash": 560,
+      "read": 713,
+      "subagents_enable": 6,
+      "create_goal": 1,
+      "subagent": 186,
+      "write": 158,
+      "edit": 267,
+      "web_enable": 1,
+      "web_search": 3,
+      "fetch_content": 15,
+      "get_search_content": 18,
+      "subagent_supervisor": 6,
+      "update_goal": 12
+    },
+    "subagentToolActions": {
+      "list": 3,
+      "workflow-launch": 48,
+      "status": 21,
+      "steer": 10,
+      "children.list": 8,
+      "direct-launch": 47,
+      "guide": 15,
+      "resume": 34
+    },
+    "goalCheckpointEvents": 93,
+    "compactions": 25,
+    "firstSummaryCharacters": 20544,
+    "maxSummaryCharacters": 135824,
+    "lastSummaryCharacters": 120302,
+    "lastMainWaitWindow": {
+      "startUtc": "2026-10-26T09:53:33Z",
+      "endUtc": "2026-10-26T10:11:08Z",
+      "assistantMessagesWithoutToolCalls": 10
+    }
+  },
+  "taskDirectorySnapshot": {
+    "scope": "Immediate code files only; filesystem snapshot at capturedUtc, not a reconstructed end-of-goal inventory.",
+    "codeFiles": 105,
+    "byExtension": {
+      "cjs": 91,
+      "py": 11,
+      "ps1": 3
+    }
+  },
+  "actualMainGate": {
+    "runId": 40302870006,
+    "attempt": 1,
+    "codeIdentity": "979716b1ef6e7051e0eb28a84a22b89ffdcb0735",
+    "taskWallClockMs": 556519.4702,
+    "reportSha256": "9ddc21aad9785709b9cf8436c24d4a80a9f0806bd3e12b90259fc29c73e19a8b",
+    "commands": [
+      {
+        "log": "01---info.log",
+        "category": "other",
+        "wallClockMs": 994.5592
+      },
+      {
+        "log": "02-restore.log",
+        "category": "restore",
+        "wallClockMs": 5154.3298
+      },
+      {
+        "log": "03-build.log",
+        "category": "build",
+        "wallClockMs": 11874.2678
+      },
+      {
+        "log": "04-test.log",
+        "category": "test",
+        "wallClockMs": 5880.4981
+      },
+      {
+        "log": "05-test.log",
+        "category": "test",
+        "wallClockMs": 2390.3234
+      },
+      {
+        "log": "06-test.log",
+        "category": "test",
+        "wallClockMs": 18080.5068
+      },
+      {
+        "log": "07-test.log",
+        "category": "test",
+        "wallClockMs": 122903.9051
+      },
+      {
+        "log": "08-test.log",
+        "category": "test",
+        "wallClockMs": 58703.1251
+      },
+      {
+        "log": "09-test.log",
+        "category": "test",
+        "wallClockMs": 40585.1455
+      },
+      {
+        "log": "10-test.log",
+        "category": "test",
+        "wallClockMs": 14715.5594
+      },
+      {
+        "log": "11-test.log",
+        "category": "discovery",
+        "wallClockMs": 1640.1605
+      },
+      {
+        "log": "12-test.log",
+        "category": "test",
+        "wallClockMs": 52128.9131
+      },
+      {
+        "log": "13-test.log",
+        "category": "test",
+        "wallClockMs": 40236.8688
+      },
+      {
+        "log": "14-test.log",
+        "category": "test",
+        "wallClockMs": 14870.3143
+      },
+      {
+        "log": "15-test.log",
+        "category": "test",
+        "wallClockMs": 52797.0694
+      },
+      {
+        "log": "16-test.log",
+        "category": "test",
+        "wallClockMs": 40550.9312
+      },
+      {
+        "log": "17-test.log",
+        "category": "test",
+        "wallClockMs": 14887.9612
+      },
+      {
+        "log": "18-test.log",
+        "category": "test",
+        "wallClockMs": 1808.6155
+      },
+      {
+        "log": "19-test.log",
+        "category": "test",
+        "wallClockMs": 2302.2616
+      },
+      {
+        "log": "20-test.log",
+        "category": "test",
+        "wallClockMs": 7534.9039
+      }
+    ],
+    "groupedCommandWallClockMs": {
+      "coreAndCliUnit": 8270.8215,
+      "restoreAndBuild": 17028.5976,
+      "cliIntegration": 18080.5068,
+      "prepare": 122903.9051,
+      "nineGameBatches": 329475.888
+    }
+  },
+  "limits": [
+    "Goal activeSeconds is plugin accounting, not CPU time or all agents exclusive work time.",
+    "Phases are natural elapsed intervals including pauses, parallel work and CI; not an exclusive breakdown of goal activeSeconds.",
+    "Selected paused intervals are not an exhaustive idle-time accounting; SDK pause includes a subsequently corrected agent diagnosis.",
+    "Tool/action/checkpoint counts are log records, not unique agents, useful operations or monetary cost.",
+    "Summary lengths are JavaScript string.length UTF-16 code units, not tokens.",
+    "Code-file inventory is a later filesystem snapshot; not all files are unnecessary.",
+    "Core/CLI unit durations are no-build/no-restore commands in one M0 run, not independent fast-entry end-to-end timing.",
+    "Grouped command wall times are descriptive; no causal comparison or general performance benchmark.",
+    "Private transcript, author details, machine paths and original game resources are not included."
+  ]
+}
