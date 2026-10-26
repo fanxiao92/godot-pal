@@ -67,7 +67,7 @@ public class Fixture
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
             'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
         $expectedProjects = @{
-            core = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 369, 0)
+            core = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 379, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 247, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 52, 0)
@@ -82,7 +82,7 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 369 passed; CLI unit 142 passed; CLI integration 247 passed + 2 skipped (249 total); Prepare 52 passed; Godot source/discovery 245; positives 242 as serial 66/79/97 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 379 passed; CLI unit 142 passed; CLI integration 247 passed + 2 skipped (249 total); Prepare 52 passed; Godot source/discovery 245; positives 242 as serial 66/79/97 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }

@@ -89,6 +89,71 @@ public sealed class FirstMandatoryBattleProfileTests
             entry => { var x = Typed<BattleLocalizedDialogueIdentity>(entry); Assert.Equal(new[] { "zh-CN", "en" }, x.Languages); Assert.Equal(new[] { "messages", "names", "portraits", "glyphs", "ui" }, x.Contents); });
     }
 
+    [Fact]
+    public void Closure_identity_hierarchy_is_closed_to_external_assemblies_and_has_exactly_nine_variants()
+    {
+        Type baseType = typeof(BattleClosureIdentity);
+        ConstructorInfo[] externallyUsableConstructors = baseType
+            .GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(constructor => constructor.IsPublic || constructor.IsFamily || constructor.IsFamilyOrAssembly)
+            .ToArray();
+        Assert.Empty(externallyUsableConstructors);
+
+        Type[] variants = baseType.Assembly.GetTypes()
+            .Where(type => type.BaseType == baseType && !type.IsAbstract)
+            .OrderBy(type => type.Name, StringComparer.Ordinal)
+            .ToArray();
+        Assert.All(variants, type => Assert.True(type.IsPublic && type.IsSealed, $"{type.Name} must be public sealed."));
+        Assert.Equal(new[]
+        {
+            typeof(BattleCommandIdentity),
+            typeof(BattleDynamicAutoIdentity),
+            typeof(BattleEquipmentLayoutIdentity),
+            typeof(BattleEventRangeIdentity),
+            typeof(BattleFailureBoundaryIdentity),
+            typeof(BattleGrowthLayoutIdentity),
+            typeof(BattleImageSetIdentity),
+            typeof(BattleLocalizedDialogueIdentity),
+            typeof(BattleRoleHooksIdentity)
+        }.OrderBy(type => type.Name, StringComparer.Ordinal), variants);
+    }
+
+    [Fact]
+    public void Collection_bearing_closure_identities_defensively_copy_all_caller_lists()
+    {
+        int[] operands = [0x0012, 0xa073, 0];
+        var effects = new List<string> { "movement", "direction", "hidden" };
+        string[] roleSpriteIds = ["F0", "F1"];
+        var languages = new List<string> { "zh-CN", "en" };
+        string[] contents = ["messages", "names", "portraits", "glyphs", "ui"];
+        var command = new BattleCommandIdentity(0x09fe, operands, 18, 495, 97, 2, 24, "special", "reverse");
+        var dynamicAuto = new BattleDynamicAutoIdentity(0x0a36, 0x0a3b, effects, "update-driven");
+        var images = new BattleImageSetIdentity(97, "ABC97", roleSpriteIds, 24, "FBP24", true);
+        var dialogue = new BattleLocalizedDialogueIdentity(languages, contents);
+
+        operands[0] = 999;
+        effects[0] = "changed";
+        roleSpriteIds[0] = "changed";
+        languages[0] = "changed";
+        contents[0] = "changed";
+
+        Assert.Equal(new[] { 0x0012, 0xa073, 0 }, command.Operands);
+        Assert.Equal(new[] { "movement", "direction", "hidden" }, dynamicAuto.Effects);
+        Assert.Equal(new[] { "F0", "F1" }, images.RoleSpriteIds);
+        Assert.Equal(new[] { "zh-CN", "en" }, dialogue.Languages);
+        Assert.Equal(new[] { "messages", "names", "portraits", "glyphs", "ui" }, dialogue.Contents);
+    }
+
+    [Fact]
+    public void Collection_bearing_closure_identities_fail_fast_for_null_lists()
+    {
+        Assert.Throws<ArgumentNullException>(() => new BattleCommandIdentity(0, null!, 0, 0, 0, 0, 0, "", ""));
+        Assert.Throws<ArgumentNullException>(() => new BattleDynamicAutoIdentity(0, 0, null!, ""));
+        Assert.Throws<ArgumentNullException>(() => new BattleImageSetIdentity(0, "", null!, 0, "", false));
+        Assert.Throws<ArgumentNullException>(() => new BattleLocalizedDialogueIdentity(null!, []));
+        Assert.Throws<ArgumentNullException>(() => new BattleLocalizedDialogueIdentity([], null!));
+    }
+
     [Theory]
     [InlineData("duplicate")]
     [InlineData("unknown")]
@@ -187,6 +252,28 @@ public sealed class FirstMandatoryBattleProfileTests
         else if (mutation == "unsafe-device-name") document["resources"]![0]!["reference"] = "events/NUL.json";
         else document["resources"]![0]!["reference"] = "../events/index.json";
         Assert.Throws<InvalidDataException>(() => LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString())));
+    }
+
+    [Theory]
+    [InlineData("COM¹")]
+    [InlineData("events/COM².json")]
+    [InlineData("nested/path/COM³.dat")]
+    [InlineData("LPT¹.txt")]
+    [InlineData("events/LPT²")]
+    [InlineData("nested/LPT³.json")]
+    public void Load_rejects_windows_superscript_device_names(string reference)
+    {
+        JsonObject document = BattleContextTestFixture.Valid().Document.DeepClone().AsObject();
+        document["resources"]![0]!["reference"] = reference;
+        Assert.Throws<InvalidDataException>(() => LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString())));
+    }
+
+    [Fact]
+    public void Load_allows_ordinary_unicode_resource_filenames()
+    {
+        JsonObject document = BattleContextTestFixture.Valid().Document.DeepClone().AsObject();
+        document["resources"]![0]!["reference"] = "events/剧情-¹.json";
+        LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString()));
     }
 
     [Fact]

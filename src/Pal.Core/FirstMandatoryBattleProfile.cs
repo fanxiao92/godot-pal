@@ -424,7 +424,7 @@ public sealed class FirstMandatoryBattleProfile
                 || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase)
                 || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase)
                 || (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase) || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
-                    && stem[3] is >= '1' and <= '9'))
+                    && (stem[3] is >= '1' and <= '9' or '\u00b9' or '\u00b2' or '\u00b3')))
                 return false;
         }
         return true;

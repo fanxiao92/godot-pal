@@ -26,45 +26,144 @@ public sealed record BattleWorldSnapshot(
     BattleLeaderSnapshot Leader, BattleSearchProof SearchProof,
     IReadOnlyList<BattleSceneEntrySnapshot> SceneEntries, IReadOnlyList<BattleEventObjectSnapshot> EventObjects);
 
-/// <summary>Closed base type for the nine frozen closure identity variants.</summary>
-public abstract record BattleClosureIdentity
+/// <summary>Genuinely closed base type for the nine frozen closure identity variants; external assemblies cannot derive another variant.</summary>
+public abstract class BattleClosureIdentity
 {
     private protected BattleClosureIdentity() { }
+
+    private protected static IReadOnlyList<T> CopyList<T>(IReadOnlyList<T> source, string parameterName) =>
+        Array.AsReadOnly((source ?? throw new ArgumentNullException(parameterName)).ToArray());
 }
 
 /// <summary>Identifies the WORD-addressed pre-battle, battle, won, and end event range.</summary>
-public sealed record BattleEventRangeIdentity(int StartAddress, int BattleAddress, int WonStartAddress, int EndAddress) : BattleClosureIdentity;
+public sealed class BattleEventRangeIdentity(int startAddress, int battleAddress, int wonStartAddress, int endAddress) : BattleClosureIdentity
+{
+    public int StartAddress { get; } = startAddress;
+    public int BattleAddress { get; } = battleAddress;
+    public int WonStartAddress { get; } = wonStartAddress;
+    public int EndAddress { get; } = endAddress;
+}
 
-/// <summary>Identifies the frozen battle command and its WORD operands and semantic target fields.</summary>
-public sealed record BattleCommandIdentity(int CommandAddress, IReadOnlyList<int> Operands, int EnemyTeamId,
-    int EnemyObjectId, int EnemyId, int EnemyCount, int BattlefieldId, string SpecialValue, string ReverseEncoding) : BattleClosureIdentity;
+/// <summary>Identifies the frozen battle command and its defensively copied WORD operands and semantic target fields.</summary>
+public sealed class BattleCommandIdentity : BattleClosureIdentity
+{
+    public int CommandAddress { get; }
+    public IReadOnlyList<int> Operands { get; }
+    public int EnemyTeamId { get; }
+    public int EnemyObjectId { get; }
+    public int EnemyId { get; }
+    public int EnemyCount { get; }
+    public int BattlefieldId { get; }
+    public string SpecialValue { get; }
+    public string ReverseEncoding { get; }
+
+    public BattleCommandIdentity(int commandAddress, IReadOnlyList<int> operands, int enemyTeamId, int enemyObjectId,
+        int enemyId, int enemyCount, int battlefieldId, string specialValue, string reverseEncoding)
+    {
+        CommandAddress = commandAddress;
+        Operands = CopyList(operands, nameof(operands));
+        EnemyTeamId = enemyTeamId;
+        EnemyObjectId = enemyObjectId;
+        EnemyId = enemyId;
+        EnemyCount = enemyCount;
+        BattlefieldId = battlefieldId;
+        SpecialValue = specialValue;
+        ReverseEncoding = reverseEncoding;
+    }
+}
 
 /// <summary>Identifies the dying and friend-death role hook WORD-address ranges.</summary>
-public sealed record BattleRoleHooksIdentity(int DyingRoleId, int DyingStartAddress, int DyingEndAddress,
-    int FriendDeathRoleId, int FriendDeathStartAddress, int FriendDeathEndAddress, string BranchCoverage) : BattleClosureIdentity;
+public sealed class BattleRoleHooksIdentity(int dyingRoleId, int dyingStartAddress, int dyingEndAddress,
+    int friendDeathRoleId, int friendDeathStartAddress, int friendDeathEndAddress, string branchCoverage) : BattleClosureIdentity
+{
+    public int DyingRoleId { get; } = dyingRoleId;
+    public int DyingStartAddress { get; } = dyingStartAddress;
+    public int DyingEndAddress { get; } = dyingEndAddress;
+    public int FriendDeathRoleId { get; } = friendDeathRoleId;
+    public int FriendDeathStartAddress { get; } = friendDeathStartAddress;
+    public int FriendDeathEndAddress { get; } = friendDeathEndAddress;
+    public string BranchCoverage { get; } = branchCoverage;
+}
 
 /// <summary>Identifies the six-role equipment layout and persistent equipment behavior.</summary>
-public sealed record BattleEquipmentLayoutIdentity(int RoleCount, int SlotCount, int DualAttackObjectId,
-    bool PersistentEquipmentStatus) : BattleClosureIdentity;
+public sealed class BattleEquipmentLayoutIdentity(int roleCount, int slotCount, int dualAttackObjectId,
+    bool persistentEquipmentStatus) : BattleClosureIdentity
+{
+    public int RoleCount { get; } = roleCount;
+    public int SlotCount { get; } = slotCount;
+    public int DualAttackObjectId { get; } = dualAttackObjectId;
+    public bool PersistentEquipmentStatus { get; } = persistentEquipmentStatus;
+}
 
 /// <summary>Identifies the five-role growth layout and required experience and cleanup behavior.</summary>
-public sealed record BattleGrowthLayoutIdentity(int RoleCount, bool IncludesPrimaryExperience,
-    bool IncludesHiddenExperience, bool IncludesRecoveryAndCleanup) : BattleClosureIdentity;
+public sealed class BattleGrowthLayoutIdentity(int roleCount, bool includesPrimaryExperience,
+    bool includesHiddenExperience, bool includesRecoveryAndCleanup) : BattleClosureIdentity
+{
+    public int RoleCount { get; } = roleCount;
+    public bool IncludesPrimaryExperience { get; } = includesPrimaryExperience;
+    public bool IncludesHiddenExperience { get; } = includesHiddenExperience;
+    public bool IncludesRecoveryAndCleanup { get; } = includesRecoveryAndCleanup;
+}
 
-/// <summary>Identifies the dynamic auto-script WORD range and its immutable effect names.</summary>
-public sealed record BattleDynamicAutoIdentity(int StartAddress, int EndAddress, IReadOnlyList<string> Effects,
-    string Advance) : BattleClosureIdentity;
+/// <summary>Identifies the dynamic auto-script WORD range and its defensively copied immutable effect names.</summary>
+public sealed class BattleDynamicAutoIdentity : BattleClosureIdentity
+{
+    public int StartAddress { get; }
+    public int EndAddress { get; }
+    public IReadOnlyList<string> Effects { get; }
+    public string Advance { get; }
+
+    public BattleDynamicAutoIdentity(int startAddress, int endAddress, IReadOnlyList<string> effects, string advance)
+    {
+        StartAddress = startAddress;
+        EndAddress = endAddress;
+        Effects = CopyList(effects, nameof(effects));
+        Advance = advance;
+    }
+}
 
 /// <summary>Identifies the lost-entry WORD address, reload command, and fail-closed behavior.</summary>
-public sealed record BattleFailureBoundaryIdentity(int LostEntryAddress, int ReloadCommand, string Behavior) : BattleClosureIdentity;
+public sealed class BattleFailureBoundaryIdentity(int lostEntryAddress, int reloadCommand, string behavior) : BattleClosureIdentity
+{
+    public int LostEntryAddress { get; } = lostEntryAddress;
+    public int ReloadCommand { get; } = reloadCommand;
+    public string Behavior { get; } = behavior;
+}
 
-/// <summary>Identifies the frozen enemy, role, and battlefield image resources.</summary>
-public sealed record BattleImageSetIdentity(int EnemyId, string EnemyArchiveEntry, IReadOnlyList<string> RoleSpriteIds,
-    int BattlefieldId, string BattlefieldArchiveEntry, bool IncludesLayoutAndEffectFrames) : BattleClosureIdentity;
+/// <summary>Identifies the frozen enemy, role, and battlefield image resources, including a defensively copied role-sprite list.</summary>
+public sealed class BattleImageSetIdentity : BattleClosureIdentity
+{
+    public int EnemyId { get; }
+    public string EnemyArchiveEntry { get; }
+    public IReadOnlyList<string> RoleSpriteIds { get; }
+    public int BattlefieldId { get; }
+    public string BattlefieldArchiveEntry { get; }
+    public bool IncludesLayoutAndEffectFrames { get; }
 
-/// <summary>Identifies the immutable language and localized content sets.</summary>
-public sealed record BattleLocalizedDialogueIdentity(IReadOnlyList<string> Languages,
-    IReadOnlyList<string> Contents) : BattleClosureIdentity;
+    public BattleImageSetIdentity(int enemyId, string enemyArchiveEntry, IReadOnlyList<string> roleSpriteIds,
+        int battlefieldId, string battlefieldArchiveEntry, bool includesLayoutAndEffectFrames)
+    {
+        EnemyId = enemyId;
+        EnemyArchiveEntry = enemyArchiveEntry;
+        RoleSpriteIds = CopyList(roleSpriteIds, nameof(roleSpriteIds));
+        BattlefieldId = battlefieldId;
+        BattlefieldArchiveEntry = battlefieldArchiveEntry;
+        IncludesLayoutAndEffectFrames = includesLayoutAndEffectFrames;
+    }
+}
+
+/// <summary>Identifies the defensively copied immutable language and localized content sets.</summary>
+public sealed class BattleLocalizedDialogueIdentity : BattleClosureIdentity
+{
+    public IReadOnlyList<string> Languages { get; }
+    public IReadOnlyList<string> Contents { get; }
+
+    public BattleLocalizedDialogueIdentity(IReadOnlyList<string> languages, IReadOnlyList<string> contents)
+    {
+        Languages = CopyList(languages, nameof(languages));
+        Contents = CopyList(contents, nameof(contents));
+    }
+}
 
 public sealed record BattleClosureEntry(string Id, string Category, BattleClosureIdentity Identity,
     IReadOnlyList<int> OwnerTickets, string Status, IReadOnlyList<string> ResourceIds);
