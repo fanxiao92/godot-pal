@@ -453,6 +453,17 @@ foreach ($job in @('quick-unit','engineering-offline','full-gate')) {
         $depth=Read-ActualCheckoutDepth $job
         $fixture=New-ShallowCandidateCase "shallow-$job" $depth ($job -ceq 'quick-unit')
         $block=if ($job -ceq 'quick-unit') { 'quick' } elseif ($job -ceq 'engineering-offline') { 'offlineStart' } else { 'start' }
+        # github.event_path is a runner step value, not a job-env input. Do not
+        # hide a misplaced binding by always injecting the fixture's valid path.
+        # This checks one documented scope contract, not the GitHub expression engine.
+        $stepName=switch($block) {
+            'quick' { 'Record and validate candidate identity' }
+            'offlineStart' { 'Record and validate offline start candidate identity' }
+            'start' { 'Record and validate start candidate identity' }
+        }
+        $header=[regex]::Match(($lines -join "`n"),'(?ms)^      - name: '+[regex]::Escape($stepName)+'\n(?<header>.*?)(?=^        run: \|$)').Groups['header'].Value
+        $eventBindings=[regex]::Matches($header,'(?m)^          CI_EVENT_PATH: \$\{\{ github\.event_path \}\}$')
+        if($eventBindings.Count -ne 1) { $fixture.case.env.CI_EVENT_PATH='' }
         $result=Invoke-Block $fixture.case $block $ownedApi
         Assert-That ($result.Exit -eq 0) "Actual $job candidate failed at configured depth ${depth}: $($result.Err)"
         $proof=if ($job -ceq 'quick-unit') { 'quick-candidate-proof' } elseif ($job -ceq 'engineering-offline') { 'offline-start-proof' } else { 'candidate-proof' }
