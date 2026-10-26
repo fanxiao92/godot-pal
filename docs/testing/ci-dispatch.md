@@ -6,23 +6,23 @@
 
 ## 事件与结果
 
-| 事件 | quick-unit | full-gate | 最终完整凭据 |
-| --- | --- | --- | --- |
-| Draft PR 更新／转回 Draft | unit＋Source 工程检查 | 不安排 | 不成功；跳过完整门不能成为完整成功 |
-| 无提交 Draft→Ready（`ready_for_review`） | unit＋Source | 唯一共享 M0 | 两条需要的 job 成功且本轮完整证据匹配 |
-| Ready PR 更新 | unit＋Source | 对新候选重新执行 | 同上，不借旧 head／base／候选成功 |
-| main push | 可按条件跳过 | 完整 M0 | 当前完整证据匹配 |
-| workflow_dispatch | 可按条件跳过 | 对实际检出的 ref 完整执行 | 当前完整证据匹配，不冒充 PR merge 结果 |
+| 事件 | quick-unit | engineering-offline | full-gate | 最终完整凭据 |
+| --- | --- | --- | --- | --- |
+| Draft PR 更新／转回 Draft | unit＋Source 工程检查 | 不安排 | 不安排 | 不成功；跳过完整门不能成为完整成功 |
+| 无提交 Draft→Ready（`ready_for_review`） | unit＋Source | Offline＋workflow 契约回归 | 唯一共享 M0 | 三条需要的 job 成功且本轮完整证据匹配 |
+| Ready PR 更新 | unit＋Source | 对新候选重新执行 | 对新候选重新执行 | 同上，不借旧 head／base／候选成功 |
+| main push | 可按条件跳过 | Offline＋workflow 契约回归 | 完整 M0 | 当前离线／完整证据匹配 |
+| workflow_dispatch | 可按条件跳过 | Offline＋workflow 契约回归 | 对实际检出的 ref 完整执行 | 当前证据匹配，不冒充 PR merge 结果 |
 
 PR 触发包含 `opened`、`synchronize`、`reopened`、`ready_for_review`、`converted_to_draft`、`edited`。`edited` 包含 base 目标变化；没有新 commit 不等于候选未变。Draft 的 quick 路径不下载 Godot／GdUnit，不执行 Game 或完整门。
 
-并发组是 workflow＋PR number（非 PR 使用 ref），不是 SHA／attempt。较新运行可取消同组旧运行，取消仍应如实失败／cancelled，不自动重试。`full-check` 使用 `always()` 并依赖 **quick-unit 和 full-gate**；Ready 的 quick 失败、取消、跳过或未知均不能被 full 单独成功掩盖。main/manual 仅允许 quick 的预期跳过或成功，仍必须 full 成功。Draft 最终 job 不以 skipped/success 作为凭据，因为 GitHub required checks 可将 skipped/neutral 看作满足。
+并发组是 workflow＋PR number（非 PR 使用 ref），不是 SHA／attempt。较新运行可取消同组旧运行，取消仍应如实失败／cancelled，不自动重试。`full-check` 使用 `always()` 并依赖 **quick-unit、engineering-offline 和 full-gate**；Ready 的 quick 失败、取消、跳过或未知均不能被 full 单独成功掩盖。main/manual 仅允许 quick 的预期跳过或成功，仍必须 offline 和 full 成功。offline 失败、取消、跳过、缺结果或不同 run/attempt/candidate/code 的 proof 一律拒绝；不能只等引擎 job 变绿。Draft 最终 job 不以 skipped/success 作为凭据，因为 GitHub required checks 可将 skipped/neutral 看作满足。
 
 这些本地条件不证明 GitHub 在排队、needs 等待及无提交 Ready 转换时何时创建新 check-run。旧 success 是否存在服务端放行窗口，必须在受控远端矩阵中检查，不能仅看 YAML 下结论。
 
 ## 候选身份链
 
-工作流的两个 checkout 均使用固定 checkout action 的 `fetch-depth: 2`，保留当前提交及其直接父层；候选身份校验因此可读取 merge candidate 的有序两个 parent，同时继续关闭凭据持久化和 LFS。该边界是有限直接父历史，不是全历史下载。
+quick、offline、full 三个 job 的 checkout 均使用固定 checkout action 的 `fetch-depth: 2`，保留当前提交及其直接父层；候选身份校验因此可读取 merge candidate 的有序两个 parent，同时继续关闭凭据持久化和 LFS。该边界是有限直接父历史，不是全历史下载。
 
 1. 原始 `GITHUB_EVENT_PATH` 通过 env 传入并复制为 `original-event.json`，不把 branch、workflow ref 等数据插进 PowerShell 源码引号。
 2. `New-CiCandidateInputs.ps1` 接收显式 repo/run/attempt/workflow/env 上下文，生成 event、metadata、snapshot。PR 使用只读 API GET 核对实际 head/base/merge candidate 和 Draft；非 PR 使用实际 checkout。`workflow_dispatch.inputs` 必须存在，允许对象或 `null`，不把合法 null 误判为不支持。
@@ -34,7 +34,9 @@ PR 触发包含 `opened`、`synchronize`、`reopened`、`ready_for_review`、`co
 
 ## 唯一 M0、原退出与墙钟
 
-完整路径先显式准备并验证固定 GdUnit 包，再把已验证输入交给 `Test-Engineering.ps1 -Mode Offline`，不把下载隐藏在 Offline 内。随后只调用一次 `scripts/Test-M0.ps1`，不另造裁剪完整门；发现、Prepare、启动、Game 三轮串行分批、三个指定负控制和原预算均保留。
+完整路径的 `engineering-offline` 与 `full-gate` 在不同 hosted runner 上独立开始，没有相互 `needs`。两者各自下载并校验固定四文件 GdUnit bundle；下载有单独步骤名，不把下载隐藏在 Offline 内。offline 不安装仓库 SDK 或 Godot，执行 `Test-Engineering.ps1 -Mode Offline` 和实际 workflow 契约回归；full 只调用一次 `scripts/Test-M0.ps1`，不重复 Offline，也不另造裁剪完整门。发现、Prepare、启动、Game 三轮串行分批、三个指定负控制、空缓存 restore/build 和原预算均保留，未引入并行引擎。
+
+offline 同样在检查前后验证实际候选。`offline-proof.json` 仅在 start/end 身份语义一致、匹配本轮 run/attempt/workflow/event/checkout、非 Draft，且 Offline journal 的九个准确步骤均为数字 exit0、root exit／双流 EOF／清理已知完成时输出；数组根、错型字段、遗漏或重复步骤不能成为成功对象。proof 记录 journal SHA256；workflow 回归或上传步骤失败仍使整个 job 失败，即使前面的 proof 已生成，最终 guard 也不能放行。它不替代 M0 FullProof 或服务端保护验收。
 
 workflow 用一个 native PowerShell host 执行唯一 M0 调用，明确 UTF-8、保留独立 `task-stdout.log`／`task-stderr.log`。取的是**原 M0 host 退出码**，不是 M0 内最后一个 dotnet 命令的 `$LASTEXITCODE`：成功内层命令后再抛出异常，不能被错记为原任务 0。启动前清除 stale exit；无法获得原数字退出时记录 `exitKnown=false`、`exitCode=null` 并失败关闭，不补成 0。
 
@@ -54,7 +56,9 @@ M0 返回后先尽力写 `task-exit.txt`，随即记录原产物的 M0 根相对
 
 ## 成功／失败上传
 
-artifact 名称同时带 run ID 和 attempt，手动重跑不覆盖或混用上一 attempt 的包。always 尽力上传原事件、候选生产输入和 start/end proof、原身份、Offline 证据、task exit/measurement、M0 logs/两流/TRX、成本 index/report/错误日志及完整 proof；full-gate 的 acceptance evidence 还上传 `m0-evidence/boundary-tests/**`，保留各 boundary 测试的原始日志、双流、命令、结果和监督记录。该显式子树不包含 `packages` 或 `http-cache`，也不扩大为整个 M0 根目录。报告／上传失败单列工程失败，不能改写原测试退出和日志；缺报告/产物不生成 PASS。步骤还没产生文件时允许上传器明确警告，不将缺失当完整。
+artifact 名称同时带 run ID 和 attempt，手动重跑不覆盖或混用上一 attempt 的包。always 尽力上传原事件、候选生产输入和 start/end proof、原身份、task exit/measurement、M0 logs/两流/TRX、成本 index/report/错误日志及完整 proof；full-gate 的 acceptance evidence 还上传 `m0-evidence/boundary-tests/**`，保留各 boundary 测试的原始日志、双流、命令、结果和监督记录。该显式子树不包含 `packages` 或 `http-cache`，也不扩大为整个 M0 根目录。报告／上传失败单列工程失败，不能改写原测试退出和日志；缺报告/产物不生成 PASS。步骤还没产生文件时允许上传器明确警告，不将缺失当完整。
+
+Offline 和 workflow 回归证据独立上传为 `ci-offline-evidence-<run>-<attempt>`，包含离线 job 的原事件、start/end 候选输入和 proof、`offline-proof.json`、`offline-evidence/**`、`workflow-evidence/**`；不从另一个 runner 复用旧目录或下载旧 artifact 补齐。full-gate 原验收 artifact 保留其 M0 原件，移除已迁出的 Offline 路径。
 
 只上传任务自有工程证据；不上传 token、真实游戏资源、reference 私有输入或全机观察数据。日志和快照不构成被加载字节的绝对认证。
 
@@ -70,7 +74,7 @@ pwsh -NoProfile -File tests/Test-CiFullProof.Tests.ps1 -EvidenceDirectory <new-p
 pwsh -NoProfile -File tests/Test-CiWorkflow.Tests.ps1 -EvidenceDirectory <new-workflow-evidence>
 ```
 
-候选夹具使用自有 Git 和受控 API stub；FullProof 使用真实公开成本工具和明确人工 TRX，不执行 SDK/引擎/M0。workflow 回归按本仓库固定 step/indent 提取**当前实际 run block**，先 AST 后执行自有 fake M0：单次调用、原 7、UTF-8 两流、未知启动、内层 0 后异常、采证写入失败、即时快照 tamper、真实成本/FullProof 互通及最终 guard；另有自有 Git 的实际 manual 候选生产→消费链。固定格式提取不是 YAML parser，更不是 GHA 表达式/调度器。
+候选夹具使用自有 Git 和受控 API stub；FullProof 使用真实公开成本工具和明确人工 TRX，不执行 SDK/引擎/M0。workflow 回归按本仓库固定 step/indent 提取**当前实际 run block**，先 AST 后执行自有 fake M0：单次调用、原 7、UTF-8 两流、未知启动、内层 0 后异常、采证写入失败、即时快照 tamper、真实成本/FullProof 互通及最终 guard；另有自有 Git 的实际 manual 候选生产→消费链。回归还提取实际 offline start/end/proof block，验证自有 shallow Git/API 的候选→journal→proof 链、完整 journal 与负例，以及最终 guard 对 offline job 各种失败/缺失/错配的拒绝；该回归本身接入 offline CI，证据独立保留。固定格式提取不是 YAML parser，更不是 GHA 表达式/调度器。
 
 FullProof 回归含三合法完整模式、候选/报告字段换序正例和明确阶段的有限单变量负例；每次保留独立调用参数、输入副本和两流。当前 JSON 接口使用 `NoEnumerate`、`DateKind String` 与内置 `JsonNode.DeepEquals`；本地现有运行环境已验证，较旧 PowerShell 7 minor 不在已验证兼容性范围，不为测试自动升级工具链。
 

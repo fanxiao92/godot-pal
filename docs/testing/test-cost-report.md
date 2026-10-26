@@ -1,6 +1,6 @@
 # 已有测试证据成本报告（#35）
 
-公开入口：[`scripts/Get-TestCostReport.ps1`](../../scripts/Get-TestCostReport.ps1)。这是 **PowerShell 7 离线只读报告**，不是测试入口、采证器或第二套完整门。它不执行 dotnet/Godot、资源准备、网络、HEAD 查询或进程枚举。只读取调用者明确列出的本轮命令记录、日志和 TRX；不搜索目录补齐结果，不读取旧私密 Observer。
+公开 CLI：[`scripts/Get-TestCostReport.ps1`](../../scripts/Get-TestCostReport.ps1)。报告实现集中在 [`scripts/TestCostReport.psm1`](../../scripts/TestCostReport.psm1) 的 `Get-TestCostReport -InputPath ... [-BaselinePath ...]`：返回一个报告对象，输入错误抛出异常，不写 console、不退出宿主。CLI 仅负责 UTF-8 JSON／stderr 与原有数字退出契约，二者不维护两份报告算法。这是 **PowerShell 7 离线只读报告**，不是测试入口、采证器或第二套完整门。它不执行 dotnet/Godot、资源准备、网络、HEAD 查询或进程枚举。只读取调用者明确列出的本轮命令记录、日志和 TRX；不搜索目录补齐结果，不读取旧私密 Observer。
 
 ## 调用与退出（供维护者及 #36）
 
@@ -112,10 +112,14 @@ try {
 ```powershell
 # AST 预检同上；不启动 SDK、引擎、CIM 或网络。
 pwsh -NoProfile -File ./tests/Pal.Game.Tests/TestCostReport.Tests.ps1
-# 保留人工输入/每次真实 CLI stdout+stderr：只能用新的自有目录
+# 保留人工输入和每次调用结果；transport 可能是 module 或 native CLI，不能混称真实进程
 pwsh -NoProfile -File ./tests/Pal.Game.Tests/TestCostReport.Tests.ps1 `
     -EvidenceDirectory 'C:/my evidence/new cost fixture run'
+# 诊断时可让全部调用走真实 CLI，集合和断言不变，但会恢复逐例进程启动成本。
+pwsh -NoProfile -File ./tests/Pal.Game.Tests/TestCostReport.Tests.ps1 -NativeProcess
 ```
+
+默认保留原 19 组、335 次语义调用及所有断言，改为在同一宿主中调用生产 module，不为每个类型／组合用例新建 pwsh。另加 module/native CLI 一致性组，覆盖成功、baseline 比较、缺输入、坏 JSON、空记录及失败后恢复；加上原中文路径／严格原始字节控制，共 348 次调用，其中 8 次真实 CLI。完成输出分别报告 invocation 与 native invocation 数；module 分支记录的退出分类和结果文件是测试适配产物，不是原生进程退出／stdout/stderr 证据。两种路径均保留逐次输入 bytes／mtime／文件集合不变检查；源码 AST 在首次加载前检查一次。
 
 回归预期来自独立人工字面值：12000ms 外层、10000ms 测试命令、5000ms 两案例合计（2000/3000）、1500/2500ms 重叠构建/准备、拆分程序集共四案例/10000ms，不能反推为真实测试成本。覆盖正常、部分、缺项、损坏、取消/未知、失败后正常、失败与缺结果组合及完整失败结果成本正例、负控制意外 exit0、显示名重复、旧混合/新拆分、身份/轮次重用、对照门槛（含完成 flags/标量状态及旧 baseline 错型、双侧成本类型/非有限值与合法数值0、六 context 字段双侧/单侧错误类型与旧 baseline、有效不同 codeIdentity、双侧未知 command/arguments 与合法空 argv、非 logger 参数逐字保留及真实 TRX/结果目录变化正例）、中文 UTF8/空格路径/任意 cwd、native stderr 及严格 UTF8 原字节中的原中文路径、输入字节/mtime/文件集合不变。默认仅清理成功回归的自有 GUID 目录；显式 EvidenceDirectory 保留；失败保留原件。
 

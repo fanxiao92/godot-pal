@@ -1,8 +1,16 @@
 # Offline public-command regression. All timings, commands and TRX below are artificial literals.
 [CmdletBinding()]
-param([string]$EvidenceDirectory)
+param([string]$EvidenceDirectory, [switch]$NativeProcess)
 $ErrorActionPreference = 'Stop'
 $reportScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../scripts/Get-TestCostReport.ps1'))
+$reportModule = Join-Path ([IO.Path]::GetDirectoryName($reportScript)) 'TestCostReport.psm1'
+# Parse once before loading the immutable implementation; no per-case parser/host startup.
+foreach ($source in @($reportScript, $reportModule)) {
+    $tokens = $null; $errors = $null
+    $null = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
+    if ($errors.Count) { throw "Report source must parse before execution: $source" }
+}
+Import-Module $reportModule -Force
 $root = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory) } else {
     Join-Path ([IO.Path]::GetTempPath()) ('pal-cost-report-' + [guid]::NewGuid().ToString('N'))
 }
@@ -16,11 +24,10 @@ function Case([string]$Name, [scriptblock]$Action) { & $Action; $results.Add($Na
 function Write-Json([string]$Name, $Value) {
     [IO.File]::WriteAllText((Join-Path $fixture $Name), (ConvertTo-Json -InputObject $Value -Depth 30), [Text.UTF8Encoding]::new($false))
 }
-function Invoke-Report([string]$Name = 'input.json', [string]$Baseline = '', [switch]$RawStreams) {
-    $tokens = $null; $errors = $null
-    $null = [Management.Automation.Language.Parser]::ParseFile($reportScript, [ref]$tokens, [ref]$errors)
-    Assert (-not $errors.Count) 'Report script must parse before execution.'
+function Invoke-Report([string]$Name = 'input.json', [string]$Baseline = '', [switch]$RawStreams, [switch]$Native) {
     $script:invocations++
+    $useNative = $NativeProcess -or $Native -or $RawStreams
+    if ($useNative) { $script:nativeInvocations++ }
     $out = Join-Path $root "report-$script:invocations.json"
     $err = Join-Path $root "report-$script:invocations.stderr.log"
     $arguments = @('-NoProfile', '-File', $reportScript, '-InputPath', (Join-Path $fixture $Name))
@@ -43,14 +50,26 @@ function Invoke-Report([string]$Name = 'input.json', [string]$Baseline = '', [sw
                 [void]$copyOut.GetAwaiter().GetResult(); [void]$copyErr.GetAwaiter().GetResult()
                 $code = $process.ExitCode
             } finally { $stdout.Dispose(); $stderr.Dispose(); $process.Dispose() }
-        } else {
+        } elseif ($useNative) {
             # PowerShell native stderr decoding uses the caller's console encoding.
             [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
             & (Join-Path $PSHOME 'pwsh.exe') @arguments 1> $out 2> $err
             $code = $LASTEXITCODE
+        } else {
+            # Semantic cases cross the same module interface as the production CLI.
+            # These adapter exits/streams are synthetic, not native process measurements.
+            $parameters = @{ InputPath = (Join-Path $fixture $Name) }
+            if ($Baseline) { $parameters.BaselinePath = $Baseline }
+            $text = ''; $errorText = ''; $code = 0
+            try { $text = ConvertTo-Json -InputObject (Get-TestCostReport @parameters) -Depth 60 }
+            catch { $code = 2; $errorText = $_.Exception.Message }
+            [IO.File]::WriteAllText($out, $text, [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($err, $errorText, [Text.UTF8Encoding]::new($false))
         }
     } finally { [Console]::OutputEncoding = $previousEncoding; Pop-Location }
     [IO.File]::WriteAllText((Join-Path $root "report-$script:invocations.exit"), [string]$code, [Text.UTF8Encoding]::new($false))
+    $call = [ordered]@{ transport = if ($useNative) { 'native-cli' } else { 'module' }; inputPath = (Join-Path $fixture $Name); baselinePath = $Baseline; exitCode = $code; exitMeasured = [bool]$useNative }
+    [IO.File]::WriteAllText((Join-Path $root "report-$script:invocations.invocation.json"), (ConvertTo-Json -InputObject $call), [Text.UTF8Encoding]::new($false))
     $after = @(Get-ChildItem -LiteralPath $fixture -File | ForEach-Object { "$($_.Name)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)|$((Get-FileHash -LiteralPath $_.FullName).Hash)" })
     Assert (-not (Compare-Object $before $after)) 'Report changed input bytes, timestamps or file set.'
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
@@ -58,6 +77,7 @@ function Invoke-Report([string]$Name = 'input.json', [string]$Baseline = '', [sw
     [pscustomobject]@{ exit = $code; output = $out; error = [IO.File]::ReadAllText($err, $utf8); report = if ($text.Trim()) { $text | ConvertFrom-Json -Depth 40 } else { $null } }
 }
 $script:invocations = 0
+$script:nativeInvocations = 0
 $command = [ordered]@{
     command = 'dotnet'; arguments = @('test', 'tests/Pal.Extract.Tests/Pal.Extract.Tests.csproj', '--no-build', '--no-restore')
     expectedExit = 0; exitCode = 0; exitKnown = $true; phase = 'completed'; rootExited = $true
@@ -659,7 +679,7 @@ try {
         $broken = $inputRecord | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable
         $broken.commandsPath = '人工 missing commands.json'
         Write-Json 'broken.json' $broken
-        $run = Invoke-Report 'broken.json'
+        $run = Invoke-Report 'broken.json' -Native
         Assert ($run.exit -eq 2 -and $null -eq $run.report -and $run.error -match 'original task exit/logs unchanged') 'Report failure manufactured success or masked error.'
         $expectedMissingPath = Join-Path $fixture '人工 missing commands.json'
         Assert ($run.error.Contains($expectedMissingPath)) "Failure stderr lost original Chinese/spaced path: $expectedMissingPath"
@@ -674,10 +694,39 @@ try {
         $empty = Invoke-Report
         Assert ($empty.exit -eq 2 -and $null -eq $empty.report) 'No command results manufactured success JSON.'
     }
+    Case 'module and native CLI agree on success comparison failure and recovery without input changes' {
+        Reset-Fixture
+        $baseline = Invoke-Report
+        foreach ($shape in @('success', 'comparison', 'missing-input', 'malformed-commands', 'empty-commands', 'recovery')) {
+            Reset-Fixture
+            $name = 'input.json'; $old = ''
+            switch ($shape) {
+                'comparison' { $old = $baseline.output }
+                'missing-input' { $name = '不存在 input.json' }
+                'malformed-commands' { [IO.File]::WriteAllText((Join-Path $fixture 'commands.json'), '{bad JSON') }
+                'empty-commands' { Write-Json 'commands.json' @() }
+            }
+            $module = Invoke-Report $name $old
+            $native = Invoke-Report $name $old -Native
+            Assert ($module.exit -eq $native.exit) "Module/CLI exit classification differs for $shape."
+            if ($module.exit -eq 0) {
+                $first = [Text.Json.Nodes.JsonNode]::Parse([IO.File]::ReadAllText($module.output))
+                $second = [Text.Json.Nodes.JsonNode]::Parse([IO.File]::ReadAllText($native.output))
+                Assert ([Text.Json.Nodes.JsonNode]::DeepEquals($first, $second)) "Module/CLI report differs for $shape."
+                Assert ($native.error -eq '') "Successful CLI emitted stderr for $shape."
+            } else {
+                Assert ($null -eq $native.report -and $native.error.Contains($module.error)) "CLI did not preserve the module diagnostic for $shape."
+                Assert ($native.error.Contains('tool exit 2; original task exit/logs unchanged')) 'CLI lost its error/exit contract.'
+            }
+        }
+        Assert ($script:nativeInvocations -ge 8) 'Representative native success, comparison, failure, UTF8 and recovery coverage was lost.'
+    }
+    Assert ($script:invocations -eq 348 -and $results.Count -eq 20) 'Original semantic matrix or new parity coverage changed; update its explicit inventory deliberately.'
+    Assert ($NativeProcess -or $script:nativeInvocations -eq 8) 'Semantic cases unexpectedly started extra native CLI processes.'
     $completed = $true
 } finally {
     if (-not $EvidenceDirectory -and $completed) { Remove-Item -LiteralPath $root -Recurse -Force }
     elseif (-not $completed) { Write-Host "Regression failed; original fixtures/output retained: $root" }
 }
 if (-not $EvidenceDirectory) { Assert (-not (Test-Path -LiteralPath $root)) 'Successful regression did not clean its own temporary directory.' }
-Write-Host "PASS: $($results.Count) offline cost report groups; report invocations=$script:invocations; no SDK/engine/process enumeration."
+Write-Host "PASS: $($results.Count) offline cost report groups; report invocations=$script:invocations; native invocations=$script:nativeInvocations; no SDK/engine/process enumeration."

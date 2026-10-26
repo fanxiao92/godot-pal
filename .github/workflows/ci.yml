@@ -76,6 +76,109 @@ jobs:
             ${{ runner.temp }}/unit-evidence/**
             ${{ runner.temp }}/source-evidence/**
 
+  engineering-offline:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    runs-on: windows-2022
+    timeout-minutes: 20
+    outputs:
+      proof_status: ${{ steps.offline-proof.outputs.status }}
+      proof_run_id: ${{ steps.offline-proof.outputs.run_id }}
+      proof_attempt: ${{ steps.offline-proof.outputs.attempt }}
+      proof_candidate: ${{ steps.offline-proof.outputs.candidate }}
+      proof_code: ${{ steps.offline-proof.outputs.code }}
+    env:
+      CI_TOKEN: ${{ github.token }}
+      CI_EVENT_NAME: ${{ github.event_name }}
+      CI_SHA: ${{ github.sha }}
+      CI_RUN_ID: ${{ github.run_id }}
+      CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+      CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+      CI_API_URL: ${{ github.api_url }}
+      CI_PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout offline candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+          lfs: false
+      - name: Record and validate offline start candidate identity
+        shell: pwsh
+        # The runner materializes event_path for steps, not job-level env evaluation.
+        env:
+          CI_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          Copy-Item -LiteralPath $env:CI_EVENT_PATH -Destination "$env:RUNNER_TEMP/offline-original-event.json"
+          $mode = if ($env:CI_EVENT_NAME -eq 'pull_request') { 'ready-full' } elseif ($env:CI_EVENT_NAME -eq 'push') { 'push-main' } else { 'manual-full' }
+          $input = "$env:RUNNER_TEMP/offline-candidate-start"
+          $params = @{ OutputDirectory=$input; RepositoryRoot=$env:GITHUB_WORKSPACE; EventName=$env:CI_EVENT_NAME; Action='event-derived'; Mode=$mode; GithubSha=$env:CI_SHA; RunId=$env:CI_RUN_ID; RunAttempt=[int]$env:CI_RUN_ATTEMPT; WorkflowRef=$env:CI_WORKFLOW_REF; ApiUrl=$env:CI_API_URL; EventJsonPath="$env:RUNNER_TEMP/offline-original-event.json" }
+          if ($env:CI_EVENT_NAME -eq 'pull_request') { $params.PrNumber=$env:CI_PR_NUMBER }
+          & ./scripts/New-CiCandidateInputs.ps1 @params; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./scripts/Test-CiCandidate.ps1 -EventPath "$input/event.json" -MetadataPath "$input/metadata.json" -RepositoryRoot $env:GITHUB_WORKSPACE -ServerSnapshotPath "$input/snapshot.json" -EvidenceDirectory "$env:RUNNER_TEMP/offline-start-proof"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Download and verify fixed GdUnit bundle for offline checks
+        shell: pwsh
+        run: ./scripts/Get-GdUnitPackages.ps1
+      - name: Run offline engineering regressions
+        shell: pwsh
+        run: ./scripts/Test-Engineering.ps1 -Mode Offline -GdUnitInputDirectory (Join-Path $env:GITHUB_WORKSPACE '.packages/gdunit') -EvidenceDirectory "$env:RUNNER_TEMP/offline-evidence"
+      - name: Validate workflow dispatch and proof contracts
+        shell: pwsh
+        run: ./tests/Test-CiWorkflow.Tests.ps1 -EvidenceDirectory "$env:RUNNER_TEMP/workflow-evidence"
+      - name: Validate offline end candidate freshness
+        if: always()
+        shell: pwsh
+        run: |
+          $mode = if ($env:CI_EVENT_NAME -eq 'pull_request') { 'ready-full' } elseif ($env:CI_EVENT_NAME -eq 'push') { 'push-main' } else { 'manual-full' }
+          $input = "$env:RUNNER_TEMP/offline-candidate-end"
+          $params = @{ OutputDirectory=$input; RepositoryRoot=$env:GITHUB_WORKSPACE; EventName=$env:CI_EVENT_NAME; Action='event-derived'; Mode=$mode; GithubSha=$env:CI_SHA; RunId=$env:CI_RUN_ID; RunAttempt=[int]$env:CI_RUN_ATTEMPT; WorkflowRef=$env:CI_WORKFLOW_REF; ApiUrl=$env:CI_API_URL; EventJsonPath="$env:RUNNER_TEMP/offline-original-event.json" }
+          if ($env:CI_EVENT_NAME -eq 'pull_request') { $params.PrNumber=$env:CI_PR_NUMBER }
+          & ./scripts/New-CiCandidateInputs.ps1 @params; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./scripts/Test-CiCandidate.ps1 -EventPath "$input/event.json" -MetadataPath "$input/metadata.json" -RepositoryRoot $env:GITHUB_WORKSPACE -ServerSnapshotPath "$input/snapshot.json" -EvidenceDirectory "$env:RUNNER_TEMP/offline-end-proof"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Validate current-run offline proof
+        id: offline-proof
+        if: always()
+        shell: pwsh
+        run: |
+          $utf8 = [Text.UTF8Encoding]::new($false,$true)
+          $startText = [IO.File]::ReadAllText("$env:RUNNER_TEMP/offline-start-proof/candidate-identity.json", $utf8)
+          $endText = [IO.File]::ReadAllText("$env:RUNNER_TEMP/offline-end-proof/candidate-identity.json", $utf8)
+          $start = $startText | ConvertFrom-Json -NoEnumerate
+          $end = $endText | ConvertFrom-Json -NoEnumerate
+          if ($start -is [array] -or $end -is [array] -or $start -isnot [pscustomobject] -or $end -isnot [pscustomobject] -or -not [Text.Json.Nodes.JsonNode]::DeepEquals([Text.Json.Nodes.JsonNode]::Parse($startText), [Text.Json.Nodes.JsonNode]::Parse($endText))) { throw 'Offline candidate identity changed or is not an object.' }
+          foreach ($name in @('CI_RUN_ID','CI_RUN_ATTEMPT','CI_SHA','CI_WORKFLOW_REF','CI_EVENT_NAME')) { if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Offline expected context missing: $name" } }
+          $mode = switch ($env:CI_EVENT_NAME) { 'pull_request' { 'ready-full' } 'push' { 'push-main' } 'workflow_dispatch' { 'manual-full' } default { throw 'Unsupported offline event.' } }
+          $expected = @{ runId=$env:CI_RUN_ID; candidateSha=$env:CI_SHA; actualCheckout=$env:CI_SHA; workflowRef=$env:CI_WORKFLOW_REF; eventName=$env:CI_EVENT_NAME; mode=$mode }
+          foreach ($name in $expected.Keys) { if ($start.$name -isnot [string] -or $start.$name -cne $expected[$name]) { throw "Offline candidate context mismatch: $name" } }
+          if ($start.runAttempt -isnot [long] -or $start.runAttempt -lt 1 -or [string]$start.runAttempt -cne $env:CI_RUN_ATTEMPT -or $start.draft -isnot [bool] -or $start.draft) { throw 'Offline attempt or Draft state is invalid.' }
+          $journalPath = "$env:RUNNER_TEMP/offline-evidence/engineering-run.json"
+          $journal = [IO.File]::ReadAllText($journalPath, $utf8) | ConvertFrom-Json -NoEnumerate
+          if ($journal -is [array] -or $journal -isnot [pscustomobject] -or $journal.schemaVersion -isnot [long] -or $journal.schemaVersion -ne 1 -or $journal.kind -isnot [string] -or $journal.kind -cne 'engineering' -or $journal.mode -isnot [string] -or $journal.mode -cne 'Offline' -or $journal.status -isnot [string] -or $journal.status -cne 'complete' -or $journal.steps -isnot [array]) { throw 'Offline engineering journal is not complete.' }
+          $expectedSteps = @('ast','unit-boundary','syntax-regression','engineering-regression','unit-boundary-regression','game-batches-regression','process-snapshot-regression','gdunit-packages-regression','cost-report-regression')
+          if ($journal.steps.Count -ne $expectedSteps.Count -or (Compare-Object @($journal.steps.name | Sort-Object) @($expectedSteps | Sort-Object))) { throw 'Offline engineering step identities differ.' }
+          foreach ($step in $journal.steps) {
+            if ($step -is [array] -or $step -isnot [pscustomobject] -or $step.name -isnot [string] -or $step.status -isnot [string] -or $step.status -cne 'completed' -or $step.exitCode -isnot [long] -or $step.exitCode -ne 0) { throw 'Offline engineering step did not exit zero.' }
+            foreach ($name in @('exitKnown','rootExited','stdoutComplete','stderrComplete','cleanupComplete')) { if ($step.$name -isnot [bool] -or -not $step.$name) { throw "Offline engineering completion unknown: $name" } }
+          }
+          $proof = [ordered]@{ schemaVersion=1; status='complete'; runId=$start.runId; runAttempt=$start.runAttempt; candidateSha=$start.candidateSha; codeIdentity=$start.actualCheckout; workflowRef=$start.workflowRef; eventName=$start.eventName; action=$start.action; engineeringSha256=(Get-FileHash -LiteralPath $journalPath -Algorithm SHA256).Hash }
+          $proof | ConvertTo-Json | Set-Content -Encoding utf8 "$env:RUNNER_TEMP/offline-proof.json"
+          "status=$($proof.status)" >> $env:GITHUB_OUTPUT; "run_id=$($proof.runId)" >> $env:GITHUB_OUTPUT; "attempt=$($proof.runAttempt)" >> $env:GITHUB_OUTPUT; "candidate=$($proof.candidateSha)" >> $env:GITHUB_OUTPUT; "code=$($proof.codeIdentity)" >> $env:GITHUB_OUTPUT
+      - name: Upload offline engineering evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
+        with:
+          name: ci-offline-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/offline-original-event.json
+            ${{ runner.temp }}/offline-candidate-start/**
+            ${{ runner.temp }}/offline-candidate-end/**
+            ${{ runner.temp }}/offline-start-proof/**
+            ${{ runner.temp }}/offline-end-proof/**
+            ${{ runner.temp }}/offline-proof.json
+            ${{ runner.temp }}/offline-evidence/**
+            ${{ runner.temp }}/workflow-evidence/**
+
   full-gate:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     runs-on: windows-2022
@@ -133,11 +236,9 @@ jobs:
         run: |
           $godot = ./scripts/Get-Godot.ps1 -Destination "$env:RUNNER_TEMP/godot-4.7.2"
           "GODOT_CONSOLE=$godot" >> $env:GITHUB_ENV
-      - name: Prepare verified fixed GdUnit bundle
+      - name: Download and verify fixed GdUnit bundle for acceptance
         shell: pwsh
-        run: |
-          $bundle = ./scripts/Get-GdUnitPackages.ps1
-          ./scripts/Test-Engineering.ps1 -Mode Offline -GdUnitInputDirectory $bundle -EvidenceDirectory "$env:RUNNER_TEMP/offline-evidence"
+        run: ./scripts/Get-GdUnitPackages.ps1
       - name: Run shared M0, M2 and M3 acceptance checks
         shell: pwsh
         env:
@@ -300,7 +401,6 @@ jobs:
             ${{ runner.temp }}/full-proof.json
             ${{ runner.temp }}/candidate-proof/**
             ${{ runner.temp }}/candidate-end-proof/**
-            ${{ runner.temp }}/offline-evidence/**
             ${{ runner.temp }}/m0-streams/**
             ${{ runner.temp }}/m0-evidence/acceptance.log
             ${{ runner.temp }}/m0-evidence/boundary-tests/**
@@ -319,7 +419,7 @@ jobs:
 
   full-check:
     if: always()
-    needs: [quick-unit, full-gate]
+    needs: [quick-unit, engineering-offline, full-gate]
     runs-on: windows-2022
     steps:
       - name: Fail closed unless the current full gate completed successfully
@@ -327,6 +427,12 @@ jobs:
         env:
           NEEDS_RESULT: ${{ needs.full-gate.result }}
           QUICK_RESULT: ${{ needs.quick-unit.result }}
+          OFFLINE_RESULT: ${{ needs.engineering-offline.result }}
+          OFFLINE_STATUS: ${{ needs.engineering-offline.outputs.proof_status }}
+          OFFLINE_RUN_ID: ${{ needs.engineering-offline.outputs.proof_run_id }}
+          OFFLINE_ATTEMPT: ${{ needs.engineering-offline.outputs.proof_attempt }}
+          OFFLINE_CANDIDATE: ${{ needs.engineering-offline.outputs.proof_candidate }}
+          OFFLINE_CODE: ${{ needs.engineering-offline.outputs.proof_code }}
           PROOF_STATUS: ${{ needs.full-gate.outputs.proof_status }}
           PROOF_RUN_ID: ${{ needs.full-gate.outputs.proof_run_id }}
           PROOF_ATTEMPT: ${{ needs.full-gate.outputs.proof_attempt }}
@@ -349,4 +455,6 @@ jobs:
           } else { throw "Unsupported current event: '$env:CURRENT_EVENT_NAME'." }
           if ($env:NEEDS_RESULT -cne 'success') { throw "Current full-gate result is '$env:NEEDS_RESULT'; no acceptance credential." }
           if ($env:PROOF_STATUS -cne 'complete' -or $env:PROOF_RUN_ID -cne $env:CURRENT_RUN_ID -or $env:PROOF_ATTEMPT -cne $env:CURRENT_ATTEMPT -or $env:PROOF_CANDIDATE -cne $env:CURRENT_SHA -or $env:PROOF_CODE -cne $env:CURRENT_SHA) { throw 'Full proof is absent or belongs to another run, attempt or candidate.' }
-          Write-Output 'PASS full-check: current quick/full results, proof identity and evidence matched.'
+          if ($env:OFFLINE_RESULT -cne 'success') { throw "Current engineering-offline result is '$env:OFFLINE_RESULT'; no acceptance credential." }
+          if ($env:OFFLINE_STATUS -cne 'complete' -or $env:OFFLINE_RUN_ID -cne $env:CURRENT_RUN_ID -or $env:OFFLINE_ATTEMPT -cne $env:CURRENT_ATTEMPT -or $env:OFFLINE_CANDIDATE -cne $env:CURRENT_SHA -or $env:OFFLINE_CODE -cne $env:CURRENT_SHA) { throw 'Offline proof is absent or belongs to another run, attempt or candidate.' }
+          Write-Output 'PASS full-check: current quick/offline/full results, proof identities and evidence matched.'
