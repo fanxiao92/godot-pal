@@ -169,7 +169,7 @@ try {
     Assert-ExactTestNames @($trxFiles) @($checks.trx) 'Complete gate TRX files'
     & (Join-Path $PSScriptRoot 'Test-GameStartup.ps1') -GodotPath $GodotPath -LogDirectory (Join-Path $evidence 'godot')
     Save-ProcessSnapshot 'processes-final'
-    'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 328; CLI unit 142; CLI integration 188 + 2 existing platform skips; Prepare 52; Godot source/discovery 245; positives 242 as serial 66/79/97 in each of three complete rounds; 16 identity-verified TRX; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
+    Get-GatePassSummary $gamePlan |
         Set-Content (Join-Path $evidence 'PASS.txt')
     Write-Host 'PASS: automated M0/M2/M3 acceptance completed. Graphical/manual acceptance is separate.'
 } finally {

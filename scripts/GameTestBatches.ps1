@@ -103,6 +103,28 @@ function Get-GameBatchPlan([string]$Repository) {
     [pscustomobject]@{ inventory = $inventory; batches = @($batches); controls = $controls; projects = $projects }
 }
 
+function Get-GatePassSummary($Plan) {
+    $projects = @{}
+    foreach ($name in @('core', 'cli-unit', 'cli-integration', 'prepare', 'game')) {
+        $project = @($Plan.projects | Where-Object name -CEQ $name)
+        if ($project.Count -ne 1) { throw "Gate PASS summary requires exactly one '$name' project." }
+        $projects[$name] = $project[0]
+    }
+    foreach ($name in @('core', 'cli-unit', 'prepare', 'game')) {
+        if ([int]$projects[$name].skipped -ne 0) { throw "Gate PASS summary cannot omit skips for '$name'." }
+    }
+    $batchCounts = @($Plan.batches | ForEach-Object { [int]$_.count })
+    $positiveCount = ($batchCounts | Measure-Object -Sum).Sum
+    if ($positiveCount -ne [int]$projects.game.passed) { throw 'Gate PASS summary Game project and batch counts differ.' }
+    if (@($Plan.inventory).Count -ne ($positiveCount + @($Plan.controls).Count)) { throw 'Gate PASS summary Game inventory and partition counts differ.' }
+
+    $cliPassed = [int]$projects['cli-integration'].passed
+    $cliSkipped = [int]$projects['cli-integration'].skipped
+    $roundCount = 3
+    $trxCount = @($Plan.projects | Where-Object name -CNE 'game').Count + ($batchCounts.Count * $roundCount) + @($Plan.controls).Count
+    "PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core $($projects.core.passed) passed; CLI unit $($projects['cli-unit'].passed) passed; CLI integration $cliPassed passed + $cliSkipped skipped ($($cliPassed + $cliSkipped) total); Prepare $($projects.prepare.passed) passed; Godot source/discovery $(@($Plan.inventory).Count); positives $positiveCount as serial $($batchCounts -join '/') in each of three complete rounds; $trxCount identity-verified TRX; $(@($Plan.controls).Count) separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate."
+}
+
 function Read-TestRunIdentity([string]$Path) {
     $document = [xml]::new()
     $document.XmlResolver = $null
