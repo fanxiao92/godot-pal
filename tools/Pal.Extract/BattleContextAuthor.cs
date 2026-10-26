@@ -11,15 +11,18 @@ internal static class BattleContextAuthor
     internal const string Profile = "first-mandatory-battle-pre-trigger-v1";
     private const string SnapshotKind = "authored-precondition-not-natural-save";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
-    private static readonly Regex Sha256Pattern = new("^[0-9a-f]{64}$", RegexOptions.CultureInvariant);
+    private static readonly Regex Sha256Pattern = new("^[0-9a-f]{64}\\z", RegexOptions.CultureInvariant);
     private static readonly string[] HiddenExperienceNames = ["health", "magic", "attack", "magicPower", "defense", "dexterity", "flee"];
     private sealed record ClosureSpec(string Category, JsonObject Identity, int[] OwnerTickets, string[] ResourceIds);
     private sealed record ResourceSpec(string Kind, int[] OwnerTickets);
+    private sealed record SourceSpec(string Kind, int? Address);
+
+    private static readonly IReadOnlyDictionary<string, SourceSpec> FrozenSourceSpecs = CreateFrozenSourceSpecs();
 
     private static readonly IReadOnlyDictionary<string, ClosureSpec> ClosureSpecs = new Dictionary<string, ClosureSpec>(StringComparer.Ordinal)
     {
         ["trigger-09c3-0a32"] = new("command", new JsonObject { ["kind"] = "event-range", ["startAddress"] = 0x09c3, ["battleAddress"] = 0x09fe, ["wonStartAddress"] = 0x09ff, ["endAddress"] = 0x0a32 }, [52, 53], ["events"]),
-        ["battle-team-18"] = new("command", new JsonObject { ["kind"] = "battle-command", ["commandAddress"] = 0x09fe, ["operands"] = new JsonArray(0x0012, 0xa073, 0x0000), ["enemyTeamId"] = 18, ["enemyObjectId"] = 495, ["enemyId"] = 97, ["enemyCount"] = 2, ["battlefieldId"] = 24, ["specialValue"] = "third-operand-zero-is-boss-no-flee", ["reverseEncoding"] = "encode-operands-from-semantic-fields" }, [46, 47, 53], ["events", "battle-data"]),
+        ["battle-team-18"] = new("command", new JsonObject { ["kind"] = "battle-command", ["commandAddress"] = 0x09fe, ["operands"] = new JsonArray(0x0012, 0xa073, 0x0000), ["enemyTeamId"] = 18, ["enemyObjectId"] = 495, ["enemyId"] = 97, ["enemyCount"] = 2, ["battlefieldId"] = 24, ["specialValue"] = "third-operand-zero-is-boss-no-flee", ["reverseEncoding"] = "encode-operands-from-semantic-fields" }, [46, 47, 51, 53], ["events", "battle-data"]),
         ["role-hooks-random"] = new("command", new JsonObject { ["kind"] = "role-script-ranges", ["dyingRoleId"] = 1, ["dyingStartAddress"] = 0xa96e, ["dyingEndAddress"] = 0xa987, ["friendDeathRoleId"] = 0, ["friendDeathStartAddress"] = 0xa9b5, ["friendDeathEndAddress"] = 0xa9d1, ["branchCoverage"] = "all-random-branches" }, [49], ["events", "battle-data", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
         ["equipment-six-role"] = new("validation", new JsonObject { ["kind"] = "equipment-layout", ["roleCount"] = 6, ["slotCount"] = 6, ["dualAttackObjectId"] = 170, ["persistentEquipmentStatus"] = true }, [48], ["battle-data"]),
         ["growth-five-role"] = new("validation", new JsonObject { ["kind"] = "growth-layout", ["roleCount"] = 5, ["includesPrimaryExperience"] = true, ["includesHiddenExperience"] = true, ["includesRecoveryAndCleanup"] = true }, [50], ["battle-data"]),
@@ -32,7 +35,7 @@ internal static class BattleContextAuthor
     private static readonly IReadOnlyDictionary<string, ResourceSpec> ResourceSpecs = new Dictionary<string, ResourceSpec>(StringComparer.Ordinal)
     {
         ["events"] = new("faithful-events", [52, 53]),
-        ["battle-data"] = new("battle-data", [46, 47, 48, 49, 50, 53]),
+        ["battle-data"] = new("battle-data", [46, 47, 48, 49, 50, 51, 53]),
         ["battle-images"] = new("battle-images", [53]),
         ["dialogue-zh-cn"] = new("dialogue-language", [49, 53]),
         ["dialogue-en"] = new("dialogue-language", [49, 53]),
@@ -157,21 +160,52 @@ internal static class BattleContextAuthor
 
     private static void ValidateSourceSemantics(JsonElement snapshot, IReadOnlyDictionary<string, JsonElement> sources)
     {
+        var frozenSources = new Dictionary<string, SourceSpec>(FrozenSourceSpecs, StringComparer.Ordinal);
+        int eventObjectIndex = 0;
+        foreach (JsonElement item in snapshot.GetProperty("world").GetProperty("eventObjects").EnumerateArray())
+        {
+            if (Integer(item, "ownerId") == 28)
+                frozenSources.Add($"snapshot.world.eventObjects[{eventObjectIndex}].state", new("required-precondition", 0x0936));
+            eventObjectIndex++;
+        }
         foreach ((string path, JsonElement source) in sources)
+        {
             Expect(Text(source, "appliesTo") == ExpectedAppliesTo(snapshot, path), $"field source appliesTo does not match path '{path}'.");
-        foreach (string path in new[] { "snapshot.roles[1].hp", "snapshot.roles[1].mp" })
+            string kind = Text(source, "sourceKind");
+            if (kind == "required-precondition")
+                Expect(frozenSources.TryGetValue(path, out SourceSpec? required) && required.Kind == kind
+                    && Word(source.GetProperty("sourceAddress"), "sourceAddress") == required.Address,
+                    $"required-precondition source for '{path}' is not an approved path/address tuple.");
+        }
+        foreach ((string path, SourceSpec expected) in frozenSources)
         {
             JsonElement source = sources[path];
-            Expect(Text(source, "sourceKind") == "original-base" && source.GetProperty("sourceAddress").ValueKind == JsonValueKind.Null
-                && Text(source, "appliesTo") == "role1", $"'{path}' must use original-base/null/role1 provenance.");
+            JsonElement address = source.GetProperty("sourceAddress");
+            Expect(Text(source, "sourceKind") == expected.Kind
+                && (expected.Address is null ? address.ValueKind == JsonValueKind.Null : Word(address, "sourceAddress") == expected.Address),
+                $"'{path}' must use its frozen {expected.Kind} provenance tuple.");
         }
-        const string magicPath = "snapshot.roles[0].magics[1]";
-        JsonElement magicSource = sources[magicPath];
-        Expect(snapshot.GetProperty("roles")[0].GetProperty("magics")[1].GetInt32() == 345
-            && Text(magicSource, "sourceKind") == "required-precondition"
-            && Word(magicSource.GetProperty("sourceAddress"), "sourceAddress") == 0x0905
-            && Text(magicSource, "appliesTo") == "role0",
-            "role0 magic value 345 must have required-precondition @0905 provenance.");
+    }
+
+    private static IReadOnlyDictionary<string, SourceSpec> CreateFrozenSourceSpecs()
+    {
+        var result = new Dictionary<string, SourceSpec>(StringComparer.Ordinal);
+        void Base(string path) => result.Add(path, new("original-base", null));
+        foreach (string property in new[] { "level", "coveredByRoleId" })
+        {
+            Base($"snapshot.roles[0].{property}");
+            Base($"snapshot.roles[1].{property}");
+        }
+        foreach (string property in new[] { "hp", "maxHp", "mp", "maxMp" }) Base($"snapshot.roles[1].{property}");
+        for (int slot = 0; slot < 6; slot++)
+        {
+            Base($"snapshot.roles[0].equipment[{slot}]");
+            Base($"snapshot.roles[1].equipment[{slot}]");
+        }
+        Base("snapshot.roles[0].magics[0]");
+        for (int index = 0; index < 10; index++) Base($"snapshot.roles[1].magics[{index}]");
+        result.Add("snapshot.roles[0].magics[1]", new("required-precondition", 0x0905));
+        return result;
     }
 
     private static string ExpectedAppliesTo(JsonElement snapshot, string path)
@@ -239,18 +273,22 @@ internal static class BattleContextAuthor
         SignedWord(leader.GetProperty("x"), "leader.x"); SignedWord(leader.GetProperty("y"), "leader.y");
         Expect(Text(leader, "direction") is "north" or "east" or "south" or "west", "leader direction is invalid.");
         Word(leader.GetProperty("layer"), "leader.layer");
-        Expect(Integer(leader, "phase") >= 0, "leader phase is invalid.");
+        Expect(Integer(leader, "phase") is >= 0 and <= 3, "leader phase must be 0..3.");
         JsonElement proof = Object(world, "searchProof");
         Keys(proof, "searchProof", "ownerId", "sampleIndex", "collisionPass");
         Expect(Integer(proof, "ownerId") == 28 && Integer(proof, "sampleIndex") is >= 0 and < 13 && Boolean(proof, "collisionPass"),
             "searchProof must record a legal 13-sample owner28 hit and collision pass.");
         JsonElement sceneEntries = Array(world, "sceneEntries");
         Expect(sceneEntries.GetArrayLength() > 0, "sceneEntries must not be empty.");
+        var sceneIds = new HashSet<int>();
         foreach (JsonElement entry in sceneEntries.EnumerateArray())
         {
             Keys(entry, "scene entry", "sceneId", "enterEntry", "teleportEntry");
-            PositiveWord(entry, "sceneId"); Word(entry.GetProperty("enterEntry"), "enterEntry"); Word(entry.GetProperty("teleportEntry"), "teleportEntry");
+            int sceneId = PositiveWord(entry, "sceneId");
+            Expect(sceneIds.Add(sceneId), "sceneEntries sceneId values must be unique.");
+            Word(entry.GetProperty("enterEntry"), "enterEntry"); Word(entry.GetProperty("teleportEntry"), "teleportEntry");
         }
+        Expect(sceneIds.Contains(2), "sceneEntries must include the selected scene 2.");
         JsonElement objects = Array(world, "eventObjects");
         Expect(objects.GetArrayLength() > 0, "eventObjects must not be empty.");
         bool foundOwner = false;

@@ -172,6 +172,13 @@ public sealed class BattleContextCliTests : IDisposable
     [InlineData("nonexistent-path")]
     [InlineData("wrong-0905-address")]
     [InlineData("empty-container")]
+    [InlineData("role0-equipment-as-policy")]
+    [InlineData("role1-equipment-as-policy")]
+    [InlineData("role0-base-magic-as-policy")]
+    [InlineData("role1-base-magic-as-policy")]
+    [InlineData("base-equipment-unrelated-precondition")]
+    [InlineData("base-magic-unrelated-precondition")]
+    [InlineData("owner28-state-unrelated-precondition")]
     public async Task Author_battle_context_rejects_contradictory_or_incomplete_provenance(string mutation)
     {
         JsonObject document = CreateAuthorDocument();
@@ -184,13 +191,43 @@ public sealed class BattleContextCliTests : IDisposable
         else if (mutation == "wrong-applies-to") role1Hp["appliesTo"] = "role5";
         else if (mutation == "nonexistent-path") sources.Add(new JsonObject { ["path"] = "snapshot.roles[5].notReal", ["sourceKind"] = "author-policy", ["sourceAddress"] = null, ["appliesTo"] = "role5" });
         else if (mutation == "wrong-0905-address") role0Magic["sourceAddress"] = 0x0904;
-        else sources.Remove(sources.Single(x => x!["path"]!.GetValue<string>() == "snapshot.roles[2].magics"));
+        else if (mutation == "empty-container") sources.Remove(sources.Single(x => x!["path"]!.GetValue<string>() == "snapshot.roles[2].magics"));
+        else
+        {
+            string path = mutation switch
+            {
+                "role0-equipment-as-policy" => "snapshot.roles[0].equipment[0]",
+                "role1-equipment-as-policy" => "snapshot.roles[1].equipment[3]",
+                "role0-base-magic-as-policy" => "snapshot.roles[0].magics[0]",
+                "role1-base-magic-as-policy" => "snapshot.roles[1].magics[0]",
+                "base-equipment-unrelated-precondition" => "snapshot.roles[0].equipment[0]",
+                "base-magic-unrelated-precondition" => "snapshot.roles[1].magics[0]",
+                _ => "snapshot.world.eventObjects[0].state"
+            };
+            JsonNode source = sources.Single(x => x!["path"]!.GetValue<string>() == path)!;
+            source["sourceKind"] = mutation.EndsWith("as-policy", StringComparison.Ordinal) ? "author-policy" : "required-precondition";
+            source["sourceAddress"] = mutation.EndsWith("as-policy", StringComparison.Ordinal) ? null : 0xffff;
+        }
         File.WriteAllText(input, document.ToJsonString());
 
         var result = await CliProcess.Run(root, "author-battle-context", "--input", input, "--output", output);
 
         Assert.Equal(1, result.ExitCode);
         Assert.NotEmpty(result.Stderr);
+    }
+
+    [Fact]
+    public async Task Author_battle_context_rejects_sha256_with_final_line_feed()
+    {
+        JsonObject document = CreateAuthorDocument();
+        document["resources"]![0]!["sha256"] = new string('a', 64) + "\n";
+        File.WriteAllText(input, document.ToJsonString());
+
+        var result = await CliProcess.Run(root, "author-battle-context", "--input", input, "--output", output);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("sha256", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(output));
     }
 
     [Fact]
@@ -212,6 +249,8 @@ public sealed class BattleContextCliTests : IDisposable
     [InlineData("unsigned-high")]
     [InlineData("signed-high")]
     [InlineData("leader-high")]
+    [InlineData("leader-phase-low")]
+    [InlineData("leader-phase-high")]
     public async Task Author_battle_context_rejects_incomplete_or_out_of_range_event_state(string mutation)
     {
         JsonObject document = CreateAuthorDocument();
@@ -220,7 +259,8 @@ public sealed class BattleContextCliTests : IDisposable
         else if (mutation == "unsigned-low") item["x"] = -1;
         else if (mutation == "unsigned-high") item["direction"] = 65536;
         else if (mutation == "signed-high") item["state"] = 32768;
-        else document["snapshot"]!["world"]!["leader"]!["x"] = 32768;
+        else if (mutation == "leader-high") document["snapshot"]!["world"]!["leader"]!["x"] = 32768;
+        else document["snapshot"]!["world"]!["leader"]!["phase"] = mutation == "leader-phase-low" ? -1 : 4;
         File.WriteAllText(input, document.ToJsonString());
 
         var result = await CliProcess.Run(root, "author-battle-context", "--input", input, "--output", output);
@@ -238,6 +278,7 @@ public sealed class BattleContextCliTests : IDisposable
     [InlineData("09fe-operands")]
     [InlineData("resource-kind")]
     [InlineData("resource-owners")]
+    [InlineData("remove-owner-51")]
     public async Task Author_battle_context_rejects_false_closure_or_resource_claims(string mutation)
     {
         JsonObject document = CreateAuthorDocument();
@@ -250,13 +291,47 @@ public sealed class BattleContextCliTests : IDisposable
         else if (mutation == "resource-link") battle["resourceIds"] = new JsonArray("events");
         else if (mutation == "09fe-operands") battle["identity"]!["operands"]![2] = 1;
         else if (mutation == "resource-kind") document["resources"]![0]!["kind"] = "anything";
-        else document["resources"]![0]!["ownerTickets"] = new JsonArray(53);
+        else if (mutation == "resource-owners") document["resources"]![0]!["ownerTickets"] = new JsonArray(53);
+        else battle["ownerTickets"] = new JsonArray(46, 47, 53);
         File.WriteAllText(input, document.ToJsonString());
 
         var result = await CliProcess.Run(root, "author-battle-context", "--input", input, "--output", output);
 
         Assert.Equal(1, result.ExitCode);
         Assert.NotEmpty(result.Stderr);
+    }
+
+    [Theory]
+    [InlineData("duplicate-scene-id")]
+    [InlineData("missing-selected-scene")]
+    public async Task Author_battle_context_rejects_ambiguous_or_missing_selected_scene_entry(string mutation)
+    {
+        JsonObject document = CreateAuthorDocument();
+        JsonArray entries = document["snapshot"]!["world"]!["sceneEntries"]!.AsArray();
+        JsonArray sources = document["provenance"]!["fieldSources"]!.AsArray();
+        if (mutation == "duplicate-scene-id")
+        {
+            entries.Add(entries[0]!.DeepClone());
+            foreach (JsonNode? original in sources.Where(x => x!["path"]!.GetValue<string>().StartsWith("snapshot.world.sceneEntries[0]", StringComparison.Ordinal)).ToArray())
+            {
+                JsonObject copy = original!.DeepClone().AsObject();
+                copy["path"] = copy["path"]!.GetValue<string>().Replace("sceneEntries[0]", "sceneEntries[1]", StringComparison.Ordinal);
+                sources.Add(copy);
+            }
+        }
+        else
+        {
+            entries[0]!["sceneId"] = 3;
+            foreach (JsonNode? source in sources.Where(x => x!["path"]!.GetValue<string>().StartsWith("snapshot.world.sceneEntries[0]", StringComparison.Ordinal)))
+                source!["appliesTo"] = "scene3";
+        }
+        File.WriteAllText(input, document.ToJsonString());
+
+        var result = await CliProcess.Run(root, "author-battle-context", "--input", input, "--output", output);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.NotEmpty(result.Stderr);
+        Assert.False(Directory.Exists(output));
     }
 
     [Theory]
@@ -298,7 +373,7 @@ public sealed class BattleContextCliTests : IDisposable
         };
         var closureEntries = new JsonArray(
             Closure("trigger-09c3-0a32", "command", new JsonObject { ["kind"] = "event-range", ["startAddress"] = 0x09c3, ["battleAddress"] = 0x09fe, ["wonStartAddress"] = 0x09ff, ["endAddress"] = 0x0a32 }, [52, 53], ["events"]),
-            Closure("battle-team-18", "command", new JsonObject { ["kind"] = "battle-command", ["commandAddress"] = 0x09fe, ["operands"] = new JsonArray(0x0012, 0xa073, 0x0000), ["enemyTeamId"] = 18, ["enemyObjectId"] = 495, ["enemyId"] = 97, ["enemyCount"] = 2, ["battlefieldId"] = 24, ["specialValue"] = "third-operand-zero-is-boss-no-flee", ["reverseEncoding"] = "encode-operands-from-semantic-fields" }, [46, 47, 53], ["events", "battle-data"]),
+            Closure("battle-team-18", "command", new JsonObject { ["kind"] = "battle-command", ["commandAddress"] = 0x09fe, ["operands"] = new JsonArray(0x0012, 0xa073, 0x0000), ["enemyTeamId"] = 18, ["enemyObjectId"] = 495, ["enemyId"] = 97, ["enemyCount"] = 2, ["battlefieldId"] = 24, ["specialValue"] = "third-operand-zero-is-boss-no-flee", ["reverseEncoding"] = "encode-operands-from-semantic-fields" }, [46, 47, 51, 53], ["events", "battle-data"]),
             Closure("role-hooks-random", "command", new JsonObject { ["kind"] = "role-script-ranges", ["dyingRoleId"] = 1, ["dyingStartAddress"] = 0xa96e, ["dyingEndAddress"] = 0xa987, ["friendDeathRoleId"] = 0, ["friendDeathStartAddress"] = 0xa9b5, ["friendDeathEndAddress"] = 0xa9d1, ["branchCoverage"] = "all-random-branches" }, [49], ["events", "battle-data", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
             Closure("equipment-six-role", "validation", new JsonObject { ["kind"] = "equipment-layout", ["roleCount"] = 6, ["slotCount"] = 6, ["dualAttackObjectId"] = 170, ["persistentEquipmentStatus"] = true }, [48], ["battle-data"]),
             Closure("growth-five-role", "validation", new JsonObject { ["kind"] = "growth-layout", ["roleCount"] = 5, ["includesPrimaryExperience"] = true, ["includesHiddenExperience"] = true, ["includesRecoveryAndCleanup"] = true }, [50], ["battle-data"]),
@@ -346,7 +421,7 @@ public sealed class BattleContextCliTests : IDisposable
             ["closure"] = new JsonObject { ["entry"] = "@09C3", ["entries"] = closureEntries },
             ["resources"] = new JsonArray(
                 Resource("events", "faithful-events", "events/index.json", [52, 53]),
-                Resource("battle-data", "battle-data", "battle/data.json", [46, 47, 48, 49, 50, 53]),
+                Resource("battle-data", "battle-data", "battle/data.json", [46, 47, 48, 49, 50, 51, 53]),
                 Resource("battle-images", "battle-images", "battle/images.json", [53]),
                 Resource("dialogue-zh-cn", "dialogue-language", "dialogue/zh-CN.json", [49, 53]),
                 Resource("dialogue-en", "dialogue-language", "dialogue/en.json", [49, 53]),
@@ -370,8 +445,22 @@ public sealed class BattleContextCliTests : IDisposable
         }
         else if (existing.Add(path))
         {
-            sources.Add(new JsonObject { ["path"] = path, ["sourceKind"] = "author-policy", ["sourceAddress"] = null, ["appliesTo"] = AppliesTo(path, snapshot) });
+            (string kind, int? address) = FixtureProvenance(path);
+            sources.Add(new JsonObject { ["path"] = path, ["sourceKind"] = kind, ["sourceAddress"] = address, ["appliesTo"] = AppliesTo(path, snapshot) });
         }
+    }
+
+    private static (string Kind, int? Address) FixtureProvenance(string path)
+    {
+        if (path == "snapshot.world.eventObjects[0].state") return ("required-precondition", 0x0936);
+        if (path.StartsWith("snapshot.roles[0].equipment[", StringComparison.Ordinal)
+            || path.StartsWith("snapshot.roles[1].equipment[", StringComparison.Ordinal)
+            || path == "snapshot.roles[0].magics[0]"
+            || path.StartsWith("snapshot.roles[1].magics[", StringComparison.Ordinal)
+            || path is "snapshot.roles[0].level" or "snapshot.roles[0].coveredByRoleId"
+            || path is "snapshot.roles[1].level" or "snapshot.roles[1].hp" or "snapshot.roles[1].maxHp" or "snapshot.roles[1].mp" or "snapshot.roles[1].maxMp" or "snapshot.roles[1].coveredByRoleId")
+            return ("original-base", null);
+        return ("author-policy", null);
     }
 
     private static string AppliesTo(string path, JsonObject snapshot)
