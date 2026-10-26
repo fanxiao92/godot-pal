@@ -16,9 +16,7 @@
 
 **M2 Windows 单领队探索里程碑已完成（2026-10-22）。** 功能、自动/人工验收及收尾文档独立双轴终审均已接受；成果已合入并通过 SSH 推送到 `main`，已验证交付提交为 `a76f83bf08c421e83892cc9515cbdd4c032014ec`。[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)、[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 和后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，[远端完整 Windows CI](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过。场景 2 / 地图 12 的静态对象、单领队离散行走/碰撞/遮挡、320×200 整数缩放、方向键/WASD 与失焦恢复已交付。入口与独立原生配置见 [M2 计划](docs/milestones/m2/plan.md)，分层证据与限制见 [M2 验收记录](docs/milestones/m2/acceptance.md)。其余表现层/外壳层能力按后续阶段设计。[事件 JSON 契约](docs/design/events-schema.md) 已确定原版忠实低层转写策略、v1 文件结构与基础命令,全量 opcode 映射尚未实现；当前 M3 有限执行与工具进度见下。独立 CLI 已提供只读 MKF 检查、Windows YJ2/图像解码、地图/精灵导出及带 v1 来源清单的完整静态场景包。
 
-**M3 独立真实 NPC 对话切片已实现，并完成本地、GPU及Windows人工分层验证（2026-10-23）。** [#20](https://github.com/fanxiao92/godot-pal/issues/20) 批准的 scene 4 / map 10 / owner 60 切片已接通完整 faithful 事件转换、现代双语显示资源、trigger 执行、真实搜索与返回/再次交谈。共享探索已取消 M2 额外的失焦冻结/清键/fresh-press；普通对话阻塞探索不等于失焦暂停。它不是原版出生或场景 4 正常自由探索，不支持全量 VM/auto/其他对象剧情。已有双语GPU各10项零差/2calls及用户Windows清单反馈按原身份保留，不冒称本轮重新实测。当前统一候选修复ACK及夹具日志读取竞态后，新完整门在17:26–17:36 UTC正常exit0/573.830秒，15份TRX及启动链完整；失败CI和后续发布严格分列，**精确候选CI、main合入/推送和各Issue关闭以[#26交付回填](https://github.com/fanxiao92/godot-pal/issues/26)及[#20](https://github.com/fanxiao92/godot-pal/issues/20)为准**，本地PASS不签远端。用户已授权持续处理到交付。证据、当前入口及限制见[M3计划](docs/milestones/m3/plan.md)和[验收检查点](docs/milestones/m3/acceptance.md)。规格外Observer已停用，历史工具P1和verifier `not-satisfied`不改判，不宣称工具修复或隐私风险消除；M2历史接受保持。
-
-**已审SceneRunner首批与M3统一候选共同交付。** 独立M2版本为ab1d64c/52afa6c（#29/#30/#28已关闭），经两父合并00f3c64统一；三项P2修复0ee8204、固定串行拆批fc70570及后续夹具ACK修复均保留八方向/布局路线、五项Main合同和main独有Core正常截止测试。最新完整本地门为Core328、CLI330＋2原skip、Prepare52、Game三轮各242、discovery245、三个指定失败和六阶段startup；前次CLI误报、旧143中止和失败CI原件不改判。M3保持无额外焦点冻结策略，不重做已实现NPC功能。旧单次17.937→11.604秒/Godot8→0不作为当前性能或历史CI根因证据。长期规则见[Game测试分层](docs/testing/game-test-layers.md)，覆盖及命令见[Game测试说明](src/Pal.Game/Tests/README.md)。
+**M3 独立真实 NPC 对话切片已主线交付。** 当前范围为 scene 4 / map 10 / owner 60 的 faithful 事件转换、现代双语资源、有限 trigger、搜索及返回/再次交谈；不包含正常场景4自由探索、全量 VM/auto 或完整剧情。共享探索已取消 M2 额外的失焦冻结/清键/fresh-press。当前状态、最终 Issue/CI 和分层证据以[M3 验收页](docs/milestones/m3/acceptance.md#当前状态)为单点索引；旧本地门、GPU/用户反馈、SceneRunner 性能、失败与 Observer 限制保留在[历史交付摘要](docs/archive/m3/game-test-run-history.md#根目录交付摘要结构收口前)，不转签为本轮实测。
 
 用户数据已放入 `data/raw/sdlpal/`,初步核对符合 Windows 数据分支。[M1 计划](docs/milestones/m1/plan.md) 范围已确认：只提取地图、瓦片、精灵、调色板与场景对象初始数据。[实施任务 #6～#10](https://github.com/fanxiao92/godot-pal/issues/6) 已完成本地验收和独立双轴审查，结果与收尾说明见对应 Issue。场景 2 的两次完整导出 416 文件字节一致，原始数据散列/长度/mtime 不变；M1 当轮 Debug/Release 构建测试与 Godot headless 启动通过，当轮未重跑 clean-cache/桌面/远程 CI 验收。M2 负责 Godot 场景构建与探索；事件、对话、语言包和字库是 M3 的独立增量，不是 M1/M2 场景构建的前置条件。后续阶段见 [总体路线](docs/design/development-plan.md)。
 
@@ -117,7 +115,7 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
   -GodotPath "C:/path/to/godot-mono.console.exe"
 ```
 
-该入口使用全新 NuGet 包/HTTP 缓存，保留 solution 还原/构建，显式串行执行 Core/CLI/Prepare，再将 Game 的每轮完整正例固定拆为66/79/97三批；首轮、独立轮和repeat轮全部保留，另核发现/指定失败控制及人工资源的 headless 导入/启动。120秒会话上限、固定工具链和全部案例不变，15份TRX按源码身份与完整性核验，规则见[固定串行批次](docs/testing/game-test-layers.md#完整门的固定串行批次)；日志路径会打印到终端，不清空既有 `.godot` 缓存。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；历史 M2 本地/远端结果见 [M2 验收记录](docs/milestones/m2/acceptance.md)；M3 的历史自动门PASS、用户人工确认通过、已停用 Observer 的历史缺陷、失败 CI 及当前收尾候选待验证项见 [M3 验收检查点](docs/milestones/m3/acceptance.md)，不得拿历史 CI 代替当前 M3。
+该入口使用全新 NuGet 包/HTTP 缓存，保留 solution 还原/构建，显式串行执行 Core、CLI unit、CLI integration、Prepare，再执行当前脚本定义的 Game 三轮完整批次、发现、指定失败控制及人工资源的 headless 导入/启动；日志路径会打印到终端，不清空既有 `.godot` 缓存。当前完整结果为16份 TRX/20条主命令，总执行1441；历史 M3 的15份/19条保持其原身份。批次、工具链及预算以当前脚本/config 为准，旧批次与交付记录见[历史索引](docs/archive/m3/game-test-history.md)。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；历史 M2 本地/远端结果见 [M2 验收记录](docs/milestones/m2/acceptance.md)；M3 的当前交付状态见 [M3 验收检查点](docs/milestones/m3/acceptance.md#当前状态)；历史自动门、用户人工确认、已停用 Observer 缺陷和失败 CI 按历史身份保留，不得拿历史 CI 代替当前状态。
 
 技术版本记录在此，检查由测试和 CI 执行，任务结果记录在 GitHub Issue 中；不要求每次检查另写一份报告。M0 的详细历史记录保留在 [归档](docs/archive/m0/acceptance.md)，仅在排障或追溯时查阅。
 
@@ -134,7 +132,8 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
 - `src/Pal.Game/` —— Godot .NET 游戏工程
 - `tools/Pal.Extract/` —— 独立离线提取 CLI（只读检查、地图/场景导出、完整静态场景包、事件转写/重建与现代对话转换）
 - `tests/Pal.Core.Tests/` —— 核心 xUnit 测试
-- `tests/Pal.Extract.Tests/` —— CLI 真实进程测试
+- `tests/Pal.Extract.Tests/` —— CLI 内存单元测试，不依赖文件/进程/Godot
+- `tests/Pal.Extract.IntegrationTests/` —— CLI 文件与真实进程集成测试
 - `scripts/` —— 引擎下载、兼容性探针、游戏启动检查与共享验收入口
 - `reference/sdlpal/` —— sdlpal 源码,作为引擎逻辑参考(见 `reference/README.md`)
 - `data/raw/` —— 放原版 98 柔情版数据文件的地方(见 `data/raw/README.md`)
@@ -143,8 +142,8 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
 
 在本目录新开一个对话，可直接给 AI 以下提示词：
 
-> 请先读取 `AGENTS.md`，遵循其中的工作流；读取 `GLOSSARY.md`、`docs/design/` 下全部 Markdown 文件、`reference/README.md`、相关 ADR 以及 `docs/milestones/m3/plan.md`，核对当前里程碑和 GitHub 状态，再确认下一项已批准任务。
+> 新任务先读 `AGENTS.md`，核对仓库、分支、HEAD、已有改动、目标 Issue 正文/评论/直接依赖及当前脚本配置；再按任务契约选择 [文档导航](docs/README.md) 中的职责入口。不要默认递归读取全部 design、reference 或历史 Issue；只在具体忠实转写/参考实现、ADR、时序、Game 迁移、排障或追溯触发时进入对应文档。
 >
-> M0/M1/M2 已完成；历史 Windows CI 已通过，#11/#17/#19 已关闭。M3 #20～#27 已批准并本地集成；2026-10-23重新只读核对正文/评论/直接依赖，除 #22 外各票仍 OPEN。先核当前分支/提交、Issue 正文评论/直接依赖和 M3 验收检查点，不据旧路线重复已完成组件。当前只支持显式独立 NPC 对话切片：精确 dab79ad8 原完整自动门PASS；本对话用户确认两语言/物理输入/Alt-Tab/缩放关闭的 Windows 人工清单通过，非agent独立实测。规格外 Observer 已停用，历史缺陷及 verifier not-satisfied 保留但非 M3 功能门；历史CI39884910037仍cancelled/未通过；当前统一收尾候选已通过新串行拆批完整门，精确提交CI、主线合入及Issue收尾按用户已给授权分别留证，不以本地结果替代远端结果。不提前勾M3整体完成，不把历史实测移给新HEAD。真实资源仅显式准备并本地复用，不上传、不自动同步。提交、推送、合并和 Issue 关闭按明确授权执行。
+> 当前里程碑和远端状态是动态事实，必须以实时 Issue、实际提交、CI 和证据为准；历史计数、人工反馈、失败、授权和 Observer 结论保持原身份，不能移给新 HEAD 或拼成新通过。真实资源只显式准备并本地复用，不上传、不自动同步。提交、推送、合并、Issue 收尾、CI/保护操作按明确授权执行；Draft/Ready/main/manual 的操作规则见 [CI 分流](docs/testing/ci-dispatch.md)，服务端保护状态不由 workflow 或仓库 public 推断。
 
 `reference/README.md` 是参考源码导航，不要求通读整个 SDLPal；实现具体任务时再读取相关源码。`docs/archive/` 仅在排障、环境升级或追溯历史结论时查阅。
