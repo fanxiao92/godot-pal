@@ -23,7 +23,7 @@ Battle context authored: first-mandatory-battle-pre-trigger-v1
 - `battle-context.json`：严格校验后规范缩进的完整 author 文档；
 - `index.json`：`formatVersion`、固定 `profile`、固定文件名和该文件实际字节的 SHA-256。
 
-命令只读取 author 文件，不读 MKF、SLF、M1 包或参考源码，不自动同步资源。运行时不得启动本工具，也不得读取原始档；后续 `45-core-profile` / `45-game-integration` 应把这份现代 JSON 显式准备成 Godot 原生 Resource，并在加载时复核 `index.json` 内容身份。真实原始与派生资源不提交。
+命令只读取 author 文件，不读 MKF、SLF、M1 包或参考源码，不自动同步资源。运行时不得启动本工具，也不得读取原始档；已完成的 `45-core-profile` 只负责复核 index/context exact-byte 身份，只有后续 `45-game-integration` 将经过验证的现代数据显式准备为 Godot 原生 Resource。真实原始与派生资源不提交。
 
 ## 2. v1 顶层与冻结身份
 
