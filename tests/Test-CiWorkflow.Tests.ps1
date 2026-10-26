@@ -48,6 +48,9 @@ $blocks = @{
     cost = Read-ActualBlock 'Generate current-run cost report'
     proof = Read-ActualBlock 'Validate current-run full proof'
     final = Read-ActualBlock 'Fail closed unless the current full gate completed successfully'
+    offlineStart = Read-ActualBlock 'Record and validate offline start candidate identity'
+    offlineEnd = Read-ActualBlock 'Validate offline end candidate freshness'
+    offlineProof = Read-ActualBlock 'Validate current-run offline proof'
 }
 foreach ($name in $blocks.Keys) { Write-Utf8 (Join-Path $base "$name.extracted.ps1") $blocks[$name] }
 Write-Json (Join-Path $base 'source.json') @{ workflow = $workflow; sha256 = (Get-FileHash $workflow -Algorithm SHA256).Hash; synthetic = $true }
@@ -94,7 +97,7 @@ function New-Case([string]$Name, [string]$Scenario = 'success', [bool]$Candidate
     $scripts = Join-Path $dir 'scripts'
     $null = New-Item -ItemType Directory -Path $scripts
     $hashes = @()
-    foreach ($script in @('New-CiCostInput.ps1','Get-TestCostReport.ps1','GameTestBatches.ps1','Test-CiFullProof.ps1','New-CiCandidateInputs.ps1','Test-CiCandidate.ps1')) {
+    foreach ($script in @('New-CiCostInput.ps1','Get-TestCostReport.ps1','TestCostReport.psm1','GameTestBatches.ps1','Test-CiFullProof.ps1','New-CiCandidateInputs.ps1','Test-CiCandidate.ps1')) {
         $source = Join-Path $root "scripts/$script"; $target = Join-Path $scripts $script
         [IO.File]::Copy($source, $target)
         $sha = (Get-FileHash $source -Algorithm SHA256).Hash
@@ -107,7 +110,7 @@ function New-Case([string]$Name, [string]$Scenario = 'success', [bool]$Candidate
     $identity = @{sha=$sha;checkout=$sha;runId='workflow-fixture';attempt=1;candidate=$sha;workflowRef="fixture/.github/workflows/ci.yml@refs/heads/含'引号";eventName='workflow_dispatch';action='manual'}
     if ($CandidateFixture) { Write-Json (Join-Path $dir 'ci-identity.json') $identity }
     $candidate = @{eventName='workflow_dispatch';action='manual';mode='manual-full';runId=$identity.runId;runAttempt=1;workflowRef=$identity.workflowRef;draft=$false;headSha=$null;baseSha=$null;candidateSha=$sha;actualCheckout=$sha;tree=('c'*40);parents=@()}
-    if ($CandidateFixture) { foreach ($sub in @('candidate-proof','candidate-end-proof')) { $null=New-Item -ItemType Directory -Path (Join-Path $dir $sub); Write-Json (Join-Path $dir "$sub/candidate-identity.json") $candidate } }
+    if ($CandidateFixture) { foreach ($sub in @('candidate-proof','candidate-end-proof','offline-start-proof','offline-end-proof')) { $null=New-Item -ItemType Directory -Path (Join-Path $dir $sub); Write-Json (Join-Path $dir "$sub/candidate-identity.json") $candidate } }
     return @{dir=$dir;env=@{RUNNER_TEMP=$dir;GITHUB_WORKSPACE=$dir;GITHUB_OUTPUT=(Join-Path $dir 'github-output.txt');CI_RUN_ID=$identity.runId;CI_RUN_ATTEMPT='1';CI_SHA=$sha;CI_WORKFLOW_REF=$identity.workflowRef;CI_EVENT_NAME='workflow_dispatch';GODOT_CONSOLE='explicit-fake-no-engine';FAKE_M0_SCENARIO=$Scenario}}
 }
 function Invoke-Block($Case, [string]$Block, [string]$Prefix = '') {
@@ -257,9 +260,81 @@ Check-Case 'full-gate-upload-includes-boundary-evidence' {
     Assert-That (@($paths | Where-Object { $_ -match '^\$\{\{ runner\.temp \}\}/m0-evidence/(?:packages|http-cache)(?:/|\*|$)' }).Count -eq 0) 'Boundary upload must not include package or HTTP cache paths.'
     Assert-That (@($paths | Where-Object { $_ -match '^\$\{\{ runner\.temp \}\}/m0-evidence/?(?:\*+(?:/\*+)*)?$' }).Count -eq 0) 'Acceptance upload must not expand to the entire M0 root.'
 }
+Check-Case 'offline-is-independent-and-full-gate-does-not-repeat-offline-regressions' {
+    $text=$lines -join "`n"
+    $job=[regex]::Match($text,'(?ms)^  engineering-offline:\n(?<body>.*?)(?=^  full-gate:)').Groups['body'].Value
+    Assert-That ($job -and $job -notmatch '(?m)^    needs:' -and $job -notmatch 'setup-dotnet@|Get-Godot.ps1|Test-M0.ps1') 'Offline job must run independently without SDK/engine setup or execution.'
+    $full=[regex]::Match($text,'(?ms)^  full-gate:\n(?<body>.*?)(?=^  full-check:)').Groups['body'].Value
+    Assert-That ($full -notmatch 'Test-Engineering.ps1 -Mode Offline') 'Full gate must not repeat offline regressions.'
+    Assert-That ($job.Contains("if: github.event_name != 'pull_request' || github.event.pull_request.draft != true")) 'Offline must follow the full-path Draft condition.'
+    Assert-That ($job.Contains('ci-offline-evidence-${{ github.run_id }}-${{ github.run_attempt }}')) 'Offline upload must distinguish run and attempt.'
+    Assert-That ($job.Contains('./tests/Test-CiWorkflow.Tests.ps1 -EvidenceDirectory') -and $job.Contains('/workflow-evidence/**')) 'Workflow contract regressions and their evidence must be wired into CI.'
+    $final=($lines[[Array]::IndexOf($lines,'  full-check:')..($lines.Length-1)]) -join "`n"
+    $bindings=@{OFFLINE_RESULT='result';OFFLINE_STATUS='outputs.proof_status';OFFLINE_RUN_ID='outputs.proof_run_id';OFFLINE_ATTEMPT='outputs.proof_attempt';OFFLINE_CANDIDATE='outputs.proof_candidate';OFFLINE_CODE='outputs.proof_code'}
+    foreach($name in $bindings.Keys) {
+        $expected='          '+$name+': ${{ needs.engineering-offline.'+$bindings[$name]+' }}'
+        Assert-That ([regex]::Matches($final,'(?m)^'+[regex]::Escape($expected)+'$').Count -eq 1) "Final offline env must consume the actual needs output: $name"
+    }
+    foreach($field in @('status','run_id','attempt','candidate','code')) {
+        Assert-That ($job.Contains('steps.offline-proof.outputs.'+$field+' }}')) "Offline job output binding is missing: $field"
+    }
+    Assert-That ($job.Contains('      - name: Download and verify fixed GdUnit bundle for offline checks') -and $job.Contains('      - name: Run offline engineering regressions')) 'Download and regressions must have separate step names.'
+}
+function Write-OfflineJournal($Case) {
+    $dir=Join-Path $Case.env.RUNNER_TEMP 'offline-evidence'; $null=New-Item -ItemType Directory -Path $dir
+    $steps=@(foreach($name in @('ast','unit-boundary','syntax-regression','engineering-regression','unit-boundary-regression','game-batches-regression','process-snapshot-regression','gdunit-packages-regression','cost-report-regression')) {
+        @{name=$name;exitCode=0;exitKnown=$true;rootExited=$true;stdoutComplete=$true;stderrComplete=$true;cleanupComplete=$true;status='completed'}
+    })
+    Write-Json (Join-Path $dir 'engineering-run.json') @{schemaVersion=1;kind='engineering';mode='Offline';status='complete';steps=$steps}
+}
+foreach($shape in @('positive','journal-failed','journal-array','journal-status-array','journal-mode-array','missing-step','duplicate-step','step-seven','step-unknown-exit','step-exit-string','step-status-array','step-status-bool','step-name-array','step-no-eof','step-cleanup-incomplete','candidate-array','candidate-stale-run','candidate-stale-attempt','candidate-stale-code','candidate-stale-workflow','candidate-draft','candidate-end-mismatch','missing-journal')) {
+    Check-Case "offline-proof-$shape" {
+        $case=New-Case "offline-proof-$shape"; Write-OfflineJournal $case
+        $journalPath=Join-Path $case.dir 'offline-evidence/engineering-run.json'
+        $candidatePath=Join-Path $case.dir 'offline-start-proof/candidate-identity.json'
+        $journal=Get-Content $journalPath -Raw | ConvertFrom-Json
+        $candidate=Get-Content $candidatePath -Raw | ConvertFrom-Json
+        switch($shape) {
+            'journal-failed' { $journal.status='failed' }
+            'journal-status-array' { $journal.status=@('complete') }
+            'journal-mode-array' { $journal.mode=@('Offline') }
+            'step-status-array' { $journal.steps[0].status=@('completed') }
+            'step-status-bool' { $journal.steps[0].status=$true }
+            'step-name-array' { $journal.steps[0].name=@('ast') }
+            'missing-step' { $journal.steps=@($journal.steps | Select-Object -SkipLast 1) }
+            'duplicate-step' { $journal.steps[8].name=$journal.steps[0].name }
+            'step-seven' { $journal.steps[0].exitCode=7 }
+            'step-unknown-exit' { $journal.steps[0].exitKnown=$false }
+            'step-exit-string' { $journal.steps[0].exitCode='0' }
+            'step-no-eof' { $journal.steps[0].stdoutComplete=$false }
+            'step-cleanup-incomplete' { $journal.steps[0].cleanupComplete=$false }
+            'candidate-stale-run' { $candidate.runId='old' }
+            'candidate-stale-attempt' { $candidate.runAttempt=2 }
+            'candidate-stale-code' { $candidate.actualCheckout=('f'*40) }
+            'candidate-stale-workflow' { $candidate.workflowRef='old' }
+            'candidate-draft' { $candidate.draft=$true }
+        }
+        Write-Json $journalPath $journal
+        Write-Json $candidatePath $candidate
+        Write-Json (Join-Path $case.dir 'offline-end-proof/candidate-identity.json') $candidate
+        if($shape -eq 'candidate-end-mismatch') { $candidate.tree=('f'*40); Write-Json (Join-Path $case.dir 'offline-end-proof/candidate-identity.json') $candidate }
+        if($shape -eq 'candidate-array') { Write-Json $candidatePath @($candidate) }
+        if($shape -eq 'journal-array') { Write-Json $journalPath @($journal) }
+        if($shape -eq 'missing-journal') { Remove-Item -LiteralPath $journalPath }
+        $r=Invoke-Block $case 'offlineProof'
+        if($shape -eq 'positive') {
+            Assert-That ($r.Exit -eq 0) "Valid offline proof failed: $($r.Err)"
+            $proof=Get-Content (Join-Path $case.dir 'offline-proof.json') -Raw | ConvertFrom-Json
+            Assert-That ($proof.status -ceq 'complete' -and $proof.runId -ceq $case.env.CI_RUN_ID -and $proof.codeIdentity -ceq $case.env.CI_SHA) 'Offline proof changed current identity.'
+        } else {
+            Assert-That ($r.Exit -ne 0) "Invalid offline proof was accepted: $shape"
+            Assert-That (-not(Test-Path -LiteralPath $case.env.GITHUB_OUTPUT)) "Rejected offline proof published outputs: $shape"
+        }
+    }
+}
 Check-Case 'final-needs-and-evidence-upload-contract' {
     $tail=($lines[[Array]::IndexOf($lines,'  full-check:')..($lines.Length-1)]) -join "`n"
-    Assert-That ($tail -match '(?m)^    needs: \[quick-unit, full-gate\]$' -and $tail -match '(?m)^    if: always\(\)$') 'Final check must always consume quick-unit AND full-gate.'
+    Assert-That ($tail -match '(?m)^    needs: \[quick-unit, engineering-offline, full-gate\]$' -and $tail -match '(?m)^    if: always\(\)$') 'Final check must always consume quick-unit, engineering-offline AND full-gate.'
     foreach($name in @('ci-quick-evidence-${{ github.run_id }}-${{ github.run_attempt }}','m0-windows-evidence-${{ github.run_id }}-${{ github.run_attempt }}')) {
         Assert-That (($lines -join "`n").Contains($name)) 'Artifact name must distinguish both run and attempt without overwriting older evidence.'
     }
@@ -280,6 +355,16 @@ $guardCases=@(
     @{name='full-cancelled';patch=@{NEEDS_RESULT='cancelled'};reason='full-gate'},
     @{name='full-skipped';patch=@{NEEDS_RESULT='skipped'};reason='full-gate'},
     @{name='full-unknown';patch=@{NEEDS_RESULT='unknown'};reason='full-gate'},
+    @{name='offline-failed';patch=@{OFFLINE_RESULT='failure'};reason='engineering-offline'},
+    @{name='offline-cancelled';patch=@{OFFLINE_RESULT='cancelled'};reason='engineering-offline'},
+    @{name='offline-skipped';patch=@{OFFLINE_RESULT='skipped'};reason='engineering-offline'},
+    @{name='offline-unknown';patch=@{OFFLINE_RESULT='unknown'};reason='engineering-offline'},
+    @{name='offline-missing-result';patch=@{OFFLINE_RESULT=''};reason='engineering-offline'},
+    @{name='offline-stale-run';patch=@{OFFLINE_RUN_ID='old'};reason='Offline proof'},
+    @{name='offline-stale-attempt';patch=@{OFFLINE_ATTEMPT='2'};reason='Offline proof'},
+    @{name='offline-stale-candidate';patch=@{OFFLINE_CANDIDATE=('f'*40)};reason='Offline proof'},
+    @{name='offline-stale-code';patch=@{OFFLINE_CODE=('f'*40)};reason='Offline proof'},
+    @{name='offline-missing-proof';patch=@{OFFLINE_STATUS=''};reason='Offline proof'},
     @{name='stale-proof-run';patch=@{PROOF_RUN_ID='old'};reason='Full proof'},
     @{name='stale-proof-attempt';patch=@{PROOF_ATTEMPT='2'};reason='Full proof'},
     @{name='stale-proof-candidate';patch=@{PROOF_CANDIDATE=('f'*40)};reason='Full proof'},
@@ -291,7 +376,7 @@ $guardCases=@(
 foreach($g in $guardCases) {
     Check-Case ('final-'+$g.name) {
         $dir=Join-Path $base ('guard-'+$g.name);$null=New-Item -ItemType Directory -Path $dir
-        $case=@{dir=$dir;env=@{NEEDS_RESULT='success';QUICK_RESULT='success';PROOF_STATUS='complete';PROOF_RUN_ID='fixture';PROOF_ATTEMPT='1';PROOF_CANDIDATE=('a'*40);PROOF_CODE=('a'*40);CURRENT_RUN_ID='fixture';CURRENT_ATTEMPT='1';CURRENT_SHA=('a'*40);CURRENT_EVENT_NAME='pull_request';CURRENT_DRAFT='false'}}
+        $case=@{dir=$dir;env=@{OFFLINE_RESULT='success';OFFLINE_STATUS='complete';OFFLINE_RUN_ID='fixture';OFFLINE_ATTEMPT='1';OFFLINE_CANDIDATE=('a'*40);OFFLINE_CODE=('a'*40);NEEDS_RESULT='success';QUICK_RESULT='success';PROOF_STATUS='complete';PROOF_RUN_ID='fixture';PROOF_ATTEMPT='1';PROOF_CANDIDATE=('a'*40);PROOF_CODE=('a'*40);CURRENT_RUN_ID='fixture';CURRENT_ATTEMPT='1';CURRENT_SHA=('a'*40);CURRENT_EVENT_NAME='pull_request';CURRENT_DRAFT='false'}}
         foreach($key in $g.patch.Keys){$case.env[$key]=$g.patch[$key]}
         $r=Invoke-Block $case 'final'
         if($g.pass){Assert-That ($r.Exit -eq 0) "Valid final guard failed: $($r.Err)"}
@@ -363,18 +448,25 @@ function Invoke-RestMethod {
 }
 '@
 Assert-Parse $ownedApi
-foreach ($job in @('quick-unit','full-gate')) {
+foreach ($job in @('quick-unit','engineering-offline','full-gate')) {
     Check-Case "actual-$job-shallow-candidate-chain" {
         $depth=Read-ActualCheckoutDepth $job
         $fixture=New-ShallowCandidateCase "shallow-$job" $depth ($job -ceq 'quick-unit')
-        $block=if ($job -ceq 'quick-unit') { 'quick' } else { 'start' }
+        $block=if ($job -ceq 'quick-unit') { 'quick' } elseif ($job -ceq 'engineering-offline') { 'offlineStart' } else { 'start' }
         $result=Invoke-Block $fixture.case $block $ownedApi
         Assert-That ($result.Exit -eq 0) "Actual $job candidate failed at configured depth ${depth}: $($result.Err)"
-        $proof=if ($job -ceq 'quick-unit') { 'quick-candidate-proof' } else { 'candidate-proof' }
+        $proof=if ($job -ceq 'quick-unit') { 'quick-candidate-proof' } elseif ($job -ceq 'engineering-offline') { 'offline-start-proof' } else { 'candidate-proof' }
         $identity=Get-Content (Join-Path $fixture.case.env.RUNNER_TEMP "$proof/candidate-identity.json") -Raw | ConvertFrom-Json -NoEnumerate
         Assert-That ($identity.parents -is [array] -and $identity.parents.Count -eq 2 -and $identity.parents[0] -ceq $fixture.parents[0] -and $identity.parents[1] -ceq $fixture.parents[1]) 'Actual public producer/consumer did not retain the ordered base/head parents.'
         Assert-That ($identity.actualCheckout -ceq $fixture.checkout -and $identity.candidateSha -ceq $fixture.checkout -and $identity.tree -ceq $fixture.tree) 'Actual public identity changed checkout/candidate/tree.'
         Assert-That ($depth -eq 2) 'Checkout must fetch only the required direct parent layer.'
+        if ($job -ceq 'engineering-offline') {
+            Write-OfflineJournal $fixture.case
+            $end=Invoke-Block $fixture.case 'offlineEnd' $ownedApi
+            Assert-That ($end.Exit -eq 0) "Actual offline end candidate failed: $($end.Err)"
+            $proofResult=Invoke-Block $fixture.case 'offlineProof'
+            Assert-That ($proofResult.Exit -eq 0) "Actual offline candidate/journal/proof chain failed: $($proofResult.Err)"
+        }
     }
 }
 Check-Case 'depth-one-candidate-rejects-for-ordered-parent-loss' {
