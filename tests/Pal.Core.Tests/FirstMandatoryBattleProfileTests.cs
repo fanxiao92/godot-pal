@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -16,6 +17,7 @@ public sealed class FirstMandatoryBattleProfileTests
         FirstMandatoryBattleProfile profile = FirstMandatoryBattleProfile.Load(fixture.IndexBytes, fixture.Files);
 
         Assert.Equal("first-mandatory-battle-pre-trigger-v1", profile.ProfileId);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(fixture.ContextBytes)), profile.ContextSha256);
         Assert.Equal(2, profile.Identity.SceneId);
         Assert.Equal(12, profile.Identity.MapId);
         Assert.Equal(28, profile.Identity.OwnerId);
@@ -36,8 +38,9 @@ public sealed class FirstMandatoryBattleProfileTests
         Assert.Equal(9, profile.Closure.Entries.Count);
         Assert.All(profile.Closure.Entries, entry => Assert.Equal("contract-only", entry.Status));
         BattleClosureEntry battle = profile.Closure.Entries.Single(x => x.Id == "battle-team-18");
-        Assert.Equal(0x09fe, battle.Identity.Numbers["commandAddress"]);
-        Assert.Equal(new[] { 0x0012, 0xa073, 0x0000 }, battle.Identity.NumberLists["operands"]);
+        BattleCommandIdentity battleIdentity = Assert.IsType<BattleCommandIdentity>(battle.Identity);
+        Assert.Equal(0x09fe, battleIdentity.CommandAddress);
+        Assert.Equal(new[] { 0x0012, 0xa073, 0x0000 }, battleIdentity.Operands);
         Assert.Equal(new[] { 46, 47, 51, 53 }, battle.OwnerTickets);
         Assert.Equal(new[] { "events", "battle-data" }, battle.ResourceIds);
         Assert.Equal(6, profile.Resources.Count);
@@ -56,6 +59,34 @@ public sealed class FirstMandatoryBattleProfileTests
             new Dictionary<string, byte[]> { ["battle-context.json"] = fixture.ContextBytes, ["extra.json"] = [] }));
         Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleProfile.Load(fixture.IndexBytes,
             new Dictionary<string, byte[]> { ["../battle-context.json"] = fixture.ContextBytes }));
+        Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleProfile.Load(fixture.IndexBytes,
+            new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase) { ["BATTLE-CONTEXT.JSON"] = fixture.ContextBytes }));
+    }
+
+    [Fact]
+    public void Public_surface_has_one_indexed_profile_factory_and_no_authoring_bypass()
+    {
+        MethodInfo[] publicStatic = typeof(FirstMandatoryBattleProfile).GetMethods(BindingFlags.Public | BindingFlags.Static);
+        MethodInfo factory = Assert.Single(publicStatic, method => method.ReturnType == typeof(FirstMandatoryBattleProfile));
+        Assert.Equal(nameof(FirstMandatoryBattleProfile.Load), factory.Name);
+        Assert.Equal(new[] { typeof(byte[]), typeof(IReadOnlyDictionary<string, byte[]>) }, factory.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.DoesNotContain(publicStatic, method => method.Name.Contains("Canonical", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Load_exposes_all_nine_closed_typed_closure_identities()
+    {
+        FirstMandatoryBattleProfile profile = LoadContextForTest(BattleContextTestFixture.Valid().ContextBytes);
+        Assert.Collection(profile.Closure.Entries,
+            entry => { var x = Typed<BattleEventRangeIdentity>(entry); Assert.Equal((0x09c3, 0x09fe, 0x09ff, 0x0a32), (x.StartAddress, x.BattleAddress, x.WonStartAddress, x.EndAddress)); },
+            entry => { var x = Typed<BattleCommandIdentity>(entry); Assert.Equal((0x09fe, 18, 495, 97, 2, 24), (x.CommandAddress, x.EnemyTeamId, x.EnemyObjectId, x.EnemyId, x.EnemyCount, x.BattlefieldId)); Assert.Equal(new[] { 0x0012, 0xa073, 0 }, x.Operands); Assert.Equal(("third-operand-zero-is-boss-no-flee", "encode-operands-from-semantic-fields"), (x.SpecialValue, x.ReverseEncoding)); },
+            entry => { var x = Typed<BattleRoleHooksIdentity>(entry); Assert.Equal((1, 0xa96e, 0xa987, 0, 0xa9b5, 0xa9d1, "all-random-branches"), (x.DyingRoleId, x.DyingStartAddress, x.DyingEndAddress, x.FriendDeathRoleId, x.FriendDeathStartAddress, x.FriendDeathEndAddress, x.BranchCoverage)); },
+            entry => { var x = Typed<BattleEquipmentLayoutIdentity>(entry); Assert.Equal((6, 6, 170, true), (x.RoleCount, x.SlotCount, x.DualAttackObjectId, x.PersistentEquipmentStatus)); },
+            entry => { var x = Typed<BattleGrowthLayoutIdentity>(entry); Assert.Equal((5, true, true, true), (x.RoleCount, x.IncludesPrimaryExperience, x.IncludesHiddenExperience, x.IncludesRecoveryAndCleanup)); },
+            entry => { var x = Typed<BattleDynamicAutoIdentity>(entry); Assert.Equal((0x0a36, 0x0a3b, "update-driven"), (x.StartAddress, x.EndAddress, x.Advance)); Assert.Equal(new[] { "movement", "direction", "hidden" }, x.Effects); },
+            entry => { var x = Typed<BattleFailureBoundaryIdentity>(entry); Assert.Equal((0xa073, 0x004e, "diagnose-and-stop-without-reload-retry-or-exploration"), (x.LostEntryAddress, x.ReloadCommand, x.Behavior)); },
+            entry => { var x = Typed<BattleImageSetIdentity>(entry); Assert.Equal((97, "ABC97", 24, "FBP24", true), (x.EnemyId, x.EnemyArchiveEntry, x.BattlefieldId, x.BattlefieldArchiveEntry, x.IncludesLayoutAndEffectFrames)); Assert.Equal(new[] { "F0", "F1" }, x.RoleSpriteIds); },
+            entry => { var x = Typed<BattleLocalizedDialogueIdentity>(entry); Assert.Equal(new[] { "zh-CN", "en" }, x.Languages); Assert.Equal(new[] { "messages", "names", "portraits", "glyphs", "ui" }, x.Contents); });
     }
 
     [Theory]
@@ -111,7 +142,7 @@ public sealed class FirstMandatoryBattleProfileTests
             else document["snapshot"]!["world"]!["eventObjects"]![0]!["vanishTime"] = 32768;
             context = Encoding.UTF8.GetBytes(document.ToJsonString());
         }
-        Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleProfile.LoadContext(context));
+        Assert.Throws<InvalidDataException>(() => LoadContextForTest(context));
     }
 
     [Theory]
@@ -124,6 +155,15 @@ public sealed class FirstMandatoryBattleProfileTests
     [InlineData("unsafe-reference")]
     [InlineData("unsafe-rooted")]
     [InlineData("unsafe-backslash")]
+    [InlineData("unsafe-nul")]
+    [InlineData("unsafe-newline")]
+    [InlineData("unsafe-double-slash")]
+    [InlineData("unsafe-dot-segment")]
+    [InlineData("unsafe-trailing-slash")]
+    [InlineData("unsafe-windows-character")]
+    [InlineData("unsafe-colon")]
+    [InlineData("unsafe-trailing-dot")]
+    [InlineData("unsafe-device-name")]
     public void Load_rejects_changes_to_frozen_contract_groups(string mutation)
     {
         var fixture = BattleContextTestFixture.Valid();
@@ -136,8 +176,17 @@ public sealed class FirstMandatoryBattleProfileTests
         else if (mutation == "resource") document["resources"]![0]!["kind"] = "other";
         else if (mutation == "unsafe-rooted") document["resources"]![0]!["reference"] = "/events/index.json";
         else if (mutation == "unsafe-backslash") document["resources"]![0]!["reference"] = "events\\index.json";
+        else if (mutation == "unsafe-nul") document["resources"]![0]!["reference"] = "events/\0index.json";
+        else if (mutation == "unsafe-newline") document["resources"]![0]!["reference"] = "events/\nindex.json";
+        else if (mutation == "unsafe-double-slash") document["resources"]![0]!["reference"] = "events//index.json";
+        else if (mutation == "unsafe-dot-segment") document["resources"]![0]!["reference"] = "events/./index.json";
+        else if (mutation == "unsafe-trailing-slash") document["resources"]![0]!["reference"] = "events/";
+        else if (mutation == "unsafe-windows-character") document["resources"]![0]!["reference"] = "events/index?.json";
+        else if (mutation == "unsafe-colon") document["resources"]![0]!["reference"] = "https://example.invalid/index.json";
+        else if (mutation == "unsafe-trailing-dot") document["resources"]![0]!["reference"] = "events./index.json";
+        else if (mutation == "unsafe-device-name") document["resources"]![0]!["reference"] = "events/NUL.json";
         else document["resources"]![0]!["reference"] = "../events/index.json";
-        Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleProfile.LoadContext(Encoding.UTF8.GetBytes(document.ToJsonString())));
+        Assert.Throws<InvalidDataException>(() => LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString())));
     }
 
     [Fact]
@@ -145,7 +194,7 @@ public sealed class FirstMandatoryBattleProfileTests
     {
         var fixture = BattleContextTestFixture.Valid();
         Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleProfile.Load([0xff], fixture.Files));
-        Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleProfile.LoadContext([0xff]));
+        Assert.Throws<InvalidDataException>(() => LoadContextForTest([0xff]));
     }
 
     [Fact]
@@ -156,9 +205,26 @@ public sealed class FirstMandatoryBattleProfileTests
         document["_note"] = "root comment";
         document["snapshot"]!["world"]!["leader"]!["_note"] = "nested comment";
         document["closure"]!["entries"]![0]!["identity"]!["_note"] = "structured identity comment";
-        FirstMandatoryBattleProfile.LoadContext(Encoding.UTF8.GetBytes(document.ToJsonString()));
+        LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString()));
         document["snapshot"]!["world"]!["leader"]!["note"] = "not a comment";
-        Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleProfile.LoadContext(Encoding.UTF8.GetBytes(document.ToJsonString())));
+        Assert.Throws<InvalidDataException>(() => LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString())));
+    }
+
+    [Theory]
+    [InlineData("hp")]
+    [InlineData("maxHp")]
+    [InlineData("mp")]
+    [InlineData("maxMp")]
+    public void Load_rejects_original_base_for_unestablished_role0_vitals(string property)
+    {
+        JsonObject document = BattleContextTestFixture.Valid().Document.DeepClone().AsObject();
+        JsonObject source = document["provenance"]!["fieldSources"]!.AsArray()
+            .Select(node => node!.AsObject())
+            .Single(item => item["path"]!.GetValue<string>() == $"snapshot.roles[0].{property}");
+        Assert.Equal("author-policy", source["sourceKind"]!.GetValue<string>());
+        Assert.Null(source["sourceAddress"]);
+        source["sourceKind"] = "original-base";
+        Assert.Throws<InvalidDataException>(() => LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString())));
     }
 
     [Fact]
@@ -193,4 +259,20 @@ public sealed class FirstMandatoryBattleProfileTests
         Assert.NotSame(first.Roles[0].HiddenExperience, second.Roles[0].HiddenExperience);
         Assert.NotSame(first.World.EventObjects, second.World.EventObjects);
     }
+
+    private static FirstMandatoryBattleProfile LoadContextForTest(byte[] contextBytes)
+    {
+        string hash = Convert.ToHexStringLower(SHA256.HashData(contextBytes));
+        byte[] indexBytes = Encoding.UTF8.GetBytes(new JsonObject
+        {
+            ["formatVersion"] = 1,
+            ["profile"] = FirstMandatoryBattleProfile.ProfileIdValue,
+            ["contextFile"] = "battle-context.json",
+            ["contextSha256"] = hash
+        }.ToJsonString());
+        return FirstMandatoryBattleProfile.Load(indexBytes,
+            new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["battle-context.json"] = contextBytes });
+    }
+
+    private static T Typed<T>(BattleClosureEntry entry) where T : BattleClosureIdentity => Assert.IsType<T>(entry.Identity);
 }

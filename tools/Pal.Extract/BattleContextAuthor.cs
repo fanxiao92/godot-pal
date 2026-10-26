@@ -14,7 +14,7 @@ internal static class BattleContextAuthor
         string source = Path.GetFullPath(input);
         string destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(output));
         ValidatePaths(source, destination);
-        byte[] contextBytes = FirstMandatoryBattleProfile.ValidateAndCanonicalizeContext(File.ReadAllBytes(source));
+        byte[] contextBytes = FirstMandatoryBattleProfile.ValidateAndCanonicalizeAuthorContext(File.ReadAllBytes(source));
         var index = new JsonObject
         {
             ["formatVersion"] = 1,

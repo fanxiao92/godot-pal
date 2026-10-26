@@ -9,6 +9,8 @@ namespace Pal.Core;
 public sealed class FirstMandatoryBattleProfile
 {
     public string ProfileId => ProfileIdValue;
+    /// <summary>Lowercase SHA-256 of the exact validated battle-context.json bytes.</summary>
+    public string ContextSha256 { get; }
     public BattleContextIdentity Identity { get; }
     public BattleContextProvenance Provenance { get; }
     public BattleContextLayout Layout { get; }
@@ -18,8 +20,9 @@ public sealed class FirstMandatoryBattleProfile
     public BattleClosure Closure { get; }
     public IReadOnlyList<BattleResourceReference> Resources { get; }
 
-    private FirstMandatoryBattleProfile(JsonElement root)
+    private FirstMandatoryBattleProfile(JsonElement root, string contextSha256)
     {
+        ContextSha256 = contextSha256;
         Identity = BattleModels.Identity(root.GetProperty("identity"));
         Provenance = BattleModels.Provenance(root.GetProperty("provenance"));
         Layout = BattleModels.Layout(root.GetProperty("layout"));
@@ -44,22 +47,20 @@ public sealed class FirstMandatoryBattleProfile
             throw new InvalidDataException("index.json contextFile must be battle-context.json.");
         string expectedHash = Text(root, "contextSha256");
         if (!Sha256Pattern.IsMatch(expectedHash)) throw new InvalidDataException("index.json contextSha256 must be lowercase hexadecimal.");
-        if (suppliedFiles.Count != 1 || !suppliedFiles.TryGetValue("battle-context.json", out byte[]? contextBytes) || contextBytes is null)
+        using IEnumerator<KeyValuePair<string, byte[]>> supplied = suppliedFiles.GetEnumerator();
+        if (!supplied.MoveNext()) throw new InvalidDataException("Supplied files must contain exactly battle-context.json.");
+        KeyValuePair<string, byte[]> contextFile = supplied.Current;
+        if (supplied.MoveNext() || !StringComparer.Ordinal.Equals(contextFile.Key, "battle-context.json") || contextFile.Value is null)
             throw new InvalidDataException("Supplied files must contain exactly battle-context.json.");
+        byte[] contextBytes = contextFile.Value;
         string actualHash = Convert.ToHexStringLower(SHA256.HashData(contextBytes));
         if (!StringComparer.Ordinal.Equals(expectedHash, actualHash)) throw new InvalidDataException("battle-context.json exact-byte SHA-256 does not match index.json.");
-        return LoadContext(contextBytes);
-    }
-
-    public static FirstMandatoryBattleProfile LoadContext(byte[] contextBytes)
-    {
-        ArgumentNullException.ThrowIfNull(contextBytes);
         using JsonDocument document = ParseStrict(contextBytes, "battle-context.json");
         ValidateSchema(document.RootElement);
-        return new FirstMandatoryBattleProfile(document.RootElement);
+        return new FirstMandatoryBattleProfile(document.RootElement, actualHash);
     }
 
-    public static byte[] ValidateAndCanonicalizeContext(byte[] contextBytes)
+    internal static byte[] ValidateAndCanonicalizeAuthorContext(byte[] contextBytes)
     {
         ArgumentNullException.ThrowIfNull(contextBytes);
         using JsonDocument document = ParseStrict(contextBytes, "battle-context.json");
@@ -242,7 +243,11 @@ public sealed class FirstMandatoryBattleProfile
             Base($"snapshot.roles[0].{property}");
             Base($"snapshot.roles[1].{property}");
         }
-        foreach (string property in new[] { "hp", "maxHp", "mp", "maxMp" }) Base($"snapshot.roles[1].{property}");
+        foreach (string property in new[] { "hp", "maxHp", "mp", "maxMp" })
+        {
+            result.Add($"snapshot.roles[0].{property}", new("author-policy", null));
+            Base($"snapshot.roles[1].{property}");
+        }
         for (int slot = 0; slot < 6; slot++)
         {
             Base($"snapshot.roles[0].equipment[{slot}]");
@@ -395,14 +400,34 @@ public sealed class FirstMandatoryBattleProfile
             Expect(id.Length > 0 && ids.Add(id), $"resource id '{id}' is empty or duplicated.");
             if (!ResourceSpecs.TryGetValue(id, out ResourceSpec? spec)) throw new InvalidDataException($"resource id '{id}' is unknown.");
             Expect(Text(resource, "kind") == spec.Kind, $"resource '{id}' kind does not match the frozen kind.");
-            Expect(reference.Length > 0 && reference[0] != '/' && !reference.Contains("..", StringComparison.Ordinal)
-                && reference.All(ch => ch is not '\\' and not ':'),
+            Expect(IsPortableRelativeReference(reference),
                 $"resource '{id}' reference must be a safe forward-slash relative path.");
             Expect(Sha256Pattern.IsMatch(hash), $"resource '{id}' sha256 must be lowercase hexadecimal.");
             Expect(ExactWordSet(Array(resource, "ownerTickets"), spec.OwnerTickets, $"resource '{id}' ownerTickets"), $"resource '{id}' ownerTickets do not match the exact owner set.");
         }
         Expect(ids.SetEquals(ResourceSpecs.Keys), "resources must contain exactly the frozen resource set.");
         return ids;
+    }
+
+    private static bool IsPortableRelativeReference(string reference)
+    {
+        if (reference.Length == 0 || reference[0] == '/' || reference[^1] == '/'
+            || reference.Any(character => char.IsControl(character) || character is '\\' or ':' or '<' or '>' or '"' or '|' or '?' or '*'))
+            return false;
+        foreach (string segment in reference.Split('/'))
+        {
+            if (segment.Length == 0 || segment is "." or ".." || segment[^1] is '.' or ' ')
+                return false;
+            string stem = segment.Split('.')[0];
+            if (stem.Equals("CON", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase)
+                || (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase) || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
+                    && stem[3] is >= '1' and <= '9'))
+                return false;
+        }
+        return true;
     }
 
     private static bool DeepEqualsIgnoringComments(JsonElement actual, JsonElement expected)

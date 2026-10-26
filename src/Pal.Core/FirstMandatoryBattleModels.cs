@@ -26,14 +26,45 @@ public sealed record BattleWorldSnapshot(
     BattleLeaderSnapshot Leader, BattleSearchProof SearchProof,
     IReadOnlyList<BattleSceneEntrySnapshot> SceneEntries, IReadOnlyList<BattleEventObjectSnapshot> EventObjects);
 
-/// <summary>Immutable structured identity fields for one frozen closure item.</summary>
-public sealed record BattleClosureIdentity(
-    string Kind,
-    IReadOnlyDictionary<string, int> Numbers,
-    IReadOnlyDictionary<string, bool> Flags,
-    IReadOnlyDictionary<string, string> Text,
-    IReadOnlyDictionary<string, IReadOnlyList<int>> NumberLists,
-    IReadOnlyDictionary<string, IReadOnlyList<string>> TextLists);
+/// <summary>Closed base type for the nine frozen closure identity variants.</summary>
+public abstract record BattleClosureIdentity
+{
+    private protected BattleClosureIdentity() { }
+}
+
+/// <summary>Identifies the WORD-addressed pre-battle, battle, won, and end event range.</summary>
+public sealed record BattleEventRangeIdentity(int StartAddress, int BattleAddress, int WonStartAddress, int EndAddress) : BattleClosureIdentity;
+
+/// <summary>Identifies the frozen battle command and its WORD operands and semantic target fields.</summary>
+public sealed record BattleCommandIdentity(int CommandAddress, IReadOnlyList<int> Operands, int EnemyTeamId,
+    int EnemyObjectId, int EnemyId, int EnemyCount, int BattlefieldId, string SpecialValue, string ReverseEncoding) : BattleClosureIdentity;
+
+/// <summary>Identifies the dying and friend-death role hook WORD-address ranges.</summary>
+public sealed record BattleRoleHooksIdentity(int DyingRoleId, int DyingStartAddress, int DyingEndAddress,
+    int FriendDeathRoleId, int FriendDeathStartAddress, int FriendDeathEndAddress, string BranchCoverage) : BattleClosureIdentity;
+
+/// <summary>Identifies the six-role equipment layout and persistent equipment behavior.</summary>
+public sealed record BattleEquipmentLayoutIdentity(int RoleCount, int SlotCount, int DualAttackObjectId,
+    bool PersistentEquipmentStatus) : BattleClosureIdentity;
+
+/// <summary>Identifies the five-role growth layout and required experience and cleanup behavior.</summary>
+public sealed record BattleGrowthLayoutIdentity(int RoleCount, bool IncludesPrimaryExperience,
+    bool IncludesHiddenExperience, bool IncludesRecoveryAndCleanup) : BattleClosureIdentity;
+
+/// <summary>Identifies the dynamic auto-script WORD range and its immutable effect names.</summary>
+public sealed record BattleDynamicAutoIdentity(int StartAddress, int EndAddress, IReadOnlyList<string> Effects,
+    string Advance) : BattleClosureIdentity;
+
+/// <summary>Identifies the lost-entry WORD address, reload command, and fail-closed behavior.</summary>
+public sealed record BattleFailureBoundaryIdentity(int LostEntryAddress, int ReloadCommand, string Behavior) : BattleClosureIdentity;
+
+/// <summary>Identifies the frozen enemy, role, and battlefield image resources.</summary>
+public sealed record BattleImageSetIdentity(int EnemyId, string EnemyArchiveEntry, IReadOnlyList<string> RoleSpriteIds,
+    int BattlefieldId, string BattlefieldArchiveEntry, bool IncludesLayoutAndEffectFrames) : BattleClosureIdentity;
+
+/// <summary>Identifies the immutable language and localized content sets.</summary>
+public sealed record BattleLocalizedDialogueIdentity(IReadOnlyList<string> Languages,
+    IReadOnlyList<string> Contents) : BattleClosureIdentity;
 
 public sealed record BattleClosureEntry(string Id, string Category, BattleClosureIdentity Identity,
     IReadOnlyList<int> OwnerTickets, string Status, IReadOnlyList<string> ResourceIds);
@@ -189,21 +220,21 @@ internal static class BattleModels
             Array.AsReadOnly(e.GetProperty("eventObjects").EnumerateArray().Select(x => new BattleEventObjectSnapshot(N(x, "ownerId"), N(x, "x"), N(x, "y"), N(x, "direction"), N(x, "state"), N(x, "vanishTime"), N(x, "triggerMode"), N(x, "triggerEntry"), N(x, "autoEntry"), N(x, "autoIdleFrameCount"), N(x, "spriteId"), N(x, "spriteFrames"), N(x, "currentFrame"), N(x, "scriptIdleFrameCount"), N(x, "spritePtrOffset"), N(x, "autoSpriteFrames"), N(x, "layer"))).ToArray()));
     }
     internal static BattleClosure Closure(JsonElement e) => new(S(e, "entry"), Array.AsReadOnly(e.GetProperty("entries").EnumerateArray().Select(x => new BattleClosureEntry(S(x, "id"), S(x, "category"), ClosureIdentity(x.GetProperty("identity")), ReadOnlyInts(x.GetProperty("ownerTickets")), S(x, "status"), Strings(x.GetProperty("resourceIds")))).ToArray()));
-    private static BattleClosureIdentity ClosureIdentity(JsonElement e)
+    private static BattleClosureIdentity ClosureIdentity(JsonElement e) => S(e, "kind") switch
     {
-        var numbers = new Dictionary<string, int>(StringComparer.Ordinal); var flags = new Dictionary<string, bool>(StringComparer.Ordinal);
-        var text = new Dictionary<string, string>(StringComparer.Ordinal); var numberLists = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
-        var textLists = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-        foreach (JsonProperty p in e.EnumerateObject())
-        {
-            if (p.Name == "kind" || p.Name.StartsWith('_')) continue;
-            if (p.Value.ValueKind == JsonValueKind.Number) numbers.Add(p.Name, p.Value.GetInt32());
-            else if (p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) flags.Add(p.Name, p.Value.GetBoolean());
-            else if (p.Value.ValueKind == JsonValueKind.String) text.Add(p.Name, p.Value.GetString()!);
-            else if (p.Value.ValueKind == JsonValueKind.Array && p.Value.GetArrayLength() > 0 && p.Value[0].ValueKind == JsonValueKind.Number) numberLists.Add(p.Name, ReadOnlyInts(p.Value));
-            else textLists.Add(p.Name, Strings(p.Value));
-        }
-        return new(S(e, "kind"), new ReadOnlyDictionary<string, int>(numbers), new ReadOnlyDictionary<string, bool>(flags), new ReadOnlyDictionary<string, string>(text), new ReadOnlyDictionary<string, IReadOnlyList<int>>(numberLists), new ReadOnlyDictionary<string, IReadOnlyList<string>>(textLists));
-    }
+        "event-range" => new BattleEventRangeIdentity(N(e, "startAddress"), N(e, "battleAddress"), N(e, "wonStartAddress"), N(e, "endAddress")),
+        "battle-command" => new BattleCommandIdentity(N(e, "commandAddress"), ReadOnlyInts(e.GetProperty("operands")), N(e, "enemyTeamId"),
+            N(e, "enemyObjectId"), N(e, "enemyId"), N(e, "enemyCount"), N(e, "battlefieldId"), S(e, "specialValue"), S(e, "reverseEncoding")),
+        "role-script-ranges" => new BattleRoleHooksIdentity(N(e, "dyingRoleId"), N(e, "dyingStartAddress"), N(e, "dyingEndAddress"),
+            N(e, "friendDeathRoleId"), N(e, "friendDeathStartAddress"), N(e, "friendDeathEndAddress"), S(e, "branchCoverage")),
+        "equipment-layout" => new BattleEquipmentLayoutIdentity(N(e, "roleCount"), N(e, "slotCount"), N(e, "dualAttackObjectId"), B(e, "persistentEquipmentStatus")),
+        "growth-layout" => new BattleGrowthLayoutIdentity(N(e, "roleCount"), B(e, "includesPrimaryExperience"), B(e, "includesHiddenExperience"), B(e, "includesRecoveryAndCleanup")),
+        "dynamic-auto-range" => new BattleDynamicAutoIdentity(N(e, "startAddress"), N(e, "endAddress"), Strings(e.GetProperty("effects")), S(e, "advance")),
+        "failure-boundary" => new BattleFailureBoundaryIdentity(N(e, "lostEntryAddress"), N(e, "reloadCommand"), S(e, "behavior")),
+        "battle-image-set" => new BattleImageSetIdentity(N(e, "enemyId"), S(e, "enemyArchiveEntry"), Strings(e.GetProperty("roleSpriteIds")),
+            N(e, "battlefieldId"), S(e, "battlefieldArchiveEntry"), B(e, "includesLayoutAndEffectFrames")),
+        "localized-dialogue-set" => new BattleLocalizedDialogueIdentity(Strings(e.GetProperty("languages")), Strings(e.GetProperty("contents"))),
+        _ => throw new InvalidDataException("Closure identity kind is unsupported.")
+    };
     internal static BattleResourceReference Resource(JsonElement e) => new(S(e, "id"), S(e, "kind"), S(e, "reference"), S(e, "sha256"), ReadOnlyInts(e.GetProperty("ownerTickets")));
 }
