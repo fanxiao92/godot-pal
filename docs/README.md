@@ -54,6 +54,7 @@
 - [M3 Game 历史运行记录](archive/m3/game-test-run-history.md)：旧 Game 命令、批次、变异、性能和交付年表。
 - [M3 历史诊断记录](archive/m3/test-diagnostics-history.md)：Windows 输出捕获、时序、Prepare/CI 症状和原结论。
 - [固定包来源与验收年表](archive/m2/gdunit-source-acceptance-history.md)：包来源、发布、固定包验收及其限制。
+- [#31 长任务执行复盘](archive/engineering/spec31-retrospective.md)：治理任务的耗时口径、上下文膨胀、采证返工与后续改进；仅在规划长任务或追溯本次结论时阅读，附固定截止点的统计数据。
 
 M0 原有报告保留在此，内容描述当时的环境和验证结果，不随每次版本变动重写：
 
