@@ -1,6 +1,6 @@
 # 首个必经剧情战：离线战前上下文契约
 
-状态：**#45 的 `45-offline-contract` 组件边界已定义并实现 CLI author；Core、Godot 原生 Resource、Main 与战斗行为不在本组件中。**
+状态：**#45 的 `45-offline-contract` 与 `45-core-profile` 组件已实现；Godot 原生 Resource、Main 与战斗行为仍未实现。本页不宣称 #45 整票完成。**
 
 本契约描述调用 scene 2 / map 12 / owner 28 的 trigger `@09C3` **之前**的独立验收前置。它是维护者显式 author 的剧情前置，不是自然游玩存档，也不是存档格式。它不能替代 `@09C3–@0A32`、战中角色钩子、动态 auto 或失败分支的真实执行。
 
@@ -147,8 +147,10 @@ owner28 的已冻结身份为：坐标 `(1280,256)`、前置 `@0936` 后 `state=
 
 ## 6. 后续消费接口
 
-- `45-core-profile`：定义纯 .NET 的严格现代加载类型，复核 `index.json` hash 与本页全部 v1 约束；把角色/世界可变数据复制为每会话状态，不共享缓存对象；只提供后续战斗/事件所需公开构造，不实现 Godot I/O。
-- `45-game-integration`：Editor Prepare 从本产物显式生成原生 Resource；输入/输出新建或空目录并保留真实诊断。Main 的独立 M4 argv、Resource URI、语言选择、READY 顺序及 owner28 副作用前拒绝由该组件接线。
+- `45-core-profile`（本组件已实现）：`FirstMandatoryBattleProfile.Load(indexBytes, suppliedFiles)` 接收外层提供的 exact bytes，严格核对唯一 `battle-context.json` 文件集、index 身份及原始 context 字节 SHA-256，再复核本页全部 v1 schema。`LoadContext` 与 `ValidateAndCanonicalizeContext` 让 CLI author 复用同一 canonical validator，不形成第二套 schema。公开 profile 提供只读 identity/provenance/layout/role/world/closure/resource metadata；`CreateSessionState` 深拷贝 party、角色与嵌套经验/装备/法术/状态，以及 leader/scene entry/event object 可变状态。Core 不做文件、路径或 Godot I/O。
+- `45-game-integration`（未实现）：Editor Prepare 从本产物显式生成原生 Resource；输入/输出新建或空目录并保留真实诊断。Main 的独立 M4 argv、Resource URI、语言选择、READY 顺序及 owner28 副作用前拒绝由该组件接线。
 - #46–#53：只扩展 closure 中分配的能力，复用同一 schema/profile 身份；不得建立第二套解码器、战斗循环或测试专用直装路径。
 
-本文件不宣称 #45 整票、Core 战斗、Main M4、SceneRunner、GPU、物理输入或真实资源验收完成。
+Core 自动化仅证明严格内存加载、typed metadata、exact-byte/index/file-set 拒绝与同一 profile 多 session 深拷贝；CLI 回归证明 author 仍保持既有文件/argv 行为。这些证据不证明原生 Prepare、真实资源、地图几何、Main M4、@09C3 执行、Core 战斗、SceneRunner、GPU 或物理输入。
+
+本文件不宣称 #45 整票、Game lane 或后续 #46–#53 能力完成。
