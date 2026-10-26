@@ -23,7 +23,7 @@ $selections=[Collections.Generic.List[object]]::new();$seen=[Collections.Generic
 foreach($record in $raw){
  if($record.log -isnot [string] -or -not$seen.Add($record.log)){throw "Missing or duplicate command log identity: $($record.log)"}
  $args=@($record.arguments);if($record.command -isnot [string] -or $args.Count -eq 0 -or @($args|?{$_ -isnot[string]}).Count){throw "Invalid command record: $($record.log)"}
- $isTest=$record.command -ceq 'dotnet' -and $args.Count -gt 0 -and $args[0] -ceq 'test';$isList=$args -contains '--list-tests';$category=if($isTest -and -not$isList){'test'}elseif($isList){'discovery'}else{'other'}
+ $isDotnet=$record.command -ceq 'dotnet' -and $args.Count -gt 0;$verb=$args[0];$isTest=$isDotnet -and $verb -ceq 'test';$isList=$args -contains '--list-tests';$category=if($isTest -and -not$isList){'test'}elseif($isList){'discovery'}elseif($isDotnet -and $verb -ceq 'restore'){'restore'}elseif($isDotnet -and $verb -ceq 'build'){'build'}else{'other'}
  $trx=@();$ri=[Array]::IndexOf($args,'--results-directory');$dir=$null;if($ri-ge0 -and $ri+1-lt$args.Count){$dir=Resolve-OwnedPath $args[$ri+1] 'Results directory';if(-not(Test-Path -LiteralPath $dir -PathType Container)){throw "Results directory missing for $($record.log)."}}
  if($category-ceq'test'){
   $li=[Array]::IndexOf($args,'--logger');if($li-lt0){$li=[Array]::IndexOf($args,'-l')};$file=$null
