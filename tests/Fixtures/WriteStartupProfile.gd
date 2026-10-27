@@ -3,9 +3,10 @@ extends SceneTree
 # Artificial M1Bundle fixture preparation only; Main never authors profiles.
 func _initialize() -> void:
     var args := OS.get_cmdline_user_args()
-    if args.size() != 2 or args[0] != "--native-root":
-        fail("expected --native-root")
+    if (args.size() != 2 and args.size() != 3) or args[0] != "--native-root" or (args.size() == 3 and args[2] != "--first-battle"):
+        fail("expected --native-root and optional --first-battle")
         return
+    var first_battle := args.size() == 3
     var uri: String = args[1] + "/Profiles/Startup.tres"
     if FileAccess.file_exists(uri):
         fail("refusing to overwrite a profile")
@@ -34,9 +35,9 @@ func _initialize() -> void:
     leader.set("WalkFramesWord", 0)
     leader.set("WalkFramesSource", source)
     var start = load("res://Scripts/Resources/PalExplorationStart.cs").new()
-    start.set("X", 320)
-    start.set("Y", 320)
-    start.set("Direction", 0)
+    start.set("X", 1264 if first_battle else 320)
+    start.set("Y", 248 if first_battle else 320)
+    start.set("Direction", 3 if first_battle else 0)
     start.set("Layer", 0)
     start.set("StepPhase", 0)
     var profile = load("res://Scripts/Resources/PalExplorationProfile.cs").new()
@@ -50,7 +51,7 @@ func _initialize() -> void:
         fail("native fixture profile save failed")
         return
     var loaded = ResourceLoader.load(uri, "", ResourceLoader.CACHE_MODE_IGNORE_DEEP)
-    if loaded == null or loaded.get("Start").get("X") != 320 or loaded.get("Leader").get("WalkFramesWord") != 0:
+    if loaded == null or loaded.get("Start").get("X") != (1264 if first_battle else 320) or loaded.get("Leader").get("WalkFramesWord") != 0:
         fail("native fixture profile roundtrip failed")
         return
     print("PAL_STARTUP_PROFILE:" + uri)

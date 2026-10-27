@@ -59,9 +59,9 @@ public class Fixture
         [IO.File]::WriteAllText((Join-Path $source 'Fixture.cs'), $text.Replace('public void Beta()', 'public ValueTask Beta()'))
         Fails { Get-GameSourceInventory $source } 'Unparsed Game test attributes'
     }
-    Case 'real source partitions 68/81/114, preserves controls and solution test projects' {
-        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '68,81,114') 'Wrong batch sizes/order.'
-        Assert ($plan.inventory.Count -eq 266 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+    Case 'real source partitions 74/81/114, preserves controls and solution test projects' {
+        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '74,81,114') 'Wrong batch sizes/order.'
+        Assert ($plan.inventory.Count -eq 272 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
         Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Wrong serial project identities/order.'
         Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj',
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
@@ -70,8 +70,8 @@ public class Fixture
             core = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 386, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 247, 2)
-            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 54, 0)
-            game = @('src/Pal.Game/Pal.Game.csproj', 263, 0)
+            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 60, 0)
+            game = @('src/Pal.Game/Pal.Game.csproj', 269, 0)
         }
         foreach ($project in $plan.projects) {
             $expectedProject = $expectedProjects[$project.name]
@@ -90,7 +90,7 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 386 passed; CLI unit 142 passed; CLI integration 247 passed + 2 skipped (249 total); Prepare 54 passed; Godot source/discovery 266; positives 263 as serial 68/81/114 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 386 passed; CLI unit 142 passed; CLI integration 247 passed + 2 skipped (249 total); Prepare 60 passed; Godot source/discovery 272; positives 269 as serial 74/81/114 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }

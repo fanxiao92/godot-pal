@@ -78,6 +78,35 @@ public class MainProcessTests
         AssertThat(result.Text.Contains("ERROR:", StringComparison.Ordinal)).IsFalse();
     }
 
+    [TestCase("duplicate", Timeout = 20000)]
+    [TestCase("mixed", Timeout = 20000)]
+    [TestCase("missing", Timeout = 20000)]
+    [TestCase("unknown", Timeout = 20000)]
+    [TestCase("illegal", Timeout = 20000)]
+    [TestCase("language", Timeout = 20000)]
+    public async Task M4ArgumentFailuresKeepSuppliedProfileIdentityAndEmitNoStartupMarkers(string kind)
+    {
+        string selected = "res://Assets/Prepared/Battle/Profile.tres";
+        string[] args = kind switch
+        {
+            "duplicate" => ["--m4-first-battle-profile", selected, "--m4-first-battle-profile", "res://Assets/Other.tres"],
+            "mixed" => ["--m4-first-battle-profile", selected, "--m2-profile", "res://Assets/Profiles/Exploration.tres"],
+            "missing" => ["--m4-first-battle-profile"],
+            "unknown" => ["--m4-unknown", "value"],
+            "illegal" => ["--m4-first-battle-profile", "C:/outside.tres"],
+            _ => ["--m4-first-battle-profile", selected, "--m4-first-battle-language", "fr"]
+        };
+        string expectedIdentity = kind is "duplicate" or "mixed" or "language" ? selected
+            : kind == "illegal" ? "C:/outside.tres" : "unselected";
+        var result = await RunMain(args);
+        AssertThat(result.ExitCode).IsEqual(1);
+        AssertThat(result.Text.Contains($"Static scene startup failed (selected-profile={expectedIdentity}, scene=unselected, static-profile=unselected):", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("PAL_MAP_LOADED", StringComparison.Ordinal)).IsFalse();
+        AssertThat(result.Text.Contains("PAL_M4_FIRST_BATTLE_CONTEXT", StringComparison.Ordinal)).IsFalse();
+        AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
+        AssertThat(result.Text.Contains("battle-complete", StringComparison.OrdinalIgnoreCase)).IsFalse();
+    }
+
     [TestCase(Timeout = 20000)]
     public async Task M4StaticMismatchReportsSelectedAndStaticIdentitiesBeforeReadyWithoutFallback()
     {

@@ -77,7 +77,54 @@ public static class M1Bundle
         Rehash(root);
     }
 
-    public static void Rehash(string root)
+    public static void ConfigureFirstMandatoryBattle(string root)
+    {
+        string originalSprite = Path.Combine(root, "sprites", "9.json");
+        JsonNode sprite = JsonNode.Parse(File.ReadAllText(originalSprite))!;
+        sprite["spriteId"] = 210;
+        sprite["source"]!["chunk"] = 210;
+        sprite["frameCount"] = 1;
+        var originalFrame = sprite["frames"]![0]!.DeepClone();
+        Directory.CreateDirectory(Path.Combine(root, "sprites", "210"));
+        var frames = new JsonArray();
+        for (int index = 0; index < 12; index++)
+        {
+            File.Copy(Path.Combine(root, "sprites", "9", "0.png"), Path.Combine(root, "sprites", "210", index + ".png"));
+            JsonNode frame = originalFrame.DeepClone();
+            frame["index"] = index;
+            frame["png"] = "sprites/210/" + index + ".png";
+            frames.Add(frame);
+        }
+        sprite["frames"] = frames;
+        File.WriteAllText(Path.Combine(root, "sprites", "210.json"), sprite.ToJsonString());
+
+        JsonNode scene = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "scene.json")))!;
+        scene["wEventObjectIndex"] = 27;
+        scene["nextEventObjectIndex"] = 28;
+        scene["objects"] = new JsonArray(new JsonObject
+        {
+            ["id"] = 28, ["sVanishTime"] = 0, ["x"] = 1280, ["y"] = 256, ["sLayer"] = 0,
+            ["wTriggerScript"] = 0x09c3, ["wAutoScript"] = 0, ["sState"] = 1, ["wTriggerMode"] = 1,
+            ["wSpriteNum"] = 210, ["nSpriteFrames"] = 0, ["wDirection"] = 0, ["wCurrentFrameNum"] = 0,
+            ["nScriptIdleFrame"] = 0, ["wSpritePtrOffset"] = 0, ["nSpriteFramesAuto"] = 0,
+            ["wScriptIdleFrameCountAuto"] = 0, ["sprite"] = "sprites/210.json", ["initialFrameIndex"] = 0,
+            ["initiallyVisible"] = true
+        });
+        scene["defaultParty"] = new JsonArray(new JsonObject
+        {
+            ["roleId"] = 0, ["wSpriteNum"] = 210, ["sprite"] = "sprites/210.json",
+            ["source"] = new JsonObject { ["archive"] = "data.mkf", ["chunk"] = 3, ["spriteByteOffset"] = 24 }
+        });
+        scene["spriteIds"] = new JsonArray(210);
+        File.WriteAllText(Path.Combine(root, "scene.json"), scene.ToJsonString());
+        File.Delete(originalSprite);
+        File.Delete(Path.Combine(root, "sprites", "7.json"));
+        Directory.Delete(Path.Combine(root, "sprites", "7"), true);
+        Directory.Delete(Path.Combine(root, "sprites", "9"), true);
+        Rehash(root, [210]);
+    }
+
+    public static void Rehash(string root, int[]? resourceSpriteIds = null)
     {
         var artifacts = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
             .Where(p => Path.GetFileName(p) != "manifest.json")
@@ -88,7 +135,8 @@ public static class M1Bundle
         {
             formatVersion = 1, command = "extract-scene", parameters = new { sceneId = 2, mapId = 12, paletteId = 0, lighting = "night" },
             sources = new[] { "data.mkf", "gop.mkf", "map.mkf", "mgo.mkf", "pat.mkf", "sss.mkf" }.Select(name => new { name, byteLength = 128, sha256 = new string('a', 64) }),
-            resources = new { scene = "scene.json", map = "map.json", tiles = "tiles.json", palette = "palette.json", preview = "preview.png", sprites = new[] { new { id = 7, path = "sprites/7.json" }, new { id = 9, path = "sprites/9.json" } } },
+            resources = new { scene = "scene.json", map = "map.json", tiles = "tiles.json", palette = "palette.json", preview = "preview.png", sprites = (resourceSpriteIds ?? [7, 9])
+                .Select(id => new { id, path = $"sprites/{id}.json" }).ToArray() },
             artifacts, bundleSha256 = Hash(Encoding.UTF8.GetBytes(identity))
         });
     }

@@ -7,11 +7,14 @@ namespace Pal.Game;
 public partial class GameStartup : Main
 {
     private readonly Exception? argumentError;
+    private readonly string? suppliedProfile;
 
     public GameStartup()
     {
         // Pure selection while still outside the tree; resource loading belongs to Main._Ready.
-        try { Configure(GameSceneConfiguration.FromArguments(OS.GetCmdlineUserArgs())); }
+        string[] arguments = OS.GetCmdlineUserArgs();
+        suppliedProfile = StartupDiagnostics.SuppliedM4Profile(arguments);
+        try { Configure(GameSceneConfiguration.FromArguments(arguments)); }
         catch (Exception error) { argumentError = error; }
     }
 
@@ -21,7 +24,7 @@ public partial class GameStartup : Main
         GetWindow().MinSize = new Vector2I(320, 200);
         if (argumentError is not null)
         {
-            Fail($"Static scene startup failed (scene=unselected, profile=unselected): {argumentError.Message}");
+            Fail(StartupDiagnostics.Format(suppliedProfile, null, null, argumentError.Message));
             return;
         }
         base._Ready();

@@ -81,13 +81,12 @@ public partial class Main : Node2D
             ExplorationInput? preparedInput = null;
             try
             {
-                checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
-                if (staticAcceptance || npc is not null) ValidateStaticAcceptance(map.Data, checkedProfile);
                 if (firstBattle is not null)
                 {
-                    firstBattle.ValidateStatic(map.Data, checkedProfile);
-                    preparedBattle = firstBattle.CreateSession(map.Data.SceneId, checkedProfile);
+                    (checkedProfile, preparedBattle) = NativeFirstMandatoryBattleProfile.ValidateStaticSelection(firstBattle, map);
                 }
+                else checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
+                if (staticAcceptance || npc is not null) ValidateStaticAcceptance(map.Data, checkedProfile);
                 if (npc is not null)
                 {
                     ValidateDialogueScene(map.Data, npc);
@@ -136,7 +135,7 @@ public partial class Main : Node2D
         }
         catch (Exception e)
         {
-            Fail($"Static scene startup failed (selected-profile={selectedProfilePath ?? "unselected"}, scene={scenePath ?? "unselected"}, static-profile={staticProfilePath ?? "unselected"}): {e.Message}");
+            Fail(StartupDiagnostics.Format(selectedProfilePath, scenePath, staticProfilePath, e.Message));
         }
     }
 

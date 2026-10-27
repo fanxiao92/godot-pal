@@ -25,6 +25,17 @@ function Assert-NoLink([string]$Path) {
     while ($cursor) { try {$a=[IO.File]::GetAttributes($cursor)} catch [IO.FileNotFoundException] {$a=0} catch [IO.DirectoryNotFoundException] {$a=0}; if ($a -band [IO.FileAttributes]::ReparsePoint) { throw "Link/reparse point is not allowed: $cursor" }; $cursor=[IO.Path]::GetDirectoryName($cursor) }
 }
 function Assert-TreeNoLink([string]$Directory) { foreach($entry in [IO.Directory]::EnumerateFileSystemEntries($Directory)) { $a=[IO.File]::GetAttributes($entry); if($a -band [IO.FileAttributes]::ReparsePoint){throw "Package contains a link/reparse point: $entry"}; if($a -band [IO.FileAttributes]::Directory){Assert-TreeNoLink $entry} } }
+function Resolve-StaticAssetUri([string]$Uri,[string]$Name,[bool]$Directory) {
+    if(-not ($Uri -ceq 'res://Assets' -or $Uri.StartsWith('res://Assets/',[StringComparison]::Ordinal))){throw "$Name must be a normalized res://Assets resource URI."}
+    foreach($segment in $Uri.Substring(6).Split('/')){if(-not $segment-or$segment-in @('.','..')-or$segment.EndsWith('.')-or$segment-ne$segment.Trim()-or$segment.IndexOfAny([char[]]'\:%?#*"<>|')-ge 0-or@($segment.ToCharArray()|Where-Object{[char]::IsControl($_)}).Count-ne 0){throw "$Name must be a normalized res://Assets resource URI."}}
+    $path=[IO.Path]::GetFullPath((Join-Path $project $Uri.Substring(6).Replace('/',[IO.Path]::DirectorySeparatorChar)))
+    $assets=[IO.Path]::GetFullPath((Join-Path $project 'Assets'))
+    if(-not (Test-Inside $path $assets)){throw "$Name must remain inside project Assets."}
+    Assert-NoLink $path
+    if($Directory){if(-not [IO.Directory]::Exists($path)){throw "$Name must select an existing directory."}}
+    elseif(-not [IO.File]::Exists($path)){throw "$Name must select an existing file."}
+    return $path
+}
 function Invoke-Checked([string]$File,[string[]]$Arguments,[string]$Marker) {
     $info=[Diagnostics.ProcessStartInfo]::new(); $info.FileName=$File; $info.WorkingDirectory=$project; $info.UseShellExecute=$false; $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
     foreach($argument in $Arguments){$info.ArgumentList.Add($argument)}
@@ -33,6 +44,11 @@ function Invoke-Checked([string]$File,[string[]]$Arguments,[string]$Marker) {
 }
 try {
     $inputRoot=[IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($options['-InputPath'])); $outputRoot=[IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($options['-OutputPath'])); $assets=Join-Path $project 'Assets'
+    $staticRoot=Resolve-StaticAssetUri $options['-StaticResources'] 'StaticResources' $true
+    $staticProfile=Resolve-StaticAssetUri $options['-StaticProfile'] 'StaticProfile' $false
+    $staticScene=Join-Path $staticRoot 'Scenes/Scene.tscn'
+    Assert-NoLink $staticScene; Assert-TreeNoLink $staticRoot; if(-not [IO.File]::Exists($staticScene)){throw 'StaticResources selected scene is missing.'}
+    if(-not (Test-Inside $staticProfile $staticRoot)){throw 'StaticProfile must be inside StaticResources.'}
     if(-not (Test-Inside $outputRoot $assets)){throw 'OutputPath must be the project Assets directory or a directory inside it.'}
     if((Test-Inside $outputRoot $inputRoot)-or(Test-Inside $inputRoot $outputRoot)){throw 'InputPath and OutputPath must not overlap in either direction.'}
     if(Test-Inside $inputRoot $project){throw 'InputPath must be outside src/Pal.Game.'}
@@ -47,7 +63,9 @@ try {
     Invoke-Checked $godot @('--version') '4.7.2.stable.mono.official.ed1daf0bf'
     Invoke-Checked 'dotnet' @('build',(Join-Path $project 'Pal.Game.csproj'),'--nologo','--verbosity','quiet') ''
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot
+    $null=Resolve-StaticAssetUri $options['-StaticResources'] 'StaticResources' $true; $null=Resolve-StaticAssetUri $options['-StaticProfile'] 'StaticProfile' $false; Assert-NoLink $staticScene; Assert-TreeNoLink $staticRoot
     Invoke-Checked $godot @('--headless','--path',$project,'res://Editor/PrepareBattleContext.tscn','--','--battle-input',$inputRoot,'--battle-output',$outputRoot,'--static-resources',$options['-StaticResources'],'--static-profile',$options['-StaticProfile']) 'PAL_PREPARE_BATTLE_CONTEXT:first-mandatory-battle-pre-trigger-v1'
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot; Assert-TreeNoLink $outputRoot
+    $null=Resolve-StaticAssetUri $options['-StaticResources'] 'StaticResources' $true; $null=Resolve-StaticAssetUri $options['-StaticProfile'] 'StaticProfile' $false; Assert-NoLink $staticScene; Assert-TreeNoLink $staticRoot
     Write-Host 'Prepared native Godot battle context: Battle/Profile.tres'; exit 0
 } catch { [Console]::Error.WriteLine("Prepare-BattleContext failed: $($_.Exception.Message)`nNo existing output is overwritten; temporary partial resources are not retained."); exit 1 }

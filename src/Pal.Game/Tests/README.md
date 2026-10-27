@@ -6,7 +6,7 @@
 
 Game 测试继续使用现有 Godot 程序集、固定 GdUnit 包和 `tests/Pal.Game.Tests/game.runsettings`。真实版本、bootstrap 和包来源以[当前包消费说明](../../../docs/testing/gdunit-source-packages.md)及仓库配置为准。测试资源是本例自有、忽略的 native fixture；真实资源和私密证据不进入提交或上传。
 
-共享完整门仍唯一使用 `scripts/Test-M0.ps1`，依赖 Core→CLI→Prepare→Game 的串行顺序和当前脚本生成的批次/身份。当前源码库存为 Game 257 positive + 3 deliberate controls = 260 discovered；完整门的15份历史 TRX/19主命令属于 M3 历史身份，#32 后工程治理的16/20/1441不得倒写为M3结果。静态库存不是通过证据。
+共享完整门仍唯一使用 `scripts/Test-M0.ps1`，依赖 Core→CLI→Prepare→Game 的串行顺序和当前脚本生成的批次/身份。当前源码库存为 Game 269 positive + 3 deliberate controls = 272 discovered；完整门的15份历史 TRX/19主命令属于 M3 历史身份，#32 后工程治理的16/20/1441不得倒写为M3结果。静态库存不是通过证据。
 
 ## 选择运行范围
 

@@ -18,24 +18,40 @@ public static class NativeFirstMandatoryBattleProfile
             if (!ResourceLoader.Exists(uri)) throw new InvalidDataException(uri + ": native first-battle profile missing; prepare it explicitly");
             var native = ResourceLoader.Load(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep) as PalFirstMandatoryBattleProfile
                 ?? throw new InvalidDataException(uri + ": expected PalFirstMandatoryBattleProfile");
-            Require(native.FormatVersion == 1, uri + ": first-battle FormatVersion must be 1");
-            Require(native.ProfileId == FirstMandatoryBattleProfile.ProfileIdValue, uri + ": first-battle profile identity mismatch");
-            FirstMandatoryBattleEnvelope envelope = NativeBattleEnvelopeAdapter.Read(native, uri);
-            Require(IsHash(native.NativeEnvelopeSha256), uri + ": NativeEnvelopeSha256 is invalid");
-            Require(FirstMandatoryBattleEnvelopeCodec.Sha256(envelope) == native.NativeEnvelopeSha256, uri + ": typed native envelope SHA-256 mismatch");
-            FirstMandatoryBattleProfile profile = FirstMandatoryBattleProfile.FromTypedEnvelope(envelope);
-            string staticResources = Need(native.StaticResources, uri, "StaticResources");
-            string staticProfile = Need(native.StaticProfile, uri, "StaticProfile");
-            NativeSceneLoader.ValidateRoot(staticResources);
-            NativeExplorationProfile.ValidateUri(staticProfile);
-            CheckNativeFile(staticResources + "/Scenes/Scene.tscn", Need(native.StaticSceneSha256, uri, "StaticSceneSha256"));
-            CheckNativeFile(staticProfile, Need(native.StaticProfileSha256, uri, "StaticProfileSha256"));
-            return new(profile, staticResources, staticProfile);
+            return Validate(native, uri);
         }
         catch (InvalidDataException e) when (!e.Message.Contains(uri, StringComparison.Ordinal))
         { throw new InvalidDataException(uri + ": " + e.Message, e); }
         catch (Exception e) when (e is NullReferenceException or ArgumentNullException or InvalidCastException or ArgumentException)
         { throw new InvalidDataException(uri + ": malformed native first-battle profile", e); }
+    }
+
+    internal static CheckedFirstMandatoryBattleProfile ValidateForPreparation(PalFirstMandatoryBattleProfile native) =>
+        Validate(native, "in-memory first-battle profile");
+
+    internal static (CheckedExplorationProfile Profile, FirstMandatoryBattleSession Session) ValidateStaticSelection(
+        CheckedFirstMandatoryBattleProfile battle, PalMapScene map)
+    {
+        CheckedExplorationProfile profile = NativeExplorationProfile.Load(battle.StaticProfile, map.Data);
+        battle.ValidateStatic(map.Data, profile);
+        return (profile, battle.CreateSession(map.Data.SceneId, profile));
+    }
+
+    private static CheckedFirstMandatoryBattleProfile Validate(PalFirstMandatoryBattleProfile native, string identity)
+    {
+        Require(native.FormatVersion == 1, identity + ": first-battle FormatVersion must be 1");
+        Require(native.ProfileId == FirstMandatoryBattleProfile.ProfileIdValue, identity + ": first-battle profile identity mismatch");
+        FirstMandatoryBattleEnvelope envelope = NativeBattleEnvelopeAdapter.Read(native, identity);
+        Require(IsHash(native.NativeEnvelopeSha256), identity + ": NativeEnvelopeSha256 is invalid");
+        Require(FirstMandatoryBattleEnvelopeCodec.Sha256(envelope) == native.NativeEnvelopeSha256, identity + ": typed native envelope SHA-256 mismatch");
+        FirstMandatoryBattleProfile profile = FirstMandatoryBattleProfile.FromTypedEnvelope(envelope);
+        string staticResources = Need(native.StaticResources, identity, "StaticResources");
+        string staticProfile = Need(native.StaticProfile, identity, "StaticProfile");
+        NativeSceneLoader.ValidateRoot(staticResources);
+        NativeExplorationProfile.ValidateUri(staticProfile);
+        CheckNativeFile(staticResources + "/Scenes/Scene.tscn", Need(native.StaticSceneSha256, identity, "StaticSceneSha256"));
+        CheckNativeFile(staticProfile, Need(native.StaticProfileSha256, identity, "StaticProfileSha256"));
+        return new(profile, staticResources, staticProfile);
     }
 
     private static string Need(string? value,string uri,string field)
