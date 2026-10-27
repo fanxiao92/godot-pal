@@ -195,6 +195,66 @@ public class MainSceneTests
         finally { healthy.Main.Display.UpdateCompleted -= rejectedReceipt; }
     }
 
+    [TestCase(Timeout = 20000)]
+    public async Task FirstBattleInitializationFailureUsesMainFailureChannelWithoutPartialScene()
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        fixture.Static.Scene.Objects.Single(item => item.Id == 28).WTriggerScript = 0x09fe;
+        fixture.Static.SavePacked();
+        fixture.Native.StaticSceneSha256 = Godot.FileAccess.GetSha256(fixture.Static.ResourceRoot + "/Scenes/Scene.tscn");
+        fixture.Save();
+        using var scene = new EmbeddedScene(Configured(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.Uri)));
+        AssertThat(scene.Main.Failure!.Contains("owner28 reference identity mismatch", StringComparison.Ordinal)).IsTrue();
+        AssertThat(scene.Main.Failure.Contains("selected-profile=" + fixture.Uri, StringComparison.Ordinal)).IsTrue();
+        AssertThat(scene.Main.Failure.Contains("scene=" + fixture.Static.ResourceRoot + "/Scenes/Scene.tscn", StringComparison.Ordinal)).IsTrue();
+        AssertThat(scene.Main.Failure.Contains("static-profile=" + fixture.Static.Uri, StringComparison.Ordinal)).IsTrue();
+        AssertThat(scene.Main.Failure.Contains("@09FE", StringComparison.OrdinalIgnoreCase)).IsFalse();
+        AssertThat(scene.Main.Failure.Contains("battle-complete", StringComparison.OrdinalIgnoreCase)).IsFalse();
+        AssertThat(scene.Failures.Count).IsEqual(1);
+        AssertThat(scene.Main.Battle).IsNull();
+        AssertThat(scene.Main.Exploration).IsNull();
+        AssertThat(scene.Main.SelectedLanguage).IsNull();
+        AssertThat(scene.Main.GetChildCount()).IsEqual(0);
+        await scene.AssertStopped();
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task FirstBattleContextStartsFromCoreStateAndRejectsOwner28BeforeSideEffects()
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        string nativeHash = Godot.FileAccess.GetSha256(fixture.Uri);
+        var selection = GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.Uri,
+            "--m4-first-battle-language", "en");
+        Main old;
+        using (var scene = new EmbeddedScene(Configured(selection)))
+        {
+            old = scene.Main;
+            scene.AssertHealthy();
+            AssertThat(old.SelectedLanguage).IsEqual("en");
+            AssertThat((old.Exploration!.Leader.X, old.Exploration.Leader.Y, old.Exploration.Leader.Direction))
+                .IsEqual(((short)1264, (short)248, 3));
+            AssertThat(old.Battle!.State.PartyRoleIds.SequenceEqual(new[] { 0 })).IsTrue();
+            AssertThat(old.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).State).IsEqual(2);
+            var before = old.Exploration;
+            scene.Press(Key.Enter);
+            await scene.WaitFor(() => old.Failure is not null, "owner28 unsupported closure rejection");
+            AssertThat(old.Failure).IsEqual("Exploration update failed: " + FirstMandatoryBattleSession.UnsupportedTriggerDiagnostic);
+            AssertThat(ReferenceEquals(old.Exploration, before)).IsTrue();
+            AssertThat(old.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).TriggerEntry).IsEqual(0x09c3);
+            AssertThat(scene.Failures.Count).IsEqual(1);
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        using (var next = new EmbeddedScene(Configured(selection)))
+        {
+            next.AssertHealthy();
+            AssertThat(next.Main.Battle!.State.Roles[0].Hp).IsEqual(150);
+            AssertThat(next.Main.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).State).IsEqual(2);
+            AssertThat((next.Main.Exploration!.Leader.X, next.Main.Exploration.Leader.Y)).IsEqual(((short)1264, (short)248));
+        }
+        AssertThat(Godot.FileAccess.GetSha256(fixture.Uri)).IsEqual(nativeHash);
+        AssertThat(fixture.Static.Scene.Objects.Single(item => item.Id == 28).SState).IsEqual(1);
+    }
+
     private static GameSceneConfiguration Select(NativeProfileFixture fixture) =>
         GameSceneConfiguration.FromArguments("--m2-resources", fixture.ResourceRoot, "--m2-profile", fixture.Uri);
 

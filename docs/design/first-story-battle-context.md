@@ -1,6 +1,6 @@
 # 首个必经剧情战：离线战前上下文契约
 
-状态：**#45 的 `45-offline-contract` 与 `45-core-profile` 组件已实现；Godot 原生 Resource、Main 与战斗行为仍未实现。本页不宣称 #45 整票完成。**
+状态：**#45 的 `45-offline-contract`、`45-core-profile` 与 `45-game-integration` 组件已实现；#46–#53 的战斗与事件能力仍未实现。本页不宣称 #44/M4 完成。**
 
 本契约描述调用 scene 2 / map 12 / owner 28 的 trigger `@09C3` **之前**的独立验收前置。它是维护者显式 author 的剧情前置，不是自然游玩存档，也不是存档格式。它不能替代 `@09C3–@0A32`、战中角色钩子、动态 auto 或失败分支的真实执行。
 
@@ -148,7 +148,7 @@ owner28 的已冻结身份为：坐标 `(1280,256)`、前置 `@0936` 后 `state=
 ## 6. 后续消费接口
 
 - `45-core-profile`（本组件已实现）：`FirstMandatoryBattleProfile.Load(indexBytes, suppliedFiles)` 是唯一公开 profile factory，接收外层提供的 exact bytes，以 ordinal 比较实际枚举出的唯一 `battle-context.json` key，严格核对 index 身份及原始 context 字节 SHA-256，再复核本页全部 v1 schema。成功 profile 以只读 lowercase `ContextSha256` 保留该已验证 exact-byte 身份。CLI author 通过 `InternalsVisibleTo("Pal.Extract")` 调用 Core 的 internal author-only canonical validator，不形成第二套 schema，也不产生无 index 的 runtime profile/hash。公开 profile 提供只读 identity/provenance/layout/role/world/resource metadata；closure identity 使用外部 assembly 无可用派生构造器的 non-record abstract base 与恰好九种 public sealed 具名强类型 variant，不向消费者泄漏 JSON field-name 字典。五个 list 属性 `Operands`、`Effects`、`RoleSpriteIds`、`Languages`、`Contents` 的 public constructor 均 fail-fast 拒绝 null，并 defensive-copy 为实际只读集合，不保留 caller array/list alias；`CreateSessionState` 深拷贝 party、角色与嵌套经验/装备/法术/状态，以及 leader/scene entry/event object 可变状态。Core 不做文件、实际路径或 Godot I/O。
-- `45-game-integration`（未实现）：Editor Prepare 从本产物显式生成原生 Resource；输入/输出新建或空目录并保留真实诊断。Main 的独立 M4 argv、Resource URI、语言选择、READY 顺序及 owner28 副作用前拒绝由该组件接线。
+- `45-game-integration`（本组件已实现）：`Prepare-BattleContext.ps1` 从本产物与显式选择的 scene2/map12 native 场景/探索 profile 生成 `Battle/Profile.tres`，复核输入并使用 new-or-empty/no-overwrite 输出；运行时只加载严格 `res://` native Resource，重新调用同一 Core factory 核 exact bytes/hash/identity，并核静态资源 hash、场景、起点和 owner28。Main 使用 `--m4-first-battle-profile <res://...>` 与可选 `--m4-first-battle-language <zh-Hans|en>`；每次创建独立 Core session。在 #46–#53 未完成期间，owner28 搜索命中在任何朝向、对象或会话状态变化之前以稳定诊断拒绝。
 - #46–#53：只扩展 closure 中分配的能力，复用同一 schema/profile 身份；不得建立第二套解码器、战斗循环或测试专用直装路径。
 
 Core 自动化仅证明严格内存加载、typed metadata、exact-byte/index/file-set 拒绝与同一 profile 多 session 深拷贝；CLI 回归证明 author 仍保持既有文件/argv 行为。这些证据不证明原生 Prepare、真实资源、地图几何、Main M4、@09C3 执行、Core 战斗、SceneRunner、GPU 或物理输入。

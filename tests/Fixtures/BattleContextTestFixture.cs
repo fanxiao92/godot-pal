@@ -1,12 +1,15 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 
-namespace Pal.Core.Tests;
+namespace Pal.TestFixtures;
 
-internal sealed record BattleContextTestFixture(JsonObject Document, byte[] ContextBytes, byte[] IndexBytes, IReadOnlyDictionary<string, byte[]> Files)
+public sealed record BattleContextTestFixture(JsonObject Document, byte[] ContextBytes, byte[] IndexBytes, IReadOnlyDictionary<string, byte[]> Files)
 {
-    internal static BattleContextTestFixture Valid()
+    public static BattleContextTestFixture Valid()
     {
         JsonObject document = CreateAuthorDocument();
         byte[] context = Encoding.UTF8.GetBytes(document.ToJsonString());

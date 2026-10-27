@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -61,6 +62,42 @@ public class MainProcessTests
         AssertThat(result.Text.Contains("M3 static acceptance requires scene 4 / map 10", StringComparison.Ordinal)).IsTrue();
         AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
         AssertThat(result.Text.Contains("PAL_M3_STATIC_ACCEPTANCE", StringComparison.Ordinal)).IsFalse();
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task M4FirstBattleStartsThroughShippedMainWithSelectedLanguageAndReadyLast()
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        var result = await RunMain("--m4-first-battle-profile", fixture.Uri, "--m4-first-battle-language", "en");
+        AssertThat(result.ExitCode).IsEqual(0);
+        int map = result.Text.IndexOf("PAL_MAP_LOADED:", StringComparison.Ordinal);
+        int mode = result.Text.IndexOf("PAL_M4_FIRST_BATTLE_CONTEXT:scene2/map12; owner28/09C3; language=en; trigger closure unavailable", StringComparison.Ordinal);
+        int ready = result.Text.IndexOf("PAL_GAME_READY:Core ready", StringComparison.Ordinal);
+        AssertThat(map >= 0 && mode > map && ready > mode).IsTrue();
+        AssertThat(result.Text.Contains("battle-complete", StringComparison.OrdinalIgnoreCase)).IsFalse();
+        AssertThat(result.Text.Contains("ERROR:", StringComparison.Ordinal)).IsFalse();
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task M4StaticMismatchReportsSelectedAndStaticIdentitiesBeforeReadyWithoutFallback()
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        fixture.Static.Scene.Objects.Single(item => item.Id == 28).WTriggerScript = 0x09fe;
+        fixture.Static.SavePacked();
+        fixture.Native.StaticSceneSha256 = Godot.FileAccess.GetSha256(fixture.Static.ResourceRoot + "/Scenes/Scene.tscn");
+        fixture.Save();
+
+        var result = await RunMain("--m4-first-battle-profile", fixture.Uri);
+
+        AssertThat(result.ExitCode).IsEqual(1);
+        AssertThat(result.Text.Contains("selected-profile=" + fixture.Uri, StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("scene=" + fixture.Static.ResourceRoot + "/Scenes/Scene.tscn", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("static-profile=" + fixture.Static.Uri, StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("owner28 reference identity mismatch", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains("PAL_MAP_LOADED", StringComparison.Ordinal)).IsFalse();
+        AssertThat(result.Text.Contains("PAL_M4_FIRST_BATTLE_CONTEXT", StringComparison.Ordinal)).IsFalse();
+        AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
+        AssertThat(result.Text.Contains("battle-complete", StringComparison.OrdinalIgnoreCase)).IsFalse();
     }
 
     [TestCase(Timeout = 20000)]

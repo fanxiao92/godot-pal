@@ -18,6 +18,7 @@ public partial class Main : Node2D
     private static readonly Key[] DirectionKeys =
         [Key.Down, Key.S, Key.Left, Key.A, Key.Up, Key.W, Key.Right, Key.D];
     private ExplorationInput? input;
+    private FirstMandatoryBattleSession? battle;
     private PalMapScene? mapScene;
     private NpcInteractionRequest? activeTrigger;
     private bool awaitingSceneDraw;
@@ -38,8 +39,10 @@ public partial class Main : Node2D
         configuration = selection;
     }
 
-    public ExplorationState? Exploration => Interaction?.Current ?? input?.Current;
+    public ExplorationState? Exploration => Battle?.Current ?? Interaction?.Current ?? input?.Current;
     public NpcInteractionSession? Interaction { get; private set; }
+    public FirstMandatoryBattleSession? Battle => battle;
+    public string? SelectedLanguage { get; private set; }
     public PalTriggerDialogue? Dialogue { get; private set; }
     public PalDialogueDisplay? Display { get; private set; }
     // Actual Main callback completion; display completion has its own production boundary.
@@ -49,37 +52,54 @@ public partial class Main : Node2D
     {
         if (initializationAttempted || exited || Failure is not null) return;
         initializationAttempted = true;
-        string? scenePath = null, profilePath = null;
+        string? selectedProfilePath = null, scenePath = null, staticProfilePath = null;
         try
         {
             var selected = configuration ?? throw new InvalidOperationException("Configure the scene before entering the tree.");
             string root = selected.Root, profile = selected.Profile, language = selected.Language;
+            selectedProfilePath = selected.BattleProfile ?? selected.DialogueProfile ?? selected.Profile;
             bool staticAcceptance = selected.StaticAcceptance;
             string? dialogueProfile = selected.DialogueProfile;
+            string? battleProfile = selected.BattleProfile;
             PalNpcInteractionProfile? npc = null;
+            CheckedFirstMandatoryBattleProfile? firstBattle = null;
             if (dialogueProfile is not null)
             {
-                profilePath = dialogueProfile;
                 npc = NativeNpcInteractionProfile.Load(dialogueProfile);
                 root = npc.StaticResources; profile = npc.StaticProfile;
             }
+            else if (battleProfile is not null)
+            {
+                firstBattle = NativeFirstMandatoryBattleProfile.Load(battleProfile);
+                root = firstBattle.StaticResources; profile = firstBattle.StaticProfile;
+            }
             scenePath = root + "/Scenes/Scene.tscn";
-            profilePath = profile;
+            staticProfilePath = profile;
             var map = NativeSceneLoader.Load(root);
             CheckedExplorationProfile checkedProfile;
+            FirstMandatoryBattleSession? preparedBattle = null;
+            ExplorationInput? preparedInput = null;
             try
             {
                 checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
                 if (staticAcceptance || npc is not null) ValidateStaticAcceptance(map.Data, checkedProfile);
+                if (firstBattle is not null)
+                {
+                    firstBattle.ValidateStatic(map.Data, checkedProfile);
+                    preparedBattle = firstBattle.CreateSession(checkedProfile);
+                }
                 if (npc is not null)
                 {
                     ValidateDialogueScene(map.Data, npc);
                     checkedProfile.SetPalette(map.Data, Palette(map.Data));
                 }
-                if (npc is null) input = new ExplorationInput(new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader));
-                map.InitializeScene(checkedProfile.Plan, checkedProfile.TextureFor);
+                if (npc is null && preparedBattle is null) preparedInput = new ExplorationInput(new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader));
+                map.InitializeScene(preparedBattle?.Current.Plan ?? checkedProfile.Plan, checkedProfile.TextureFor);
             }
             catch { map.Free(); throw; }
+            battle = preparedBattle;
+            input = preparedInput;
+            SelectedLanguage = language;
             mapScene = map;
             AddChild(map);
             if (npc is not null)
@@ -110,12 +130,13 @@ public partial class Main : Node2D
                 GD.Print($"PAL_M3_DIALOGUE_ACCEPTANCE:scene4/map10; owner60/0188; language={language}; not normal scene story/free exploration");
             }
             GD.Print($"PAL_MAP_LOADED:{root}/Scenes/Scene.tscn");
+            if (firstBattle is not null) GD.Print($"PAL_M4_FIRST_BATTLE_CONTEXT:scene2/map12; owner28/09C3; language={language}; trigger closure unavailable");
             if (staticAcceptance) GD.Print("PAL_M3_STATIC_ACCEPTANCE:scene4/map10; events are not scheduled");
             GD.Print($"PAL_GAME_READY:{Pal.Core.Startup.Status}");
         }
         catch (Exception e)
         {
-            Fail($"Static scene startup failed (scene={scenePath ?? "unselected"}, profile={profilePath ?? "unselected"}): {e.Message}");
+            Fail($"Static scene startup failed (selected-profile={selectedProfilePath ?? "unselected"}, scene={scenePath ?? "unselected"}, static-profile={staticProfilePath ?? "unselected"}): {e.Message}");
         }
     }
 
@@ -153,7 +174,12 @@ public partial class Main : Node2D
             for (int i = 0; i < DirectionKeys.Length; i++)
             {
                 if (key.Keycode != DirectionKeys[i] || !key.IsAction(DirectionActions[i / 2])) continue;
-                if (Interaction is { } interaction)
+                if (battle is { } firstBattle)
+                {
+                    if (key.Pressed) firstBattle.Press((ExplorationKey)i, key.Echo);
+                    else firstBattle.Release((ExplorationKey)i);
+                }
+                else if (Interaction is { } interaction)
                 {
                     if (key.Pressed) interaction.Press((ExplorationKey)i, key.Echo);
                     else interaction.Release((ExplorationKey)i);
@@ -163,10 +189,12 @@ public partial class Main : Node2D
                 return;
             }
             // Windows reference EnableKeyRepeat=false; no held search repeater or fresh-press gate.
-            if (Interaction is { Phase: not NpcInteractionPhase.Trigger } npc && key.Pressed && !key.Echo
+            if (key.Pressed && !key.Echo
                 && (key.Keycode is Key.Enter or Key.Space or Key.KpEnter || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right))
             {
-                npc.PressSearch();
+                if (battle is not null) battle.PressSearch();
+                else if (Interaction is { Phase: not NpcInteractionPhase.Trigger } npc) npc.PressSearch();
+                else return;
                 GetViewport().SetInputAsHandled();
             }
         }
@@ -182,7 +210,8 @@ public partial class Main : Node2D
             // submission boundary across actual callbacks; graphical runs wait for FramePostDraw.
             if (awaitingSceneDraw && DisplayServer.GetName() == "headless") StartAfterSceneDraw();
             if (Failure is not null) return;
-            bool changed = Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
+            bool changed = battle?.Update(unchecked((uint)Time.GetTicksMsec()))
+                ?? Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? input!.Update(unchecked((uint)Time.GetTicksMsec()));
             if (changed) mapScene.UpdateScene(Exploration.Plan);
             if (activeTrigger is null && Interaction?.PendingTrigger is { } request)

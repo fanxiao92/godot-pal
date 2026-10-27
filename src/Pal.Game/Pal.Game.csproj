@@ -10,6 +10,7 @@
     <VSTestTestCaseFilter Condition="'$(VSTestTestCaseFilter)' == ''">FullyQualifiedName!~FailureControlTests</VSTestTestCaseFilter>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../tests/Fixtures/BattleContextTestFixture.cs" Link="Tests/Fixtures/BattleContextTestFixture.cs" />
     <ProjectReference Include="../Pal.Core/Pal.Core.csproj" />
     <PackageReference Include="gdUnit4.api" Version="[5.1.0-rc6.pal.a5f20fb8.1]" />
     <PackageReference Include="gdUnit4.test.adapter" Version="[3.2.0-pal.a5f20fb8.1]" />

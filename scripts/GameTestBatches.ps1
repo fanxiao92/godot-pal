@@ -67,9 +67,9 @@ function Get-GameSourceInventory([string]$Directory) {
 function Get-GameBatchPlan([string]$Repository) {
     $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
     $definitions = @(
-        @{ name = 'process'; count = 66; classes = @('MainProcessTests', 'ExplorationProcessTests') }
-        @{ name = 'scene-dialogue'; count = 79; classes = @('ExplorationSceneTests', 'MainSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
-        @{ name = 'native-map'; count = 97; classes = @('NativeExplorationProfileTests', 'PalMapSceneTests', 'ViewportTests') }
+        @{ name = 'process'; count = 68; classes = @('MainProcessTests', 'ExplorationProcessTests') }
+        @{ name = 'scene-dialogue'; count = 81; classes = @('ExplorationSceneTests', 'MainSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
+        @{ name = 'native-map'; count = 108; classes = @('NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'PalMapSceneTests', 'ViewportTests') }
     )
     $batches = foreach ($definition in $definitions) {
         $names = @($inventory | Where-Object class -CIn $definition.classes | ForEach-Object name)
@@ -82,14 +82,14 @@ function Get-GameBatchPlan([string]$Repository) {
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object class -CNE 'FailureControlTests' | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 245) { throw "Game inventory differs: $($inventory.Count)/245." }
+    if ($inventory.Count -ne 260) { throw "Game inventory differs: $($inventory.Count)/260." }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
-        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj'; passed = 379; skipped = 0 }
+        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj'; passed = 381; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 142; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 247; skipped = 2 }
-        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 52; skipped = 0 }
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = 242; skipped = 0 }
+        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 54; skipped = 0 }
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = 257; skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {
