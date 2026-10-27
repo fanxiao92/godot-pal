@@ -352,18 +352,8 @@ internal static class EventArchive
             if (!obj.ContainsKey(key)) throw new InvalidDataException($"{context}: missing field '{key}'.");
     }
 
-    private static void RejectLinks(string path, string resource)
-    {
-        for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
-        {
-            try
-            {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException($"{resource}: links/reparse points are not supported.");
-            }
-            catch (FileNotFoundException) { }
-            catch (DirectoryNotFoundException) { }
-        }
-    }
+    private static void RejectLinks(string path, string resource) =>
+        PathLinkGuard.RejectReparsePoints(path, $"{resource}: links/reparse points are not supported.");
 
     private static void RejectEventLinks(string path)
     {

@@ -14,5 +14,6 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" />
+    <Compile Include="../Fixtures/BattleContextTestFixture.cs" Link="BattleContextTestFixture.cs" />
   </ItemGroup>
 </Project>

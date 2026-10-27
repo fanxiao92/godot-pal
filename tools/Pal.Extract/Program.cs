@@ -53,6 +53,25 @@ if (args.Length == 5 && args[0] == "export-events" && args[1] == "--input" && ar
     }
 }
 
+if (args.Length == 5 && args[0] == "author-battle-context" && args[1] == "--input" && args[3] == "--output"
+    && !string.IsNullOrWhiteSpace(args[2]) && !args[2].StartsWith("--", StringComparison.Ordinal)
+    && !string.IsNullOrWhiteSpace(args[4]) && !args[4].StartsWith("--", StringComparison.Ordinal))
+{
+    try
+    {
+        BattleContextAuthor.Author(args[2], args[4]);
+        Console.WriteLine($"Battle context authored: {BattleContextAuthor.Profile}");
+        return 0;
+    }
+    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or JsonException or InvalidOperationException or FormatException or OverflowException)
+    {
+        Console.Error.WriteLine(exception is InvalidDataException or JsonException or InvalidOperationException or FormatException or OverflowException
+            ? $"Battle context authoring failed: {exception.Message}"
+            : $"Battle context authoring failed: unable to read input or write output ({exception.GetType().Name}).");
+        return 1;
+    }
+}
+
 if (args.Length == 5 && args[0] == "rebuild-events" && args[1] == "--input" && args[3] == "--output")
 {
     try
@@ -102,7 +121,7 @@ if (args.Length == 11 && args[0] is "export-map" or "export-scene" or "extract-s
 
 if (args.Length != 0 && (args.Length != 1 || args[0] != "--help"))
 {
-    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" ? $"Unsupported arguments for {args[0]}."
+    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" or "author-battle-context" ? $"Unsupported arguments for {args[0]}."
         : $"Unsupported arguments: {string.Join(" ", args)}");
     Console.Error.WriteLine("Use --help for usage.");
     return 2;
@@ -119,6 +138,7 @@ Console.WriteLine("""
            pal-extract extract-dialogue --input <directory> --reference <reference/sdlpal> --output <new-or-empty-directory>
            pal-extract export-events --input <directory> --output <directory>
            pal-extract rebuild-events --input <directory> --output <file>
+           pal-extract author-battle-context --input <author.json> --output <new-or-empty-directory>
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
 
@@ -140,6 +160,10 @@ Console.WriteLine("""
 
       rebuild-events Reconstruct SSS.MKF chunk 4 from a complete faithful event set.
                      Writes a new file only; edited semantic fields are re-encoded.
+
+      author-battle-context Validate and canonicalize the authored @09C3 pre-trigger context.
+                            Records source provenance and the complete local closure without claiming a natural save.
+                            Writes a new or empty directory; runtime does not read original archives or this tool.
 
       extract-scene Compose a complete static scene bundle with a v1 source/artifact manifest.
                     Derives the map from the scene record; requires only six scene MKFs.

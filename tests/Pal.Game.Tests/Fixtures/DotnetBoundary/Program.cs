@@ -57,6 +57,7 @@ internal static class Program
                 "case" => await Supervise(args),
                 "root" => await Root(args),
                 "writer" => await Writer(args),
+                "handle-publication-check" => CheckHandlePublication(),
                 "journal-check" => CheckJournal(),
                 _ => throw new ArgumentException("unknown synthetic role")
             };
@@ -145,10 +146,61 @@ internal static class Program
         {
             string path = Path.Combine(directory, name + ".handle.json");
             if (owned.ContainsKey(name) || !File.Exists(path)) continue;
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
-            owned[name] = new Owned(new IntPtr(document.RootElement.GetProperty("handle").GetInt64()));
+            try
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(path));
+                owned[name] = new Owned(new IntPtr(document.RootElement.GetProperty("handle").GetInt64()));
+            }
+            catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33)
+            {
+                // An atomically published handle file may still be locked briefly by Windows.
+                continue;
+            }
         }
         foreach (var process in owned.Values) process.Observe();
+    }
+    private static int CheckHandlePublication()
+    {
+        if (Directory.Exists(directory)) throw new IOException("refuse to reuse evidence");
+        Directory.CreateDirectory(directory);
+        if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), out var handle,
+                0x00100000 | 0x1000, false, 0)) throw new System.ComponentModel.Win32Exception();
+        var owned = new Dictionary<string, Owned>();
+        try
+        {
+            Save("root.handle.json", new { handle = handle.ToInt64(), pid = Environment.ProcessId });
+            string path = Path.Combine(directory, "root.handle.json");
+            using (var held = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                Receive(owned);
+                if (owned.Count != 0) throw new InvalidOperationException("locked handle publication must be pending");
+            }
+            Receive(owned);
+            if (!owned.TryGetValue("root", out var current) || current.Handle != handle || current.Exit is not null)
+                throw new InvalidOperationException("unlocked owned process handle was not observed");
+
+            File.WriteAllText(Path.Combine(directory, "writer.handle.json"), "{");
+            bool malformed = false;
+            try { Receive(owned); }
+            catch (JsonException) { malformed = true; }
+            if (!malformed) throw new InvalidOperationException("malformed handle publication must fail");
+
+            File.WriteAllText(Path.Combine(directory, "writer.handle.json"), "{\"handle\":0,\"pid\":0}");
+            bool invalid = false;
+            try { Receive(owned); }
+            catch (System.ComponentModel.Win32Exception) { invalid = true; }
+            if (!invalid) throw new InvalidOperationException("invalid process handle must fail observation");
+
+            Save("result.json", new { expected = true, lockedPublicationPending = true,
+                unlockedOwnedHandleObserved = true, malformedPublicationRejected = true, invalidHandleRejected = true });
+            Console.WriteLine("PASS: locked handle publication is pending; unlocked publication remains strict.");
+            return 0;
+        }
+        finally
+        {
+            foreach (var process in owned.Values) CloseHandle(process.Handle);
+            if (!owned.Values.Any(process => process.Handle == handle)) CloseHandle(handle);
+        }
     }
     private static JsonElement? Journal(bool inFlight = false)
     {

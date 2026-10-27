@@ -28,6 +28,7 @@
 - [M3 独立真实 NPC 对话](milestones/m3/plan.md)：已交付 scene4/map10/owner60 有限切片的批准范围；不是正常剧情或全量事件系统。
   - [M3 当前状态与分层验收](milestones/m3/acceptance.md#当前状态)：最终 Issue/CI 的单点索引，以及保持原身份的本地、GPU、用户反馈、失败和 Observer 限制；普通测试选层无需重读历史。
   - [对话资源与显示](design/dialogue-display.md)、[trigger 执行](design/trigger-execution.md)、[搜索/返回规则](design/npc-interaction.md)、[Godot 宿主与启动配置](design/npc-interaction-host.md)：当前实际接口与支持/拒绝范围。
+- [M4 首战离线战前上下文](design/first-story-battle-context.md)：#45 首个组件的 snapshot author、严格现代产物、局部 closure 与后续 Core/Game 所有权；不表示战斗或 Main 接线已实现。
 
 后续计划放在 `docs/milestones/<里程碑>/plan.md`。具体任务规格、讨论和结果留在 GitHub Issues。
 

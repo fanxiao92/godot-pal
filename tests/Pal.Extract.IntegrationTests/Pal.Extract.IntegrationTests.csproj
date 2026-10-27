@@ -19,7 +19,7 @@
   <!-- Run the built CLI, not dotnet run, so builds cannot hide its output/exit code. -->
   <Target Name="CopyCliForProcessTests" AfterTargets="Build">
     <ItemGroup>
-      <CliFiles Include="../../tools/Pal.Extract/bin/$(Configuration)/net10.0/Pal.Extract.*" />
+      <CliFiles Include="../../tools/Pal.Extract/bin/$(Configuration)/net10.0/Pal.Extract.*;../../tools/Pal.Extract/bin/$(Configuration)/net10.0/Pal.Core.*" />
     </ItemGroup>
     <Copy SourceFiles="@(CliFiles)" DestinationFolder="$(OutDir)cli" SkipUnchangedFiles="true" />
   </Target>
