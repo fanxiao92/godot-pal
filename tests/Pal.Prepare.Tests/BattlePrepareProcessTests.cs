@@ -142,7 +142,11 @@ public sealed class BattlePrepareProcessTests : IDisposable
     [InlineData("search")]
     public async Task Static_owner_start_and_search_mismatch_fail_without_publication(string kind)
     {
-        if (kind == "owner") M1Bundle.Mutate(StaticInput, "scene.json", node => node["objects"]![0]!["wTriggerScript"] = 0x09fe);
+        if (kind == "owner")
+        {
+            M1Bundle.Mutate(StaticInput, "scene.json", node => node["objects"]![0]!["wTriggerScript"] = 0x09fe, rehash: false);
+            M1Bundle.Rehash(StaticInput, [210]);
+        }
         else
         {
             BattleContextTestFixture changed = ValidBattleContext();
