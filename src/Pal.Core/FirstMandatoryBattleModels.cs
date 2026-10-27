@@ -319,7 +319,7 @@ internal static class BattleModels
             Array.AsReadOnly(e.GetProperty("eventObjects").EnumerateArray().Select(x => new BattleEventObjectSnapshot(N(x, "ownerId"), N(x, "x"), N(x, "y"), N(x, "direction"), N(x, "state"), N(x, "vanishTime"), N(x, "triggerMode"), N(x, "triggerEntry"), N(x, "autoEntry"), N(x, "autoIdleFrameCount"), N(x, "spriteId"), N(x, "spriteFrames"), N(x, "currentFrame"), N(x, "scriptIdleFrameCount"), N(x, "spritePtrOffset"), N(x, "autoSpriteFrames"), N(x, "layer"))).ToArray()));
     }
     internal static BattleClosure Closure(JsonElement e) => new(S(e, "entry"), Array.AsReadOnly(e.GetProperty("entries").EnumerateArray().Select(x => new BattleClosureEntry(S(x, "id"), S(x, "category"), ClosureIdentity(x.GetProperty("identity")), ReadOnlyInts(x.GetProperty("ownerTickets")), S(x, "status"), Strings(x.GetProperty("resourceIds")))).ToArray()));
-    private static BattleClosureIdentity ClosureIdentity(JsonElement e) => S(e, "kind") switch
+    internal static BattleClosureIdentity ClosureIdentity(JsonElement e) => S(e, "kind") switch
     {
         "event-range" => new BattleEventRangeIdentity(N(e, "startAddress"), N(e, "battleAddress"), N(e, "wonStartAddress"), N(e, "endAddress")),
         "battle-command" => new BattleCommandIdentity(N(e, "commandAddress"), ReadOnlyInts(e.GetProperty("operands")), N(e, "enemyTeamId"),

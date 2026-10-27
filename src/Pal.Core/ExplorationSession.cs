@@ -16,6 +16,8 @@ public sealed class ExplorationSession
         Current = new(initialLeader, false, rules.BuildPlan(initialLeader));
     }
 
+    internal bool IsUpdateDue(uint ticksMilliseconds) => !hasUpdated || unchecked((int)(nextDeadline - ticksMilliseconds)) <= 0;
+
     internal SceneSearchMatch? FindSearchTarget() => rules.FindSearchTarget(Current.Leader);
 
     internal void PrepareSearch(ushort objectId)
@@ -37,7 +39,7 @@ public sealed class ExplorationSession
     {
         if (direction is < 0 or > 3) throw new ArgumentOutOfRangeException(nameof(direction));
         // SDL_TICKS_PASSED: comparisons require tick differences smaller than 2^31 ms.
-        if (hasUpdated && unchecked((int)(nextDeadline - ticksMilliseconds)) > 0) return false;
+        if (!IsUpdateDue(ticksMilliseconds)) return false;
         var leader = Current.Leader;
         int facing = direction ?? leader.Direction;
         short targetX = unchecked((short)(leader.X + (facing is 0 or 1 ? -16 : 16)));

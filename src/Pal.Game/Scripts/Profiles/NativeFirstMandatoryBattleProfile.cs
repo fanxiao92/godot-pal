@@ -12,48 +12,57 @@ public static class NativeFirstMandatoryBattleProfile
 {
     public static CheckedFirstMandatoryBattleProfile Load(string uri)
     {
-        NativeExplorationProfile.ValidateUri(uri);
-        if (!ResourceLoader.Exists(uri)) throw new InvalidDataException(uri + ": native first-battle profile missing; prepare it explicitly");
-        var native = ResourceLoader.Load(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep) as PalFirstMandatoryBattleProfile
-            ?? throw new InvalidDataException(uri + ": expected PalFirstMandatoryBattleProfile");
-        Require(native.FormatVersion == 1, uri + ": first-battle FormatVersion must be 1");
-        Require(native.ProfileId == FirstMandatoryBattleProfile.ProfileIdValue, uri + ": first-battle profile identity mismatch");
-        Require(native.IndexBytes is { Length: > 0 } && native.ContextBytes is { Length: > 0 }, uri + ": embedded exact index/context bytes are required");
-        var profile = FirstMandatoryBattleProfile.Load(native.IndexBytes,
-            new System.Collections.Generic.Dictionary<string, byte[]>(StringComparer.Ordinal) { ["battle-context.json"] = native.ContextBytes });
-        Require(profile.ContextSha256 == native.ContextSha256, uri + ": embedded context hash identity mismatch");
-        Require((native.SceneId, native.MapId, native.OwnerId, native.TriggerAddress) ==
-            (profile.Identity.SceneId, profile.Identity.MapId, profile.Identity.OwnerId, profile.Identity.TriggerAddress),
-            uri + ": embedded scene/map/owner/trigger identity mismatch");
-        NativeSceneLoader.ValidateRoot(native.StaticResources);
-        NativeExplorationProfile.ValidateUri(native.StaticProfile);
-        string sceneUri = native.StaticResources + "/Scenes/Scene.tscn";
-        CheckNativeFile(sceneUri, native.StaticSceneSha256);
-        CheckNativeFile(native.StaticProfile, native.StaticProfileSha256);
-        string[] ids = profile.Resources.Select(item => item.Id).ToArray();
-        string[] references = profile.Resources.Select(item => item.Reference).ToArray();
-        string[] hashes = profile.Resources.Select(item => item.Sha256).ToArray();
-        Require(native.ResourceIds.SequenceEqual(ids) && native.ResourceReferences.SequenceEqual(references)
-            && native.ResourceSha256.SequenceEqual(hashes), uri + ": embedded contract resource identities mismatch");
-        return new(profile, native.StaticResources, native.StaticProfile);
+        try
+        {
+            NativeExplorationProfile.ValidateUri(uri);
+            if (!ResourceLoader.Exists(uri)) throw new InvalidDataException(uri + ": native first-battle profile missing; prepare it explicitly");
+            var native = ResourceLoader.Load(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep) as PalFirstMandatoryBattleProfile
+                ?? throw new InvalidDataException(uri + ": expected PalFirstMandatoryBattleProfile");
+            Require(native.FormatVersion == 1, uri + ": first-battle FormatVersion must be 1");
+            Require(native.ProfileId == FirstMandatoryBattleProfile.ProfileIdValue, uri + ": first-battle profile identity mismatch");
+            FirstMandatoryBattleEnvelope envelope = NativeBattleEnvelopeAdapter.Read(native, uri);
+            Require(IsHash(native.NativeEnvelopeSha256), uri + ": NativeEnvelopeSha256 is invalid");
+            Require(FirstMandatoryBattleEnvelopeCodec.Sha256(envelope) == native.NativeEnvelopeSha256, uri + ": typed native envelope SHA-256 mismatch");
+            FirstMandatoryBattleProfile profile = FirstMandatoryBattleProfile.FromTypedEnvelope(envelope);
+            string staticResources = Need(native.StaticResources, uri, "StaticResources");
+            string staticProfile = Need(native.StaticProfile, uri, "StaticProfile");
+            NativeSceneLoader.ValidateRoot(staticResources);
+            NativeExplorationProfile.ValidateUri(staticProfile);
+            CheckNativeFile(staticResources + "/Scenes/Scene.tscn", Need(native.StaticSceneSha256, uri, "StaticSceneSha256"));
+            CheckNativeFile(staticProfile, Need(native.StaticProfileSha256, uri, "StaticProfileSha256"));
+            return new(profile, staticResources, staticProfile);
+        }
+        catch (InvalidDataException e) when (!e.Message.Contains(uri, StringComparison.Ordinal))
+        { throw new InvalidDataException(uri + ": " + e.Message, e); }
+        catch (Exception e) when (e is NullReferenceException or ArgumentNullException or InvalidCastException or ArgumentException)
+        { throw new InvalidDataException(uri + ": malformed native first-battle profile", e); }
     }
 
+    private static string Need(string? value,string uri,string field)
+    {
+        if (value is null) throw new InvalidDataException(uri + ": " + field + " is null");
+        return value;
+    }
+    private static bool IsHash(string? value) => value is { Length:64 } && value.All(c=>c is >= '0' and <= '9' or >= 'a' and <= 'f');
     private static void CheckNativeFile(string uri, string expected)
     {
         NativeExplorationProfile.ValidateUri(uri);
-        Require(expected is { Length: 64 } && expected.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'), uri + ": native SHA-256 identity is invalid");
+        Require(IsHash(expected), uri + ": native SHA-256 identity is invalid");
         Require(Godot.FileAccess.FileExists(uri) && Godot.FileAccess.GetSha256(uri) == expected, uri + ": native resource SHA-256 mismatch or missing resource");
     }
-
-    private static void Require(bool value, string diagnostic)
-    {
-        if (!value) throw new InvalidDataException(diagnostic);
-    }
+    private static void Require(bool value,string diagnostic) { if(!value) throw new InvalidDataException(diagnostic); }
 }
 
-public sealed record CheckedFirstMandatoryBattleProfile(FirstMandatoryBattleProfile Profile, string StaticResources, string StaticProfile)
+public sealed class CheckedFirstMandatoryBattleProfile
 {
-    public FirstMandatoryBattleSession CreateSession(CheckedExplorationProfile scene) => new(Profile, scene.Rules, scene.Leader);
+    public FirstMandatoryBattleProfile Profile { get; }
+    public string StaticResources { get; }
+    public string StaticProfile { get; }
+
+    internal CheckedFirstMandatoryBattleProfile(FirstMandatoryBattleProfile profile,string staticResources,string staticProfile)
+        => (Profile,StaticResources,StaticProfile)=(profile,staticResources,staticProfile);
+
+    public FirstMandatoryBattleSession CreateSession(int sceneId, CheckedExplorationProfile scene) => new(Profile, sceneId, scene.Rules, scene.Leader);
 
     public void ValidateStatic(PalSceneData data, CheckedExplorationProfile scene)
     {
@@ -71,9 +80,5 @@ public sealed record CheckedFirstMandatoryBattleProfile(FirstMandatoryBattleProf
             throw new InvalidDataException("First mandatory battle static profile start identity mismatch.");
     }
 
-    private static int Direction(string value) => value switch
-    {
-        "south" => 0, "west" => 1, "north" => 2, "east" => 3,
-        _ => throw new InvalidDataException("First mandatory battle direction identity mismatch.")
-    };
+    private static int Direction(string value) => value switch { "south"=>0,"west"=>1,"north"=>2,"east"=>3,_=>throw new InvalidDataException("First mandatory battle direction identity mismatch.") };
 }

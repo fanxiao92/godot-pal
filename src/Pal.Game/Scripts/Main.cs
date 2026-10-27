@@ -86,7 +86,7 @@ public partial class Main : Node2D
                 if (firstBattle is not null)
                 {
                     firstBattle.ValidateStatic(map.Data, checkedProfile);
-                    preparedBattle = firstBattle.CreateSession(checkedProfile);
+                    preparedBattle = firstBattle.CreateSession(map.Data.SceneId, checkedProfile);
                 }
                 if (npc is not null)
                 {
@@ -219,7 +219,7 @@ public partial class Main : Node2D
                 activeTrigger = request;
                 awaitingSceneDraw = true;
             }
-            UpdateCompleted?.Invoke();
+            if (changed) UpdateCompleted?.Invoke();
         }
         catch (Exception e) { Fail($"Exploration update failed: {e.Message}"); }
     }

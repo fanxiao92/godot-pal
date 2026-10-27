@@ -65,13 +65,30 @@ public sealed class FirstMandatoryBattleProfileTests
     }
 
     [Fact]
-    public void Public_surface_has_one_indexed_profile_factory_and_no_authoring_bypass()
+    public void Public_surface_exposes_exact_source_and_strict_typed_factories_only()
     {
-        MethodInfo[] publicStatic = typeof(FirstMandatoryBattleProfile).GetMethods(BindingFlags.Public | BindingFlags.Static);
-        MethodInfo factory = Assert.Single(publicStatic, method => method.ReturnType == typeof(FirstMandatoryBattleProfile));
-        Assert.Equal(nameof(FirstMandatoryBattleProfile.Load), factory.Name);
-        Assert.Equal(new[] { typeof(byte[]), typeof(IReadOnlyDictionary<string, byte[]>) }, factory.GetParameters().Select(parameter => parameter.ParameterType));
-        Assert.DoesNotContain(publicStatic, method => method.Name.Contains("Canonical", StringComparison.Ordinal));
+        MethodInfo[] factories = typeof(FirstMandatoryBattleProfile).GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Where(method => method.ReturnType == typeof(FirstMandatoryBattleProfile)).OrderBy(method => method.Name).ToArray();
+        Assert.Equal(new[] { nameof(FirstMandatoryBattleProfile.FromTypedEnvelope), nameof(FirstMandatoryBattleProfile.Load) }, factories.Select(x => x.Name));
+        Assert.Equal(new[] { typeof(FirstMandatoryBattleEnvelope) }, factories[0].GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.Equal(new[] { typeof(byte[]), typeof(IReadOnlyDictionary<string, byte[]>) }, factories[1].GetParameters().Select(parameter => parameter.ParameterType));
+    }
+
+    [Fact]
+    public void Typed_envelope_roundtrip_preserves_all_layers_and_has_deterministic_non_json_hash()
+    {
+        FirstMandatoryBattleProfile source = LoadContextForTest(BattleContextTestFixture.Valid().ContextBytes);
+        FirstMandatoryBattleEnvelope envelope = source.ToTypedEnvelope();
+        FirstMandatoryBattleProfile roundtrip = FirstMandatoryBattleProfile.FromTypedEnvelope(envelope);
+        Assert.Equal(source.ContextSha256, roundtrip.ContextSha256);
+        Assert.Equal(source.Provenance.FieldSources.Count, roundtrip.Provenance.FieldSources.Count);
+        Assert.Equal(source.Roles.Count, roundtrip.Roles.Count);
+        Assert.Equal(source.World.EventObjects.Count, roundtrip.World.EventObjects.Count);
+        Assert.Equal(source.Closure.Entries.Count, roundtrip.Closure.Entries.Count);
+        Assert.Equal(source.Resources.Count, roundtrip.Resources.Count);
+        byte[] canonical = FirstMandatoryBattleEnvelopeCodec.Encode(envelope);
+        Assert.DoesNotContain((byte)'{', canonical.Take(16));
+        Assert.Equal(FirstMandatoryBattleEnvelopeCodec.Sha256(envelope), Convert.ToHexStringLower(SHA256.HashData(canonical)));
     }
 
     [Fact]

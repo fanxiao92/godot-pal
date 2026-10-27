@@ -37,15 +37,11 @@ public partial class PrepareBattleContext : Node
             string sceneHash = Godot.FileAccess.GetSha256(staticScene), staticProfileHash = Godot.FileAccess.GetSha256(args[7]);
             var native = new PalFirstMandatoryBattleProfile
             {
-                FormatVersion = 1, ProfileId = profile.ProfileId, ContextSha256 = profile.ContextSha256,
-                IndexBytes = indexBytes, ContextBytes = contextBytes, StaticResources = args[5], StaticProfile = args[7],
-                StaticSceneSha256 = sceneHash, StaticProfileSha256 = staticProfileHash,
-                SceneId = profile.Identity.SceneId, MapId = profile.Identity.MapId, OwnerId = profile.Identity.OwnerId,
-                TriggerAddress = profile.Identity.TriggerAddress,
-                ResourceIds = profile.Resources.Select(item => item.Id).ToArray(),
-                ResourceReferences = profile.Resources.Select(item => item.Reference).ToArray(),
-                ResourceSha256 = profile.Resources.Select(item => item.Sha256).ToArray()
+                FormatVersion = 1, ProfileId = profile.ProfileId,
+                StaticResources = args[5], StaticProfile = args[7],
+                StaticSceneSha256 = sceneHash, StaticProfileSha256 = staticProfileHash
             };
+            NativeBattleEnvelopeAdapter.Write(native, profile.ToTypedEnvelope());
             // Re-read every source immediately before writing; a changed source is never paired with the validated bytes.
             Require(File.ReadAllBytes(indexPath).SequenceEqual(indexBytes) && File.ReadAllBytes(contextPath).SequenceEqual(contextBytes),
                 "battle context source changed during preparation");

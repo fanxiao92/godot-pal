@@ -14,13 +14,14 @@ public sealed class FirstMandatoryBattleSession
     public ExplorationState Current => exploration.Current;
     public IReadOnlyList<SceneObject> Objects => exploration.Objects;
 
-    public FirstMandatoryBattleSession(FirstMandatoryBattleProfile profile, StaticSceneRules staticRules, StaticLeader staticLeader)
+    public FirstMandatoryBattleSession(FirstMandatoryBattleProfile profile, int sceneId, StaticSceneRules staticRules, StaticLeader staticLeader)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(staticRules);
         ArgumentNullException.ThrowIfNull(staticLeader);
         State = profile.CreateSessionState();
-        if (State.World is not { SceneId: 2, MapId: 12 } || staticRules.Objects.All(item => item.Id != 28))
+        if (sceneId != 2 || State.World is not { SceneId: 2, MapId: 12 } || staticRules.MapId != 12
+            || staticRules.Objects.All(item => item.Id != 28))
             throw new InvalidDataException("First mandatory battle requires scene2/map12 static rules containing owner28.");
 
         var snapshots = State.World.EventObjects.ToDictionary(item => item.OwnerId);
@@ -54,14 +55,31 @@ public sealed class FirstMandatoryBattleSession
 
     public bool Update(uint ticksMilliseconds)
     {
+        if (!input.IsUpdateDue(ticksMilliseconds)) return false;
         if (searchPressed)
         {
             searchPressed = false;
             if (exploration.FindSearchTarget() is { ObjectId: 28 })
                 throw new InvalidOperationException(UnsupportedTriggerDiagnostic);
         }
-        return input.Update(ticksMilliseconds);
+        bool updated = input.Update(ticksMilliseconds);
+        if (updated)
+        {
+            StaticLeader leader = exploration.Current.Leader;
+            State.World.Leader.X = leader.X;
+            State.World.Leader.Y = leader.Y;
+            State.World.Leader.Direction = DirectionName(leader.Direction);
+            State.World.Leader.Layer = leader.Layer;
+            State.World.Leader.Phase = leader.StepPhase;
+        }
+        return updated;
     }
+
+    private static string DirectionName(int direction) => direction switch
+    {
+        0 => "south", 1 => "west", 2 => "north", 3 => "east",
+        _ => throw new InvalidDataException("First mandatory battle leader direction is invalid.")
+    };
 
     private static int Direction(string direction) => direction switch
     {

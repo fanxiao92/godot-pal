@@ -59,19 +59,19 @@ public class Fixture
         [IO.File]::WriteAllText((Join-Path $source 'Fixture.cs'), $text.Replace('public void Beta()', 'public ValueTask Beta()'))
         Fails { Get-GameSourceInventory $source } 'Unparsed Game test attributes'
     }
-    Case 'real source partitions 68/81/108, preserves controls and solution test projects' {
-        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '68,81,108') 'Wrong batch sizes/order.'
-        Assert ($plan.inventory.Count -eq 260 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+    Case 'real source partitions 68/81/114, preserves controls and solution test projects' {
+        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '68,81,114') 'Wrong batch sizes/order.'
+        Assert ($plan.inventory.Count -eq 266 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
         Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Wrong serial project identities/order.'
         Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj',
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
             'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
         $expectedProjects = @{
-            core = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 381, 0)
+            core = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 386, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 247, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 54, 0)
-            game = @('src/Pal.Game/Pal.Game.csproj', 257, 0)
+            game = @('src/Pal.Game/Pal.Game.csproj', 263, 0)
         }
         foreach ($project in $plan.projects) {
             $expectedProject = $expectedProjects[$project.name]
@@ -80,9 +80,17 @@ public class Fixture
         Assert ($plan.batches[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.MainProcessTests.|FullyQualifiedName~Pal.Game.Tests.ExplorationProcessTests.') 'Filter boundary lost.'
         Assert-ExactTestNames @($plan.batches.expected) @($plan.inventory | Where-Object class -NE 'FailureControlTests' | ForEach-Object name) 'all source positives'
     }
+    Case 'typed native runtime source cannot regress to embedded JSON factory' {
+        $resource = [IO.File]::ReadAllText((Join-Path $repository 'src/Pal.Game/Scripts/Resources/PalFirstMandatoryBattleProfile.cs'))
+        $loader = [IO.File]::ReadAllText((Join-Path $repository 'src/Pal.Game/Scripts/Profiles/NativeFirstMandatoryBattleProfile.cs'))
+        $adapter = [IO.File]::ReadAllText((Join-Path $repository 'src/Pal.Game/Scripts/Profiles/NativeBattleEnvelopeAdapter.cs'))
+        Assert ($resource -notmatch 'IndexBytes|ContextBytes|Json') 'Native profile regained a JSON text/blob property.'
+        Assert (($loader + $adapter) -notmatch 'JsonDocument|FirstMandatoryBattleProfile\.Load\s*\(') 'Runtime native adapter regained the JSON factory/parser.'
+        Assert ($resource -match 'NativeEnvelopeSha256') 'Native profile lost its canonical typed-envelope hash.'
+    }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 381 passed; CLI unit 142 passed; CLI integration 247 passed + 2 skipped (249 total); Prepare 54 passed; Godot source/discovery 260; positives 257 as serial 68/81/108 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 386 passed; CLI unit 142 passed; CLI integration 247 passed + 2 skipped (249 total); Prepare 54 passed; Godot source/discovery 266; positives 263 as serial 68/81/114 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }

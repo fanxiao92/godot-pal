@@ -5,6 +5,7 @@ public sealed class StaticSceneRules
 {
     private const int AnchorX = 160, AnchorY = 112;
     private readonly SceneMap map;
+    public int MapId => map.MapId;
     public IReadOnlyList<SceneObject> Objects { get; }
 
     public StaticSceneRules(SceneMap map, IEnumerable<SceneObject>? objects = null)

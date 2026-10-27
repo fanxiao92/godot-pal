@@ -235,11 +235,14 @@ public class MainSceneTests
                 .IsEqual(((short)1264, (short)248, 3));
             AssertThat(old.Battle!.State.PartyRoleIds.SequenceEqual(new[] { 0 })).IsTrue();
             AssertThat(old.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).State).IsEqual(2);
+            await scene.WaitFor(() => scene.Updates.Count > 0, "first actual M4 update completion");
+            int completedUpdates = scene.Updates.Count;
             var before = old.Exploration;
             scene.Press(Key.Enter);
             await scene.WaitFor(() => old.Failure is not null, "owner28 unsupported closure rejection");
             AssertThat(old.Failure).IsEqual("Exploration update failed: " + FirstMandatoryBattleSession.UnsupportedTriggerDiagnostic);
             AssertThat(ReferenceEquals(old.Exploration, before)).IsTrue();
+            AssertThat(scene.Updates.Count).IsEqual(completedUpdates);
             AssertThat(old.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).TriggerEntry).IsEqual(0x09c3);
             AssertThat(scene.Failures.Count).IsEqual(1);
         }

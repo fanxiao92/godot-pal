@@ -20,18 +20,28 @@ public sealed class FirstMandatoryBattleProfile
     public BattleClosure Closure { get; }
     public IReadOnlyList<BattleResourceReference> Resources { get; }
 
-    private FirstMandatoryBattleProfile(JsonElement root, string contextSha256)
+    private FirstMandatoryBattleProfile(FirstMandatoryBattleEnvelope envelope)
     {
-        ContextSha256 = contextSha256;
-        Identity = BattleModels.Identity(root.GetProperty("identity"));
-        Provenance = BattleModels.Provenance(root.GetProperty("provenance"));
-        Layout = BattleModels.Layout(root.GetProperty("layout"));
-        JsonElement snapshot = root.GetProperty("snapshot");
-        PartyRoleIds = BattleModels.ReadOnlyInts(snapshot.GetProperty("partyRoleIds"));
-        Roles = System.Array.AsReadOnly(snapshot.GetProperty("roles").EnumerateArray().Select(BattleModels.Role).ToArray());
-        World = BattleModels.World(snapshot.GetProperty("world"));
-        Closure = BattleModels.Closure(root.GetProperty("closure"));
-        Resources = System.Array.AsReadOnly(root.GetProperty("resources").EnumerateArray().Select(BattleModels.Resource).ToArray());
+        ContextSha256 = envelope.ContextSha256;
+        Identity = envelope.Identity;
+        Provenance = envelope.Provenance;
+        Layout = envelope.Layout;
+        PartyRoleIds = System.Array.AsReadOnly(envelope.PartyRoleIds.ToArray());
+        Roles = System.Array.AsReadOnly(envelope.Roles.ToArray());
+        World = envelope.World;
+        Closure = envelope.Closure;
+        Resources = System.Array.AsReadOnly(envelope.Resources.ToArray());
+    }
+
+    public FirstMandatoryBattleEnvelope ToTypedEnvelope() => new(ContextSha256, Identity, Provenance, Layout,
+        PartyRoleIds, Roles, World, Closure, Resources);
+
+    /// <summary>The sole semantic factory for JSON-author and native-resource adapters.</summary>
+    public static FirstMandatoryBattleProfile FromTypedEnvelope(FirstMandatoryBattleEnvelope envelope)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ValidateTypedEnvelope(envelope);
+        return new(envelope);
     }
 
     public static FirstMandatoryBattleProfile Load(byte[] indexBytes, IReadOnlyDictionary<string, byte[]> suppliedFiles)
@@ -57,7 +67,15 @@ public sealed class FirstMandatoryBattleProfile
         if (!StringComparer.Ordinal.Equals(expectedHash, actualHash)) throw new InvalidDataException("battle-context.json exact-byte SHA-256 does not match index.json.");
         using JsonDocument document = ParseStrict(contextBytes, "battle-context.json");
         ValidateSchema(document.RootElement);
-        return new FirstMandatoryBattleProfile(document.RootElement, actualHash);
+        JsonElement context = document.RootElement;
+        JsonElement snapshot = context.GetProperty("snapshot");
+        var envelope = new FirstMandatoryBattleEnvelope(actualHash,
+            BattleModels.Identity(context.GetProperty("identity")), BattleModels.Provenance(context.GetProperty("provenance")),
+            BattleModels.Layout(context.GetProperty("layout")), BattleModels.ReadOnlyInts(snapshot.GetProperty("partyRoleIds")),
+            System.Array.AsReadOnly(snapshot.GetProperty("roles").EnumerateArray().Select(BattleModels.Role).ToArray()),
+            BattleModels.World(snapshot.GetProperty("world")), BattleModels.Closure(context.GetProperty("closure")),
+            System.Array.AsReadOnly(context.GetProperty("resources").EnumerateArray().Select(BattleModels.Resource).ToArray()));
+        return FromTypedEnvelope(envelope);
     }
 
     internal static byte[] ValidateAndCanonicalizeAuthorContext(byte[] contextBytes)
@@ -70,6 +88,101 @@ public sealed class FirstMandatoryBattleProfile
     }
 
     public FirstMandatoryBattleSessionState CreateSessionState() => new(this);
+
+    private static void ValidateTypedEnvelope(FirstMandatoryBattleEnvelope e)
+    {
+        Expect(Sha256Pattern.IsMatch(e.ContextSha256), "ContextSha256 must be lowercase hexadecimal.");
+        Expect(e.Identity == new BattleContextIdentity(SnapshotKind, 2, 12, 28, 0x09c3), "Battle context identity must be scene 2 / map 12 / owner 28 / trigger @09C3.");
+        Expect(!e.Provenance.OptionalGrinding && !e.Provenance.PlayerEquipmentChanges && e.Provenance.FieldSources.Count > 0,
+            "Battle context provenance is invalid.");
+        Expect(e.Provenance.FieldSources.All(x => x is not null && x.Path.Length > 0 && x.AppliesTo.Length > 0
+            && x.SourceKind is "original-base" or "required-precondition" or "author-policy"
+            && (x.SourceKind == "required-precondition") == x.SourceAddress.HasValue)
+            && e.Provenance.FieldSources.Select(x => x.Path).Distinct(StringComparer.Ordinal).Count() == e.Provenance.FieldSources.Count,
+            "Battle context fieldSources are invalid.");
+        Dictionary<string,string> leafPaths = TypedLeafPaths(e);
+        Expect(e.Provenance.FieldSources.Select(x => x.Path).ToHashSet(StringComparer.Ordinal).SetEquals(leafPaths.Keys)
+            && e.Provenance.FieldSources.All(x => x.AppliesTo == leafPaths[x.Path]), "Battle context fieldSources do not cover the typed snapshot exactly.");
+        var frozenSources = new Dictionary<string, SourceSpec>(FrozenSourceSpecs, StringComparer.Ordinal)
+        { ["snapshot.world.eventObjects[" + e.World.EventObjects.ToList().FindIndex(x => x.OwnerId == 28) + "].state"] = new("required-precondition", 0x0936) };
+        foreach (BattleFieldSource source in e.Provenance.FieldSources)
+        {
+            if (source.SourceKind == "required-precondition")
+                Expect(frozenSources.TryGetValue(source.Path, out SourceSpec? expected) && expected.Kind == source.SourceKind && expected.Address == source.SourceAddress,
+                    $"required-precondition source for '{source.Path}' is invalid.");
+        }
+        foreach ((string path, SourceSpec expected) in frozenSources)
+        {
+            BattleFieldSource source = e.Provenance.FieldSources.Single(x => x.Path == path);
+            Expect(source.SourceKind == expected.Kind && source.SourceAddress == expected.Address, $"'{path}' does not use its frozen provenance tuple.");
+        }
+        Expect(e.Layout == new BattleContextLayout(6, 6, 5), "Battle context layout is invalid.");
+        Expect(e.PartyRoleIds.SequenceEqual([0]) && e.Roles.Count == 6, "Battle context party/roles are invalid.");
+        for (int i = 0; i < e.Roles.Count; i++)
+        {
+            BattleRoleSnapshot r = e.Roles[i];
+            Expect(r is not null && r.RoleId == i && r.Level is > 0 and <= 65535 && r.Hp is >= 0 and <= 65535 && r.Hp <= r.MaxHp
+                && r.Mp is >= 0 and <= 65535 && r.Mp <= r.MaxMp && r.MaxHp is > 0 and <= 65535 && r.MaxMp is >= 0 and <= 65535
+                && r.PrimaryExperience.Level == r.Level && r.HiddenExperience is not null
+                && HiddenExperienceNames.All(name => r.HiddenExperience.TryGetValue(name, out BattleExperienceSnapshot? x) && x.Level == r.Level)
+                && r.HiddenExperience.Count == HiddenExperienceNames.Length && r.Equipment.Count == 6 && r.Statuses.Count == 9
+                && r.Magics.Count <= 32 && r.Magics.All(x => x is > 0 and <= 65535) && r.Magics.Distinct().Count() == r.Magics.Count
+                && r.CoveredByRoleId is >= 0 and < 6, $"role {i} is invalid.");
+        }
+        BattleWorldSnapshot w = e.World;
+        Expect(w.SceneId == 2 && w.MapId == 12 && w.Leader.Direction is "north" or "east" or "south" or "west"
+            && w.Leader.Phase is >= 0 and <= 3 && w.SearchProof is { OwnerId: 28, CollisionPass: true }
+            && w.SearchProof.SampleIndex is >= 0 and < 13 && w.SceneEntries.Any(x => x.SceneId == 2)
+            && w.SceneEntries.Select(x => x.SceneId).Distinct().Count() == w.SceneEntries.Count
+            && w.EventObjects.Select(x => x.OwnerId).Distinct().Count() == w.EventObjects.Count, "Battle world is invalid.");
+        BattleEventObjectSnapshot? owner = w.EventObjects.SingleOrDefault(x => x.OwnerId == 28);
+        Expect(owner is { X: 1280, Y: 256, State: 2, TriggerMode: 1, TriggerEntry: 0x09c3, AutoEntry: 0, SpriteId: 210 }, "owner28 identity is invalid.");
+        Expect(e.Closure.Entry == "@09C3" && e.Closure.Entries.Count == ClosureSpecs.Count
+            && e.Closure.Entries.Select(x => x.Id).ToHashSet(StringComparer.Ordinal).SetEquals(ClosureSpecs.Keys), "Battle closure is invalid.");
+        foreach (BattleClosureEntry entry in e.Closure.Entries)
+        {
+            ClosureSpec spec = ClosureSpecs[entry.Id];
+            Expect(entry.Category == spec.Category && entry.Status == "contract-only" && ClosureIdentityEquals(entry.Identity, spec.Identity)
+                && entry.OwnerTickets.Count == entry.OwnerTickets.Distinct().Count() && entry.OwnerTickets.ToHashSet().SetEquals(spec.OwnerTickets)
+                && entry.ResourceIds.SequenceEqual(spec.ResourceIds), $"closure entry '{entry.Id}' is invalid.");
+        }
+        Expect(e.Resources.Count == ResourceSpecs.Count && e.Resources.Select(x => x.Id).ToHashSet(StringComparer.Ordinal).SetEquals(ResourceSpecs.Keys), "Battle resources are invalid.");
+        foreach (BattleResourceReference resource in e.Resources)
+        {
+            ResourceSpec spec = ResourceSpecs[resource.Id];
+            Expect(resource.Kind == spec.Kind && Sha256Pattern.IsMatch(resource.Sha256) && IsPortableRelativeReference(resource.Reference)
+                && resource.OwnerTickets.Count == resource.OwnerTickets.Distinct().Count() && resource.OwnerTickets.ToHashSet().SetEquals(spec.OwnerTickets),
+                $"resource '{resource.Id}' is invalid.");
+        }
+        _ = FirstMandatoryBattleEnvelopeCodec.Encode(e);
+    }
+
+    private static Dictionary<string,string> TypedLeafPaths(FirstMandatoryBattleEnvelope e)
+    {
+        var result = new Dictionary<string,string>(StringComparer.Ordinal);
+        void Add(string path,string applies) => result.Add(path,applies);
+        for (int i=0;i<e.PartyRoleIds.Count;i++) Add($"snapshot.partyRoleIds[{i}]","team-before-09C3");
+        string[] roleScalars=["roleId","level","hp","maxHp","mp","maxMp"];
+        string[] experience=["value","level","count"];
+        for(int i=0;i<e.Roles.Count;i++)
+        {
+            string root=$"snapshot.roles[{i}]", applies="role"+i;
+            foreach(string name in roleScalars) Add(root+"."+name,applies);
+            foreach(string name in experience) Add(root+".primaryExperience."+name,applies);
+            foreach(string hidden in HiddenExperienceNames) foreach(string name in experience) Add(root+".hiddenExperience."+hidden+"."+name,applies);
+            for(int j=0;j<e.Roles[i].Equipment.Count;j++) Add($"{root}.equipment[{j}]",applies);
+            if(e.Roles[i].Magics.Count==0) Add(root+".magics",applies); else for(int j=0;j<e.Roles[i].Magics.Count;j++) Add($"{root}.magics[{j}]",applies);
+            for(int j=0;j<e.Roles[i].Statuses.Count;j++) Add($"{root}.statuses[{j}]",applies);
+            Add(root+".coveredByRoleId",applies);
+        }
+        foreach(string name in new[]{"sceneId","mapId","paletteId","nightPalette","musicId","battleMusicId"}) Add("snapshot.world."+name,"world");
+        foreach(string name in new[]{"x","y","direction","layer","phase"}) Add("snapshot.world.leader."+name,"world");
+        foreach(string name in new[]{"ownerId","sampleIndex","collisionPass"}) Add("snapshot.world.searchProof."+name,"world");
+        for(int i=0;i<e.World.SceneEntries.Count;i++) foreach(string name in new[]{"sceneId","enterEntry","teleportEntry"}) Add($"snapshot.world.sceneEntries[{i}].{name}","scene"+e.World.SceneEntries[i].SceneId);
+        string[] objectNames=["ownerId","x","y","direction","state","vanishTime","triggerMode","triggerEntry","autoEntry","autoIdleFrameCount","spriteId","spriteFrames","currentFrame","scriptIdleFrameCount","spritePtrOffset","autoSpriteFrames","layer"];
+        for(int i=0;i<e.World.EventObjects.Count;i++) foreach(string name in objectNames) Add($"snapshot.world.eventObjects[{i}].{name}","owner"+e.World.EventObjects[i].OwnerId);
+        return result;
+    }
 
     private static JsonDocument ParseStrict(byte[] bytes, string identity)
     {
@@ -90,7 +203,7 @@ public sealed class FirstMandatoryBattleProfile
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly Regex Sha256Pattern = new("^[0-9a-f]{64}\\z", RegexOptions.CultureInvariant);
     private static readonly string[] HiddenExperienceNames = ["health", "magic", "attack", "magicPower", "defense", "dexterity", "flee"];
-    private sealed record ClosureSpec(string Category, JsonObject Identity, int[] OwnerTickets, string[] ResourceIds);
+    private sealed record ClosureSpec(string Category, BattleClosureIdentity Identity, int[] OwnerTickets, string[] ResourceIds);
     private sealed record ResourceSpec(string Kind, int[] OwnerTickets);
     private sealed record SourceSpec(string Kind, int? Address);
 
@@ -98,15 +211,15 @@ public sealed class FirstMandatoryBattleProfile
 
     private static readonly IReadOnlyDictionary<string, ClosureSpec> ClosureSpecs = new Dictionary<string, ClosureSpec>(StringComparer.Ordinal)
     {
-        ["trigger-09c3-0a32"] = new("command", new JsonObject { ["kind"] = "event-range", ["startAddress"] = 0x09c3, ["battleAddress"] = 0x09fe, ["wonStartAddress"] = 0x09ff, ["endAddress"] = 0x0a32 }, [52, 53], ["events"]),
-        ["battle-team-18"] = new("command", new JsonObject { ["kind"] = "battle-command", ["commandAddress"] = 0x09fe, ["operands"] = new JsonArray(0x0012, 0xa073, 0x0000), ["enemyTeamId"] = 18, ["enemyObjectId"] = 495, ["enemyId"] = 97, ["enemyCount"] = 2, ["battlefieldId"] = 24, ["specialValue"] = "third-operand-zero-is-boss-no-flee", ["reverseEncoding"] = "encode-operands-from-semantic-fields" }, [46, 47, 51, 53], ["events", "battle-data"]),
-        ["role-hooks-random"] = new("command", new JsonObject { ["kind"] = "role-script-ranges", ["dyingRoleId"] = 1, ["dyingStartAddress"] = 0xa96e, ["dyingEndAddress"] = 0xa987, ["friendDeathRoleId"] = 0, ["friendDeathStartAddress"] = 0xa9b5, ["friendDeathEndAddress"] = 0xa9d1, ["branchCoverage"] = "all-random-branches" }, [49], ["events", "battle-data", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
-        ["equipment-six-role"] = new("validation", new JsonObject { ["kind"] = "equipment-layout", ["roleCount"] = 6, ["slotCount"] = 6, ["dualAttackObjectId"] = 170, ["persistentEquipmentStatus"] = true }, [48], ["battle-data"]),
-        ["growth-five-role"] = new("validation", new JsonObject { ["kind"] = "growth-layout", ["roleCount"] = 5, ["includesPrimaryExperience"] = true, ["includesHiddenExperience"] = true, ["includesRecoveryAndCleanup"] = true }, [50], ["battle-data"]),
-        ["dynamic-auto-0a36-0a3b"] = new("command", new JsonObject { ["kind"] = "dynamic-auto-range", ["startAddress"] = 0x0a36, ["endAddress"] = 0x0a3b, ["effects"] = new JsonArray("movement", "direction", "hidden"), ["advance"] = "update-driven" }, [52], ["events"]),
-        ["failure-reload-todo"] = new("command", new JsonObject { ["kind"] = "failure-boundary", ["lostEntryAddress"] = 0xa073, ["reloadCommand"] = 0x004e, ["behavior"] = "diagnose-and-stop-without-reload-retry-or-exploration" }, [51], ["events", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
-        ["battle-images"] = new("resource", new JsonObject { ["kind"] = "battle-image-set", ["enemyId"] = 97, ["enemyArchiveEntry"] = "ABC97", ["roleSpriteIds"] = new JsonArray("F0", "F1"), ["battlefieldId"] = 24, ["battlefieldArchiveEntry"] = "FBP24", ["includesLayoutAndEffectFrames"] = true }, [53], ["battle-images"]),
-        ["dialogue-languages"] = new("resource", new JsonObject { ["kind"] = "localized-dialogue-set", ["languages"] = new JsonArray("zh-CN", "en"), ["contents"] = new JsonArray("messages", "names", "portraits", "glyphs", "ui") }, [49, 53], ["dialogue-zh-cn", "dialogue-en", "glyphs"])
+        ["trigger-09c3-0a32"] = new("command", new BattleEventRangeIdentity(0x09c3, 0x09fe, 0x09ff, 0x0a32), [52, 53], ["events"]),
+        ["battle-team-18"] = new("command", new BattleCommandIdentity(0x09fe, [0x0012, 0xa073, 0], 18, 495, 97, 2, 24, "third-operand-zero-is-boss-no-flee", "encode-operands-from-semantic-fields"), [46, 47, 51, 53], ["events", "battle-data"]),
+        ["role-hooks-random"] = new("command", new BattleRoleHooksIdentity(1, 0xa96e, 0xa987, 0, 0xa9b5, 0xa9d1, "all-random-branches"), [49], ["events", "battle-data", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
+        ["equipment-six-role"] = new("validation", new BattleEquipmentLayoutIdentity(6, 6, 170, true), [48], ["battle-data"]),
+        ["growth-five-role"] = new("validation", new BattleGrowthLayoutIdentity(5, true, true, true), [50], ["battle-data"]),
+        ["dynamic-auto-0a36-0a3b"] = new("command", new BattleDynamicAutoIdentity(0x0a36, 0x0a3b, ["movement", "direction", "hidden"], "update-driven"), [52], ["events"]),
+        ["failure-reload-todo"] = new("command", new BattleFailureBoundaryIdentity(0xa073, 0x004e, "diagnose-and-stop-without-reload-retry-or-exploration"), [51], ["events", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
+        ["battle-images"] = new("resource", new BattleImageSetIdentity(97, "ABC97", ["F0", "F1"], 24, "FBP24", true), [53], ["battle-images"]),
+        ["dialogue-languages"] = new("resource", new BattleLocalizedDialogueIdentity(["zh-CN", "en"], ["messages", "names", "portraits", "glyphs", "ui"]), [49, 53], ["dialogue-zh-cn", "dialogue-en", "glyphs"])
     };
 
     private static readonly IReadOnlyDictionary<string, ResourceSpec> ResourceSpecs = new Dictionary<string, ResourceSpec>(StringComparer.Ordinal)
@@ -378,8 +491,7 @@ public sealed class FirstMandatoryBattleProfile
             if (!ClosureSpecs.TryGetValue(id, out ClosureSpec? spec)) throw new InvalidDataException($"closure id '{id}' is unknown.");
             Expect(Text(entry, "category") == spec.Category, $"closure entry '{id}' category is not the frozen category.");
             JsonElement identity = Object(entry, "identity");
-            using JsonDocument expectedIdentity = JsonDocument.Parse(spec.Identity.ToJsonString());
-            Expect(DeepEqualsIgnoringComments(identity, expectedIdentity.RootElement), $"closure entry '{id}' identity is not the frozen structured identity.");
+            Expect(ClosureIdentityEquals(BattleModels.ClosureIdentity(identity), spec.Identity), $"closure entry '{id}' identity is not the frozen structured identity.");
             Expect(ExactWordSet(Array(entry, "ownerTickets"), spec.OwnerTickets, $"closure entry '{id}' ownerTickets"), $"closure entry '{id}' ownerTickets do not match the exact owner set.");
             Expect(Text(entry, "status") == "contract-only", $"closure entry '{id}' must remain contract-only until downstream evidence is delivered.");
             string[] links = Array(entry, "resourceIds").EnumerateArray().Select(value => value.ValueKind == JsonValueKind.String ? value.GetString()! : throw new InvalidDataException($"closure entry '{id}' resourceIds must be strings.")).ToArray();
@@ -429,6 +541,20 @@ public sealed class FirstMandatoryBattleProfile
         }
         return true;
     }
+
+    private static bool ClosureIdentityEquals(BattleClosureIdentity actual, BattleClosureIdentity expected) => (actual, expected) switch
+    {
+        (BattleEventRangeIdentity a, BattleEventRangeIdentity b) => (a.StartAddress,a.BattleAddress,a.WonStartAddress,a.EndAddress)==(b.StartAddress,b.BattleAddress,b.WonStartAddress,b.EndAddress),
+        (BattleCommandIdentity a, BattleCommandIdentity b) => a.CommandAddress==b.CommandAddress && a.Operands.SequenceEqual(b.Operands) && (a.EnemyTeamId,a.EnemyObjectId,a.EnemyId,a.EnemyCount,a.BattlefieldId,a.SpecialValue,a.ReverseEncoding)==(b.EnemyTeamId,b.EnemyObjectId,b.EnemyId,b.EnemyCount,b.BattlefieldId,b.SpecialValue,b.ReverseEncoding),
+        (BattleRoleHooksIdentity a, BattleRoleHooksIdentity b) => (a.DyingRoleId,a.DyingStartAddress,a.DyingEndAddress,a.FriendDeathRoleId,a.FriendDeathStartAddress,a.FriendDeathEndAddress,a.BranchCoverage)==(b.DyingRoleId,b.DyingStartAddress,b.DyingEndAddress,b.FriendDeathRoleId,b.FriendDeathStartAddress,b.FriendDeathEndAddress,b.BranchCoverage),
+        (BattleEquipmentLayoutIdentity a, BattleEquipmentLayoutIdentity b) => (a.RoleCount,a.SlotCount,a.DualAttackObjectId,a.PersistentEquipmentStatus)==(b.RoleCount,b.SlotCount,b.DualAttackObjectId,b.PersistentEquipmentStatus),
+        (BattleGrowthLayoutIdentity a, BattleGrowthLayoutIdentity b) => (a.RoleCount,a.IncludesPrimaryExperience,a.IncludesHiddenExperience,a.IncludesRecoveryAndCleanup)==(b.RoleCount,b.IncludesPrimaryExperience,b.IncludesHiddenExperience,b.IncludesRecoveryAndCleanup),
+        (BattleDynamicAutoIdentity a, BattleDynamicAutoIdentity b) => (a.StartAddress,a.EndAddress,a.Advance)==(b.StartAddress,b.EndAddress,b.Advance) && a.Effects.SequenceEqual(b.Effects),
+        (BattleFailureBoundaryIdentity a, BattleFailureBoundaryIdentity b) => (a.LostEntryAddress,a.ReloadCommand,a.Behavior)==(b.LostEntryAddress,b.ReloadCommand,b.Behavior),
+        (BattleImageSetIdentity a, BattleImageSetIdentity b) => (a.EnemyId,a.EnemyArchiveEntry,a.BattlefieldId,a.BattlefieldArchiveEntry,a.IncludesLayoutAndEffectFrames)==(b.EnemyId,b.EnemyArchiveEntry,b.BattlefieldId,b.BattlefieldArchiveEntry,b.IncludesLayoutAndEffectFrames) && a.RoleSpriteIds.SequenceEqual(b.RoleSpriteIds),
+        (BattleLocalizedDialogueIdentity a, BattleLocalizedDialogueIdentity b) => a.Languages.SequenceEqual(b.Languages) && a.Contents.SequenceEqual(b.Contents),
+        _ => false
+    };
 
     private static bool DeepEqualsIgnoringComments(JsonElement actual, JsonElement expected)
     {

@@ -7,6 +7,7 @@ using System.Text;
 using Godot;
 using Pal.Core;
 using Pal.Game.Resources;
+using Pal.Game.Profiles;
 using Pal.TestFixtures;
 
 namespace Pal.Game.Tests;
@@ -43,14 +44,11 @@ internal sealed class NativeBattleProfileFixture : IDisposable
         Core = FirstMandatoryBattleProfile.Load(index, new Dictionary<string, byte[]> { ["battle-context.json"] = context });
         Native = new PalFirstMandatoryBattleProfile
         {
-            FormatVersion = 1, ProfileId = Core.ProfileId, ContextSha256 = Core.ContextSha256,
-            IndexBytes = index, ContextBytes = context, StaticResources = Static.ResourceRoot, StaticProfile = Static.Uri,
+            FormatVersion = 1, ProfileId = Core.ProfileId, StaticResources = Static.ResourceRoot, StaticProfile = Static.Uri,
             StaticSceneSha256 = Godot.FileAccess.GetSha256(Static.ResourceRoot + "/Scenes/Scene.tscn"),
-            StaticProfileSha256 = Godot.FileAccess.GetSha256(Static.Uri), SceneId = 2, MapId = 12, OwnerId = 28, TriggerAddress = 0x09c3,
-            ResourceIds = Core.Resources.Select(item => item.Id).ToArray(),
-            ResourceReferences = Core.Resources.Select(item => item.Reference).ToArray(),
-            ResourceSha256 = Core.Resources.Select(item => item.Sha256).ToArray()
+            StaticProfileSha256 = Godot.FileAccess.GetSha256(Static.Uri)
         };
+        NativeBattleEnvelopeAdapter.Write(Native, Core.ToTypedEnvelope());
         Save();
     }
 
