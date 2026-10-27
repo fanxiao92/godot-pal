@@ -218,7 +218,9 @@ public partial class Main : Node2D
                 activeTrigger = request;
                 awaitingSceneDraw = true;
             }
-            if (changed) UpdateCompleted?.Invoke();
+            // Exploration/dialogue observers consume every real Main callback; first-battle
+            // observers only consume committed updates, leaving no-change/rejection unpublished.
+            if (battle is null || changed) UpdateCompleted?.Invoke();
         }
         catch (Exception e) { Fail($"Exploration update failed: {e.Message}"); }
     }

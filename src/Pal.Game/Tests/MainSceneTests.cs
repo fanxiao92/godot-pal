@@ -36,6 +36,11 @@ public class MainSceneTests
             AssertThat(initial).IsNotNull();
             AssertThat((initial!.Leader.X, initial.Leader.Y)).IsEqual(((short)320, (short)320));
             await scene.WaitFor(() => scene.Updates.Count > 0, "actual initial update");
+            var firstUpdate = main.Exploration;
+            int initialCompletions = scene.Updates.Count;
+            await scene.WaitFor(() => scene.Updates.Count > initialCompletions,
+                "non-battle no-change callback completion");
+            AssertThat(ReferenceEquals(main.Exploration, firstUpdate)).IsTrue();
             scene.AssertHealthy();
             AssertThat(main.GetChildren().OfType<Pal.Game.Resources.PalMapScene>().Count()).IsEqual(1);
         }
@@ -242,6 +247,8 @@ public class MainSceneTests
             await scene.WaitFor(() => old.Failure is not null, "owner28 unsupported closure rejection");
             AssertThat(old.Failure).IsEqual("Exploration update failed: " + FirstMandatoryBattleSession.UnsupportedTriggerDiagnostic);
             AssertThat(ReferenceEquals(old.Exploration, before)).IsTrue();
+            // First-battle preflight callbacks without a committed update, including the
+            // rejected @09C3 callback, must not publish completion.
             AssertThat(scene.Updates.Count).IsEqual(completedUpdates);
             AssertThat(old.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).TriggerEntry).IsEqual(0x09c3);
             AssertThat(scene.Failures.Count).IsEqual(1);
