@@ -29,7 +29,10 @@ public partial class PrepareBattleContext : Node
             NativeExplorationProfile.ValidateUri(args[7]);
             string staticRootPath = PreparationPathSafety.AssetResourcePath(args[5], directory: true);
             string staticProfilePath = PreparationPathSafety.AssetResourcePath(args[7], directory: false);
+            string outputPath = ProjectSettings.GlobalizePath(output);
             Require(IsInside(staticProfilePath, staticRootPath), "selected static profile must be inside selected static resources");
+            Require(!IsInside(outputPath, staticRootPath) && !IsInside(staticRootPath, outputPath),
+                "battle native output and selected static resources must not overlap in either direction");
             string staticScene = args[5] + "/Scenes/Scene.tscn";
             string staticScenePath = PreparationPathSafety.AssetResourcePath(staticScene, directory: false);
             PreparationPathSafety.CheckTreeNoReparse(staticRootPath);
@@ -63,7 +66,6 @@ public partial class PrepareBattleContext : Node
             string destination = output + "/Battle/Profile.tres";
             string destinationPath = ProjectSettings.GlobalizePath(destination);
             Require(!File.Exists(destinationPath), "native battle profile already exists");
-            string outputPath = ProjectSettings.GlobalizePath(output);
             string destinationDirectory = Path.GetDirectoryName(destinationPath)!;
             CreateOwnedDirectory(outputPath, createdDirectories);
             CreateOwnedDirectory(destinationDirectory, createdDirectories);
@@ -124,9 +126,21 @@ public partial class PrepareBattleContext : Node
 
     private static void CreateOwnedDirectory(string path, List<string> created)
     {
-        if (Directory.Exists(path)) return;
-        Directory.CreateDirectory(path);
-        created.Add(path);
+        var missing = new Stack<string>();
+        string? current = Path.GetFullPath(path);
+        while (current is not null && !Directory.Exists(current))
+        {
+            missing.Push(current);
+            current = Path.GetDirectoryName(current);
+        }
+
+        while (missing.Count > 0)
+        {
+            current = missing.Pop();
+            if (Directory.Exists(current)) continue;
+            Directory.CreateDirectory(current);
+            created.Add(current);
+        }
     }
 
     private static bool IsInside(string child, string parent)

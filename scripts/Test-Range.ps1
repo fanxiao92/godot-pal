@@ -217,7 +217,7 @@ try {
             $snapshot = @{ all = $plan.inventory; selected = $selectedInventory; actualFilter = $actualFilter }
         } else {
             $discovery = Read-Version7Discovery -Name $s -DiagnosticPath $diag -Assembly $assembly
-            if ($s -ceq 'prepare' -and $discovery.total -ne 60) { Fail 'discovery' "Prepare must discover exactly the 60 approved cases, got $($discovery.total)." }
+            if ($s -ceq 'prepare' -and $discovery.total -ne 61) { Fail 'discovery' "Prepare must discover exactly the 61 approved cases, got $($discovery.total)." }
             $selected = @($discovery.cases | Where-Object { Match-Method $_.FullyQualifiedName })
             if (-not $selected.Count) { Fail 'filter-empty' 'No independent discovered cases match the selected filter.' }
             $expected = @($selected.Id)

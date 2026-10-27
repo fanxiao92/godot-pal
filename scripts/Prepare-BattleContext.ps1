@@ -50,6 +50,7 @@ try {
     Assert-NoLink $staticScene; Assert-TreeNoLink $staticRoot; if(-not [IO.File]::Exists($staticScene)){throw 'StaticResources selected scene is missing.'}
     if(-not (Test-Inside $staticProfile $staticRoot)){throw 'StaticProfile must be inside StaticResources.'}
     if(-not (Test-Inside $outputRoot $assets)){throw 'OutputPath must be the project Assets directory or a directory inside it.'}
+    if((Test-Inside $outputRoot $staticRoot)-or(Test-Inside $staticRoot $outputRoot)){throw 'OutputPath and StaticResources must not overlap in either direction.'}
     if((Test-Inside $outputRoot $inputRoot)-or(Test-Inside $inputRoot $outputRoot)){throw 'InputPath and OutputPath must not overlap in either direction.'}
     if(Test-Inside $inputRoot $project){throw 'InputPath must be outside src/Pal.Game.'}
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot

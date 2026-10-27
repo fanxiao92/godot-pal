@@ -62,25 +62,75 @@ public sealed class BattlePrepareProcessTests : IDisposable
     public async Task Publication_is_single_move_no_overwrite_and_never_exposes_zero_byte_profile()
     {
         (string staticUri, string staticProfile) = await PrepareStatic();
-        Task<PrepareProcessTests.Result> first = Prepare(battleOutput, staticUri, staticProfile);
-        Task<PrepareProcessTests.Result> second = Prepare(battleOutput, staticUri, staticProfile);
-        string destination = Path.Combine(battleOutput, "Battle", "Profile.tres");
+
+        string cleanupRoot = battleOutput + "-cleanup";
+        string cleanupOutput = Path.Combine(cleanupRoot, "new-parent", "new-output");
+        string contextPath = Path.Combine(Input, "battle-context.json");
+        byte[] contextBytes = File.ReadAllBytes(contextPath);
+        Task<PrepareProcessTests.Result> changedSourcePreparation = Prepare(cleanupOutput, staticUri, staticProfile);
+        using (var writerTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(120)))
+        {
+            await Task.Run(() =>
+            {
+                while (!Directory.Exists(cleanupOutput))
+                {
+                    writerTimeout.Token.ThrowIfCancellationRequested();
+                    if (changedSourcePreparation.IsCompleted) throw new InvalidOperationException("Preparation exited before creating its multilevel output directory.");
+                    Thread.Yield();
+                }
+                File.AppendAllText(contextPath, " ");
+            }, writerTimeout.Token);
+        }
+        PrepareProcessTests.Result changedSource;
+        try { changedSource = await changedSourcePreparation; }
+        finally { File.WriteAllBytes(contextPath, contextBytes); }
+        Assert.Equal(1, changedSource.ExitCode);
+        Assert.Contains("battle context source changed during preparation", changedSource.Text);
+        Assert.False(Directory.Exists(cleanupRoot));
+
+        string racedOutput = Path.Combine(battleOutput, "new-parent", "new-output");
+        string racedDestination = Path.Combine(racedOutput, "Battle", "Profile.tres");
+        byte[] sentinel = Encoding.UTF8.GetBytes("test-owned publication collision");
+        Task<PrepareProcessTests.Result> collidedPreparation = Prepare(racedOutput, staticUri, staticProfile);
+        using (var writerTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(120)))
+        {
+            await Task.Run(() =>
+            {
+                while (!Directory.Exists(racedOutput))
+                {
+                    writerTimeout.Token.ThrowIfCancellationRequested();
+                    if (collidedPreparation.IsCompleted) throw new InvalidOperationException("Preparation exited before creating its output directory.");
+                    Thread.Yield();
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(racedDestination)!);
+                using var destination = new FileStream(racedDestination, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                destination.Write(sentinel);
+            }, writerTimeout.Token);
+        }
+        PrepareProcessTests.Result collided = await collidedPreparation;
+        Assert.Equal(1, collided.ExitCode);
+        Assert.Contains("Battle context native import failed", collided.Text);
+        Assert.Equal(sentinel, File.ReadAllBytes(racedDestination));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(racedDestination)!, "*.tmp-*.tres"));
+
+        string publishedOutput = battleOutput + "-published";
+        string destination = Path.Combine(publishedOutput, "Battle", "Profile.tres");
+        Task<PrepareProcessTests.Result> publication = Prepare(publishedOutput, staticUri, staticProfile);
         bool observedZero = false;
-        while (!first.IsCompleted || !second.IsCompleted)
+        while (!publication.IsCompleted)
         {
             if (File.Exists(destination) && new FileInfo(destination).Length == 0) observedZero = true;
-            await Task.Delay(2);
+            await Task.Yield();
         }
-        PrepareProcessTests.Result[] results = [await first, await second];
-        Assert.Single(results, item => item.ExitCode == 0);
-        Assert.Single(results, item => item.ExitCode == 1);
+        PrepareProcessTests.Result published = await publication;
+        Assert.True(published.ExitCode == 0, published.Text);
         Assert.False(observedZero);
         Assert.True(File.Exists(destination) && new FileInfo(destination).Length > 0);
         Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(destination)!, "*.tmp-*.tres"));
 
         byte[] bytes = File.ReadAllBytes(destination);
         string hash = Convert.ToHexString(SHA256.HashData(bytes));
-        var noOverwrite = await Prepare(battleOutput, staticUri, staticProfile);
+        var noOverwrite = await Prepare(publishedOutput, staticUri, staticProfile);
         Assert.Equal(1, noOverwrite.ExitCode);
         Assert.Equal(hash, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(destination))));
         Assert.Equal(bytes, File.ReadAllBytes(destination));
@@ -101,11 +151,12 @@ public sealed class BattlePrepareProcessTests : IDisposable
             WriteBattleContext(changed);
         }
         (string staticUri, string staticProfile) = await PrepareStatic();
-        var result = await Prepare(battleOutput, staticUri, staticProfile);
+        string output = kind == "search" ? Path.Combine(battleOutput, "new-parent", "new-output") : battleOutput;
+        var result = await Prepare(output, staticUri, staticProfile);
         Assert.Equal(1, result.ExitCode);
         Assert.Contains(kind == "owner" ? "owner28" : kind == "start" ? "start identity" : "start/search identity", result.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(Path.Combine(battleOutput, "Battle", "Profile.tres")));
-        Assert.False(Directory.Exists(battleOutput) && Directory.EnumerateFiles(battleOutput, "*", SearchOption.AllDirectories).Any());
+        Assert.False(File.Exists(Path.Combine(output, "Battle", "Profile.tres")));
+        Assert.False(Directory.Exists(battleOutput));
     }
 
     [Theory]
@@ -150,6 +201,34 @@ public sealed class BattlePrepareProcessTests : IDisposable
             if (Directory.Exists(nested)) Directory.Delete(nested);
             if (Directory.Exists(linkRoot)) Directory.Delete(linkRoot, !new DirectoryInfo(linkRoot).Attributes.HasFlag(FileAttributes.ReparsePoint));
             else if (File.Exists(linkRoot)) File.Delete(linkRoot);
+        }
+    }
+
+    [Fact]
+    public async Task Static_resources_and_output_overlap_is_rejected_before_engine_or_output()
+    {
+        string assets = Path.Combine(repo, "src", "Pal.Game", "Assets", "PrepareTests");
+        foreach (bool outputInsideStatic in new[] { true, false })
+        {
+            string caseRoot = Path.Combine(assets, Guid.NewGuid().ToString("N"));
+            string staticRoot = Path.Combine(caseRoot, "Static");
+            Directory.CreateDirectory(Path.Combine(staticRoot, "Scenes"));
+            File.WriteAllText(Path.Combine(staticRoot, "Scenes", "Scene.tscn"), "fixture");
+            File.WriteAllText(Path.Combine(staticRoot, "Profile.tres"), "fixture");
+            string output = outputInsideStatic ? Path.Combine(staticRoot, "Generated") : caseRoot;
+            string[] before = Snapshot(caseRoot);
+            try
+            {
+                string unavailable = Path.Combine(root, "godot-must-not-start.exe");
+                string staticUri = ToUri(staticRoot);
+                var result = await PrepareWithGodot(output, staticUri, staticUri + "/Profile.tres", unavailable);
+                Assert.Equal(1, result.ExitCode);
+                Assert.Contains("OutputPath and StaticResources must not overlap in either direction", result.Text);
+                Assert.DoesNotContain(unavailable, result.Text);
+                Assert.Equal(before, Snapshot(caseRoot));
+                if (outputInsideStatic) Assert.False(Directory.Exists(output));
+            }
+            finally { if (Directory.Exists(caseRoot)) Directory.Delete(caseRoot, true); }
         }
     }
 
@@ -239,7 +318,7 @@ public sealed class BattlePrepareProcessTests : IDisposable
 
     public void Dispose()
     {
-        foreach (string directory in new[] { root, staticOutput, battleOutput, battleOutput + "-empty", battleOutput + "-corrupt" })
+        foreach (string directory in new[] { root, staticOutput, battleOutput, battleOutput + "-empty", battleOutput + "-corrupt", battleOutput + "-cleanup", battleOutput + "-published" })
             if (Directory.Exists(directory)) Directory.Delete(directory, true);
     }
 }
