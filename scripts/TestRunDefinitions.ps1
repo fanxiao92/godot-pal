@@ -56,6 +56,43 @@ function Read-Version7Discovery {
     }
 }
 
+# Direct project feedback validates this TRX's completeness, NOT an independent discovery set.
+function Assert-DirectUnitTrxRun {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Assembly)
+    $identity = Read-TestRunIdentity $Path
+    $doc = $identity.document; $ns = $identity.ns
+    foreach ($element in @('Times','Results','TestDefinitions','TestEntries','ResultSummary')) {
+        if ($doc.SelectNodes("/t:TestRun/t:$element", $ns).Count -ne 1) { throw "[unit-trx] Missing/duplicate element: $element" }
+    }
+    $times = $doc.SelectSingleNode('/t:TestRun/t:Times', $ns)
+    foreach ($attribute in @('creation','queuing','start','finish')) {
+        $stamp = [DateTimeOffset]::MinValue
+        if (-not [DateTimeOffset]::TryParse($times.GetAttribute($attribute), [ref]$stamp)) { throw "[unit-trx] Invalid timestamp: $attribute" }
+    }
+    if ([DateTimeOffset]::Parse($times.finish) -lt [DateTimeOffset]::Parse($times.start)) { throw '[unit-trx] Reversed Times' }
+    foreach ($id in @($identity.runId) + @($identity.executionIds)) {
+        $guid = [guid]::Empty
+        if (-not [guid]::TryParse($id, [ref]$guid) -or $guid -eq [guid]::Empty) { throw '[unit-trx] Invalid GUID identity' }
+    }
+    $summary = $doc.SelectSingleNode('/t:TestRun/t:ResultSummary', $ns)
+    if ($summary.outcome -cne 'Completed' -or $summary.SelectNodes('t:Counters', $ns).Count -ne 1 -or $summary.SelectNodes('t:RunInfos/t:RunInfo', $ns).Count) { throw '[unit-trx] Incomplete summary or unexpected RunInfo' }
+    $rows = @($doc.SelectNodes('/t:TestRun/t:Results/t:UnitTestResult', $ns))
+    if (-not $rows.Count -or @($rows | Where-Object outcome -CNE 'Passed').Count) { throw '[unit-trx] Zero execution, failed or skipped result' }
+    $counters = $summary.SelectSingleNode('t:Counters', $ns)
+    foreach ($attribute in @('total','executed','passed','failed','error','timeout','aborted','inconclusive','passedButRunAborted','notRunnable','notExecuted','disconnected','warning','completed','inProgress','pending')) {
+        $expected = if ($attribute -in @('total','executed','passed')) { $rows.Count } else { 0 }
+        if (-not $counters.HasAttribute($attribute) -or $counters.GetAttribute($attribute) -notmatch '^\d+$' -or [long]$counters.GetAttribute($attribute) -ne $expected) { throw "[unit-trx] Invalid counter: $attribute" }
+    }
+    foreach ($attribute in $counters.Attributes) {
+        if ($attribute.Name -notin @('total','executed','passed') -and $attribute.Value -cne '0') { throw '[unit-trx] Unknown nonzero counter' }
+    }
+    foreach ($definition in $doc.SelectNodes('/t:TestRun/t:TestDefinitions/t:UnitTest', $ns)) {
+        $method = $definition.SelectSingleNode('t:TestMethod', $ns)
+        if (-not $method.codeBase -or [IO.Path]::GetFullPath($method.codeBase) -cne [IO.Path]::GetFullPath($Assembly)) { throw '[unit-trx] Wrong project assembly' }
+    }
+    return $identity
+}
+
 function Assert-Version7TrxRun {
     param(
         [Parameter(Mandatory)][string]$Path,

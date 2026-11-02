@@ -4,7 +4,7 @@
 
 | 层 | 适用契约 | 依赖与运行时机 | 能证明 | 不能证明 | 细则 |
 | --- | --- | --- | --- | --- | --- |
-| Core / CLI unit | 公开业务规则、精确时间；内存算法和纯数据变换 | 普通 .NET 项目；可用 `scripts/Test-Unit.ps1` 做显式 unit 选择 | 独立预期下的状态、边界、回绕、释放与重调度 | 文件/进程、Godot 接线、资源导入、桌面显示 | [unit 入口](unit-entry.md)；调整 CLI 项目边界再读[迁移说明](cli-test-migration.md) |
+| Core / CLI unit | 公开业务规则、精确时间；内存算法和纯数据变换 | 按影响选择明确 .NET 工程，默认直接 `dotnet test` 项目全量 | 独立预期下的状态、边界、回绕、释放与重调度 | 文件/进程、Godot 接线、资源导入、桌面显示 | [短指南](getting-started.md) → [Unit 协议](unit-entry.md)；调整 CLI 项目边界再读[迁移说明](cli-test-migration.md) |
 | CLI integration | argv、真实退出/诊断、文件系统和已构建 CLI 产物 | `Pal.Extract.IntegrationTests`；先构建，再显式范围运行 | CLI 文件/进程契约、退出码、输出和清理 | Godot 场景、GPU、完整门覆盖 | [范围回归](range-regression.md)；调整项目边界再读[CLI 迁移](cli-test-migration.md) |
 | Prepare | 原生资源准备、导入和拒绝诊断 | 共享完整门中先于 Game；使用批准工具链和人工资源 | 准备产物、解析/导入失败传播及输入安全 | 场景树业务、GPU、物理桌面 | [范围回归](range-regression.md)、[Game 分层](game-test-layers.md) |
 | Game SceneRunner | 真实 Resource/PackedScene、输入、信号、更新完成边界 | 固定 GdUnit；默认嵌入真实 Main，逐例隔离并在 finally 清理 | 引擎接线、场景业务状态、真实更新完成后的快照 | 精确业务时钟、GPU 像素、OS 物理输入和完整进程启动 | [Game 分层](game-test-layers.md) |
@@ -19,7 +19,7 @@
 
 ### 共同证据边界
 
-预期来自规格、迁移前冻结清单或独立字面值，不从被测结果反推。结果须绑定实际源码/候选身份、退出码、TRX Summary/RunInfo 和完整结果图；显示名、静态计数或一条 PASS 日志不能替代案例身份。当前状态、操作规则和历史证据分别维护：历史链接只在排障、追溯或明确反例触发时读取。
+预期来自规格、迁移前冻结清单或独立字面值，不从被测结果反推。结果须绑定实际源码/候选身份、退出码、TRX Summary/RunInfo 和完整结果图；显示名、静态计数或一条 PASS 日志不能替代案例身份。普通 Unit 按 [Unit 协议](unit-entry.md)核对本轮完整性，不默认额外发现/冻结，也不宣称具有维护工具的发现与执行集合逐项比较保证；迁移身份核对仍是单独任务。当前状态、操作规则和历史证据分别维护：历史链接只在排障、追溯或明确反例触发时读取。
 
 仓库架构、安全、隐私、全局串行、未知进程与失败停止规则仍以根目录 [AGENTS.md](../../AGENTS.md) 为不可绕过的权威来源；本页只负责选择入口，不缩减这些规则。
 

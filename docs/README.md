@@ -35,7 +35,7 @@
 
 - [测试职责矩阵](testing/test-layers.md)：按契约、依赖和证据选择 Core/CLI unit、CLI 文件集成、Prepare、SceneRunner 或真实进程；不按耗时分类。
 - [工程检查与分层回归](testing/engineering-checks.md)：Source、Offline、OwnedProcess 的边界、退出和证据规则。
-- [单元快入口](testing/unit-entry.md)：只选择 Core 与 CLI unit；不调用 Game、Prepare 或 GdUnit bootstrap。
+- [Unit 反馈短指南](testing/getting-started.md)：新人和 work agent 的唯一短上手入口，选工程、直接运行、判定与停止留证；[Unit 专题](testing/unit-entry.md)维护协议和显式维护工具细则。
 - [显式范围回归](testing/range-regression.md)：选择 CLI integration、Prepare 或 Game 现有批次；明确参数、准备顺序和非完整门证据。
 - [时序验证细则](testing/time-boundaries.md)：业务时间、输入更新边界、相关断言、Game 迁移或调度偶发时先读；普通选层不加载长细则。
 - [CLI 测试迁移](testing/cli-test-migration.md)：unit/integration 项目边界、映射和完整门接线。
