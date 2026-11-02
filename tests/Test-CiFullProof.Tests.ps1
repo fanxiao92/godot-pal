@@ -45,6 +45,9 @@ Run-Mutation 'outer-exit-seven' { $x=Get-Content (Join-Path $m0 'task-measuremen
 Run-Mutation 'artifact-hash-tamper' { $x=Get-Content (Join-Path $m0 'task-measurement.json') -Raw|ConvertFrom-Json;$x.artifacts[0].sha256=('0'*64);WriteJson (Join-Path $m0 'task-measurement.json') $x } '\[full-proof:artifact\]'
 Run-Mutation 'wrong-commands-path' { $x=Get-Content (Join-Path $m0 'cost-input.json') -Raw|ConvertFrom-Json;$x.commandsPath='other-commands.json';WriteJson (Join-Path $m0 'cost-input.json') $x } '\[full-proof:cost\]'
 Run-Mutation 'draft-candidate' { $x=Get-Content (Join-Path $base 'candidate.json') -Raw|ConvertFrom-Json;$x.draft=$true;WriteJson (Join-Path $base 'candidate.json') $x } '\[full-proof:identity\]'
+foreach($unitMode in @('pr-unit','push-unit','manual-unit')) {
+ Run-Mutation ("unit-mode-is-not-full-"+$unitMode) { $x=Get-Content (Join-Path $base 'candidate.json') -Raw|ConvertFrom-Json;$x.mode=$unitMode;WriteJson (Join-Path $base 'candidate.json') $x } '\[full-proof:identity\]'
+}
 Run-Mutation 'wrong-workflow' { $x=Get-Content (Join-Path $base 'ci-identity.json') -Raw|ConvertFrom-Json;$x.workflowRef='refs/workflows/wrong.yml';WriteJson (Join-Path $base 'ci-identity.json') $x } '\[full-proof:identity\]'
 Run-Mutation 'candidate-tree-diff' { $x=Get-Content (Join-Path $base 'end-candidate.json') -Raw|ConvertFrom-Json;$x.tree=('9'*40);WriteJson (Join-Path $base 'end-candidate.json') $x } '\[full-proof:identity\]'
 Run-Mutation 'candidate-singleton-array' { $x=Get-Content (Join-Path $base 'candidate.json') -Raw;WriteUtf8 (Join-Path $base 'candidate.json') ('['+$x.Trim()+']') } '\[full-proof:type\]'

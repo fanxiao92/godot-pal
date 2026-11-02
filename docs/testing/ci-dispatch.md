@@ -1,81 +1,77 @@
-# CI 分流、候选身份与证据
+# Unit-only CI、候选身份与证据
 
-## 交付边界
+## 三个交付阶段
 
-工作流为 `.github/workflows/ci.yml`，稳定最终检查名为 `full-check`。以下是实现契约及本地回归入口，**不表示 Draft／Ready／取消已在 GitHub 上验收，也不表示 main 已配置合并保护**。推送、创建 PR、手动调度、实际合并及保护配置均需另行明确授权。本地夹具、YAML 解析、PowerShell AST 和历史成功不能代替远端事件验收。
+[规格 #69](https://github.com/fanxiao92/godot-pal/issues/69) 的 [#67](https://github.com/fanxiao92/godot-pal/issues/67) 将自动反馈改为 Unit-only，接受阶段性覆盖降低，不把 Unit 称为完整验收。
 
-## 事件与结果
+| 阶段 | 当前候选的含义 | 不可据此宣称 |
+| --- | --- | --- |
+| 本地 workflow candidate | `.github/workflows/ci.yml` 提供独立 `unit-check`，由本地有界契约及直接 Unit 验证 | GitHub 调度、check-run 或保护已生效 |
+| 远端检查 | 尚待单独授权发布与实际事件矩阵验收 | required check 已切换 |
+| 服务端切换 | 尚待单独授权，配置回读及受控拒绝/允许验收见[保护操作说明](merge-protection.md#unit-only-分阶段切换67) | “Unit 通过即可合并”已生效 |
 
-| 事件 | quick-unit | engineering-offline | full-gate | 最终完整凭据 |
-| --- | --- | --- | --- | --- |
-| Draft PR 更新／转回 Draft | unit＋Source 工程检查 | 不安排 | 不安排 | 不成功；跳过完整门不能成为完整成功 |
-| 无提交 Draft→Ready（`ready_for_review`） | unit＋Source | Offline＋workflow 契约回归 | 唯一共享 M0 | 三条需要的 job 成功且本轮完整证据匹配 |
-| Ready PR 更新 | unit＋Source | 对新候选重新执行 | 对新候选重新执行 | 同上，不借旧 head／base／候选成功 |
-| main push | 可按条件跳过 | Offline＋workflow 契约回归 | 完整 M0 | 当前离线／完整证据匹配 |
-| workflow_dispatch | 可按条件跳过 | Offline＋workflow 契约回归 | 对实际检出的 ref 完整执行 | 当前证据匹配，不冒充 PR merge 结果 |
+以上描述当前分支候选，不代表已经发布到 `main`。本地具体命令、提交、原始证据及验收结论保存在任务交接；不能仅凭本页或历史成功补签新候选。完整 spec 的 Standards/Spec 双轴评审留给最终 candidate，不在每张子票重复。
 
-PR 触发包含 `opened`、`synchronize`、`reopened`、`ready_for_review`、`converted_to_draft`、`edited`。`edited` 包含 base 目标变化；没有新 commit 不等于候选未变。Draft 的 quick 路径不下载 Godot／GdUnit，不执行 Game 或完整门。
+## 自动事件与工程集合
 
-并发组是 workflow＋PR number（非 PR 使用 ref），不是 SHA／attempt。较新运行可取消同组旧运行，取消仍应如实失败／cancelled，不自动重试。`full-check` 使用 `always()` 并依赖 **quick-unit、engineering-offline 和 full-gate**；Ready 的 quick 失败、取消、跳过或未知均不能被 full 单独成功掩盖。main/manual 仅允许 quick 的预期跳过或成功，仍必须 offline 和 full 成功。offline 失败、取消、跳过、缺结果或不同 run/attempt/candidate/code 的 proof 一律拒绝；不能只等引擎 job 变绿。Draft 最终 job 不以 skipped/success 作为凭据，因为 GitHub required checks 可将 skipped/neutral 看作满足。
+| 事件 | Unit 模式 | 执行 |
+| --- | --- | --- |
+| Draft PR 更新、转回 Draft | `pr-unit` | Core Unit → CLI Unit |
+| Ready PR 更新、无新提交 `ready_for_review` | `pr-unit` | 同上，核对当前 merge candidate |
+| `main` push | `push-unit` | 同上，核对实际 checkout |
+| `workflow_dispatch` | `manual-unit` | 同上，对实际检出的 ref，不冒充 PR merge 结果 |
 
-这些本地条件不证明 GitHub 在排队、needs 等待及无提交 Ready 转换时何时创建新 check-run。旧 success 是否存在服务端放行窗口，必须在受控远端矩阵中检查，不能仅看 YAML 下结论。
+PR 事件包含 `opened`、`synchronize`、`reopened`、`ready_for_review`、`converted_to_draft`、`edited`。不以 Draft 状态跳过 Unit，也没有 path/filter 筛选。固定批准集合为：
 
-## 候选身份链
+- `tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj`
+- `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj`
 
-quick、offline、full 三个 job 的 checkout 均使用固定 checkout action 的 `fetch-depth: 2`，保留当前提交及其直接父层；候选身份校验因此可读取 merge candidate 的有序两个 parent，同时继续关闭凭据持久化和 LFS。该边界是有限直接父历史，不是全历史下载。
+CI 专用 `scripts/Invoke-CiUnit.ps1` 按上述顺序直接启动 `dotnet test <csproj> --configuration Debug --logger 'trx;LogFileName=results.trx' --results-directory <本轮独立目录>`，正常隐式 restore/build、普通 NuGet 缓存，不用 `--no-build`、`--no-restore`、discovery 或 solution。它只补 CI 所需的固定集合执行/采证，不是新的 agent 默认入口；agent 仍按[直接 Unit 协议](unit-entry.md#默认反馈协议)自行选择明确项目。`Test-Unit.ps1` 保留为显式维护工具。
 
-1. 原始 `GITHUB_EVENT_PATH` 通过 env 传入并复制为 `original-event.json`，不把 branch、workflow ref 等数据插进 PowerShell 源码引号。
-2. `New-CiCandidateInputs.ps1` 接收显式 repo/run/attempt/workflow/env 上下文，生成 event、metadata、snapshot。PR 使用只读 API GET 核对实际 head/base/merge candidate 和 Draft；非 PR 使用实际 checkout。`workflow_dispatch.inputs` 必须存在，允许对象或 `null`，不把合法 null 误判为不支持。
-3. `Test-CiCandidate.ps1` 在本地 Git 对照实际 checkout、tree、完整有序 parents；PR 候选须是 base/head 两个正确有序 parent 的 merge candidate，不能以 head 自测替代。metadata／snapshot／event 根须为对象，单元素数组也不能自动展开冒充对象。run、attempt、workflow、event、action、mode、Draft 与快照一致，失败不写成功身份，输出不覆盖已有身份文件。
-4. M0 前后分别重新生产和验证候选。CI 身份 action 来自实际已验证候选：PR 原事件 action、push 的 `main`、manual 的 `manual`，不是字面值 `event-derived`。结束 API 快照变化使旧候选失败。
-5. `Test-CiFullProof.ps1` 只给当前 run/attempt/workflow/event/action/mode、实际候选及 checkout 一致的完整证据输出 `complete`。PR 必须 Ready；非 PR 保留实际 Git parent 列表，不假设 main/manual 一定是单 parent。
+自动 workflow 不运行 Source/Offline 工程编排、Integration、Prepare、Godot、完整门，也不下载 Godot/GdUnit。`Test-M0.ps1`、`Test-CiFullProof.ps1`、旧成本/身份工具及历史证据保留，不因保留就视为当前完整门运行兼容性已验收。恢复重型自动检查须另立任务，验证工具链、候选绑定、重复运行、指定失败 controls 与完整证据，再分别批准调度及保护切换。
 
-最小权限保持 `contents: read`、`pull-requests: read`；checkout 不保留凭据，不下载真实 LFS 游戏数据。Actions app 的同名检查不是 workflow 路径/ref 身份认证；管理员或有权限者修改工作流、改规则等残余边界由服务端保护票另行说明。
+## 候选身份与失败封闭
 
-## 唯一 M0、原退出与墙钟
+- checkout/action、setup-dotnet/action、upload-artifact/action 保持批准的固定 commit；SDK 由 `global.json` 选择，沿用其补丁策略，不自动升级依赖。checkout 使用 `fetch-depth: 2`、`persist-credentials: false`、`lfs: false`，保留直接父层而非全部历史。
+- `GITHUB_EVENT_PATH` 通过 step env 传入并保存原件。`New-CiCandidateInputs.ps1` 从原事件派生 action；PR 在开始和结束分别只读 GET 核对 head/base/merge candidate/Draft，不把表达式数据拼进脚本源码。manual 的 `inputs` 允许对象或 null。
+- `Test-CiCandidate.ps1` 对照实际 Git checkout/tree/有序 parents 与 run/attempt/workflow/event/action/mode/Draft。PR 必须是有序 base/head 双亲的 merge candidate，不能用 head 自测替代；非 PR 不假定只有一个 parent。错型对象、旧候选、旧 run/attempt 或快照变化失败，不覆盖成功身份文件。
+- 新的 `pr-unit`/`push-unit`/`manual-unit` 与保留的 `draft-quick`/`ready-full`/`push-main`/`manual-full` 分开；Unit 身份不能作为旧 FullProof 的完整凭据。
+- executor 要求 clean checkout，绑定所有 tracked 文件的路径/SHA-256；命令前后及结束 block 再核对源码。原始命令、SDK 输出、真实数字退出、root exit 和双流 EOF 与本轮 TRX 一并保留。未知退出为 null，不能借内层/旧 `$LASTEXITCODE=0` 补成功。
+- 每项目通过后才执行下一项目。非零退出、restore/build/宿主错误诊断、零执行、skip、会话中止、未知/不完整输出或缺少必要证据均阻断；后续工程保持 `not-run`。原非零退出不被报告错误改成零；原零但采证失败仍使 job 失败。不自动重试、换源、缩范围或加时限。
+- TRX 校验复用共享身份图，检查 Times、唯一 Summary/Counters、Completed、无 RunInfo、全部标准 counters 和 Results/Definitions/Entries 一致性，全部 Passed 且非零，绑定预期测试程序集及当前命令时间窗；不同项目不复用 run/execution IDs。**不执行独立 discovery，因此不宣称发现集合与执行集合逐项等价**。
+- 结束 block 重新校验候选，要求开始/结束/report 身份相同、两个批准项目及全部命令完整、源码清单完整、必要原件存在且 hash/长度未变。缺日志/报告有明确诊断；局部 PASS、旧轮/部分项目或缺证据不能拼成整个检查成功。
 
-完整路径的 `engineering-offline` 与 `full-gate` 在不同 hosted runner 上独立开始，没有相互 `needs`。两者各自下载并校验固定四文件 GdUnit bundle；下载有单独步骤名，不把下载隐藏在 Offline 内。offline 不安装仓库 SDK 或 Godot，执行 `Test-Engineering.ps1 -Mode Offline` 和实际 workflow 契约回归；full 只调用一次 `scripts/Test-M0.ps1`，不重复 Offline，也不另造裁剪完整门。发现、Prepare、启动、Game 三轮串行分批、三个指定负控制、空缓存 restore/build 和原预算均保留，未引入并行引擎。
+并发组仍为 workflow＋PR number（非 PR 用 ref），新运行可以取消同组旧运行。取消/timeout 没有完整证据时不能宣称成功；本地脚本无法证明 GitHub 创建 check-run 的时机、无提交 Ready 转换或旧 success 的服务端放行窗口，须另行受控远端验证。
 
-offline 同样在检查前后验证实际候选。`offline-proof.json` 仅在 start/end 身份语义一致、匹配本轮 run/attempt/workflow/event/checkout、非 Draft，且 Offline journal 的九个准确步骤均为数字 exit0、root exit／双流 EOF／清理已知完成时输出；数组根、错型字段、遗漏或重复步骤不能成为成功对象。proof 记录 journal SHA256；workflow 回归或上传步骤失败仍使整个 job 失败，即使前面的 proof 已生成，最终 guard 也不能放行。它不替代 M0 FullProof 或服务端保护验收。
+## 成本、预算与上传
 
-workflow 用一个 native PowerShell host 执行唯一 M0 调用，明确 UTF-8、保留独立 `task-stdout.log`／`task-stderr.log`。取的是**原 M0 host 退出码**，不是 M0 内最后一个 dotnet 命令的 `$LASTEXITCODE`：成功内层命令后再抛出异常，不能被错记为原任务 0。启动前清除 stale exit；无法获得原数字退出时记录 `exitKnown=false`、`exitCode=null` 并失败关闭，不补成 0。
+`unit-evidence/unit-run.json` 记录固定选择、候选/source manifest、SDK、cache、逐命令 argv/cwd/UTC/Stopwatch 墙钟/退出与双流状态、项目状态和原始 artifact 的相对路径/hash/长度。
 
-UTC／Stopwatch 只包该单次原任务（含该 native host 启动），不包括后续 API、hash、成本生成、上传，也不声称是整个 job 墙钟。原 7 不被报告／采证异常改成 0 或 1；原 0 但采证失败时，原 0 保留在 task 证据，外层工程步骤可失败，最终不发凭据。取消、崩溃或没有 finally 证据不得反推完成。
+- 项目命令墙钟从原进程启动前至 root exit、双流落盘及资源释放，包含隐式 restore/build；不是 TRX duration。未独立测量的 restore/build 为 null，不补零或伪拆成本。
+- round 墙钟从初始源码身份留证后到最后判定/失败停止，包含 SDK、项目间检查与采证；当前内部测量在 finally 的最终 artifact 索引/终态报告写入前停止，不是完整 job/外层 host 墙钟。其余结束 API/上传成本不混入该值；需要完整端到端成本另记外层测量，不将子项相加冒充。
+- 单项目 >5 分钟、round >10 分钟只告警，不杀进程、不改变功能结论、不重试。沿用每命令 root exit＋双流 EOF 共用 600000ms、仅自有进程树清理 5000ms、job 20 分钟的预算；这些 timeout 与告警分列，不是性能承诺。
 
-## 即时产物绑定与成本
+`always()` 尽力上传 `ci-unit-evidence-<run_id>-<run_attempt>`：原事件、`unit-start/**`、`unit-end/**`、`unit-evidence/**`。上传失败或一个文件都没有时 job 不能成功；部分目录可为诊断上传，但不能成为完整检查凭据。新目录不复用旧 artifact，不下载旧轮补齐。不上传 token、真实游戏资源、缓存、私有 reference 输入或全机观察数据。
 
-M0 返回后先尽力写 `task-exit.txt`，随即记录原产物的 M0 根相对路径、SHA256、整数 byte length，再写 `task-measurement.json`。扫描在下降前拒绝 reparse point；既有证据根不复用、不清空。共享 M0 要求目录尚不存在，由它创建空缓存根；caller 的原两流先保留在全新兄弟目录 `m0-streams`，M0 返回后才原字节复制进证据根并绑定，不能提前创建 M0 目录。兄弟目录亦 always 上传，以保留前置失败或取消时尚未归档的原流。快照覆盖 commands、PASS、task exit、原日志/两流/TRX，发生在结束 API／成本工具之前，不混入后生成的成本文件。
+## 过渡期的旧 full-check
 
-测量带本轮 run/attempt/code、显式时区起止、正有限墙钟、原退出及已知性、M0 证据根与采证错误。FullProof 检查命令时间在测量外层窗内、当前 index／原产物 hash/length、完整任务状态；缺字段、类型伪装、小数长度、无时区测量、错误证据根、跨轮拼接、产物变更都不能发完整凭据。
+当前候选保留一个**明确抛错**的 `full-check`，不运行重型检查、不依赖 Unit 成功，也不以 skipped/neutral/空成功满足旧 required check。它会使整个 workflow 显示失败，即使独立 `unit-check` 成功；这是切换前允许的明确阻断，不是 Unit 冒充 full。
 
-`New-CiCostInput.ps1` 仅从当前 `commands.json` 的真实 argv 和显式 TRX 位置构造已交付 [成本报告接口](test-cost-report.md) 输入，保留原 argv；绝对/相对 results 及外部 index 路径保持绑定原证据根。未知 machine/toolchain/cache/build 为 `null`，不伪称某 hosted image、空缓存或已知构建环境。quick 的原 unit/Source 记录保留各自时耗；这些阶段耗时不能相加冒充完整 job 墙钟。
+在旧保护仍生效时，不允许无保护窗口；不能凭这个 blocker 就断言旧成功不会被服务端复用。发布、实际远端事件/拒绝矩阵、required check 切换及实际合并均分别授权，完整顺序见[保护操作说明](merge-protection.md#unit-only-分阶段切换67)。
 
-成本报告用独立 native CLI 捕获真实数字工具退出与原 UTF-8 输出，不能用 PowerShell 对象管道捕获 `[Console]` 输出而得到空报告。FullProof 再通过现有只读报告器重新生成，以内置 `JsonNode.DeepEquals` 比较语义 JSON，不重复实现 TRX 解释器，也不因字段换序误拒绝。
+## 有界本地回归
 
-报告工具 exit 0 只说明报告生成，不代表原任务通过。指定负控制的 Failed 行仍失败；严格满足成本分类时任务可为 `completed-with-expected-failures`，但负控制身份／诊断契约仍由唯一 M0 验收。历史真实资料只能证明读取兼容性，不能当本次 CI 测量或优化效果。
-
-## 成功／失败上传
-
-artifact 名称同时带 run ID 和 attempt，手动重跑不覆盖或混用上一 attempt 的包。always 尽力上传原事件、候选生产输入和 start/end proof、原身份、task exit/measurement、M0 logs/两流/TRX、成本 index/report/错误日志及完整 proof；full-gate 的 acceptance evidence 还上传 `m0-evidence/boundary-tests/**`，保留各 boundary 测试的原始日志、双流、命令、结果和监督记录。该显式子树不包含 `packages` 或 `http-cache`，也不扩大为整个 M0 根目录。报告／上传失败单列工程失败，不能改写原测试退出和日志；缺报告/产物不生成 PASS。步骤还没产生文件时允许上传器明确警告，不将缺失当完整。
-
-Offline 和 workflow 回归证据独立上传为 `ci-offline-evidence-<run>-<attempt>`，包含离线 job 的原事件、start/end 候选输入和 proof、`offline-proof.json`、`offline-evidence/**`、`workflow-evidence/**`；不从另一个 runner 复用旧目录或下载旧 artifact 补齐。full-gate 原验收 artifact 保留其 M0 原件，移除已迁出的 Offline 路径。
-
-只上传任务自有工程证据；不上传 token、真实游戏资源、reference 私有输入或全机观察数据。日志和快照不构成被加载字节的绝对认证。
-
-## 本地回归与剩余验收
-
-在仓库根用当前 PowerShell 7 工具链运行，各 `-EvidenceDirectory` 必须是全新路径；建议放仓库外，原失败证据不清理：
+在仓库根运行，证据目录均须全新；工程回归与产品 Unit 分开，不进入自动 Unit job：
 
 ```powershell
+pwsh -NoProfile -File tests/Test-CiWorkflow.Tests.ps1 -EvidenceDirectory <new-workflow-evidence>
+pwsh -NoProfile -File tests/Test-CiUnit.Tests.ps1 -EvidenceDirectory <new-trx-evidence>
 pwsh -NoProfile -File tests/Test-CiCandidate.Tests.ps1 -EvidenceDirectory <new-candidate-evidence>
 pwsh -NoProfile -File tests/Test-CiCandidate-Inputs.Tests.ps1 -EvidenceDirectory <new-transport-evidence>
-pwsh -NoProfile -File tests/Test-CiCostInput.Tests.ps1 -EvidenceDirectory <new-cost-input-evidence>
-pwsh -NoProfile -File tests/Test-CiFullProof.Tests.ps1 -EvidenceDirectory <new-proof-evidence>
-pwsh -NoProfile -File tests/Test-CiWorkflow.Tests.ps1 -EvidenceDirectory <new-workflow-evidence>
+# 按候选/FullProof兼容影响选择；人工证据，不执行完整门：
+pwsh -NoProfile -File tests/Test-CiFullProof.Tests.ps1 -EvidenceDirectory <new-full-proof-evidence>
 ```
 
-候选夹具使用自有 Git 和受控 API stub；FullProof 使用真实公开成本工具和明确人工 TRX，不执行 SDK/引擎/M0。workflow 回归按本仓库固定 step/indent 提取**当前实际 run block**，先 AST 后执行自有 fake M0：单次调用、原 7、UTF-8 两流、未知启动、内层 0 后异常、采证写入失败、即时快照 tamper、真实成本/FullProof 互通及最终 guard；另有自有 Git 的实际 manual 候选生产→消费链。回归还提取实际 offline start/end/proof block，验证自有 shallow Git/API 的候选→journal→proof 链、完整 journal 与负例，以及最终 guard 对 offline job 各种失败/缺失/错配的拒绝；该回归本身接入 offline CI，证据独立保留。固定格式提取不是 YAML parser，更不是 GHA 表达式/调度器。
+workflow 回归从**实际 run block**提取代码并先做 AST 检查，使用自有 Git merge、受控 API 与一次本地构建的人工 native SDK executable，覆盖事件/全项目 argv、原退出/UTF-8、失败停止、零/skip/aborted、未知启动、部分项目、旧 run/attempt/candidate、缺失/篡改证据和旧 full 拒绝。TRX 回归覆盖正常完整图与指定损坏形状。现有 `Test-CiCostInput.Tests.ps1`、FullProof/成本工具仍可按需维护；不借它们补签本次 Unit 或完整验收。
 
-FullProof 回归含三合法完整模式、候选/报告字段换序正例和明确阶段的有限单变量负例；每次保留独立调用参数、输入副本和两流。当前 JSON 接口使用 `NoEnumerate`、`DateKind String` 与内置 `JsonNode.DeepEquals`；本地现有运行环境已验证，较旧 PowerShell 7 minor 不在已验证兼容性范围，不为测试自动升级工具链。
-
-发布前还需匹配当前字节的 YAML/PS 检查与独立 Standards/Spec review。实际 Draft 更新、无提交 Ready、Ready 新候选、main/manual、取消与旧成功错配必须在明确授权的远端计划下留证；服务端保护配置及普通合并拒绝/允许验收单独进行。本文件不授予执行这些动作的权限。
+固定格式 block 提取不是 YAML parser，更不是 Actions 表达式/调度器。静态 YAML/AST 与人工控制也不证明真实 restore/build/test 每一种宿主故障或实际取消/timeout；这些限制及本地实测命令应保留在交接。当前 JSON 接口沿用本地已验证的 PowerShell 7 API，不自动升级工具链。远端 Draft/Ready/main/manual、取消、失败、缺失/不完整及错误候选的行为保持待验，不能以本地通过或保护 GET 代替。
