@@ -102,6 +102,8 @@ Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
 
 正常编辑器入口 `res://Editor/PrepareBattleData.tscn` 的 `_Ready` 只接受精确顺序 `--battle-input <dir> --battle-output <dir>`，调用同一 public Prepare，成功后输出 `PAL_PREPARE_BATTLE_DATA:BattleContent.tres` 并 exit0；失败 stderr `Battle data native import failed: <原诊断>` 并 exit1，不发成功 marker。
 
+先按[固定 GdUnit 源码包与 bootstrap](../testing/gdunit-source-packages.md)准备仓库锁定的包；下面的 wrapper 会执行项目 build，但不负责下载或升级依赖。
+
 ```powershell
 # 显式离线操作；不会由正常 Main 自动执行。OutputPath 必须新建或为空。
 pwsh -NoProfile -File ./scripts/Prepare-BattleData.ps1 `
