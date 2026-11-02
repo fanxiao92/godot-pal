@@ -25,7 +25,7 @@
 | `equipment` | 恰好6项WORD |
 | `magics` | 恰好32项WORD槽位（不是唯一ID注册表） |
 | `statuses` | 恰好9项WORD |
-| `coveredByRoleId` | 整数0..5；沿既有snapshot约定0为无cover |
+| `coveredByRoleId` | 整数0..5，保留原角色编号；0仍可指角色0，不是通用的无cover sentinel。当前单角色零cover支持域只接受存储值0；实际能否掩护还取决于队伍和战斗规则，后续由 #48 扩展 |
 
 先完成本 reader 的严格校验，再复用 `BattleModels.Role` 转换；不调用或放松真实 frozen profile validator，不增加平行 role DTO。
 
@@ -38,7 +38,7 @@
 | `equipment`, `statuses` | 分别恰好6、9项WORD，显式能力输入，不从role悄悄推断 |
 | `poisons` | 显式WORD数组；既有typed模型未定义固定毒槽宽，本格式不臆造宽度 |
 | `dyingScript`, `friendDeathScript` | WORD |
-| `coveredByRoleId` | null或整数0..5；沿combat模型约定null为无cover，不能与snapshot的0约定混同 |
+| `coveredByRoleId` | null或整数0..5；combat模型以null表示没有实际cover，不能将snapshot存储的角色编号0直接当作该null。当前能力预检只接受此字段为null |
 | `attackAll` | bool |
 
 ## Growth：复用 ClassicBattleGrowthData
