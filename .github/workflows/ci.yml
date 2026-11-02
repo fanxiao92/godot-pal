@@ -30,6 +30,12 @@ jobs:
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
+      # Disposable #69 failure control; independent of mutable API merge previews.
+      - name: Specified failure control for Spec 69
+        shell: pwsh
+        run: |
+          Copy-Item -LiteralPath $env:GITHUB_EVENT_PATH -Destination "$env:RUNNER_TEMP/original-event.json"
+          throw 'UNIT_ONLY_69_EXPECTED_FAILURE_CONTROL'
       - name: Validate Unit start candidate
         shell: pwsh
         env:
@@ -50,13 +56,6 @@ jobs:
           $params = @{ OutputDirectory=$input; RepositoryRoot=$env:GITHUB_WORKSPACE; EventName=$env:CI_EVENT_NAME; Action='event-derived'; Mode=$mode; GithubSha=$env:CI_SHA; RunId=$env:CI_RUN_ID; RunAttempt=[int]$env:CI_RUN_ATTEMPT; WorkflowRef=$env:CI_WORKFLOW_REF; ApiUrl=$env:CI_API_URL; PrNumber=$env:CI_PR_NUMBER; EventJsonPath="$env:RUNNER_TEMP/original-event.json" }
           & ./scripts/New-CiCandidateInputs.ps1 @params; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & ./scripts/Test-CiCandidate.ps1 -EventPath "$input/event.json" -MetadataPath "$input/metadata.json" -RepositoryRoot $env:GITHUB_WORKSPACE -ServerSnapshotPath "$input/snapshot.json" -EvidenceDirectory "$input/proof"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      # Disposable #69 negative-control branch only. Never merge this control.
-      - name: Bounded negative control for Spec 69
-        shell: pwsh
-        run: |
-          Write-Output 'UNIT_ONLY_69_CONTROL_ARMED'
-          Start-Sleep -Seconds 90
-          throw 'UNIT_ONLY_69_EXPECTED_FAILURE_CONTROL'
       - name: Run all approved Unit projects
         shell: pwsh
         run: |
