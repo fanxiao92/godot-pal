@@ -34,9 +34,15 @@
 
 版本约束以 `global.json`、各项目 `.csproj` 和脚本为准，README 提供开发环境概览。跨平台桌面是目标，其他操作系统与导出包尚未验证；M2 先验收 Windows 开发运行，不包含导出包。GdUnit4Net 隔离关卡已通过并接入；#18 后续另获批准交付固定源码包，版本、来源与下载校验以[包说明](docs/testing/gdunit-source-packages.md)及锁文件为准，进一步升级仍需授权。
 
-## 构建、测试与运行
+## 测试：第一阶段默认 Unit-only
 
-从仓库根目录执行，需先安装上述 SDK 和完整的 Godot .NET 引擎：
+新人和 work agent 从[唯一短上手入口](docs/testing/getting-started.md)选明确 Core/CLI Unit 工程，直接使用 dotnet CLI 与原生 runsettings，保留输出、退出和本轮 TRX；无需 Python、测试执行框架、Godot 或真实资源。默认信任原生结果，强审计改为显式维护能力，取舍见 [ADR-0003](docs/adr/0003-native-unit-feedback.md)。按需的 Integration、Game SceneRunner、真实进程与完整验收由[职责矩阵](docs/testing/test-layers.md)分流，不能由 Unit 补签。
+
+当前自动 CI 使用独立 `unit-check`，#67 已完成远端检查、保护切换及实际普通拒绝/允许验收；main 的已记录测试要求是 Unit，而非完整门。实时状态及过渡期仍明确失败的旧 `full-check` 见[CI 分流](docs/testing/ci-dispatch.md)和[保护说明](docs/testing/merge-protection.md)；覆盖损失、保留工具与恢复条件见 [ADR-0002](docs/adr/0002-unit-only-first-stage.md)。
+
+## 完整构建与游戏运行（显式路径）
+
+以下不是默认 Unit 反馈。从仓库根目录执行，需先安装上述 SDK 和完整的 Godot .NET 引擎：
 
 直接还原/构建前先显式 bootstrap 固定 GdUnit 包（需要下载或已校验的本地四文件包，详见[包说明](docs/testing/gdunit-source-packages.md)）：
 
@@ -47,7 +53,7 @@ dotnet build GodotPal.sln --no-restore
 dotnet run --project tools/Pal.Extract --no-build -- --help
 ```
 
-完整回归优先使用下方 `Test-M0.ps1`，它在内部 bootstrap 并设置 `GODOT_BIN` / `PAL_TEST_GODOT`。单独执行 Game 或 solution 测试前须按 [Game 测试说明](src/Pal.Game/Tests/README.md)设置这两个引擎路径变量、完成必要导入并核对 `tests/Pal.Game.Tests/game.runsettings`（headless、串行、会话超时及零测试失败）；默认测试过滤三个故意失败控制，完整门禁会分别验证它们。Godot、Prepare、Game 与 solution 检查全局串行。
+仅在显式选择完整验收时使用下方 `Test-M0.ps1`，它在内部 bootstrap 并设置 `GODOT_BIN` / `PAL_TEST_GODOT`。单独执行 Game 或 solution 测试前须按 [Game 测试说明](src/Pal.Game/Tests/README.md)设置这两个引擎路径变量、完成必要导入并核对 `tests/Pal.Game.Tests/game.runsettings`（headless、串行、会话超时及零测试失败）；默认测试过滤三个故意失败控制，完整门禁会分别验证它们。Godot、Prepare、Game 与 solution 检查全局串行。
 
 ### 测试职责
 
@@ -108,14 +114,14 @@ dotnet run --project tools/Pal.Extract --no-build -- extract-scene `
 
 独立起点 (1232,1336)、South0/layer0/phase0，默认 role0；相机由 (160,112) 锚点推导。保留全部 32 原始对象，搜索 owner60 / trigger0188；owner57 热点未被改 state 关闭，只是不在此独立上下文调度。方向键/WASD 移动，Return/Space/KP Enter/左Ctrl 搜索；按参考输入加速正文/继续等待，不用 `ui_accept` 代替。缺失/损坏/身份不符/语言缺失/不支持入口明确失败，不静默回退地图12。不带 M3 参数仍是普通 M2 Main；旧独立静态模式也保留。完整配置、输入与拒绝边界见 [NPC 宿主契约](docs/design/npc-interaction-host.md)，离线入口见[对话资源](docs/design/dialogue-display.md)和[事件执行](docs/design/trigger-execution.md)。
 
-本地与 CI 共用的完整自动化检查入口：
+保留的显式完整验收入口（当前自动 CI 不运行）：
 
 ```powershell
 pwsh -NoProfile -File scripts/Test-M0.ps1 `
   -GodotPath "C:/path/to/godot-mono.console.exe"
 ```
 
-该入口使用全新 NuGet 包/HTTP 缓存，保留 solution 还原/构建，显式串行执行 Core、CLI unit、CLI integration、Prepare，再执行当前脚本定义的 Game 三轮完整批次、发现、指定失败控制及人工资源的 headless 导入/启动；日志路径会打印到终端，不清空既有 `.godot` 缓存。当前完整结果为16份 TRX/20条主命令，总执行1441；历史 M3 的15份/19条保持其原身份。批次、工具链及预算以当前脚本/config 为准，旧批次与交付记录见[历史索引](docs/archive/m3/game-test-history.md)。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；历史 M2 本地/远端结果见 [M2 验收记录](docs/milestones/m2/acceptance.md)；M3 的当前交付状态见 [M3 验收检查点](docs/milestones/m3/acceptance.md#当前状态)；历史自动门、用户人工确认、已停用 Observer 缺陷和失败 CI 按历史身份保留，不得拿历史 CI 代替当前状态。
+该入口使用全新 NuGet 包/HTTP 缓存，保留 solution 还原/构建，显式串行执行 Core、CLI unit、CLI integration、Prepare，再执行当前脚本定义的 Game 三轮完整批次、发现、指定失败控制及人工资源的 headless 导入/启动；日志路径会打印到终端，不清空既有 `.godot` 缓存。批次、工具链及预算以当前脚本/config 为准；旧批次与已完成运行见[历史索引](docs/archive/m3/game-test-history.md)，历史结果保持原身份，不证明本批更名后完整门的运行兼容性已验证。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；历史 M2 本地/远端结果见 [M2 验收记录](docs/milestones/m2/acceptance.md)；M3 的当前交付状态见 [M3 验收检查点](docs/milestones/m3/acceptance.md#当前状态)；历史自动门、用户人工确认、已停用 Observer 缺陷和失败 CI 按历史身份保留，不得拿历史 CI 代替当前状态。
 
 技术版本记录在此，检查由测试和 CI 执行，任务结果记录在 GitHub Issue 中；不要求每次检查另写一份报告。M0 的详细历史记录保留在 [归档](docs/archive/m0/acceptance.md)，仅在排障或追溯时查阅。
 
@@ -131,10 +137,10 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
 - `src/Pal.Core/` —— 纯 .NET 核心类库
 - `src/Pal.Game/` —— Godot .NET 游戏工程
 - `tools/Pal.Extract/` —— 独立离线提取 CLI（只读检查、地图/场景导出、完整静态场景包、事件转写/重建与现代对话转换）
-- `tests/Pal.Core.Tests/` —— 核心 xUnit 测试
-- `tests/Pal.Extract.Tests/` —— CLI 内存单元测试，不依赖文件/进程/Godot
+- `tests/Pal.Core.UnitTests/` —— 核心 xUnit 测试
+- `tests/Pal.Extract.UnitTests/` —— CLI 内存单元测试，不依赖文件/进程/Godot
 - `tests/Pal.Extract.IntegrationTests/` —— CLI 文件与真实进程集成测试
-- `scripts/` —— 引擎下载、兼容性探针、游戏启动检查与共享验收入口
+- `scripts/` —— [用途与调用方清单](docs/testing/script-inventory.md)；显式维护、资源准备及 CI/验收证据工具，不是默认 Unit 编排入口
 - `reference/sdlpal/` —— sdlpal 源码,作为引擎逻辑参考(见 `reference/README.md`)
 - `data/raw/` —— 放原版 98 柔情版数据文件的地方(见 `data/raw/README.md`)
 

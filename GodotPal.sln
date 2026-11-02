@@ -14,7 +14,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pal.Game", "src\Pal.Game\Pa
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pal.Core.Tests", "tests\Pal.Core.Tests\Pal.Core.Tests.csproj", "{89D08FF6-4D9E-4DBE-B39C-C1F888DFC77A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pal.Core.UnitTests", "tests\Pal.Core.UnitTests\Pal.Core.UnitTests.csproj", "{89D08FF6-4D9E-4DBE-B39C-C1F888DFC77A}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
 EndProject

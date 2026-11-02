@@ -8,6 +8,10 @@
 
 固定锁包含来源、recipe、producer run、文件名、长度、SHA256 和 Release 地址。只消费锁定的四文件 bundle：两个 `.nupkg`、`provenance.json`、`SHA256SUMS`。真实游戏资源、私密证据和个人路径不进入包或提交。
 
+## 固定 SceneRunner 源码语义
+
+按锁文件的 upstream commit `a5f20fb8c12864b17c77d433cad14f9bf0094458` 查阅 [`ISceneRunner.cs`](https://github.com/godot-gdunit-labs/gdUnit4Net/blob/a5f20fb8c12864b17c77d433cad14f9bf0094458/Api/src/ISceneRunner.cs) 与 [`SceneRunner.cs`](https://github.com/godot-gdunit-labs/gdUnit4Net/blob/a5f20fb8c12864b17c77d433cad14f9bf0094458/Api/src/core/SceneRunner.cs)：Load 立即入树、输入跟踪、等待和 Dispose/autoFree 均以该实现为准，不用 latest 文档覆盖。仓库调用示例及边界解释在 [Game 专题](game-test-layers.md)，实际引擎/包加载身份仍需对应运行证据；源码核对不是 runtime 通过证明。
+
 ## Bootstrap 与运行时机
 
 从仓库根、PowerShell 7 调用。已有受核 bundle 可显式离线输入；发布后或已有验证缓存可使用默认入口：

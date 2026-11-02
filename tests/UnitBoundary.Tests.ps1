@@ -16,9 +16,9 @@ function Reset-Fixture {
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
     Put 'src/Pal.Core/Pal.Core.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
     Put 'tools/Pal.Extract/Pal.Extract.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
-    Put 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /></ItemGroup></Project>'
+    Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /></ItemGroup></Project>'
     Put 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../tools/Pal.Extract/Pal.Extract.csproj" /><Compile Include="../Pal.Extract.Tests/Fixtures/Yj2TestData.cs" Link="Fixtures/Yj2TestData.cs" /></ItemGroup></Project>'
-    Put 'tests/Pal.Core.Tests/人工 Tests.cs' 'using System.IO; class Pure { string 中文 = "File.ReadAllText 不是调用"; /* Directory.CreateDirectory */ }'
+    Put 'tests/Pal.Core.UnitTests/人工 Tests.cs' 'using System.IO; class Pure { string 中文 = "File.ReadAllText 不是调用"; /* Directory.CreateDirectory */ }'
     Put 'tests/Pal.Extract.UnitTests/PngTests.cs' 'using System.IO; using System.IO.Compression; class Png { void Read() { using var m = new MemoryStream(); using var r = new BinaryReader(m); using var z = new ZLibStream(m, CompressionMode.Decompress); } }'
     Put 'tests/Pal.Extract.Tests/Fixtures/Yj2TestData.cs' 'class Yj2TestData { static byte[] Data() => new byte[] { 1, 2 }; }'
     Put 'tools/Pal.Extract/Program.cs' 'class Program { static void Main() { System.IO.File.ReadAllText("production I/O is not a unit fixture"); } }'
@@ -47,14 +47,14 @@ try {
     Check 'pure projects / Chinese and spaces / foreign cwd / production Exe I/O allowed' 0 'PASS unit-boundary: cli-unit'
     $caseFailures = [Collections.Generic.List[string]]::new()
     Put 'tests/forbidden.cs' 'class Forbidden { static string Leak = File.ReadAllText("outside unit sources"); }'
-    Put 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /><compile Include="../forbidden.cs" Link="Leak.cs" /></ItemGroup></Project>'
+    Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /><compile Include="../forbidden.cs" Link="Leak.cs" /></ItemGroup></Project>'
     try { Check 'noncanonical compile cannot bypass explicit helper selection' 1 '[boundary:project-shape]' } catch { $caseFailures.Add($_.Exception.Message); Write-Host $_.Exception.Message }
     Reset-Fixture
     Put 'tools/Pal.Extract/Pal.Extract.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><projectreference Include="../../src/Pal.Game/Pal.Game.csproj" /></ItemGroup></Project>'
     try { Check 'noncanonical production projectreference cannot hide dependency' 1 '[boundary:project-shape]' } catch { $caseFailures.Add($_.Exception.Message); Write-Host $_.Exception.Message }
     if ($caseFailures.Count) { throw ($caseFailures -join "`n") }
     Reset-Fixture
-    Put 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj" /></ItemGroup></Project>'
+    Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj" /></ItemGroup></Project>'
     Check 'integration reference rejected' 1 '[boundary:project-reference]'
     foreach ($include in @('../Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', '../../src/Pal.Game/Pal.Game.csproj')) {
         Reset-Fixture
@@ -77,7 +77,7 @@ try {
         'class C { MkfFixture helper; }'
     )) {
         Reset-Fixture
-        Put 'tests/Pal.Core.Tests/人工 Tests.cs' $source
+        Put 'tests/Pal.Core.UnitTests/人工 Tests.cs' $source
         Check "whole-source side effect rejected: $source" 1 '[boundary:source-forbidden]'
     }
     Reset-Fixture
@@ -88,10 +88,10 @@ try {
     Check 'unknown selection rejected' 1 '[boundary:selection]' @('integration')
     Check 'empty name rejected' 1 '[boundary:selection]' @('')
     Check 'duplicate selection rejected' 1 '[boundary:selection]' @('core', 'core')
-    Remove-Item -LiteralPath (Join-Path $root 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj')
+    Remove-Item -LiteralPath (Join-Path $root 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj')
     Check 'missing applicable project rejected' 1 '[boundary:project-missing]'
     Reset-Fixture
-    Remove-Item -LiteralPath (Join-Path $root 'tests/Pal.Core.Tests/人工 Tests.cs')
+    Remove-Item -LiteralPath (Join-Path $root 'tests/Pal.Core.UnitTests/人工 Tests.cs')
     Check 'empty source selection rejected' 1 '[boundary:source-selection]'
     Reset-Fixture
     Check 'normal invocation after deterministic failures remains clean' 0 'PASS unit-boundary: cli-unit'
@@ -113,7 +113,7 @@ try {
     Put 'Directory.Build.targets' '<Project><Target Name="Hidden"><Exec Command="echo deployment" /></Target></Project>'
     Check 'implicit repository build import rejected' 1 '[boundary:project-shape]'
     Reset-Fixture
-    Put 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /></ItemGroup></Project>'
+    Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /></ItemGroup></Project>'
     Check 'missing test identity rejected' 1 '[boundary:test-project]'
     Reset-Fixture
     Put 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../tools/Pal.Extract/Pal.Extract.csproj" /><Compile Include="../Pal.Extract.Tests/**/*.cs" /></ItemGroup></Project>'
@@ -123,7 +123,7 @@ try {
     Put 'tests/Pal.Extract.IntegrationTests/CliProcess.cs' '// Even an empty prohibited helper file must not be shared.'
     Check 'prohibited helper source link rejected' 1 '[boundary:source-selection]'
     Reset-Fixture
-    Put 'tests/Pal.Core.Tests/人工 Tests.cs' 'class C { string Pure = """"safe""""; string Leak = File.ReadAllText("初始化"); }'
+    Put 'tests/Pal.Core.UnitTests/人工 Tests.cs' 'class C { string Pure = """"safe""""; string Leak = File.ReadAllText("初始化"); }'
     Check 'raw-string delimiter must not hide subsequent initializer / UTF-8 diagnostic path' 1 '人工 Tests.cs:1 forbidden unit fixture token: File'
     foreach ($source in @(
         'using F = System.IO.File; class C { string Data = F.ReadAllText("alias"); }',
@@ -131,13 +131,13 @@ try {
         'class C { string Data = @"verbatim ""File.ReadAllText"""; string Raw = """File.ReadAllText"""; }'
     )) {
         Reset-Fixture
-        Put 'tests/Pal.Core.Tests/人工 Tests.cs' $source
+        Put 'tests/Pal.Core.UnitTests/人工 Tests.cs' $source
         if ($source.StartsWith('class C { string Data = @')) {
             Check 'ordinary/verbatim/raw literal text is not I/O' 0 'PASS unit-boundary: core'
         } else { Check "recognizable alias/interpolation: $source" 1 '[boundary:source-forbidden]' }
     }
     Reset-Fixture
-    Put 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><Target Name="CopyCliForProcessTests"><Copy SourceFiles="cli" DestinationFolder="out" /></Target></Project>'
+    Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><Target Name="CopyCliForProcessTests"><Copy SourceFiles="cli" DestinationFolder="out" /></Target></Project>'
     Check 'unit deployment target rejected directly' 1 '[boundary:build-target]'
     Reset-Fixture
     Remove-Item -LiteralPath (Join-Path $root 'tests/Pal.Extract.Tests/Fixtures/Yj2TestData.cs')

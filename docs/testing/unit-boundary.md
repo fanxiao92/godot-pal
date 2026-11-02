@@ -24,7 +24,7 @@ pwsh -NoProfile -File tests/UnitBoundary.Tests.ps1
 
 | 身份 | unit 项目 | 唯一允许的直接生产引用 |
 | --- | --- | --- |
-| core | `tests/Pal.Core.Tests/Pal.Core.Tests.csproj` | `src/Pal.Core/Pal.Core.csproj` |
+| core | `tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj` | `src/Pal.Core/Pal.Core.csproj` |
 | cli-unit | `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj` | `tools/Pal.Extract/Pal.Extract.csproj` |
 
 每个 unit 必须明确 `IsTestProject=true`、且恰有一个上述引用；两生产项目均不允许进一步 ProjectReference。允许生产 CLI 的 `OutputType=Exe`，**引用它不等于启动它**。不读取 solution 或扫描生产 CLI 所有 C# I/O 来否定这种合法引用。默认成功各输出一行 `PASS unit-boundary: <identity> (<n> sources inspected; ...)`；只有整个命令数值退出 **0** 表示所有选择均完成，数值退出 **1** 表示检查失败。后一个项目失败时，前一个项目的 PASS 不代表整条命令通过。

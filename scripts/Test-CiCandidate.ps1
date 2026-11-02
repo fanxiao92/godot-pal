@@ -68,16 +68,17 @@ try {
     $parentText = Git @('show','-s','--format=%P','HEAD^{commit}'); $parents = @($parentText -split '\s+' | Where-Object { $_ })
     foreach ($parent in $parents) { $null = Sha $parent 'actual parent' }
     $head = $null; $base = $null; $candidate = $githubSha
-    if ($mode -in @('draft-quick','ready-full')) {
+    if ($mode -in @('draft-quick','ready-full','pr-unit')) {
         if ($eventName -cne 'pull_request') { Fail 2 "$mode requires pull_request event." }
         $head = Sha (Required-String $metadata 'prHeadSha') 'prHeadSha'; $base = Sha (Required-String $metadata 'prBaseSha') 'prBaseSha'
         if ($mode -eq 'draft-quick' -and -not $draft) { Fail 2 'draft-quick requires draft=true.' }
         if ($mode -eq 'ready-full' -and $draft) { Fail 2 'ready-full requires draft=false.' }
         if ($actualHead -cne $githubSha -or $parents.Count -ne 2 -or $parents[0] -cne $base -or $parents[1] -cne $head) { Fail 2 'PR checkout/head/base/merge candidate identity does not match ordered git history.' }
-    } elseif ($mode -in @('push-main','manual-full')) {
+    } elseif ($mode -in @('push-main','manual-full','push-unit','manual-unit')) {
         if ($draft) { Fail 2 'Non-PR mode cannot carry draft=true.' }
-        if ($mode -eq 'push-main' -and ($eventName -cne 'push' -or $action -cne 'main')) { Fail 2 'push-main requires push/main event.' }
+        if ($mode -in @('push-main','push-unit') -and ($eventName -cne 'push' -or $action -cne 'main')) { Fail 2 'push-main requires push/main event.' }
         if ($mode -eq 'manual-full' -and $eventName -cne 'workflow_dispatch') { Fail 2 'manual-full requires workflow_dispatch event.' }
+        if ($mode -eq 'manual-unit' -and ($eventName -cne 'workflow_dispatch' -or $action -cne 'manual')) { Fail 2 'manual-unit requires workflow_dispatch/manual event.' }
         if ($actualHead -cne $githubSha -or $parents.Count -gt 2) { Fail 2 'Non-PR checkout must be the GitHub SHA and have a bounded commit parent list.' }
     } else { Fail 2 "Unsupported mode: $mode" }
     $initial = [ordered]@{ eventName=$eventName; action=$action; mode=$mode; runId=$runId; runAttempt=$runAttempt; workflowRef=$workflowRef; draft=$draft; headSha=$head; baseSha=$base; candidateSha=$candidate; actualCheckout=$actualHead; tree=$tree; parents=@($parents) }
@@ -95,6 +96,16 @@ try {
     }
     $snapshotParents = $snapshot.PSObject.Properties['parents']; if ($null -eq $snapshotParents -or $snapshotParents.Value -isnot [array] -or @($snapshotParents.Value).Count -ne $parents.Count) { Fail 3 'Server snapshot stale or mismatched: parents.' }
     for ($index=0; $index -lt $parents.Count; $index++) { if ($snapshotParents.Value[$index] -cne $parents[$index]) { Fail 3 'Server snapshot stale or mismatched: parents.' } }
+    $serverMergeProperty = $snapshot.PSObject.Properties['serverMergeCandidate']
+    if ($null -ne $serverMergeProperty) {
+        $serverMerge = $serverMergeProperty.Value
+        if ($mode -cne 'pr-unit' -or $serverMerge -isnot [pscustomobject] -or $serverMerge.relation -isnot [string] -or $serverMerge.relation -cne 'same-tree-ordered-parents' -or $serverMerge.sha -isnot [string] -or $serverMerge.sha -cnotmatch '^[0-9a-f]{40}$' -or $serverMerge.sha -ceq $actualHead -or $serverMerge.tree -isnot [string] -or $serverMerge.tree -cne $tree -or $serverMerge.parents -isnot [array] -or $serverMerge.parents.Count -ne 2 -or $parents.Count -ne 2) {
+            Fail 3 'Server merge equivalence proof has invalid mode, SHA, tree or parent shape.'
+        }
+        for ($index = 0; $index -lt 2; $index++) {
+            if ($serverMerge.parents[$index] -isnot [string] -or $serverMerge.parents[$index] -cne $parents[$index]) { Fail 3 'Server merge equivalence proof has different ordered parents.' }
+        }
+    }
     if (Test-Path -LiteralPath $output) { Fail 4 'Candidate evidence already exists; refusing overwrite.' }
     $json = $initial | ConvertTo-Json -Depth 10
     try { $stream = [IO.File]::Open($output, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None); try { $bytes = $utf8.GetBytes($json); $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() } } catch { Fail 4 "Cannot atomically create candidate evidence: $($_.Exception.Message)" }

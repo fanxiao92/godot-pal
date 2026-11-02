@@ -1,12 +1,12 @@
 # Game 测试当前入口
 
-本页只维护当前 Game 测试入口、覆盖口径与失败判定。职责选择见[测试职责矩阵](../../../docs/testing/test-layers.md)，初始化、SceneRunner 生命周期、时序边界和完整门规则见[Game 测试分层](../../../docs/testing/game-test-layers.md)。旧命令、变异、性能对照、M2/M3 交付年表与历史失败见[历史运行记录](../../../docs/archive/m3/game-test-run-history.md)。
+Game 是[默认 Unit 反馈](../../../docs/testing/getting-started.md)之后的按需路径，不是第一阶段自动 CI 或测试合并要求。本页只维护当前 Game 测试入口、覆盖口径与失败判定；Configure→立即入树→输入→生产更新完成→清理的示例只在[Game 专题](../../../docs/testing/game-test-layers.md#新人最小模型仅按需进入-godot)维护，不复制第二套规则或命令。职责选择见[测试职责矩阵](../../../docs/testing/test-layers.md)，初始化、SceneRunner 生命周期、时序边界和完整门规则见[Game 测试分层](../../../docs/testing/game-test-layers.md)。旧命令、变异、性能对照、M2/M3 交付年表与历史失败见[历史运行记录](../../../docs/archive/m3/game-test-run-history.md)。
 
 ## 当前入口与覆盖
 
 Game 测试继续使用现有 Godot 程序集、固定 GdUnit 包和 `tests/Pal.Game.Tests/game.runsettings`。真实版本、bootstrap 和包来源以[当前包消费说明](../../../docs/testing/gdunit-source-packages.md)及仓库配置为准。测试资源是本例自有、忽略的 native fixture；真实资源和私密证据不进入提交或上传。
 
-共享完整门仍唯一使用 `scripts/Test-M0.ps1`，依赖 Core→CLI→Prepare→Game 的串行顺序和当前脚本生成的批次/身份。当前源码库存为 Game 269 positive + 3 deliberate controls = 272 discovered；完整门的15份历史 TRX/19主命令属于 M3 历史身份，#32 后工程治理的16/20/1441不得倒写为M3结果。静态库存不是通过证据。
+共享完整门仍唯一使用 `scripts/Test-M0.ps1`，依赖 Core→CLI→Prepare→Game 的串行顺序和当前脚本生成的批次/身份。当前库存和批次从 `scripts/GameTestBatches.ps1` 与测试定义核对，不在本页复制案例计数；已完成运行见历史索引并保持原身份。保留完整门实现不证明当前 M4 候选的完整门运行兼容性已验证。
 
 ## 选择运行范围
 
@@ -15,7 +15,7 @@ Game 测试继续使用现有 Godot 程序集、固定 GdUnit 包和 `tests/Pal.
 - 精确业务时间：运行 Core 显式时间测试；Game 等待仅是活性保护。
 - 完整候选：只调用共享 `scripts/Test-M0.ps1`，不将局部 TRX、静态 discovery 或历史结果拼成全门。
 
-定点运行使用[显式范围入口](../../../docs/testing/range-regression.md)，而非从历史命令墙取命令。示例只说明调用形状，不授予运行授权；两个变量须预先指向批准的 Godot console 和已验证的四文件 bundle，证据目录须不存在：
+定点运行使用[显式范围入口](../../../docs/testing/range-regression.md)，而非从历史命令墙取命令。下例只核对当前参数定义，未因文档维护实际执行，不是运行证明，也不授予运行授权；两个变量须预先指向批准的 Godot console 和已验证的四文件 bundle，证据目录须不存在：
 
 ```powershell
 & ./scripts/Test-Range.ps1 -Scope game -GameBatch process `

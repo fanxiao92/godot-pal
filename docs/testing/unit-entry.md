@@ -1,8 +1,28 @@
-# 单元快入口（#32-C）
+# Unit 反馈协议与显式维护工具
 
-`Test-Unit.ps1` 只运行明确的 Core 与 CLI unit 项目。它不是范围回归、工程检查聚合器或完整验收；通过不能代替 CLI integration、Prepare、Game、真实资源、GPU/人工桌面或远端 CI 验收。完整门仍是 `scripts/Test-M0.ps1`。
+第一次运行从[短指南](getting-started.md)进入：选工程 → 标准项目命令 → 判定 → 留证报告。本页是协议与维护工具的专题权威，不是另一套默认编排器。Unit 反馈不能代替 CLI integration、Prepare、Game、真实资源、GPU/人工桌面或远端 CI 验收；完整门仍是 `scripts/Test-M0.ps1`，不进入默认反馈。
 
-## 调用
+## 默认反馈协议
+
+[ADR-0003](../adr/0003-native-unit-feedback.md) 记录了用户在 #69 复盘后批准的方案 B：默认信任原生工具，强审计改为显式维护能力；这不是对 #69 历史结果的重新验收。
+
+1. **选范围**：按变更与已知调用方选择明确工程、说明理由；所选工程默认全量，仅调用者显式指定才加 filter。solution、Integration、Prepare、Godot 和编排器不进入默认反馈。
+2. **用原生入口**：在仓库根目录直接 `dotnet test <csproj> --configuration Debug --settings tests/unit.runsettings`，加 TRX logger 与全新结果目录。`global.json` 交给 dotnet 解析，不用 Python 或另一套 SDK 政策判断。默认普通缓存及隐式 restore/build；不用 `--no-build`，仅有匹配的成功 restore 依据时才考虑 `--no-restore`。
+3. **最小留证**：保留 cwd、HEAD/dirty 范围、选择理由、实际命令、原始工具输出、数字退出与本轮 TRX 路径。脏树不能仅写 HEAD，但不要求每轮另存全仓 hash/源码副本或独立审计报告。终端/agent 的现有命令记录即可承担输出采集，不另写进程执行器。
+4. **先判定再继续**：每项目正常结束、数字退出 0、输出报告通过且本轮预期 TRX 存在，才继续下一个。`TreatNoTestsAsError` 与 `xUnit.FailSkips` 由现有 VSTest/xUnit 拒绝零执行和 skip。明显异常、中止、取消、超时、未知退出、缺失/明显损坏报告均停止留证，不能用局部 Passed 或旧报告补成功。不自动重试、换源、升级、缩范围或加时限。受控负例仍须匹配指定失败原因。
+5. **简短报告**：说明上述原件、结论及未运行项，只称“所选项目 Unit 反馈通过”，不称完整验收。时长用宿主/终端/CI 已有数据并标注口径；没记录的写未知，隐式 restore/build 不伪拆成本，不把 TRX duration 当端到端墙钟。默认不再要求精确 Stopwatch/整轮审计或另建 5/10 分钟告警编排。超时仍是未完成，不是性能告警，也不自动提高预算。
+
+### 默认路径的保证范围
+
+正常退出、原生报告及本轮文件存在性是默认基线，不额外解析 TRX 的全部 counters、RunInfo、Results/Definitions/Entries/GUID/时间窗，不做独立 discovery/冻结或逐项集合比较，也不生成 `unit-run.json`。不宣称能够独立识别一切 runner 假绿、报告篡改或源码中途变化。
+
+若任务要证明迁移前后案例对应、原始退出/root/双流 EOF、完整 TRX 身份图、源码/产物散列或精确成本，须显式选择下文维护工具或相应层的原契约；不能把普通命令成功当成这些额外保证，也不把维护审计重新挂回默认入口。CI 的实际调用、宿主预算与远端生效限制见 [CI 分流](ci-dispatch.md)。
+
+## 显式维护工具：Test-Unit.ps1
+
+下文保留 #32-C 交付的维护能力，仅在调用者明确需要其边界检查、发现冻结与执行身份比较时使用；不是 work agent 默认入口，也不因为默认路径变化而删除或降级。
+
+### 调用
 
 需要 PowerShell 7、仓库 `global.json` 选择的普通 .NET SDK 与现有三个 xUnit/Test SDK 包版本。沿用普通 NuGet restore/cache，不调用 GdUnit bootstrap，不提供/要求 Godot、固定 GdUnit bundle 或游戏资源。首次普通 NuGet restore 可能需要配置的 nuget.org 源；这不是无网络/空 NuGet 缓存证明，也不下载引擎或固定包。
 
@@ -28,13 +48,13 @@ pwsh -NoProfile -File scripts/Test-Unit.ps1 -Project cli-unit
 | `Project: string[]` | 默认 `@('core','cli-unit')`；只允许无重复、非空子集；未知/空名/重复全部失败 |
 | `OutputDirectory: string` | 默认 `<RepositoryRoot>/TestResults/unit-<唯一runId>`；显式指定时必须不存在（即使空目录也拒绝）；不删除/覆盖旧结果 |
 
-身份精确绑定 `tests/Pal.Core.Tests/Pal.Core.Tests.csproj` 和 `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj`。当前受支持构建口径是仓库既有 `Debug/net10.0`，没有任意构建属性/框架/SDK注入接口。
+身份精确绑定 `tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj` 和 `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj`。当前受支持构建口径是仓库既有 `Debug/net10.0`，没有任意构建属性/框架/SDK注入接口。
 
 脚本先以隔离 `pwsh` 调用[既有轻量边界命令](unit-boundary.md)，正确传递数组并保留退出/日志；不会 dot-source 该含 `exit` 的命令。只加载 `GameTestBatches.ps1` 的无副作用定义以复用 `Read-TestRunIdentity`，不调用会读取 Game/solution 的 `Get-GameBatchPlan`。
 
 然后对每个选定项目显式 `dotnet build --configuration Debug`（普通 restore），再 `dotnet test --no-build --no-restore --list-tests --diag ...`。**所有选定项目的完整发现先冻结，才执行第一个项目**；执行同样仅指定项目、无 filter、无隐式重建。不从 solution 构建/发现后排除 integration。
 
-## 成功、失败与证据
+### 维护工具的成功、失败与证据
 
 只有整个入口实际数字退出 **0** 且 `unit-run.json.status=completed` 才表示本次所选 unit 反馈完成。`PASS unit: N projects` 不是完整门通过。子命令非零退出原样传播；选择/边界/证据错误通常退出 1。报告写入失败不能把原非零退出改成 0。后续项目失败时，前一项目的通过不代表整条命令通过。
 
@@ -55,7 +75,7 @@ TRX 核验复用 Results/Definitions/Entries 完整身份图，要求唯一且�
 
 自有命令 root 与 stdout/stderr EOF 共用 600000ms 工作预算；失败时只对该自有进程树做至多 5000ms 的清理等待，不查询全机进程、不套用 Godot Observer。root exit/EOF 不是所有后代退出证明，也不是恶意项目沙箱。中止、崩溃、未知退出/输出不完整时保留原现场并停止；不要自动重试、换参数或扩大预算。目录/日志不可写等环境错误同样不能算通过。
 
-## 本入口自己的回归
+### 维护工具自己的回归
 
 ```powershell
 # 先 Parser.ParseFile 预检所有改动/生成的 PS，再执行。
