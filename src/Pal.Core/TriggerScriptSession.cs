@@ -45,6 +45,20 @@ public sealed class TriggerScriptSession
         BattleRole = battleContent.InitialRole;
     }
 
+    /// <summary>Pure selected-entry capability check against the content's initial role. Does not start a call,
+    /// create a battle or require randomness; later Start calls still validate their current settled role.</summary>
+    public static void ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language,
+        TriggerBattleContent battleContent, string fileId, string entryId, int inheritedColor = DialogueTextTokenizer.DefaultColor)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+        ArgumentNullException.ThrowIfNull(language);
+        ArgumentNullException.ThrowIfNull(battleContent);
+        if (inheritedColor is < 0 or > 255) throw new ArgumentOutOfRangeException(nameof(inheritedColor));
+        var entry = events.GetEntry(fileId, entryId);
+        if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
+        ValidateCapabilityClosure(events, language, battleContent, battleContent.InitialRole, inheritedColor, entry.SourceAddress);
+    }
+
     public void Start(string fileId, string entryId, int caller)
     {
         if (BlocksSceneUpdates) throw new InvalidOperationException("A trigger call is already active.");
@@ -82,7 +96,11 @@ public sealed class TriggerScriptSession
         return true;
     }
 
-    private void ValidateCapabilityClosure(int address)
+    private void ValidateCapabilityClosure(int address) =>
+        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRole, Context.Color, address);
+
+    private static void ValidateCapabilityClosure(TriggerEventCollection events, DialogueLanguagePackage language,
+        TriggerBattleContent? battleContent, BattleRoleSnapshot? battleRole, int color, int address)
     {
         var pending = new Stack<int>();
         var visited = new HashSet<int>();
@@ -90,11 +108,11 @@ public sealed class TriggerScriptSession
         while (pending.TryPop(out address))
         {
             if (address == 0 || !visited.Add(address)) continue;
-            var command = _events.CommandAt(address);
+            var command = events.CommandAt(address);
             if (command.Op == "end" && command.Mode == "keep") continue;
-            if (command.Op == "startBattle" && _battleContent is not null)
+            if (command.Op == "startBattle" && battleContent is not null)
             {
-                try { _battleContent.Validate(command.TeamId, BattleRole!); }
+                try { battleContent.Validate(command.TeamId, battleRole!); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 pending.Push(Next(command));
                 if (command.LossAddress is { } loss) pending.Push(loss);
@@ -102,11 +120,11 @@ public sealed class TriggerScriptSession
             }
             else if (command.Op == "showDialog")
             {
-                var content = ReadDisplay(ref address);
+                var content = ReadDisplay(events, language, ref address);
                 try
                 {
                     // Keep the existing language/control rules, on a separate display without production state or RNG.
-                    var preview = new DialogueDisplaySession(content.Block, Context.Color, 0);
+                    var preview = new DialogueDisplaySession(content.Block, color, 0);
                     while (preview.Current.Phase != DialogueDisplayPhase.Completed) preview.Update(preview.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
                 }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
@@ -117,25 +135,29 @@ public sealed class TriggerScriptSession
         }
     }
 
-    private (DialogueMessageBlock Block, IReadOnlyList<TriggerMessageReference> References) ReadDisplay(ref int address)
+    private (DialogueMessageBlock Block, IReadOnlyList<TriggerMessageReference> References) ReadDisplay(ref int address) =>
+        ReadDisplay(_events, _language, ref address);
+
+    private static (DialogueMessageBlock Block, IReadOnlyList<TriggerMessageReference> References) ReadDisplay(
+        TriggerEventCollection events, DialogueLanguagePackage language, ref int address)
     {
         var references = new List<TriggerMessageReference>();
         var parts = new List<DialogueMessagePart>();
         do
         {
-            var command = _events.CommandAt(address);
+            var command = events.CommandAt(address);
             int start = command.MessageId, last = start;
             var position = command.Position;
             address = Next(command);
-            while (address != 0 && _events.CommandAt(address) is { Op: "showDialog" } next && next.MessageId == last + 1)
+            while (address != 0 && events.CommandAt(address) is { Op: "showDialog" } next && next.MessageId == last + 1)
             {
                 last = next.MessageId;
                 address = Next(next);
             }
-            try { parts.AddRange(_language.Resolve(start, last - start).Parts); }
+            try { parts.AddRange(language.Resolve(start, last - start).Parts); }
             catch (InvalidDataException exception) { throw new InvalidDataException($"{position}: {exception.Message}", exception); }
             references.Add(new TriggerMessageReference(position, start, last - start));
-        } while (address != 0 && _events.CommandAt(address).Op == "showDialog");
+        } while (address != 0 && events.CommandAt(address).Op == "showDialog");
         // Range lookup and display line count are independent. Separate ranges do not
         // themselves clear/wait; PAL_ClearDialog/EndDialog provide the final boundary.
         var first = references[0];

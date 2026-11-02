@@ -55,6 +55,12 @@
 
 公开 Core binding 用例经真实KO验证：Won rawHP100→settled125/MP35，第二场承接125→137/MP42；Lost HP0/MP20 保留，下一场才抬HP1/reset；结果保持原 Caller/ReturnEntry并继续至完整停边界。另核对请求身份隔离、display交叉、跨文件 loss/循环、所有编码分支预检、规范 hidden 键、支持域及深隔离。这只是 Core 证据，不签 native/Main/表现、GPU、人工或 CI。
 
+## 公开纯入口预检（#46 native binding 前置检查点）
+
+`TriggerScriptSession.ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language, TriggerBattleContent battleContent, string fileId, string entryId, int inheritedColor = DialogueTextTokenizer.DefaultColor)` 为外层严格加载提供纯 capability seam。三个依赖不能为 null，颜色须为0..255，入口必须存在且 kind 为 trigger；禁用零入口沿既有语义不执行任何命令。它只针对 `battleContent.InitialRole` 校验选中入口的完整 next/loss/flee 保守闭包，复用与 `Start` 相同的私有静态 walker、消息范围读取及独立 display/control preview。遇不支持数据或命令抛出带原位置的 `InvalidDataException`，不创建 trigger session、战斗或 lifecycle，不接收/消耗 RNG，不调用 `Start` 或模拟胜利，也不改变任何现有会话、请求或初始角色。
+
+`Start` 的调用/副作用时机保持不变：仍以该会话当前 settled `BattleRole` 和 `Context.Color` 在 caller/PC/request 改变前调用同一 walker；后续 Start 不因静态预检而重置为初始角色。旧无 battle 配置的路径仍在原边界拒绝 `startBattle`。数据格式合法与选中入口能力不混淆：仅沿该闭包验证，归档的非零能力/未引用 team 不因此变成格式错误；本入口不验证来源认证、native hash、scene/owner identity、字形/画像或战斗视觉资源。完整 static native story profile、production package preparation 和正常 Main/输入/显示仍未交付。
+
 ## 现代数值读取（#46 有界检查点）
 
 `ModernBattleContent.Parse(string)` 仅严格读取纯数值并返回上述同一 `TriggerBattleContent`；字段和数组演进边界见[现代战斗数据 v1](modern-battle-data.md)。复用既有 role 转换及 combat/growth 类型，不增第二套规则。格式合法不等于选中入口可执行：合法非零能力字段、含0阈值和有序重复法术行均保留，再由正式 `Start` 纯预检拒绝不支持闭包，不消耗RNG。`InitialRole/Player/Growth/Teams` 为public只读投影，全部嵌套集合沿现构造器防御拷贝。公开 Core 字符串用例已真实经Won/Lost与原事件续接；独立 typed native codec 已追加；不是已交付的完整人工资源链，数值 Prepare/Editor/PS 已交付，完整 storypackage/CLI 作者链/Main 仍待后续。

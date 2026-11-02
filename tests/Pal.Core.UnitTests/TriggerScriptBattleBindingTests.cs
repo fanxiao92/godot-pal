@@ -5,6 +5,152 @@ namespace Pal.Core.Tests;
 
 public sealed class TriggerScriptBattleBindingTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(100)]
+    public void ValidateEntry_checks_initial_content_without_starting_a_call_or_changing_role(int hp)
+    {
+        var events = Fixture().Load();
+        var content = Content(Role() with { Hp = hp });
+        TriggerScriptSession.ValidateEntry(events, TriggerScriptSessionTests.Language(), content, "shared", "npc");
+        Assert.Equal(hp, content.InitialRole.Hp);
+        Assert.Equal(20, content.InitialRole.Mp);
+        Assert.Equal(55, content.InitialRole.HiddenExperience["attack"].Count);
+        var random = new BindingRandom();
+        var script = new TriggerScriptSession(events, TriggerScriptSessionTests.Language(), content, random);
+        Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+        Assert.Null(script.CurrentPosition);
+        Assert.Null(script.PendingBattle);
+        script.Start("shared", "npc", 28);
+        Assert.Equal(hp == 0 ? 1 : 100, script.PendingBattle!.Lifecycle.Current.Role.Hp);
+        Assert.Equal(0, random.Draws);
+    }
+
+    [Theory]
+    [InlineData("events")]
+    [InlineData("language")]
+    [InlineData("content")]
+    public void ValidateEntry_rejects_missing_dependencies(string missing)
+    {
+        Assert.Throws<ArgumentNullException>(() => TriggerScriptSession.ValidateEntry(
+            missing == "events" ? null! : Fixture().Load(),
+            missing == "language" ? null! : TriggerScriptSessionTests.Language(),
+            missing == "content" ? null! : Content(), "shared", "npc"));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(256)]
+    public void ValidateEntry_rejects_out_of_range_inherited_color(int color)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => TriggerScriptSession.ValidateEntry(
+            Fixture().Load(), TriggerScriptSessionTests.Language(), Content(), "shared", "npc", color));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(255)]
+    public void ValidateEntry_accepts_inherited_color_endpoints(int color)
+    {
+        TriggerScriptSession.ValidateEntry(Fixture().Load(), TriggerScriptSessionTests.Language(), Content(), "shared", "npc", color);
+    }
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("entry")]
+    [InlineData("auto")]
+    public void ValidateEntry_requires_an_existing_trigger_entry(string fault)
+    {
+        var fixture = Fixture();
+        if (fault == "auto")
+        {
+            fixture.Entry["kind"] = "auto";
+            fixture.Entry["slot"] = "wAutoScript";
+        }
+        var error = Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(
+            fixture.Load(), TriggerScriptSessionTests.Language(), Content(), fault == "file" ? "absent" : "shared",
+            fault == "entry" ? "absent" : "npc"));
+        Assert.Contains(fault == "auto" ? "auto context is unsupported" : "missing entry", error.Message);
+    }
+
+    [Theory]
+    [InlineData("en", false)]
+    [InlineData("en", true)]
+    [InlineData("zh-Hans", false)]
+    [InlineData("zh-Hans", true)]
+    public void ValidateEntry_uses_only_the_supplied_language_and_exact_message_range(string languageId, bool missing)
+    {
+        var language = new DialogueLanguagePackage(languageId, [new DialogueMessageBlock(61, missing ? 61 : 62,
+            [DialogueMessagePart.FromText(languageId == "en" ? "Victory" : "胜利")])]);
+        if (missing)
+        {
+            var error = Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(
+                Fixture().Load(), language, Content(), "shared", "npc"));
+            Assert.Contains("shared.json#L0002 @0002", error.Message);
+            Assert.Contains($"Language '{languageId}' is missing message range 61+1", error.Message);
+        }
+        else TriggerScriptSession.ValidateEntry(Fixture().Load(), language, Content(), "shared", "npc");
+    }
+
+    [Fact]
+    public void ValidateEntry_disabled_entry_does_not_execute_archived_commands_or_grant_unselected_capabilities()
+    {
+        var fixture = Fixture();
+        fixture.Entry["target"] = null;
+        fixture.Entry["sourceAddress"] = 0;
+        var content = Content(enemy: new(7, 0, 43, 0, 0, 0, 1) { Experience = 1 });
+        TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), content, "shared", "npc");
+        Assert.Equal(1, content.Teams[18].Experience);
+        Assert.Equal(100, content.InitialRole.Hp);
+    }
+
+    [Theory]
+    [InlineData("battle", false)]
+    [InlineData("battle", true)]
+    [InlineData("display", false)]
+    [InlineData("display", true)]
+    [InlineData("completed", false)]
+    [InlineData("completed", true)]
+    public void ValidateEntry_is_independent_of_live_requests_and_never_resets_the_settled_role(string phase, bool reject)
+    {
+        var events = Fixture().Load();
+        var language = TriggerScriptSessionTests.Language();
+        var content = Content();
+        var random = new BindingRandom();
+        var script = new TriggerScriptSession(events, language, content, random);
+        script.Start("shared", "npc", 28);
+        if (phase != "battle")
+        {
+            var battle = script.PendingBattle!;
+            Win(battle);
+            Assert.True(script.AcknowledgeBattle(battle.Id, battle.Lifecycle.Completion));
+            Assert.Equal(125, script.BattleRole!.Hp);
+            if (phase == "completed") FinishDisplay(script);
+        }
+        var before = (script.Phase, script.Caller, script.ReturnEntry, script.CurrentPosition, script.Context,
+            script.PendingDisplay, script.PendingBattle, script.BattleRole, random.Draws);
+        var combat = script.PendingBattle?.Lifecycle.Current;
+        var display = script.PendingDisplay?.Display.Current;
+        if (reject)
+        {
+            var unsupported = Content(growth: new(Enumerable.Repeat(5, 100).ToArray(), []));
+            Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(events, language, unsupported, "shared", "npc"));
+        }
+        else TriggerScriptSession.ValidateEntry(events, language, content, "shared", "npc");
+        Assert.Equal(before, (script.Phase, script.Caller, script.ReturnEntry, script.CurrentPosition, script.Context,
+            script.PendingDisplay, script.PendingBattle, script.BattleRole, random.Draws));
+        Assert.Same(combat, script.PendingBattle?.Lifecycle.Current);
+        Assert.Same(display, script.PendingDisplay?.Display.Current);
+        Assert.Equal(100, content.InitialRole.Hp);
+        if (phase == "completed")
+        {
+            script.Start("shared", "npc", 65535);
+            Assert.Equal(28, script.Caller);
+            Assert.Equal(125, script.PendingBattle!.Lifecycle.Current.Role.Hp);
+            Assert.Equal(35, script.PendingBattle.Lifecycle.Current.Role.Mp);
+        }
+    }
+
     [Fact]
     public void Named_battle_waits_for_real_lifecycle_settlement_then_resumes_dialogue_to_keep_end()
     {
@@ -194,6 +340,11 @@ public sealed class TriggerScriptBattleBindingTests
     }
 
     [Theory]
+    [InlineData("next", "raw")]
+    [InlineData("next", "unsupported")]
+    [InlineData("next", "language")]
+    [InlineData("next", "team")]
+    [InlineData("next", "enemy")]
     [InlineData("loss", "raw")]
     [InlineData("flee", "raw")]
     [InlineData("loss", "unsupported")]
@@ -209,7 +360,7 @@ public sealed class TriggerScriptBattleBindingTests
         var fixture = Fixture();
         fixture.Commands[1] = Battle(1, loss: branch == "loss" ? "L0003" : null,
             boss: branch != "flee", flee: branch == "flee" ? "L0003" : null);
-        fixture.Commands[2] = End(2);
+        fixture.Commands[2] = branch == "next" ? JsonNode.Parse("""{"label":"L0002","op":"setDialog","box":"upper","portraitId":0,"color":0,"rngWord":0,"next":"L0003","source":{"index":2,"opcode":60,"operands":[0,0,0]}}""") : End(2);
         fixture.Commands[3] = fault switch
         {
             "raw" => JsonNode.Parse("""{"label":"L0003","op":"raw","next":"L0004","source":{"index":3,"opcode":7,"operands":[18,0,0]}}"""),
@@ -222,11 +373,15 @@ public sealed class TriggerScriptBattleBindingTests
         var content = new TriggerBattleContent(Role(), new(1, 100, 150, 40, 20, 100), Growth(), teams);
         var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(62, 62, [DialogueMessagePart.FromText("~01A")])]);
         var random = new BindingRandom();
-        var script = new TriggerScriptSession(fixture.Load(), language, content, random);
+        var events = fixture.Load();
+        var preflightError = Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(events, language, content, "shared", "npc"));
+        Assert.Contains("shared.json#L0003 @0003", preflightError.Message);
+        var script = new TriggerScriptSession(events, language, content, random);
         var role = script.BattleRole;
         var context = script.Context;
         var error = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 28));
         Assert.Contains("shared.json#L0003 @0003", error.Message);
+        Assert.Equal(preflightError.Message, error.Message);
         Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
         Assert.Equal(0, script.Caller);
         Assert.Equal(0, script.ReturnEntry);
@@ -260,11 +415,15 @@ public sealed class TriggerScriptBattleBindingTests
         }
         var content = new TriggerBattleContent(role, player, growth, new Dictionary<int, ClassicBattleEnemy> { [18] = new(7, 0, 43, 0, 0, 0, 1) });
         var random = new BindingRandom();
+        var preflightError = Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(
+            Fixture().Load(), TriggerScriptSessionTests.Language(), content, "shared", "npc"));
+        Assert.Contains("shared.json#L0001 @0001", preflightError.Message);
         var script = Script(Fixture(), random, content);
         var initial = script.BattleRole;
         var context = script.Context;
         var error = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 28));
         Assert.Contains("shared.json#L0001 @0001", error.Message);
+        Assert.Equal(preflightError.Message, error.Message);
         Assert.Same(initial, script.BattleRole);
         Assert.Equal(context, script.Context);
         Assert.Null(script.PendingBattle);
@@ -274,8 +433,10 @@ public sealed class TriggerScriptBattleBindingTests
         Assert.Equal(0, random.Draws);
     }
 
-    [Fact]
-    public void Cross_file_loss_to_another_battle_and_a_cycle_preflight_without_previewing_combat()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Cross_file_loss_to_another_battle_and_a_cycle_preflight_without_previewing_combat(bool missingTeam)
     {
         var fixture = Fixture();
         fixture.Index["files"] = new JsonArray("shared", "targets");
@@ -285,7 +446,7 @@ public sealed class TriggerScriptBattleBindingTests
         fixture.Commands[2] = End(2);
         fixture.Commands[3] = End(3);
         fixture.Commands[3]!["next"] = "targets#L0004";
-        var nextBattle = Battle(4, loss: "shared#L0001");
+        var nextBattle = Battle(4, team: missingTeam ? 19 : 18, loss: "shared#L0001");
         nextBattle["next"] = "L0005";
         end["label"] = "L0005";
         end["source"]!["index"] = 5;
@@ -294,7 +455,21 @@ public sealed class TriggerScriptBattleBindingTests
         fixture.Index["source"]!["instructionCount"] = 6;
         fixture.Index["source"]!["byteLength"] = 48;
         var random = new BindingRandom();
-        var script = Script(fixture, random, Content(Role() with { Hp = 20 }, new(7, 0, 100, 0, 0, 0, 1)));
+        var content = Content(Role() with { Hp = 20 }, new(7, 0, 100, 0, 0, 0, 1));
+        var script = Script(fixture, random, content);
+        if (missingTeam)
+        {
+            var error = Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(
+                fixture.Load(), TriggerScriptSessionTests.Language(), content, "shared", "npc"));
+            Assert.Contains("targets.json#L0004 @0004: Missing battle team 19", error.Message);
+            Assert.Equal(error.Message, Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 28)).Message);
+            Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+            Assert.Null(script.PendingBattle);
+            Assert.Null(script.CurrentPosition);
+            Assert.Equal(0, random.Draws);
+            return;
+        }
+        TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), content, "shared", "npc");
         script.Start("shared", "npc", 28);
         Assert.Equal(0, random.Draws);
         var first = script.PendingBattle!;
@@ -359,6 +534,7 @@ public sealed class TriggerScriptBattleBindingTests
         var fixture = Fixture();
         fixture.Commands[2] = End(2);
         fixture.Commands[3] = Battle(3, team: 999);
+        TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), Content(), "shared", "npc");
         var script = Script(fixture, new BindingRandom());
         script.Start("shared", "npc", 28);
         Win(script.PendingBattle!);
