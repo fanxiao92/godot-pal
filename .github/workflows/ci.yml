@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-check-control-missing:
+  unit-check:
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
@@ -30,12 +30,6 @@ jobs:
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
-      # Disposable #69 failure control; independent of mutable API merge previews.
-      - name: Specified failure control for Spec 69
-        shell: pwsh
-        run: |
-          Copy-Item -LiteralPath $env:GITHUB_EVENT_PATH -Destination "$env:RUNNER_TEMP/original-event.json"
-          throw 'UNIT_ONLY_69_EXPECTED_FAILURE_CONTROL'
       - name: Validate Unit start candidate
         shell: pwsh
         env:
