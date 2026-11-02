@@ -88,6 +88,7 @@ public sealed class ClassicBattleLifecycleSession
         if (growth.LevelUpExperience is not { Count: 100 } || growth.LevelUpExperience.Any(x => x is < 1 or > 65535)
             || !ValidExperience(role.PrimaryExperience) || role.PrimaryExperience.Value >= growth.LevelUpExperience[role.Level]
             || role.HiddenExperience is not { Count: 7 }
+            || role.HiddenExperience.Keys.Any(name => !HiddenNames.Contains(name, StringComparer.Ordinal))
             || HiddenNames.Any(name => !role.HiddenExperience.TryGetValue(name, out var xp) || !ValidExperience(xp)
                 || xp.Level > 99 || xp.Value >= growth.LevelUpExperience[xp.Level]))
             throw new InvalidDataException("Baseline requires complete valid EXP data below every applicable growth threshold.");

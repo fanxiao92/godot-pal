@@ -126,6 +126,36 @@ public sealed class ClassicBattleLifecycleSessionTests
         random.AssertExhausted();
     }
 
+    [Theory]
+    [InlineData("attack", "ATTACK")]
+    [InlineData("magicPower", "magicpower")]
+    public void Noncanonical_hidden_names_are_rejected_before_random_regardless_of_dictionary_comparer(string canonical, string alias)
+    {
+        var source = Role();
+        var hidden = source.HiddenExperience.ToDictionary(pair => pair.Key == canonical ? alias : pair.Key,
+            pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var role = source with { HiddenExperience = hidden };
+        var random = new ScriptedRandom([]);
+        Assert.Throws<InvalidDataException>(() => Start(role, random));
+        Assert.Equal(100, role.Hp);
+        Assert.Equal(55, hidden[alias].Count);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Canonical_hidden_names_remain_supported_with_case_insensitive_input_dictionary()
+    {
+        var source = Role();
+        var role = source with { HiddenExperience = source.HiddenExperience.ToDictionary(pair => pair.Key,
+            pair => pair.Value, StringComparer.OrdinalIgnoreCase) };
+        var random = new ScriptedRandom([]);
+        var session = Start(role, random);
+        Assert.Equal(0, session.Current.Role.HiddenExperience["attack"].Count);
+        Assert.Equal(55, role.HiddenExperience["attack"].Count);
+        Assert.True(session.Current.IsInBattle);
+        random.AssertExhausted();
+    }
+
     public static IEnumerable<object[]> UnsupportedGrowth()
     {
         var role = Role();
