@@ -131,7 +131,7 @@ internal static class EventArchive
                 throw new InvalidDataException($"{String(entry, "id")}: target does not resolve to sourceAddress {sourceAddress:X4}.");
         }
         var bytes = new byte[length];
-        foreach (var pair in allCommands) Encode(pair.Value.Command, bytes.AsSpan(pair.Key * 8, 8));
+        foreach (var pair in allCommands) Encode(pair.Value.Command, pair.Value.FileId, labelsByFile, bytes.AsSpan(pair.Key * 8, 8));
         string expectedHash = String(source, "sha256");
         if (!Regex.IsMatch(expectedHash, @"^[0-9a-f]{64}\z", RegexOptions.CultureInvariant)) throw new InvalidDataException("index.json: sha256 must be lowercase hexadecimal.");
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -151,6 +151,14 @@ internal static class EventArchive
         {
             result["op"] = "setDialog"; result["box"] = "upper"; result["portraitId"] = a;
             result["color"] = b & 255; result["rngWord"] = c;
+        }
+        else if (opcode == 7)
+        {
+            if (b != 0 && b >= count || c != 0 && c >= count)
+                throw new InvalidDataException($"SSS.MKF: startBattle @{index:X4} result target is outside chunk 4.");
+            result["op"] = "startBattle"; result["teamId"] = a;
+            result["lossTarget"] = b == 0 ? null : LabelAt(b);
+            result["isBoss"] = c == 0; result["fleeTarget"] = c == 0 ? null : LabelAt(c);
         }
         else if (opcode == 0xffff)
         {
@@ -198,7 +206,7 @@ internal static class EventArchive
         });
     }
 
-    private static void Encode(JsonObject command, Span<byte> destination)
+    private static void Encode(JsonObject command, string fileId, IReadOnlyDictionary<string, Dictionary<string, int>> labelsByFile, Span<byte> destination)
     {
         var source = Required(command, "source");
         ushort opcode = checked((ushort)Int(source, "opcode"));
@@ -216,6 +224,12 @@ internal static class EventArchive
             _ = checked((ushort)Int(command, "rngWord"));
             c = (ushort)Int(command, "rngWord");
         }
+        else if (opcode == 7 && op == "startBattle")
+        {
+            a = checked((ushort)Int(command, "teamId"));
+            b = EncodeBattleTarget(command, "lossTarget", fileId, labelsByFile);
+            c = EncodeBattleTarget(command, "fleeTarget", fileId, labelsByFile);
+        }
         else if (opcode == 0xffff && op == "showDialog")
         {
             a = checked((ushort)Int(command, "messageId")); b = checked((ushort)Int(command, "descriptionLineWord"));
@@ -224,12 +238,22 @@ internal static class EventArchive
         Write(destination, opcode); Write(destination[2..], a); Write(destination[4..], b); Write(destination[6..], c);
     }
 
+    private static ushort EncodeBattleTarget(JsonObject command, string field, string fileId, IReadOnlyDictionary<string, Dictionary<string, int>> labelsByFile)
+    {
+        string? reference = NullableString(command, field);
+        if (reference is null) return 0;
+        string context = $"{fileId}.json#{String(command, "label")} @{Int(Required(command, "source"), "index"):X4}.{field}";
+        int address = ResolveReference(reference, fileId, labelsByFile, context);
+        if (address == 0) throw new InvalidDataException($"{context}: address zero must use null, not a reference.");
+        return checked((ushort)address);
+    }
+
     private static void ValidateCommand(JsonObject command, string fileId, int count)
     {
         string label = String(command, "label");
         if (!Identifier.IsMatch(label)) throw new InvalidDataException($"{fileId}.json: invalid command label.");
         string op = String(command, "op");
-        if (op is not ("raw" or "end" or "setDialog" or "showDialog")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
+        if (op is not ("raw" or "end" or "setDialog" or "showDialog" or "startBattle")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
         string? next = NullableString(command, "next");
         if (next is not null) ValidateReferenceSyntax(next, $"{label}.next");
         var source = Required(command, "source");
@@ -244,9 +268,22 @@ internal static class EventArchive
             "raw" => new[] { "label", "op", "next", "source" },
             "end" => new[] { "label", "op", "mode", "next", "source" },
             "setDialog" => new[] { "label", "op", "box", "portraitId", "color", "rngWord", "next", "source" },
+            "startBattle" => new[] { "label", "op", "teamId", "lossTarget", "isBoss", "fleeTarget", "next", "source" },
             _ => new[] { "label", "op", "messageId", "descriptionLineWord", "next", "source" }
         };
         ValidateKeys(command, label, allowed);
+        if (op == "startBattle")
+        {
+            string context = $"{fileId}.json#{label} @{index:X4}";
+            if (opcodeValue != 7) throw new InvalidDataException($"{context}: invalid startBattle mapping.");
+            _ = Word(command["teamId"]);
+            if (command["isBoss"] is not JsonValue value || !value.TryGetValue<bool>(out bool isBoss))
+                throw new InvalidDataException($"{context}: startBattle.isBoss must be a boolean.");
+            string? loss = NullableString(command, "lossTarget"), flee = NullableString(command, "fleeTarget");
+            if (isBoss != (flee is null)) throw new InvalidDataException($"{context}: startBattle.isBoss must equal fleeTarget being null.");
+            if (loss is not null) ValidateReferenceSyntax(loss, context + ".lossTarget");
+            if (flee is not null) ValidateReferenceSyntax(flee, context + ".fleeTarget");
+        }
         if (op == "end" && (opcodeValue != 0 || String(command, "mode") != "keep")) throw new InvalidDataException($"{label}: invalid end mapping.");
         if (op == "setDialog" && (opcodeValue != 0x003c || String(command, "box") != "upper")) throw new InvalidDataException($"{label}: invalid setDialog mapping.");
         if (op == "showDialog" && opcodeValue != 0xffff) throw new InvalidDataException($"{label}: invalid showDialog mapping.");

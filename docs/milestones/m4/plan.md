@@ -4,7 +4,7 @@
 
 规格以 [#44](https://github.com/fanxiao92/godot-pal/issues/44) 正文、评论和 #45–#54 的原生依赖为准；下表是已发布的十票顺序，不沿用父规格末尾较早的七项草案。本文是本次隔离实施的计划，不覆盖其他工作树中的用户文件，也不把规格标签当作实现证据。
 
-当前本地状态：#45 的战前上下文及必要补强已验证并集成到 M4 集成分支（`0672bdd35021af534092d08de223592d32b90e39`）；#46 已有首个 Core 单人单敌经典普攻 combat-only 检查点（见[公开 interface 与参考规则](../../design/classic-battle-session.md)），人工内容/native、CLI、事件往返和 Main 接通尚未实施；#47–#54 尚未实施。**这不是 main 交付、GitHub 任务关闭或整个 M4 验收通过。** 后继按实际实现、匹配验证和集成结果释放；远端任务收尾随真实交付更新。
+当前本地状态：#45 的战前上下文及必要补强已验证并集成到 M4 集成分支（`0672bdd35021af534092d08de223592d32b90e39`）；#46 已有首个 Core 单人单敌经典普攻 combat-only 检查点（见[公开 interface 与参考规则](../../design/classic-battle-session.md)），另有 `startBattle` faithful 具名双向编解码与 Core 严格集合加载检查点（完整 source/next、结果引用和旧 raw7 包兼容，见[事件契约](../../design/events-schema.md)），仍由能力预检拒绝执行；人工内容/native、事件战斗请求/续接和 Main 接通尚未实施；#47–#54 尚未实施。**这不是 main 交付、GitHub 任务关闭或整个 M4 验收通过。** 后继按实际实现、匹配验证和集成结果释放；远端任务收尾随真实交付更新。
 
 已交付的 M2/M3 能力不重做。当前默认 Unit 与 CI 继续遵循 [ADR-0003](../../adr/0003-native-unit-feedback.md)，不能用 required Unit 成功代签 M4 完整验收。
 

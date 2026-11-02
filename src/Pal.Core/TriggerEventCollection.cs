@@ -86,6 +86,11 @@ public sealed class TriggerEventCollection
             if (expected != actual) throw new InvalidDataException($"{command.Position}: next must resolve to its WORD-order successor.");
             command.NextAddress = actual;
             if (command.TargetReference is not null) _ = collection.Resolve(command.TargetReference, command.Position.FileId, command.Position.ToString());
+            if (command.Op == "startBattle")
+            {
+                command.LossAddress = collection.ResolveBattleTarget(command.LossReference, command.Position, "lossTarget");
+                command.FleeAddress = collection.ResolveBattleTarget(command.FleeReference, command.Position, "fleeTarget");
+            }
         }
         foreach (var entry in collection._entries.Values)
             if (entry.Target is not null && collection.Resolve(entry.Target, entry.FileId, entry.Id) != entry.SourceAddress)
@@ -99,6 +104,14 @@ public sealed class TriggerEventCollection
         var key = pieces.Length == 1 ? (fileId, pieces[0]) : (pieces[0], pieces[1]);
         return _labels.TryGetValue(key, out int address) ? address
             : throw new InvalidDataException($"{fileId}.json {context}: dangling reference '{reference}'.");
+    }
+
+    private int? ResolveBattleTarget(string? reference, TriggerPosition position, string field)
+    {
+        if (reference is null) return null;
+        int address = Resolve(reference, position.FileId, $"{position}.{field}");
+        if (address == 0) throw new InvalidDataException($"{position}.{field}: address zero must use null, not a reference.");
+        return address;
     }
 
     private static bool ValidSlot(string type, string slot, string kind) =>
@@ -146,6 +159,7 @@ public sealed class TriggerEventCollection
                     _ => throw new InvalidDataException("Unknown dialogue box.")
                 },
                 "showDialog" => ["messageId", "descriptionLineWord"],
+                "startBattle" => ["teamId", "lossTarget", "isBoss", "fleeTarget"],
                 _ => throw new InvalidDataException($"Unknown op '{op}'.")
             };
             EventJson.Keys(node, context, ["label", "op", "next", "source", ..fields]);
@@ -179,6 +193,18 @@ public sealed class TriggerEventCollection
                     if (command.Box != "centerWindow") command.RngWord = EventJson.Word(node, "rngWord");
                     if (opcode != (command.Box switch { "center" => 59, "upper" => 60, "lower" => 61, "centerWindow" => 62, _ => -1 })
                         || command.Color is < 0 or > 255) throw new InvalidDataException("Invalid setDialog mapping/color.");
+                    break;
+                case "startBattle":
+                    if (opcode != 7) throw new InvalidDataException("Invalid startBattle mapping.");
+                    command.TeamId = EventJson.Word(node, "teamId");
+                    command.LossReference = EventJson.Reference(node, "lossTarget");
+                    command.FleeReference = EventJson.Reference(node, "fleeTarget");
+                    var isBoss = node.GetProperty("isBoss");
+                    if (isBoss.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new InvalidDataException("startBattle.isBoss must be a boolean.");
+                    command.IsBoss = isBoss.GetBoolean();
+                    if (command.IsBoss != (command.FleeReference is null))
+                        throw new InvalidDataException("startBattle.isBoss must equal fleeTarget being null.");
                     break;
                 case "showDialog":
                     command.MessageId = EventJson.Word(node, "messageId");
@@ -218,6 +244,12 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int Color { get; set; }
     internal int RngWord { get; set; }
     internal int MessageId { get; set; }
+    internal int TeamId { get; set; }
+    internal bool IsBoss { get; set; }
+    internal string? LossReference { get; set; }
+    internal string? FleeReference { get; set; }
+    internal int? LossAddress { get; set; }
+    internal int? FleeAddress { get; set; }
 }
 
 internal static class EventJson

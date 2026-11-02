@@ -67,9 +67,9 @@ public class Fixture
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
             'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
         $expectedProjects = @{
-            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 445, 0)
+            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 467, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
-            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 247, 2)
+            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 268, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 61, 0)
             game = @('src/Pal.Game/Pal.Game.csproj', 289, 0)
         }
@@ -90,7 +90,7 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 445 passed; CLI unit 142 passed; CLI integration 247 passed + 2 skipped (249 total); Prepare 61 passed; Godot source/discovery 292; positives 289 as serial 74/85/130 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 467 passed; CLI unit 142 passed; CLI integration 268 passed + 2 skipped (270 total); Prepare 61 passed; Godot source/discovery 292; positives 289 as serial 74/85/130 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }
@@ -103,7 +103,7 @@ public class Fixture
             $cli.skipped = 3
             $summary = Get-GatePassSummary $plan
             Assert ($summary -match 'CLI integration 246 passed \+ 3 skipped \(249 total\)') 'Changed CLI plan counts were not rendered.'
-            Assert ($summary -notmatch 'CLI integration 247|CLI integration 188') 'Static CLI plan count remained in changed summary.'
+            Assert ($summary -notmatch 'CLI integration 268|CLI integration 188') 'Static CLI plan count remained in changed summary.'
         } finally {
             $cli.passed = $originalPassed
             $cli.skipped = $originalSkipped
