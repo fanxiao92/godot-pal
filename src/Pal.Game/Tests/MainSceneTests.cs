@@ -350,6 +350,69 @@ public class MainSceneTests
         AssertThat(fixture.Static.Scene.Objects.Single(item => item.Id == 28).WTriggerScript).IsEqual(0x09c3);
     }
 
+    [TestCase(Timeout = 20000)]
+    public async Task PreparedFirstBattleContextLoadsThroughMainAndKeepsSameUriSessionIndependent()
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        // Offline preparation finishes synchronously before either Main enters the tree.
+        string preparedUri = fixture.PrepareProductionProfile();
+        AssertThat(preparedUri.EndsWith("/Battle/Profile.tres", StringComparison.Ordinal)).IsTrue();
+        string preparedHash = Godot.FileAccess.GetSha256(preparedUri);
+        var selection = GameSceneConfiguration.FromArguments("--m4-first-battle-profile", preparedUri);
+        Main old;
+        GodotObject[] children;
+        using (var scene = new EmbeddedScene(Configured(selection)))
+        {
+            old = scene.Main;
+            scene.AssertHealthy();
+            AssertThat(old.SelectedLanguage).IsEqual("zh-Hans");
+            AssertFirstBattlePreTriggerState(old);
+            children = old.GetChildren().Cast<GodotObject>().ToArray();
+            var first = await scene.FirstSouthStep();
+            AssertThat((first.Leader.X, first.Leader.Y, first.Leader.Direction, first.Leader.StepPhase,
+                first.IsWalking, first.Plan.LeaderFrameIndex)).IsEqual(((short)1248, (short)256, 0, 1, true, 1));
+            AssertThat((old.Battle!.State.World.Leader.X, old.Battle.State.World.Leader.Y,
+                old.Battle.State.World.Leader.Direction)).IsEqual((1248, 256, "south"));
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        foreach (GodotObject child in children) AssertThat(GodotObject.IsInstanceValid(child)).IsFalse();
+        AssertThat(Input.IsActionPressed("exploration_south")).IsFalse();
+        // Reuse exactly the prepared URI without clearing the shared ResourceLoader cache.
+        using (var next = new EmbeddedScene(Configured(selection)))
+        {
+            next.AssertHealthy();
+            AssertThat(next.Main.SelectedLanguage).IsEqual("zh-Hans");
+            AssertFirstBattlePreTriggerState(next.Main);
+            await next.WaitFor(() => next.Updates.Count > 0, "prepared same-URI initial update completion");
+            AssertIdleBattleUpdates(next);
+            int completedUpdates = next.Updates.Count;
+            int stopPhase = completedUpdates % 2 * 2;
+            AssertFirstBattlePreTriggerState(next.Main, stopPhase);
+            var before = next.Updates[^1];
+            string beforeState = next.BattleSnapshots[^1];
+            next.Press(Key.Enter);
+            await next.WaitFor(() => next.Main.Failure is not null, "prepared owner28 @09C3 search rejection");
+            AssertThat(next.Main.Failure).IsEqual("Exploration update failed: " + FirstMandatoryBattleSession.UnsupportedTriggerDiagnostic);
+            AssertThat(next.Failures.Count).IsEqual(1);
+            AssertThat(next.Failures[0]).IsEqual(next.Main.Failure!);
+            AssertThat(next.Updates.Count).IsEqual(completedUpdates);
+            AssertThat(ReferenceEquals(next.Main.Exploration, before)).IsTrue();
+            AssertThat(JsonSerializer.Serialize(next.Main.Battle!.State)).IsEqual(beforeState);
+            AssertFirstBattlePreTriggerState(next.Main, stopPhase);
+            next.Press(Key.Down);
+            await next.AssertStopped();
+            AssertThat(JsonSerializer.Serialize(next.Main.Battle.State)).IsEqual(beforeState);
+        }
+        AssertThat(Input.IsActionPressed("exploration_south")).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+        AssertThat(Godot.FileAccess.GetSha256(preparedUri)).IsEqual(preparedHash);
+        foreach (var source in fixture.PreparationSourceHashes)
+            AssertThat(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(source.Key))))
+                .IsEqual(source.Value);
+        AssertThat(fixture.Static.Scene.Objects.Single(item => item.Id == 28).SState).IsEqual(1);
+        AssertThat(fixture.Static.Scene.Objects.Single(item => item.Id == 28).WTriggerScript).IsEqual(0x09c3);
+    }
+
     private static void AssertIdleBattleUpdates(EmbeddedScene scene)
     {
         AssertThat(scene.BattleSnapshots.Count).IsEqual(scene.Updates.Count);

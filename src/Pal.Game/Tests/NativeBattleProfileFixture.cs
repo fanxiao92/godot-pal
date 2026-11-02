@@ -19,6 +19,11 @@ internal sealed class NativeBattleProfileFixture : IDisposable
     public string Uri => Root + "/Battle.tres";
     public PalFirstMandatoryBattleProfile Native { get; }
     public FirstMandatoryBattleProfile Core { get; }
+    private readonly byte[] indexBytes;
+    private readonly byte[] contextBytes;
+    private readonly string inputDirectory = Path.Combine(Path.GetTempPath(), "pal-battle-bridge-" + Guid.NewGuid().ToString("N"));
+    private readonly string preparedRoot = "res://Assets/RuntimeTests/BattlePrepared-" + Guid.NewGuid().ToString("N");
+    public Dictionary<string, string> PreparationSourceHashes { get; } = new(StringComparer.Ordinal);
 
     public NativeBattleProfileFixture()
     {
@@ -41,6 +46,8 @@ internal sealed class NativeBattleProfileFixture : IDisposable
         byte[] context = Encoding.UTF8.GetBytes(fixture.Document.ToJsonString());
         string contextHash = Convert.ToHexStringLower(SHA256.HashData(context));
         byte[] index = Encoding.UTF8.GetBytes($"{{\"formatVersion\":1,\"profile\":\"first-mandatory-battle-pre-trigger-v1\",\"contextFile\":\"battle-context.json\",\"contextSha256\":\"{contextHash}\"}}");
+        indexBytes = index;
+        contextBytes = context;
         Core = FirstMandatoryBattleProfile.Load(index, new Dictionary<string, byte[]> { ["battle-context.json"] = context });
         Native = new PalFirstMandatoryBattleProfile
         {
@@ -54,9 +61,25 @@ internal sealed class NativeBattleProfileFixture : IDisposable
 
     public void Save() => NativeProfileFixture.SaveResource(Native, Uri);
 
+    public string PrepareProductionProfile()
+    {
+        Directory.CreateDirectory(inputDirectory);
+        File.WriteAllBytes(Path.Combine(inputDirectory, "index.json"), indexBytes);
+        File.WriteAllBytes(Path.Combine(inputDirectory, "battle-context.json"), contextBytes);
+        string staticProfile = Static.ResourceRoot + "/Profile.tres";
+        NativeProfileFixture.SaveResource(Static.Profile, staticProfile);
+        foreach (string path in Directory.GetFiles(inputDirectory).Concat(
+            Directory.GetFiles(ProjectSettings.GlobalizePath(Static.ResourceRoot), "*", SearchOption.AllDirectories)))
+            PreparationSourceHashes.Add(path, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))));
+        return Editor.PrepareBattleContext.Prepare(inputDirectory, ProjectSettings.GlobalizePath(preparedRoot),
+            Static.ResourceRoot, staticProfile);
+    }
+
     public void Dispose()
     {
         Static.Dispose();
+        if (Directory.Exists(inputDirectory)) Directory.Delete(inputDirectory, true);
+        if (Directory.Exists(ProjectSettings.GlobalizePath(preparedRoot))) Directory.Delete(ProjectSettings.GlobalizePath(preparedRoot), true);
         if (Directory.Exists(ProjectSettings.GlobalizePath(Root))) Directory.Delete(ProjectSettings.GlobalizePath(Root), true);
     }
 }

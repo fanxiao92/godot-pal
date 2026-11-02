@@ -15,25 +15,41 @@ public partial class PrepareBattleContext : Node
 {
     public override void _Ready()
     {
-        string? temporary = null;
-        var createdDirectories = new List<string>();
         try
         {
             string[] args = OS.GetCmdlineUserArgs();
             Require(args.Length == 8 && args[0] == "--battle-input" && args[2] == "--battle-output"
                 && args[4] == "--static-resources" && args[6] == "--static-profile", "invalid battle-context prepare arguments");
-            string input = Path.GetFullPath(args[1]);
-            string output = ProjectSettings.LocalizePath(Path.GetFullPath(args[3])).TrimEnd('/');
+            _ = Prepare(args[1], args[3], args[5], args[7]);
+            GD.Print("PAL_PREPARE_BATTLE_CONTEXT:" + FirstMandatoryBattleProfile.ProfileIdValue);
+            GetTree().Quit(0);
+        }
+        catch (Exception error)
+        {
+            GD.PrintErr("Battle context native import failed: " + error.Message);
+            GetTree().Quit(1);
+        }
+    }
+
+    // Explicit offline preparation shared by the editor entry and in-host callers, never runtime startup.
+    public static string Prepare(string inputDirectory, string outputDirectory, string staticResources, string staticProfile)
+    {
+        string? temporary = null;
+        var createdDirectories = new List<string>();
+        try
+        {
+            string input = Path.GetFullPath(inputDirectory);
+            string output = ProjectSettings.LocalizePath(Path.GetFullPath(outputDirectory)).TrimEnd('/');
             Require(output == "res://Assets" || output.StartsWith("res://Assets/", StringComparison.Ordinal), "battle native output must be under project Assets");
-            NativeSceneLoader.ValidateRoot(args[5]);
-            NativeExplorationProfile.ValidateUri(args[7]);
-            string staticRootPath = PreparationPathSafety.AssetResourcePath(args[5], directory: true);
-            string staticProfilePath = PreparationPathSafety.AssetResourcePath(args[7], directory: false);
+            NativeSceneLoader.ValidateRoot(staticResources);
+            NativeExplorationProfile.ValidateUri(staticProfile);
+            string staticRootPath = PreparationPathSafety.AssetResourcePath(staticResources, directory: true);
+            string staticProfilePath = PreparationPathSafety.AssetResourcePath(staticProfile, directory: false);
             string outputPath = ProjectSettings.GlobalizePath(output);
             Require(IsInside(staticProfilePath, staticRootPath), "selected static profile must be inside selected static resources");
             Require(!IsInside(outputPath, staticRootPath) && !IsInside(staticRootPath, outputPath),
                 "battle native output and selected static resources must not overlap in either direction");
-            string staticScene = args[5] + "/Scenes/Scene.tscn";
+            string staticScene = staticResources + "/Scenes/Scene.tscn";
             string staticScenePath = PreparationPathSafety.AssetResourcePath(staticScene, directory: false);
             PreparationPathSafety.CheckTreeNoReparse(staticRootPath);
 
@@ -49,18 +65,18 @@ public partial class PrepareBattleContext : Node
             var native = new PalFirstMandatoryBattleProfile
             {
                 FormatVersion = 1, ProfileId = profile.ProfileId,
-                StaticResources = args[5], StaticProfile = args[7],
+                StaticResources = staticResources, StaticProfile = staticProfile,
                 StaticSceneSha256 = sceneHash, StaticProfileSha256 = staticProfileHash
             };
             NativeBattleEnvelopeAdapter.Write(native, profile.ToTypedEnvelope());
 
             RecheckSources(indexPath, contextPath, indexBytes, contextBytes,
-                args[5], staticRootPath, staticScene, staticScenePath, args[7], staticProfilePath,
+                staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
                 sceneLease, profileLease, sceneHash, staticProfileHash);
             CheckedFirstMandatoryBattleProfile checkedNative = NativeFirstMandatoryBattleProfile.ValidateForPreparation(native);
             ValidateStaticSelection(checkedNative);
             RecheckSources(indexPath, contextPath, indexBytes, contextBytes,
-                args[5], staticRootPath, staticScene, staticScenePath, args[7], staticProfilePath,
+                staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
                 sceneLease, profileLease, sceneHash, staticProfileHash);
 
             string destination = output + "/Battle/Profile.tres";
@@ -74,25 +90,23 @@ public partial class PrepareBattleContext : Node
             Require(ResourceSaver.Save(native, temporaryUri) == Error.Ok, "could not save native battle profile");
 
             RecheckSources(indexPath, contextPath, indexBytes, contextBytes,
-                args[5], staticRootPath, staticScene, staticScenePath, args[7], staticProfilePath,
+                staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
                 sceneLease, profileLease, sceneHash, staticProfileHash);
             CheckedFirstMandatoryBattleProfile saved = NativeFirstMandatoryBattleProfile.Load(temporaryUri);
             ValidateStaticSelection(saved);
             RecheckSources(indexPath, contextPath, indexBytes, contextBytes,
-                args[5], staticRootPath, staticScene, staticScenePath, args[7], staticProfilePath,
+                staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
                 sceneLease, profileLease, sceneHash, staticProfileHash);
             File.Move(temporary, destinationPath, false);
             temporary = null;
-            GD.Print("PAL_PREPARE_BATTLE_CONTEXT:" + profile.ProfileId);
-            GetTree().Quit(0);
+            return destination;
         }
-        catch (Exception error)
+        catch
         {
             if (temporary is not null) try { File.Delete(temporary); } catch { }
             for (int i = createdDirectories.Count - 1; i >= 0; i--)
                 try { Directory.Delete(createdDirectories[i], false); } catch { }
-            GD.PrintErr("Battle context native import failed: " + error.Message);
-            GetTree().Quit(1);
+            throw;
         }
     }
 
