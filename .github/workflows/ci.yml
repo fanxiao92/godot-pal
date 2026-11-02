@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-check:
+  unit-check-control-missing:
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
