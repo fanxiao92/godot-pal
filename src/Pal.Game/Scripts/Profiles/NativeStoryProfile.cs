@@ -70,6 +70,7 @@ public static class NativeStoryProfile
             var portraits = portraitUris.ToDictionary(x => x.Key, x => LoadImage(x.Value));
             var packages = new Dictionary<string, DialogueLanguagePackage>(StringComparer.Ordinal);
             var requirements = new Dictionary<string, TriggerEntryRequirements>(StringComparer.Ordinal);
+            IReadOnlyDictionary<int, string>? selectedWords = null;
             foreach (string id in new[] { "zh-Hans", "en" })
             {
                 var resource = LoadResource<PalDialogueLanguage>($"{dialogue}/Language.{id}.tres");
@@ -77,6 +78,7 @@ public static class NativeStoryProfile
                 try
                 {
                     packages.Add(id, resource.ToCorePackage());
+                    if (id == language) selectedWords = resource.CopyWords();
                     requirements.Add(id, TriggerScriptSession.ValidateEntry(events, packages[id], content, native.EntryFileId, native.EntryId));
                 }
                 catch (InvalidDataException error) { throw new InvalidDataException(resource.ResourcePath + ": " + error.Message, error); }
@@ -84,10 +86,11 @@ public static class NativeStoryProfile
             Require(requirements.Values.SelectMany(x => x.PortraitIds).ToHashSet().SetEquals(portraits.Keys),
                 "Portraits must cover exactly the selected entry's nonzero portrait IDs");
 
+            var packedScene = LoadResource<PackedScene>(sceneUri);
             Node? node = null;
             try
             {
-                node = LoadResource<PackedScene>(sceneUri).Instantiate();
+                node = packedScene.Instantiate();
                 Require(node is PalMapScene, sceneUri + ": expected PalMapScene root");
                 var scene = ((PalMapScene)node).Data;
                 Require(scene is not null && scene.BundleSha256 == native.BundleSha256, "story scene BundleSha256 mismatch");
@@ -107,7 +110,7 @@ public static class NativeStoryProfile
                 // Detect byte changes during validation, not future edits/import-cache or GPU changes.
                 foreach (string path in hashes.Keys) CheckFile(path, hashes);
                 return new(native.StaticResources, native.StaticProfile, native.BundleSha256, native.SourceIdentity,
-                    entry, events, packages[language], content, requirements[language], exploration, font, prompts, portraits, palette, hashes);
+                    entry, events, packages[language], content, requirements[language], exploration, font, prompts, portraits, palette, hashes, packedScene, selectedWords!);
             }
             finally { node?.Free(); }
         }
@@ -140,6 +143,8 @@ public static class NativeStoryProfile
 /// callers must treat prepared resources as read-only. No hot reload or clone-on-get contract.</summary>
 public sealed class CheckedStoryProfile
 {
+    internal PackedScene Scene { get; }
+    public IReadOnlyDictionary<int, string> SelectedWords { get; }
     public string StaticResources { get; }
     public string StaticProfile { get; }
     public string BundleSha256 { get; }
@@ -159,8 +164,9 @@ public sealed class CheckedStoryProfile
     internal CheckedStoryProfile(string staticResources, string staticProfile, string bundleSha256, string sourceIdentity,
         TriggerEventEntry entry, TriggerEventCollection events, DialogueLanguagePackage language, TriggerBattleContent battleContent,
         TriggerEntryRequirements requirements, CheckedExplorationProfile exploration, PalDialogueFont font,
-        PalDialogueIndexedImage[] prompts, Dictionary<int, PalDialogueIndexedImage> portraits, Color[] palette, Dictionary<string, string> hashes)
+        PalDialogueIndexedImage[] prompts, Dictionary<int, PalDialogueIndexedImage> portraits, Color[] palette, Dictionary<string, string> hashes, PackedScene scene, IReadOnlyDictionary<int, string> selectedWords)
     {
+        Scene = scene; SelectedWords = selectedWords;
         StaticResources = staticResources; StaticProfile = staticProfile; BundleSha256 = bundleSha256; SourceIdentity = sourceIdentity;
         Entry = entry; Events = events; Language = language; BattleContent = battleContent; Requirements = requirements;
         Exploration = exploration; Font = font; Prompts = Array.AsReadOnly(prompts.ToArray());

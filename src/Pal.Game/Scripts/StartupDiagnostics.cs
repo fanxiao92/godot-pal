@@ -13,7 +13,7 @@ internal static class StartupDiagnostics
     {
         for (int index = 0; index < arguments.Length; index++)
         {
-            if (arguments[index] == "--m4-first-battle-profile" && index + 1 < arguments.Length
+            if (arguments[index] is ("--m4-first-battle-profile" or "--story-profile") && index + 1 < arguments.Length
                 && !arguments[index + 1].StartsWith("--", StringComparison.Ordinal))
                 return arguments[index + 1];
         }

@@ -56,6 +56,8 @@ public partial class Main : Node2D
         try
         {
             var selected = configuration ?? throw new InvalidOperationException("Configure the scene before entering the tree.");
+            selectedProfilePath = selected.StoryProfile;
+            if (selected.StoryProfile is not null) { InitializeStory(selected); return; }
             string root = selected.Root, profile = selected.Profile, language = selected.Language;
             selectedProfilePath = selected.BattleProfile ?? selected.DialogueProfile ?? selected.Profile;
             bool staticAcceptance = selected.StaticAcceptance;
@@ -191,7 +193,8 @@ public partial class Main : Node2D
             if (key.Pressed && !key.Echo
                 && (key.Keycode is Key.Enter or Key.Space or Key.KpEnter || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right))
             {
-                if (battle is not null) battle.PressSearch();
+                if (storyRequest is not null) battleConfirm = true;
+                else if (battle is not null) battle.PressSearch();
                 else if (Interaction is { Phase: not NpcInteractionPhase.Trigger } npc) npc.PressSearch();
                 else return;
                 GetViewport().SetInputAsHandled();
@@ -205,6 +208,8 @@ public partial class Main : Node2D
         if (Failure is not null || exited || Exploration is null || mapScene is null) return;
         try
         {
+            ResumeStoryDisplay();
+            if (ProcessStoryBattle()) { UpdateCompleted?.Invoke(); return; }
             // The headless dummy renderer has no presented frame. Preserve the command/redraw
             // submission boundary across actual callbacks; graphical runs wait for FramePostDraw.
             if (awaitingSceneDraw && DisplayServer.GetName() == "headless") StartAfterSceneDraw();
@@ -232,6 +237,8 @@ public partial class Main : Node2D
         try
         {
             Dialogue!.Start(request.FileId, request.EntryId, request.Caller);
+            if (story is not null && !Interaction!.BindTrigger(request.Id, Dialogue.Session!))
+                throw new InvalidOperationException("Selected trigger call could not bind its search request.");
             CompleteTrigger(); // Also handles synchronous, no-wait completion.
         }
         catch (Exception e) { Fail($"NPC trigger failed: {e.Message}"); }
@@ -258,6 +265,7 @@ public partial class Main : Node2D
         SetProcess(false);
         SetProcessInput(false);
         DisconnectRuntime();
+        ReleaseStory();
         Failed?.Invoke(message);
     }
 
@@ -279,5 +287,8 @@ public partial class Main : Node2D
     {
         exited = true;
         DisconnectRuntime();
+        ReleaseStory();
+        activeTrigger = null; Interaction = null; input = null; battle = null; mapScene = null;
+        Display = null; Dialogue = null; SelectedLanguage = null;
     }
 }

@@ -16,6 +16,8 @@ public sealed class TriggerScriptSession
     public IReadOnlyList<TriggerEventEntry> Entries => _events.Entries;
     public TriggerScriptPhase Phase { get; private set; }
     public bool BlocksSceneUpdates => Phase is TriggerScriptPhase.WaitingForDisplay or TriggerScriptPhase.WaitingForBattle;
+    public Guid CallId { get; private set; }
+    public TriggerEventEntry? StartedEntry { get; private set; }
     public int Caller { get; private set; }
     public int ReturnEntry { get; private set; }
     public TriggerPosition? CurrentPosition { get; private set; }
@@ -68,6 +70,8 @@ public sealed class TriggerScriptSession
         var entry = _events.GetEntry(fileId, entryId);
         if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
         ValidateCapabilityClosure(entry.SourceAddress);
+        CallId = Guid.NewGuid();
+        StartedEntry = entry;
         Caller = caller == 65535 ? _lastCaller : caller;
         _lastCaller = Caller;
         ReturnEntry = _address = entry.SourceAddress;

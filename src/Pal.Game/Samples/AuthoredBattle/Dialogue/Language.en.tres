@@ -39,3 +39,5 @@ script = ExtResource("3")
 Language = "en"
 SourceIdentity = "Original pixel art and bitmap lettering authored for godot-pal #46; no retail assets or extraction evidence."
 Messages = Array[ExtResource("2")]([SubResource("s1"), SubResource("s3"), SubResource("s5")])
+
+Words = Dictionary[int, String]({60000: "ATTACK", 60001: "TARGET", 60002: "MISS", 60003: "CRITICAL", 60004: "HP"})

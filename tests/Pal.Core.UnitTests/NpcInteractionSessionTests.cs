@@ -310,6 +310,55 @@ public class NpcInteractionSessionTests
         Assert.Equal(60, trigger.Caller);
     }
 
+    [Fact]
+    public void Selected_entry_requires_bound_actual_call_and_preserves_return_deadline_and_held_direction()
+    {
+        var trigger = new TriggerScriptSession(TriggerScriptSessionTests.RealShape().Load(), TriggerScriptSessionTests.Language());
+        var entry = trigger.Entries.Single(e => e.Id == "npc");
+        var session = NpcInteractionSession.ForSelectedEntry(SceneSearchTests.Rules([Target()]), SceneSearchTests.Leader(1232, 1336), entry);
+        session.PressSearch(); session.Update(0);
+        var request = session.PendingTrigger!;
+        Assert.Equal(Guid.Empty, trigger.CallId);
+        Assert.Null(trigger.StartedEntry);
+        Assert.False(session.BindTrigger(request.Id, trigger));
+        trigger.Start(request.FileId, request.EntryId, request.Caller);
+        Assert.True(session.BindTrigger(request.Id, trigger));
+        Assert.False(session.BindTrigger(request.Id, trigger));
+        Assert.False(session.CompleteTrigger(request.Id, trigger, 1));
+        Finish(trigger);
+        session.Press(ExplorationKey.EastPrimary);
+        Assert.True(session.CompleteTrigger(request.Id, trigger, 100));
+        Assert.False(session.CompleteTrigger(request.Id, trigger, 100));
+        Assert.False(session.Update(149));
+        Assert.True(session.Update(150));
+        Assert.Equal(NpcInteractionPhase.Exploring, session.Phase);
+        Assert.Equal((1248, 1344), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y));
+    }
+
+    [Fact]
+    public void Selected_entry_rejects_foreign_stale_rebinding_and_same_object_new_call()
+    {
+        var events = TriggerScriptSessionTests.RealShape().Load();
+        var trigger = new TriggerScriptSession(events, TriggerScriptSessionTests.Language());
+        var other = new TriggerScriptSession(events, TriggerScriptSessionTests.Language());
+        var session = NpcInteractionSession.ForSelectedEntry(SceneSearchTests.Rules([Target()]), SceneSearchTests.Leader(1232, 1336), events.GetEntry("shared", "npc"));
+        session.PressSearch(); session.Update(0); var request = session.PendingTrigger!;
+        trigger.Start("shared", "npc", 60); other.Start("shared", "npc", 60);
+        Assert.False(session.BindTrigger(Guid.NewGuid(), trigger));
+        Assert.True(session.BindTrigger(request.Id, trigger));
+        Assert.False(session.BindTrigger(request.Id, other));
+        Finish(other);
+        Assert.False(session.CompleteTrigger(request.Id, other, 0));
+        Finish(trigger); var call = trigger.CallId;
+        Assert.Throws<InvalidDataException>(() => trigger.Start("shared", "missing", 60));
+        Assert.Equal(call, trigger.CallId);
+        trigger.Start("shared", "npc", 60); Finish(trigger);
+        Assert.NotEqual(call, trigger.CallId);
+        Assert.False(session.BindTrigger(request.Id, trigger));
+        Assert.False(session.CompleteTrigger(request.Id, trigger, 0));
+        Assert.Equal(NpcInteractionPhase.Trigger, session.Phase);
+    }
+
     internal static void Finish(TriggerScriptSession trigger)
     {
         for (int i = 0; i < 10 && trigger.PendingDisplay is { } request; i++)

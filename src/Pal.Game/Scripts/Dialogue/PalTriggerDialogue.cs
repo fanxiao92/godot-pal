@@ -5,6 +5,7 @@ using System.Linq;
 using Godot;
 using Pal.Core;
 using Pal.Game.Resources;
+using Pal.Game.Profiles;
 
 namespace Pal.Game.Dialogue;
 
@@ -56,6 +57,27 @@ public partial class PalTriggerDialogue : Node
         _display.UpdateCompleted += OnDisplayUpdated;
     }
 
+    private CheckedStoryProfile? _story;
+
+    public void Initialize(PalDialogueDisplay display, CheckedStoryProfile story, IBattleRandom random)
+    {
+        ArgumentNullException.ThrowIfNull(display); ArgumentNullException.ThrowIfNull(story); ArgumentNullException.ThrowIfNull(random);
+        if (_display is not null || display.Session is { Current.Phase: not DialogueDisplayPhase.Completed })
+            throw new InvalidOperationException("Trigger dialogue or display is already in use.");
+        _story = story; _events = story.Events; _language = story.Language; _font = story.Font;
+        _prompts = story.Prompts.ToArray(); _palette = story.Palette.ToArray();
+        foreach (var pair in story.Portraits) _portraits.Add(pair.Key, pair.Value);
+        Session = new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random);
+        _display = display; display.UpdateCompleted += OnDisplayUpdated;
+    }
+
+    public bool AcknowledgeBattle(Guid requestId, ClassicBattleLifecycleSession.CompletionReceipt? completion)
+    {
+        if (Session is null || !Session.AcknowledgeBattle(requestId, completion)) return false;
+        BindPendingDisplay();
+        return true;
+    }
+
     public void Start(string fileId, string entryId, int caller)
     {
         if (Session is null || _events is null || _language is null || _display is null)
@@ -64,6 +86,13 @@ public partial class PalTriggerDialogue : Node
         if (_display.Session is { Current.Phase: not DialogueDisplayPhase.Completed })
             throw new InvalidOperationException("The display is already in use.");
         TriggerEventEntry entry = _events.GetEntry(fileId, entryId);
+        if (_story is not null)
+        {
+            if (entry != _story.Entry) throw new InvalidDataException("Story adapter only supports its checked selected entry.");
+            Session.Start(fileId, entryId, caller);
+            BindPendingDisplay();
+            return;
+        }
         ValidateOwner(entry);
         // Preflight every selected display and native resource before modifying the real call.
         // This separate executor uses the same public rules; it never advances request.Display.
@@ -153,5 +182,7 @@ public partial class PalTriggerDialogue : Node
     public override void _ExitTree()
     {
         if (_display is not null) _display.UpdateCompleted -= OnDisplayUpdated;
+        _display = null; Session = null; _story = null; _events = null; _language = null;
+        _font = null; _scene = null; _prompts = []; _portraits.Clear(); _palette = [];
     }
 }
