@@ -23,6 +23,8 @@ jobs:
       - name: Checkout exact event candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
+          # Isolated wrong-checkout control: not the current PR merge SHA. Never merge.
+          ref: 0b6d3609047e205beb8601fcc9ae435b04b1b134
           persist-credentials: false
           fetch-depth: 2
           lfs: false
