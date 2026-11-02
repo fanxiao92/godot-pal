@@ -70,4 +70,4 @@ M0 原有报告保留在此，内容描述当时的环境和验证结果，不�
 
 按根目录 [AGENTS.md](../AGENTS.md) 的入口读取，用于任务系统、标签映射及领域文档规则。
 
-领域术语见根目录 [GLOSSARY.md](../GLOSSARY.md)。正式架构决策位于 `docs/adr/`，当前有 [ADR-0001：原版事件采用忠实低层转写](adr/0001-faithful-event-transcription.md)及 [ADR-0002：第一阶段 Unit-only](adr/0002-unit-only-first-stage.md)；后者记录覆盖损失、完整门保留原因与另立任务的恢复条件，进入相关设计或实现前阅读。
+领域术语见根目录 [GLOSSARY.md](../GLOSSARY.md)。正式架构决策位于 `docs/adr/`：[ADR-0001：忠实低层转写](adr/0001-faithful-event-transcription.md)、[ADR-0002：第一阶段 Unit-only](adr/0002-unit-only-first-stage.md)记录业务覆盖与重型恢复条件；[ADR-0003：原生 Unit 反馈](adr/0003-native-unit-feedback.md)记录默认路径退出强审计的后续取舍。进入对应设计或维护时按需读取。
