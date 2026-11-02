@@ -64,6 +64,10 @@ $pwsh = (Get-Process -Id $PID).Path
 function Run([string]$Name, [string]$Code, [string]$ExpectedSha = $sha) {
     $dir = Join-Path $base $Name; $null = New-Item -ItemType Directory $dir
     $script = Join-Path $dir 'block.ps1'; Put $script ("`$ErrorActionPreference = 'Stop'`n" + $Code + "`nexit 0`n")
+    $tokens = $null; $parseErrors = $null
+    $null = [Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$parseErrors)
+    $diagnostics = @($parseErrors | ForEach-Object { '{0}:{1}:{2}: {3}' -f $script, $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message })
+    Assert ($parseErrors.Count -eq 0) ("Generated workflow block does not parse: {0}`n{1}" -f $Name, ($diagnostics -join "`n"))
     $psi = [Diagnostics.ProcessStartInfo]::new($pwsh)
     $psi.WorkingDirectory = $fixture; $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
     foreach ($arg in @('-NoProfile','-File',$script)) { $psi.ArgumentList.Add($arg) }
@@ -80,6 +84,14 @@ function Run([string]$Name, [string]$Code, [string]$ExpectedSha = $sha) {
     Put "$dir/command.json" (@{executable=$pwsh;arguments=@('-NoProfile','-File',$script);cwd=$fixture;exitCode=$nativeExit} | ConvertTo-Json)
     return @{exit=$nativeExit;text=$outText+"`n"+$errText;dir=$dir}
 }
+$parseRejected = $false
+try { $null = Run 'invalid-generated' 'if (' }
+catch {
+    Put "$base/invalid-generated/parse-error.txt" $_.Exception.Message
+    $parseRejected = $_.Exception.Message.Contains('Generated workflow block does not parse:')
+}
+Assert $parseRejected 'Malformed generated block was not rejected before launch.'
+Assert (-not (Test-Path "$base/invalid-generated/command.json")) 'Malformed generated block reached process execution.'
 $r = Run 'checkout' $checkout; Assert ($r.exit -eq 0) 'Actual checkout guard rejected matching SHA.'
 $r = Run 'wrong-checkout' $checkout ('f' * 40)
 Assert ($r.exit -ne 0 -and $r.text.Contains('Unit checkout does not match GITHUB_SHA.')) 'Wrong checkout was not refused for its designated reason.'
@@ -106,5 +118,5 @@ $r = Run 'existing-results' ("New-Item -ItemType Directory -Path `"`$env:RUNNER_
 Assert ($r.exit -ne 0 -and $r.text.Contains('Core Unit results directory already exists.')) 'Existing results were allowed to substitute for a new run.'
 $r = Run 'legacy-block' $legacy
 Assert ($r.exit -ne 0 -and $r.text.Contains('Unit-only is not full-check')) 'Preserved legacy full refusal changed.'
-Put (Join-Path $base 'summary.json') (@{cases=9;failed=0;realDotnet=$true;realGit=$true;remoteActions=$false;productUnit=$false} | ConvertTo-Json)
-Write-Output 'PASS native Unit workflow: 9 controls; actual blocks and real dotnet/xUnit; no remote/Godot/full acceptance.'
+Put (Join-Path $base 'summary.json') (@{cases=10;failed=0;realDotnet=$true;realGit=$true;remoteActions=$false;productUnit=$false} | ConvertTo-Json)
+Write-Output 'PASS native Unit workflow: 10 controls; actual blocks and real dotnet/xUnit; no remote/Godot/full acceptance.'
