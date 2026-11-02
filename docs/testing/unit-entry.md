@@ -28,7 +28,7 @@ pwsh -NoProfile -File scripts/Test-Unit.ps1 -Project cli-unit
 | `Project: string[]` | 默认 `@('core','cli-unit')`；只允许无重复、非空子集；未知/空名/重复全部失败 |
 | `OutputDirectory: string` | 默认 `<RepositoryRoot>/TestResults/unit-<唯一runId>`；显式指定时必须不存在（即使空目录也拒绝）；不删除/覆盖旧结果 |
 
-身份精确绑定 `tests/Pal.Core.Tests/Pal.Core.Tests.csproj` 和 `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj`。当前受支持构建口径是仓库既有 `Debug/net10.0`，没有任意构建属性/框架/SDK注入接口。
+身份精确绑定 `tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj` 和 `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj`。当前受支持构建口径是仓库既有 `Debug/net10.0`，没有任意构建属性/框架/SDK注入接口。
 
 脚本先以隔离 `pwsh` 调用[既有轻量边界命令](unit-boundary.md)，正确传递数组并保留退出/日志；不会 dot-source 该含 `exit` 的命令。只加载 `GameTestBatches.ps1` 的无副作用定义以复用 `Read-TestRunIdentity`，不调用会读取 Game/solution 的 `Get-GameBatchPlan`。
 

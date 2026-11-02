@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 function Fail([string]$Code, [string]$Message) { throw "[boundary:$Code] $Message" }
 $identities = @{
-    core = 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj'
+    core = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'
     'cli-unit' = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'
 }
 $production = @{

@@ -131,7 +131,7 @@ pwsh -NoProfile -File scripts/Test-M0.ps1 `
 - `src/Pal.Core/` —— 纯 .NET 核心类库
 - `src/Pal.Game/` —— Godot .NET 游戏工程
 - `tools/Pal.Extract/` —— 独立离线提取 CLI（只读检查、地图/场景导出、完整静态场景包、事件转写/重建与现代对话转换）
-- `tests/Pal.Core.Tests/` —— 核心 xUnit 测试
+- `tests/Pal.Core.UnitTests/` —— 核心 xUnit 测试
 - `tests/Pal.Extract.Tests/` —— CLI 内存单元测试，不依赖文件/进程/Godot
 - `tests/Pal.Extract.IntegrationTests/` —— CLI 文件与真实进程集成测试
 - `scripts/` —— 引擎下载、兼容性探针、游戏启动检查与共享验收入口

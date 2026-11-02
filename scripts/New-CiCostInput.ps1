@@ -35,7 +35,7 @@ foreach($record in $raw){
  $round=$null;$batch=$null
  if($isTest){
   $project=($args|Where-Object {$_ -match '\.csproj$'}|Select-Object -First 1)
-  if($project -match 'Pal.Core.Tests'){ $round='solution';$batch='core' }
+  if($project -match 'Pal.Core.UnitTests'){ $round='solution';$batch='core' }
   elseif($project -match 'Pal.Extract.UnitTests'){ $round='solution';$batch='cli-unit' }
   elseif($project -match 'Pal.Extract.IntegrationTests'){ $round='solution';$batch='cli-integration' }
   elseif($project -match 'Pal.Prepare.Tests'){ $round='solution';$batch='prepare' }

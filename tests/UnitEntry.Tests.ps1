@@ -23,12 +23,12 @@ function Reset-Fixture {
         Put ($p[0] + '.csproj') "<Project Sdk=`"Microsoft.NET.Sdk`"><PropertyGroup><TargetFramework>net10.0</TargetFramework>$($p[1])</PropertyGroup></Project>"
         Put ((Split-Path $p[0] -Parent) + '/Program.cs') 'public class Program { public static void Main() {} }'
     }
-    foreach ($p in @(@('Pal.Core.Tests', '../../src/Pal.Core/Pal.Core.csproj'), @('Pal.Extract.UnitTests', '../../tools/Pal.Extract/Pal.Extract.csproj'))) {
+    foreach ($p in @(@('Pal.Core.UnitTests', '../../src/Pal.Core/Pal.Core.csproj'), @('Pal.Extract.UnitTests', '../../tools/Pal.Extract/Pal.Extract.csproj'))) {
         Put "tests/$($p[0])/$($p[0]).csproj" @"
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1"/><PackageReference Include="xunit" Version="2.9.3"/><PackageReference Include="xunit.runner.visualstudio" Version="3.1.4"/><ProjectReference Include="$($p[1])"/></ItemGroup></Project>
 "@
     }
-    Put 'tests/Pal.Core.Tests/Cases.cs' 'using Xunit; namespace Artificial; public class CoreCases { [Fact] public void One() { Assert.Equal(2, 1 + 1); } }'
+    Put 'tests/Pal.Core.UnitTests/Cases.cs' 'using Xunit; namespace Artificial; public class CoreCases { [Fact] public void One() { Assert.Equal(2, 1 + 1); } }'
     Put 'tests/Pal.Extract.UnitTests/Cases.cs' 'using Xunit; namespace Artificial; public class CliCases { [Theory][InlineData(1)][InlineData(2)] public void Value(int n) { Assert.InRange(n, 1, 2); } }'
 }
 function Check([string]$Name, [int]$ExpectedExit, [string]$Diagnostic, [string[]]$Selection = @('core','cli-unit'), [string]$Output = '') {
@@ -74,19 +74,19 @@ try {
     $null = Check 'duplicate project rejected' 1 '[unit:selection]' @('core','core')
     $null = Check 'old output directory rejected unchanged' 1 '[unit:output-exists]' @('core') $output
     if ((Get-Content -LiteralPath (Join-Path $output 'unit-run.json') -Raw | ConvertFrom-Json).status -cne 'completed') { throw 'Old success was overwritten' }
-    Remove-Item -LiteralPath (Join-Path $root 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj')
+    Remove-Item -LiteralPath (Join-Path $root 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj')
     $null = Check 'missing applicable project before SDK' 1 '[boundary:project-missing]'
     Reset-Fixture
     Put 'tools/Pal.Extract/Pal.Extract.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><Target Name="Deploy"><Copy SourceFiles="a" DestinationFolder="b"/></Target></Project>'
     $null = Check 'boundary deployment rejected before SDK' 1 '[boundary:build-target]'
     Reset-Fixture
-    Put 'tests/Pal.Core.Tests/Cases.cs' 'namespace Artificial; public class EmptyCases { }'
+    Put 'tests/Pal.Core.UnitTests/Cases.cs' 'namespace Artificial; public class EmptyCases { }'
     $zero = Check 'zero discovered/executed tests rejected' 1 '[unit:zero-discovery]' @('core')
     Reset-Fixture
-    Put 'tests/Pal.Core.Tests/Cases.cs' 'using Xunit; namespace Artificial; public class SkippedCases { [Fact(Skip="unexpected skip")] public void One() {} }'
+    Put 'tests/Pal.Core.UnitTests/Cases.cs' 'using Xunit; namespace Artificial; public class SkippedCases { [Fact(Skip="unexpected skip")] public void One() {} }'
     $skip = Check 'nonzero discovery but zero execution / skip rejected' 1 '[unit:results]' @('core')
     Reset-Fixture
-    Put 'tests/Pal.Core.Tests/Cases.cs' 'using Xunit; namespace Artificial; public class FailingCases { [Fact] public void One() { Assert.True(false, "中文失败原文"); } }'
+    Put 'tests/Pal.Core.UnitTests/Cases.cs' 'using Xunit; namespace Artificial; public class FailingCases { [Fact] public void One() { Assert.True(false, "中文失败原文"); } }'
     $failed = Check 'real test failure preserves original exit and UTF8 logs' 1 '[unit:command-exit]' @('core')
     $failedReport = Get-Content -LiteralPath (Join-Path $failed 'unit-run.json') -Raw | ConvertFrom-Json
     $testCommand = @($failedReport.commands | Where-Object name -CEQ 'core.test')
@@ -100,7 +100,7 @@ try {
     $blocked = (Join-Path $missingOutput 'core/results.trx').Replace('"', '""')
     # Deliberate artifact fault in an artificial production dependency; no SDK/tool mocking seam.
     Put 'src/Pal.Core/Program.cs' "public class Program { public static void BlockResult() { System.IO.Directory.CreateDirectory(@`"$blocked`" ); } }"
-    Put 'tests/Pal.Core.Tests/Cases.cs' 'using Xunit; namespace Artificial; public class CoreCases { [Fact] public void One() { Program.BlockResult(); Assert.True(true); } }'
+    Put 'tests/Pal.Core.UnitTests/Cases.cs' 'using Xunit; namespace Artificial; public class CoreCases { [Fact] public void One() { Program.BlockResult(); Assert.True(true); } }'
     $null = Check 'result path blocked / missing TRX cannot count as success' 1 '[unit:results-missing]' @('core') $missingOutput
     Reset-Fixture
     Put 'tests/Pal.Extract.UnitTests/Cases.cs' @'
@@ -122,7 +122,7 @@ public class CliCases {
     $changedOutput = Join-Path $evidence ('run-' + ($records.Count + 1))
     $frozenPath = (Join-Path $changedOutput 'core.discovery.json').Replace('"', '""')
     Put 'src/Pal.Core/Program.cs' "public class Program { public static int Value() => System.IO.File.Exists(@`"$frozenPath`") ? 2 : 1; }"
-    Put 'tests/Pal.Core.Tests/Cases.cs' 'using Xunit; namespace Artificial; public class CoreCases { public static System.Collections.Generic.IEnumerable<object[]> Values => new[] { new object[] { Program.Value() } }; [Theory][MemberData(nameof(Values))] public void One(int n) { Assert.InRange(n, 1, 2); } }'
+    Put 'tests/Pal.Core.UnitTests/Cases.cs' 'using Xunit; namespace Artificial; public class CoreCases { public static System.Collections.Generic.IEnumerable<object[]> Values => new[] { new object[] { Program.Value() } }; [Theory][MemberData(nameof(Values))] public void One(int n) { Assert.InRange(n, 1, 2); } }'
     $changed = Check 'same count but substituted parameter case rejected' 1 '[unit:identity]' @('core') $changedOutput
     $frozenCase = (Get-Content -LiteralPath (Join-Path $changed 'core.discovery.json') -Raw | ConvertFrom-Json).cases
     [xml]$changedTrx = Get-Content -LiteralPath (Join-Path $changed 'core/results.trx') -Raw

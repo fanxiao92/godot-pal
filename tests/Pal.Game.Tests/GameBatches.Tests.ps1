@@ -63,11 +63,11 @@ public class Fixture
         Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '66,79,97') 'Wrong batch sizes/order.'
         Assert ($plan.inventory.Count -eq 245 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
         Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Wrong serial project identities/order.'
-        Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj',
+        Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj',
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
             'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
         $expectedProjects = @{
-            core = @('tests/Pal.Core.Tests/Pal.Core.Tests.csproj', 328, 0)
+            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 328, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 188, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 52, 0)

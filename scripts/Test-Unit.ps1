@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false)
 . (Join-Path $PSScriptRoot 'GameTestBatches.ps1') # Definitions only; never Get-GameBatchPlan.
 . (Join-Path $PSScriptRoot 'TestRunDefinitions.ps1')
-$paths = @{ core = 'tests/Pal.Core.Tests/Pal.Core.Tests.csproj'; 'cli-unit' = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj' }
+$paths = @{ core = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; 'cli-unit' = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj' }
 $journal = [Collections.Generic.List[object]]::new()
 $projects = [Collections.Generic.List[object]]::new()
 $exitCode = 1
