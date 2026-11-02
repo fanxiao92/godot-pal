@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using GdUnit4;
 using Godot;
@@ -200,27 +201,78 @@ public class MainSceneTests
         finally { healthy.Main.Display.UpdateCompleted -= rejectedReceipt; }
     }
 
-    [TestCase(Timeout = 20000)]
-    public async Task FirstBattleInitializationFailureUsesMainFailureChannelWithoutPartialScene()
+    [TestCase("missing", Timeout = 20000)]
+    [TestCase("version", Timeout = 20000)]
+    [TestCase("identity", Timeout = 20000)]
+    public async Task FirstBattleInitializationFailureUsesMainFailureChannelWithoutPartialScene(string fault)
     {
         using var fixture = new NativeBattleProfileFixture();
-        fixture.Static.Scene.Objects.Single(item => item.Id == 28).WTriggerScript = 0x09fe;
-        fixture.Static.SavePacked();
-        fixture.Native.StaticSceneSha256 = Godot.FileAccess.GetSha256(fixture.Static.ResourceRoot + "/Scenes/Scene.tscn");
+        string diagnostic;
+        if (fault == "missing")
+        {
+            File.Delete(ProjectSettings.GlobalizePath(fixture.Uri));
+            diagnostic = "native first-battle profile missing; prepare it explicitly";
+        }
+        else if (fault == "version")
+        {
+            fixture.Native.FormatVersion = 2;
+            fixture.Save();
+            diagnostic = "first-battle FormatVersion must be 1";
+        }
+        else
+        {
+            fixture.Static.Scene.Objects.Single(item => item.Id == 28).WTriggerScript = 0x09fe;
+            fixture.Static.SavePacked();
+            fixture.Native.StaticSceneSha256 = Godot.FileAccess.GetSha256(fixture.Static.ResourceRoot + "/Scenes/Scene.tscn");
+            fixture.Save();
+            diagnostic = "owner28 reference identity mismatch";
+        }
+        string staticSceneUri = fixture.Static.ResourceRoot + "/Scenes/Scene.tscn";
+        string staticSceneHash = Godot.FileAccess.GetSha256(staticSceneUri);
+        var selection = GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.Uri);
+        Main old;
+        using (var scene = new EmbeddedScene(Configured(selection)))
+        {
+            old = scene.Main;
+            AssertThat(old.Failure!.Contains(diagnostic, StringComparison.Ordinal)).IsTrue();
+            AssertThat(old.Failure.Contains("selected-profile=" + fixture.Uri, StringComparison.Ordinal)).IsTrue();
+            if (fault == "identity")
+            {
+                AssertThat(old.Failure.Contains("scene=" + fixture.Static.ResourceRoot + "/Scenes/Scene.tscn", StringComparison.Ordinal)).IsTrue();
+                AssertThat(old.Failure.Contains("static-profile=" + fixture.Static.Uri, StringComparison.Ordinal)).IsTrue();
+            }
+            AssertThat(old.Failure.Contains("@09FE", StringComparison.OrdinalIgnoreCase)).IsFalse();
+            AssertThat(old.Failure.Contains("battle-complete", StringComparison.OrdinalIgnoreCase)).IsFalse();
+            AssertThat(scene.Failures.Count).IsEqual(1);
+            AssertThat(scene.Failures[0]).IsEqual(old.Failure);
+            AssertThat(old.Battle).IsNull();
+            AssertThat(old.Exploration).IsNull();
+            AssertThat(old.SelectedLanguage).IsNull();
+            AssertThat(old.Dialogue).IsNull();
+            AssertThat(old.Display).IsNull();
+            AssertThat(old.GetChildCount()).IsEqual(0);
+            scene.Press(Key.Down);
+            scene.Press(Key.Enter);
+            await scene.AssertStopped();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsActionPressed("exploration_south")).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+        AssertThat(Godot.FileAccess.GetSha256(staticSceneUri)).IsEqual(staticSceneHash);
+        // Static PackedScene content is immutable; hot reload is not this contract.
+        if (fault == "identity") return;
+        // Repair only the native profile; reuse all URIs and unchanged static resources.
+        fixture.Native.FormatVersion = 1;
         fixture.Save();
-        using var scene = new EmbeddedScene(Configured(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.Uri)));
-        AssertThat(scene.Main.Failure!.Contains("owner28 reference identity mismatch", StringComparison.Ordinal)).IsTrue();
-        AssertThat(scene.Main.Failure.Contains("selected-profile=" + fixture.Uri, StringComparison.Ordinal)).IsTrue();
-        AssertThat(scene.Main.Failure.Contains("scene=" + fixture.Static.ResourceRoot + "/Scenes/Scene.tscn", StringComparison.Ordinal)).IsTrue();
-        AssertThat(scene.Main.Failure.Contains("static-profile=" + fixture.Static.Uri, StringComparison.Ordinal)).IsTrue();
-        AssertThat(scene.Main.Failure.Contains("@09FE", StringComparison.OrdinalIgnoreCase)).IsFalse();
-        AssertThat(scene.Main.Failure.Contains("battle-complete", StringComparison.OrdinalIgnoreCase)).IsFalse();
-        AssertThat(scene.Failures.Count).IsEqual(1);
-        AssertThat(scene.Main.Battle).IsNull();
-        AssertThat(scene.Main.Exploration).IsNull();
-        AssertThat(scene.Main.SelectedLanguage).IsNull();
-        AssertThat(scene.Main.GetChildCount()).IsEqual(0);
-        await scene.AssertStopped();
+        using (var next = new EmbeddedScene(Configured(selection)))
+        {
+            next.AssertHealthy();
+            AssertFirstBattlePreTriggerState(next.Main);
+            var first = await next.FirstSouthStep();
+            AssertThat((first.Leader.X, first.Leader.Y, first.Leader.StepPhase, first.Plan.LeaderFrameIndex))
+                .IsEqual(((short)1248, (short)256, 1, 1));
+        }
+        AssertThat(Input.IsActionPressed("exploration_south")).IsFalse();
     }
 
     [TestCase(Timeout = 20000)]
@@ -228,41 +280,135 @@ public class MainSceneTests
     {
         using var fixture = new NativeBattleProfileFixture();
         string nativeHash = Godot.FileAccess.GetSha256(fixture.Uri);
+        string staticSceneUri = fixture.Static.ResourceRoot + "/Scenes/Scene.tscn";
+        string sceneHash = Godot.FileAccess.GetSha256(staticSceneUri);
+        string staticProfileHash = Godot.FileAccess.GetSha256(fixture.Static.Uri);
         var selection = GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.Uri,
             "--m4-first-battle-language", "en");
         Main old;
+        GodotObject[] children;
         using (var scene = new EmbeddedScene(Configured(selection)))
         {
             old = scene.Main;
             scene.AssertHealthy();
             AssertThat(old.SelectedLanguage).IsEqual("en");
-            AssertThat((old.Exploration!.Leader.X, old.Exploration.Leader.Y, old.Exploration.Leader.Direction))
-                .IsEqual(((short)1264, (short)248, 3));
-            AssertThat(old.Battle!.State.PartyRoleIds.SequenceEqual(new[] { 0 })).IsTrue();
-            AssertThat(old.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).State).IsEqual(2);
+            AssertFirstBattlePreTriggerState(old);
+            children = old.GetChildren().Cast<GodotObject>().ToArray();
             await scene.WaitFor(() => scene.Updates.Count > 0, "first actual M4 update completion");
+            AssertIdleBattleUpdates(scene);
             int completedUpdates = scene.Updates.Count;
-            var before = old.Exploration;
+            int stopPhase = completedUpdates % 2 * 2;
+            AssertFirstBattlePreTriggerState(old, stopPhase);
+            var before = scene.Updates[^1];
+            // Value snapshot saved at the production completion boundary, not after await.
+            // Independent literals and the reference idle rule check its baseline.
+            string beforeState = scene.BattleSnapshots[^1];
+            AssertThat(JsonSerializer.Serialize(old.Battle!.State)).IsEqual(beforeState);
             scene.Press(Key.Enter);
             await scene.WaitFor(() => old.Failure is not null, "owner28 unsupported closure rejection");
             AssertThat(old.Failure).IsEqual("Exploration update failed: " + FirstMandatoryBattleSession.UnsupportedTriggerDiagnostic);
             AssertThat(ReferenceEquals(old.Exploration, before)).IsTrue();
-            // First-battle preflight callbacks without a committed update, including the
-            // rejected @09C3 callback, must not publish completion.
+            AssertThat(JsonSerializer.Serialize(old.Battle.State)).IsEqual(beforeState);
+            AssertFirstBattlePreTriggerState(old, stopPhase);
+            // Rejected @09C3 is not a committed update, nor an @09FE/battle completion.
             AssertThat(scene.Updates.Count).IsEqual(completedUpdates);
-            AssertThat(old.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).TriggerEntry).IsEqual(0x09c3);
             AssertThat(scene.Failures.Count).IsEqual(1);
+            AssertThat(scene.Failures[0]).IsEqual(old.Failure);
+            scene.Press(Key.Down);
+            scene.Press(Key.Enter);
+            await scene.AssertStopped();
+            AssertThat(JsonSerializer.Serialize(old.Battle.State)).IsEqual(beforeState);
+            AssertFirstBattlePreTriggerState(old, stopPhase);
         }
         AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        foreach (GodotObject child in children) AssertThat(GodotObject.IsInstanceValid(child)).IsFalse();
+        AssertThat(Input.IsActionPressed("exploration_south")).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
         using (var next = new EmbeddedScene(Configured(selection)))
         {
             next.AssertHealthy();
-            AssertThat(next.Main.Battle!.State.Roles[0].Hp).IsEqual(150);
-            AssertThat(next.Main.Battle.State.World.EventObjects.Single(item => item.OwnerId == 28).State).IsEqual(2);
-            AssertThat((next.Main.Exploration!.Leader.X, next.Main.Exploration.Leader.Y)).IsEqual(((short)1264, (short)248));
+            AssertFirstBattlePreTriggerState(next.Main);
+            await next.WaitFor(() => next.Updates.Count > 0, "fresh same-URI M4 update completion");
+            AssertIdleBattleUpdates(next);
+            int stopPhase = next.Updates.Count % 2 * 2;
+            AssertFirstBattlePreTriggerState(next.Main, stopPhase);
+            string beforeState = next.BattleSnapshots[^1];
+            next.Press(Key.Enter);
+            await next.WaitFor(() => next.Main.Failure is not null, "fresh same-URI owner28 search rejection");
+            AssertThat(next.Main.Failure).IsEqual("Exploration update failed: " + FirstMandatoryBattleSession.UnsupportedTriggerDiagnostic);
+            AssertThat(next.Failures.Count).IsEqual(1);
+            AssertThat(JsonSerializer.Serialize(next.Main.Battle!.State)).IsEqual(beforeState);
+            AssertFirstBattlePreTriggerState(next.Main, stopPhase);
+            await next.AssertStopped();
+            AssertThat(JsonSerializer.Serialize(next.Main.Battle.State)).IsEqual(beforeState);
         }
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
         AssertThat(Godot.FileAccess.GetSha256(fixture.Uri)).IsEqual(nativeHash);
+        AssertThat(Godot.FileAccess.GetSha256(staticSceneUri)).IsEqual(sceneHash);
+        AssertThat(Godot.FileAccess.GetSha256(fixture.Static.Uri)).IsEqual(staticProfileHash);
         AssertThat(fixture.Static.Scene.Objects.Single(item => item.Id == 28).SState).IsEqual(1);
+        AssertThat(fixture.Static.Scene.Objects.Single(item => item.Id == 28).WTriggerScript).IsEqual(0x09c3);
+    }
+
+    private static void AssertIdleBattleUpdates(EmbeddedScene scene)
+    {
+        AssertThat(scene.BattleSnapshots.Count).IsEqual(scene.Updates.Count);
+        for (int i = 0; i < scene.Updates.Count; i++)
+        {
+            var update = scene.Updates[i];
+            // SDLPal scene.c PAL_UpdatePartyGestures(false): phase &= 2; phase ^= 2.
+            // Core Every_idle_step_toggles_stop_phase... freezes 0 -> 2 -> 0.
+            AssertThat((update.Leader.X, update.Leader.Y, update.Leader.Direction, update.Leader.StepPhase,
+                update.IsWalking, update.Plan.LeaderFrameIndex))
+                .IsEqual(((short)1264, (short)248, 3, (i + 1) % 2 * 2, false, 9));
+        }
+    }
+
+    private static void AssertFirstBattlePreTriggerState(Main main, int phase = 0)
+    {
+        var state = main.Battle!.State;
+        AssertThat(string.Join(",", state.PartyRoleIds)).IsEqual("0");
+        AssertThat(state.Roles.Length).IsEqual(6);
+        string[] roles = ["0,1,150,150,100,100,2", "1,5,28,240,10,240,0",
+            "2,1,1,1,0,0,0", "3,1,1,1,0,0,0", "4,1,1,1,0,0,0", "5,1,1,1,0,0,0"];
+        string[] equipment = ["196,225,208,166,235,249", "197,0,210,170,237,248",
+            "0,0,0,0,0,0", "0,0,0,0,0,0", "0,0,0,0,0,0", "0,0,0,0,0,0"];
+        string[] magics = ["296,345", "312,316,321,327,332,306,297,309,303,307", "", "", "", ""];
+        for (int i = 0; i < 6; i++)
+        {
+            var role = state.Roles[i];
+            AssertThat(string.Join(",", role.RoleId, role.Level, role.Hp, role.MaxHp, role.Mp, role.MaxMp, role.CoveredByRoleId)).IsEqual(roles[i]);
+            AssertThat(string.Join(",", role.Equipment)).IsEqual(equipment[i]);
+            AssertThat(string.Join(",", role.Magics)).IsEqual(magics[i]);
+            AssertThat(string.Join(",", role.Statuses)).IsEqual("0,0,0,0,0,0,0,0,0");
+            int level = i == 1 ? 5 : 1;
+            AssertThat((role.PrimaryExperience.Value, role.PrimaryExperience.Level, role.PrimaryExperience.Count)).IsEqual((0, level, 0));
+            AssertThat(string.Join(",", role.HiddenExperience.Keys.OrderBy(key => key, StringComparer.Ordinal)))
+                .IsEqual("attack,defense,dexterity,flee,health,magic,magicPower");
+            foreach (var experience in role.HiddenExperience.Values)
+                AssertThat((experience.Value, experience.Level, experience.Count)).IsEqual((0, level, 0));
+        }
+        var world = state.World;
+        AssertThat((world.SceneId, world.MapId, world.PaletteId, world.NightPalette, world.MusicId, world.BattleMusicId))
+            .IsEqual((2, 12, 0, false, 31, 37));
+        AssertThat((world.Leader.X, world.Leader.Y, world.Leader.Direction, world.Leader.Layer, world.Leader.Phase))
+            .IsEqual((1264, 248, "east", 0, phase));
+        AssertThat((world.SearchProof.OwnerId, world.SearchProof.SampleIndex, world.SearchProof.CollisionPass)).IsEqual((28, 1, true));
+        AssertThat(world.SceneEntries.Length).IsEqual(1);
+        AssertThat((world.SceneEntries[0].SceneId, world.SceneEntries[0].EnterEntry, world.SceneEntries[0].TeleportEntry)).IsEqual((2, 0x0e97, 0));
+        AssertThat(world.EventObjects.Length).IsEqual(1);
+        var owner = world.EventObjects[0];
+        AssertThat(string.Join(",", owner.OwnerId, owner.X, owner.Y, owner.Direction, owner.State, owner.VanishTime,
+            owner.TriggerMode, owner.TriggerEntry, owner.AutoEntry, owner.AutoIdleFrameCount, owner.SpriteId,
+            owner.SpriteFrames, owner.CurrentFrame, owner.ScriptIdleFrameCount, owner.SpritePtrOffset, owner.AutoSpriteFrames, owner.Layer))
+            .IsEqual("28,1280,256,0,2,0,1,2499,0,0,210,0,0,0,0,0,0");
+        AssertThat((main.Exploration!.Leader.X, main.Exploration.Leader.Y, main.Exploration.Leader.Direction,
+            main.Exploration.Leader.Layer, main.Exploration.Leader.StepPhase)).IsEqual(((short)1264, (short)248, 3, (ushort)0, phase));
+        AssertThat(main.GetChildren().OfType<Pal.Game.Resources.PalMapScene>().Count()).IsEqual(1);
+        AssertThat(main.GetChildCount()).IsEqual(1);
+        AssertThat(main.Interaction).IsNull();
+        AssertThat(main.Dialogue).IsNull();
+        AssertThat(main.Display).IsNull();
     }
 
     private static GameSceneConfiguration Select(NativeProfileFixture fixture) =>
@@ -297,6 +443,7 @@ public class MainSceneTests
         public Main Main { get; }
         public List<string> Failures { get; } = [];
         public List<ExplorationState> Updates { get; } = [];
+        public List<string> BattleSnapshots { get; } = [];
 
         public EmbeddedScene(Main main)
         {
@@ -319,7 +466,11 @@ public class MainSceneTests
         }
 
         private void OnFailed(string message) => Failures.Add(message);
-        private void OnUpdated() => Updates.Add(Main.Exploration!);
+        private void OnUpdated()
+        {
+            Updates.Add(Main.Exploration!);
+            if (Main.Battle is { } battle) BattleSnapshots.Add(JsonSerializer.Serialize(battle.State));
+        }
         public void AssertHealthy()
         {
             AssertThat(Main.Failure).IsNull();
