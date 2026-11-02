@@ -29,4 +29,9 @@
 
 **未交付**：攻击 effect 图档/索引绑定、动作/动画时间推进、renderer/GPU、Main/input/HUD、完整 package Prepare、真实 SceneRunner 往返。后续 UI 必须消费同一真实 Core 生命周期与本次校验资源，不另写规则引擎。冻结 `first-mandatory-battle-pre-trigger-v1` 与真实 owner28/@09C3 gate 不变，不能靠人工 visual 绑定绕开；#46/M4 尚未完成。
 
-后续 [Story package production prepare](story-package-preparation.md) 已提供 typed Story/Visual 的统一离线绑定入口（checkpoint A，复用已准备依赖）；本 visual binding 自身不负责 Prepare、动作推进或 Main。完整可见人工作者包 B 仍未交付。
+后续 [Story package production prepare](story-package-preparation.md) 已提供 typed Story/Visual 的统一离线绑定入口（checkpoint A，复用已准备依赖）；本 visual binding 自身不负责 Prepare、动作推进或 Main。完整可见人工作者数据包 B 现已交付，见下节；正常 Main 尚未接线。
+
+
+## #46 checkpoint B: original authored sample
+
+完整可提交人工作者 native 静态/双语非空bitmap字形/索引视觉资源及 Win/Loss 现代输入已提供，见 [正常准备命令、来源、搜索和数值设计](../../samples/authored-battle/README.md)。正常 numeric/story wrappers 分别准备两种场景；两个精确 Game 数据用例核双语 strict Load、真实搜索/可见平面和公开 Core Won/Lost 续接。本文上文 checkpoint A 的历史范围不改写；本B仍不接 Main/HUD/input/动作/effect，不签 SceneRunner/GPU/人工/CI、#46或M4完成。

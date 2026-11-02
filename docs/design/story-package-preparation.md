@@ -1,6 +1,6 @@
 # Story package 离线准备（#46 checkpoint A）
 
-这是正常 Editor/PowerShell 的**生产准备路径**，不是运行时准备或测试业务装配。它组合完整现代 faithful 事件与**已显式准备**的原生静态、数值、双语/字形/画像和 battle visual leaves。输入**非自包含**；不会复制、自动提取、导入或同步这些 native dependencies。完整可提交、可见的自有人工作者内容包属于紧随的 checkpoint B，当前没有交付；测试的小图/空字形数据不冒称正常桌面包。
+这是正常 Editor/PowerShell 的**生产准备路径**，不是运行时准备或测试业务装配。它组合完整现代 faithful 事件与**已显式准备**的原生静态、数值、双语/字形/画像和 battle visual leaves。输入**非自包含**；不会复制、自动提取、导入或同步这些 native dependencies。完整可提交、可见的自有人工作者内容包已由 [checkpoint B](../../samples/authored-battle/README.md) 提供；它与测试的小图/空字形数据区分，尚不包含正常 Main 接线或桌面验收。
 
 ## 公共入口与输出
 
@@ -76,7 +76,7 @@ wrapper 必需且仅一次 `-InputPath/-OutputPath`，可选 `-GodotPath/-Timeou
 - 语言：可复用正常 `Prepare-DialoguePackage.ps1 -InputPath <现有现代对话包> -OutputPath <Assets语言根> -GodotPath <engine>` 的 `Language.zh-Hans/en.tres`、`Font.tres`、三个 prompts 和画像。该既有 schema 有固定原档来源约束，**不修改它冒充通用人工转换器**。现代作者也可直接提供这些正式 native Resource 类型，完整布局/消息/可见字形必须满足 Story 契约；不使用系统字体 fallback。
 - 视觉：显式 author 正式 `PalSprite`/`PalFrame`、`PalPalette`、`PalDialogueIndexedImage` native leaves。player/enemy indices+alpha 可直接消费，不必另造图像 DTO；RGB palette 必须与静态当前 palette 一致。外部 texture source 必须已有正式 `.import`，本准备函数不触发 runtime/import 自动准备。
 
-所有这些 native 依赖仍留在原位置。规范 `res://Tests/...` 等项目 data 路径也允许（不误套 #45 仅 Assets 的 helper）；只有输出必须位于 `res://Assets`。B 将提供可提交、可复现、可见人工资产与实际准备步骤；这里不把测试构造器当作完整作者包。
+所有这些 native 依赖仍留在原位置。规范 `res://Tests/...` 等项目 data 路径也允许（不误套 #45 仅 Assets 的 helper）；只有输出必须位于 `res://Assets`。B 已提供可提交、可复现、可见人工资产与实际准备步骤；这里不把测试构造器当作完整作者包。
 
 ## 安全、发布与所有权
 
@@ -90,4 +90,9 @@ wrapper 必需且仅一次 `-InputPath/-OutputPath`，可选 `-GodotPath/-Timeou
 
 `PrepareStoryPackageTests` direct31 覆盖完整 typed准备/严格读取、完整事件/hash、双语 glyph/owner/visual拒绝后清理、UTF8/schema/大小/文件数、caller目录/无覆盖、规范大小写/缺祖先、input/events/output/native junction拒绝。Prepare process10 覆盖正常 wrapper+真实 Editor发布、argv exit/marker和严格 metadata诊断；它们是离线契约，不是 Main 交互/GPU验收。
 
-本 checkpoint 不接 Main/input/HUD、不推进动作/动画、不绑定 attack effect，不交付可见人工桌面包、真实战斗往返或 #47+。#46 和 M4 仍未完成；冻结真实内容由 #53 完整接入，不能用人工资产替代。
+本 checkpoint A 不接 Main/input/HUD、不推进动作/动画、不绑定 attack effect；后续B交付可见人工数据但尚不签桌面验收、真实Main战斗往返或 #47+。#46 和 M4 仍未完成；冻结真实内容由 #53 完整接入，不能用人工资产替代。
+
+
+## #46 checkpoint B: original authored sample
+
+完整可提交人工作者 native 静态/双语非空bitmap字形/索引视觉资源及 Win/Loss 现代输入已提供，见 [正常准备命令、来源、搜索和数值设计](../../samples/authored-battle/README.md)。正常 numeric/story wrappers 分别准备两种场景；两个精确 Game 数据用例核双语 strict Load、真实搜索/可见平面和公开 Core Won/Lost 续接。本文上文 checkpoint A 的历史范围不改写；本B仍不接 Main/HUD/input/动作/effect，不签 SceneRunner/GPU/人工/CI、#46或M4完成。

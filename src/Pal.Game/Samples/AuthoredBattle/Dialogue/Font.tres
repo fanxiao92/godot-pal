@@ -1,0 +1,121 @@
+[gd_resource type="Resource" script_class="PalDialogueFont" format=3]
+
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueGlyph.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueFont.cs" id="2"]
+
+[sub_resource type="Resource" id="s0"]
+script = ExtResource("1")
+Codepoint = 69
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 124, 124, 64, 64, 64, 64, 120, 120, 64, 64, 64, 64, 124, 124)
+
+[sub_resource type="Resource" id="s1"]
+script = ExtResource("1")
+Codepoint = 70
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 124, 124, 64, 64, 64, 64, 120, 120, 64, 64, 64, 64, 64, 64)
+
+[sub_resource type="Resource" id="s2"]
+script = ExtResource("1")
+Codepoint = 71
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 56, 56, 68, 68, 64, 64, 92, 92, 68, 68, 68, 68, 56, 56)
+
+[sub_resource type="Resource" id="s3"]
+script = ExtResource("1")
+Codepoint = 72
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 68, 68, 68, 68, 68, 68, 124, 124, 68, 68, 68, 68, 68, 68)
+
+[sub_resource type="Resource" id="s4"]
+script = ExtResource("1")
+Codepoint = 73
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 124, 124, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 124, 124)
+
+[sub_resource type="Resource" id="s5"]
+script = ExtResource("1")
+Codepoint = 76
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 124, 124)
+
+[sub_resource type="Resource" id="s6"]
+script = ExtResource("1")
+Codepoint = 78
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 68, 68, 100, 100, 100, 100, 84, 84, 76, 76, 76, 76, 68, 68)
+
+[sub_resource type="Resource" id="s7"]
+script = ExtResource("1")
+Codepoint = 79
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 56, 56, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 56, 56)
+
+[sub_resource type="Resource" id="s8"]
+script = ExtResource("1")
+Codepoint = 83
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 60, 60, 64, 64, 64, 64, 56, 56, 4, 4, 4, 4, 120, 120)
+
+[sub_resource type="Resource" id="s9"]
+script = ExtResource("1")
+Codepoint = 84
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 124, 124, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16)
+
+[sub_resource type="Resource" id="s10"]
+script = ExtResource("1")
+Codepoint = 87
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(0, 68, 68, 68, 68, 68, 68, 84, 84, 84, 84, 84, 84, 40, 40)
+
+[sub_resource type="Resource" id="s11"]
+script = ExtResource("1")
+Codepoint = 25112
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(1, 8, 1, 8, 125, 8, 69, 16, 69, 16, 125, 126, 69, 8, 69, 8, 125, 72, 69, 72, 69, 74, 125, 82, 1, 98, 1, 66, 0, 134, 0, 0)
+
+[sub_resource type="Resource" id="s12"]
+script = ExtResource("1")
+Codepoint = 32988
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 120, 8, 72, 8, 72, 126, 120, 8, 72, 8, 72, 126, 120, 8, 72, 8, 72, 8, 120, 254, 72, 0, 72, 0, 136, 0, 152, 0, 0, 0)
+
+[sub_resource type="Resource" id="s13"]
+script = ExtResource("1")
+Codepoint = 36133
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 124, 32, 68, 32, 84, 32, 84, 126, 84, 68, 84, 68, 84, 68, 84, 40, 84, 40, 16, 40, 40, 48, 40, 40, 68, 68, 130, 130, 0, 0)
+
+[resource]
+script = ExtResource("2")
+SourceIdentity = "Original pixel art and bitmap lettering authored for godot-pal #46; no retail assets or extraction evidence."
+Glyphs = Array[ExtResource("1")]([SubResource("s0"), SubResource("s1"), SubResource("s2"), SubResource("s3"), SubResource("s4"), SubResource("s5"), SubResource("s6"), SubResource("s7"), SubResource("s8"), SubResource("s9"), SubResource("s10"), SubResource("s11"), SubResource("s12"), SubResource("s13")])

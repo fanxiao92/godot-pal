@@ -1,0 +1,292 @@
+{
+  "formatVersion": 1,
+  "roles": [
+    {
+      "roleId": 0,
+      "level": 2,
+      "hp": 100,
+      "maxHp": 150,
+      "mp": 20,
+      "maxMp": 50,
+      "primaryExperience": {
+        "value": 0,
+        "level": 1,
+        "count": 0
+      },
+      "hiddenExperience": {
+        "health": {
+          "value": 0,
+          "level": 1,
+          "count": 0
+        },
+        "magic": {
+          "value": 0,
+          "level": 1,
+          "count": 0
+        },
+        "attack": {
+          "value": 0,
+          "level": 1,
+          "count": 0
+        },
+        "magicPower": {
+          "value": 0,
+          "level": 1,
+          "count": 0
+        },
+        "defense": {
+          "value": 0,
+          "level": 1,
+          "count": 0
+        },
+        "dexterity": {
+          "value": 0,
+          "level": 1,
+          "count": 0
+        },
+        "flee": {
+          "value": 0,
+          "level": 1,
+          "count": 0
+        }
+      },
+      "equipment": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "magics": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statuses": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "coveredByRoleId": 0
+    }
+  ],
+  "players": [
+    {
+      "roleId": 0,
+      "hp": 100,
+      "maxHp": 150,
+      "attack": 40,
+      "defense": 20,
+      "dexterity": 100,
+      "equipment": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statuses": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "poisons": [
+        0
+      ],
+      "dyingScript": 0,
+      "friendDeathScript": 0,
+      "coveredByRoleId": null,
+      "attackAll": false
+    }
+  ],
+  "growth": [
+    {
+      "roleId": 0,
+      "levelUpExperience": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "levelUpMagics": []
+    }
+  ],
+  "teams": [
+    {
+      "teamId": 18,
+      "enemies": [
+        {
+          "id": 7,
+          "level": 0,
+          "hp": 43,
+          "attack": 0,
+          "defense": 0,
+          "dexterity": 0,
+          "physicalResistance": 1,
+          "statuses": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "poisons": [
+            0
+          ],
+          "turnStartScript": 0,
+          "readyScript": 0,
+          "battleEndScript": 0,
+          "magicId": 0,
+          "dualMove": 0,
+          "attackEquivItem": 0,
+          "attackEquivItemRate": 0,
+          "experience": 0,
+          "cash": 0
+        }
+      ]
+    }
+  ]
+}

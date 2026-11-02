@@ -45,4 +45,9 @@ Godot4.7.2实际探针核定：依赖项是一段path，或三段 `uid::::fallba
 
 ## 后续离线生产入口
 
-[Story package preparation](story-package-preparation.md) 现提供正式 public Editor API、真实 argv 场景与正常 PS wrapper，复用本严格 Load 和完整 dependency helper。checkpoint A 输入非自包含；完整可提交可见人工资产包仍由 B 交付，Main/input/display/动画/effect 不由此补签。上文关于本 binding 本身不包含 Prepare 的职责划分不变。
+[Story package preparation](story-package-preparation.md) 现提供正式 public Editor API、真实 argv 场景与正常 PS wrapper，复用本严格 Load 和完整 dependency helper。checkpoint A 输入非自包含；完整可提交可见人工资产包现已由 B 交付，Main/input/display/动画/effect 不由此补签。上文关于本 binding 本身不包含 Prepare 的职责划分不变。
+
+
+## #46 checkpoint B: original authored sample
+
+完整可提交人工作者 native 静态/双语非空bitmap字形/索引视觉资源及 Win/Loss 现代输入已提供，见 [正常准备命令、来源、搜索和数值设计](../../samples/authored-battle/README.md)。正常 numeric/story wrappers 分别准备两种场景；两个精确 Game 数据用例核双语 strict Load、真实搜索/可见平面和公开 Core Won/Lost 续接。本文上文 checkpoint A 的历史范围不改写；本B仍不接 Main/HUD/input/动作/effect，不签 SceneRunner/GPU/人工/CI、#46或M4完成。

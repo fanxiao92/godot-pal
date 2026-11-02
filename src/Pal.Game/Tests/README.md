@@ -38,3 +38,7 @@ headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证�
 ### #46 Story package prepare bounded checks
 
 `PrepareStoryPackageTests` 是 native-map 中的 direct31：真实 public Prepare → typed Save → Story/Visual strict Load、完整events/hash、UTF8/schema/limits/路径/无覆盖/owned cleanup。`StoryPackagePrepareProcessTests` 增10例真实 Editor/wrapper 契约；Prepare严格总数现89，Game metadata为505（502 positives，串行74/85/343）。这些数字是库存，不表示本轮跑了全部Game；本轮只新类31和完整Prepare89。前置依赖、schema与正常命令见[生产准备文档](../../../docs/design/story-package-preparation.md)。无Main/input/动作/effect/GPU/人工/CI或完整可见人工作者包交付声明。
+
+### #46 authored package B
+
+`AuthoredBattlePackageTests` adds two native-map cases (Win/Loss): committed original author data → normal public numeric/story Prepare → both languages strict Story/Visual Load → literal search, indexed colors/Texture2D, nonempty glyphs, complete source hash and real public Core outcome/owned receipt/branch stop. Inventory now 507 (504 positives; serial 74/85/345). Normal wrappers also prepare these exact inputs; see [sample instructions](../../../../samples/authored-battle/README.md). This is data/preparation evidence, not Main, SceneRunner, GPU, manual or CI acceptance. Earlier A direct31/Prepare89 evidence is reused, not rerun.
