@@ -108,6 +108,8 @@ Battle context authored: first-mandatory-battle-pre-trigger-v1
 
 自动化中的六角色文档是**人工小 fixture**，只证明格式和严格拒绝，不是可提交的真实源快照；role2–5 的真实字段必须由本机 author 明确提供，不能从测试 fixture 反推。
 
+`author-policy` 不必表示来源未知，也可表示作者为独立快照固化已核对的前置效果。v1 未注册的前置 path/address tuple 仍只能编码为 `author-policy/null`，不能借此放宽验证器或改写事实。真实 author 应在工程外的本机来源旁证中逐字段保留实际值、原表 offset 或真实指令地址/操作数、装备调用上下文，以及采用该 v1 编码的原因，并绑定 author、最终 context/index 的 exact-byte hash。该旁证不进入恰好两文件产物；它补充来源事实，不代表 v1 封套本身已表达所有真实前置地址。未核定的世界最终字段必须另列为明确的独立 author policy，不能把部分前置核对说成整条自然流程已经执行。
+
 ### 3.2 世界、入口与位置
 
 `world` 保存 scene/map、palette/night、探索音乐与必要战斗音乐，以及唯一 leader 坐标源。`leader` 必须有 `x/y/direction/layer/phase`；`direction` 只允许 `north/east/south/west`，`phase` 必须为与 `StaticSceneRules`/正常探索 seam 一致的 `0..3`。`searchProof` 保存 owner28、PAL_Search 的 13 点 sample index 和地图碰撞已通过的事实，不能只凭邻近坐标猜命中。
@@ -115,6 +117,8 @@ Battle context authored: first-mandatory-battle-pre-trigger-v1
 `sceneEntries` 保存受前置影响的 scene `enterEntry/teleportEntry`，`sceneId` 必须唯一且必须包含当前选中 scene 2。当前来源证据未把 scene2 的两个入口值核定为冻结常量，因此 v1 只要求两个值均为 WORD 且各自有 provenance，不猜测精确值。`eventObjects` 以 owner ID 唯一保存 SDLPal `EVENTOBJECT` 的全部后续会话可变字段：`x/y/direction/state/vanishTime/triggerMode/triggerEntry/autoEntry/autoIdleFrameCount/spriteId/spriteFrames/currentFrame/scriptIdleFrameCount/spritePtrOffset/autoSpriteFrames/layer`，包括跨场景被前置改变的对象，不修改静态原包。`x/y/direction`、入口、模式、sprite 和四个 frame/counter/offset 字段是 WORD；`state/layer/vanishTime` 是 signed WORD。leader `x/y` 服从现有 `StaticLeader` signed-short seam，`layer` 为 WORD。
 
 owner28 的已冻结身份为：坐标 `(1280,256)`、前置 `@0936` 后 `state=2`、trigger mode 1、trigger `@09C3`、auto 0、sprite 210。author 还必须提供独立核过碰撞和 PAL_Search 命中的 leader 起点；工具记录该证明，但地图几何验证仍由真实资源准备/后续 SceneRunner 承担，不能由一个布尔值替代验收。
+
+人工地图的可站立点不是真实地图的可站立证明：人工 fixture 使用过的 `(1248,256)`、`(1264,248)` 不得直接复制为真实起点。本机真实静态上下文采用经独立碰撞/对象顺序核对且通过 production native Prepare 与首战 session 搜索校验的 `(1264,256), east, layer0/phase0`，PAL_Search 首命中 owner28 的 sample index 为 1。坐标只在离线 author 中选择一次，新的探索 profile 从同一 leader 值显式保存，Prepare 严格比较二者；不改旧探索 profile、地图或 trigger mode。这个结论仅保证该独立上下文的初始站位/搜索，不证明此前行走可达、整个场景自由探索、真实输入已执行剧情或 GPU/桌面验收。
 
 ## 4. 完整局部 closure 与后续票所有权
 
@@ -135,6 +139,8 @@ owner28 的已冻结身份为：坐标 `(1280,256)`、前置 `@0936` 后 `state=
 本组件只冻结身份和所有权；`contract-only` 明确表示运行能力尚未交付。Core/Game 在闭包能力齐备前必须于任何显示、对象变化或战斗请求之前拒绝 `@09C3`；不得静态加载成功后偷偷跳到 `@09FE`、换简单战斗或发完成标记。
 
 `resources` 必须且只能包含下列固定 ID/kind/`ownerTickets`：`events/faithful-events/[52,53]`、`battle-data/battle-data/[46,47,48,49,50,51,53]`、`battle-images/battle-images/[53]`、`dialogue-zh-cn/dialogue-language/[49,53]`、`dialogue-en/dialogue-language/[49,53]`、`glyphs/glyph-atlas/[49,53]`。每项另存 `reference/sha256`；reference 必须是纯词法、跨平台的 forward-slash 相对路径，禁止绝对路径、反斜线、控制字符、空或 `.`/`..` segment、首尾或重复 slash、冒号/scheme、Windows 非法字符、设备名（包括 `COM`/`LPT` 后接 ASCII `1..9` 或 `¹`/`²`/`³`，无论是否带扩展名）及 segment 尾随点/空格；普通 Unicode 文件名仍合法。SHA-256 必须为小写 64 位十六进制。九项 closure 的资源链接逐项冻结：trigger/dynamic 依赖 events；battle command 依赖 events+battle-data；角色钩子依赖 events+battle-data+双语对话+glyphs；装备/成长依赖 battle-data；失败边界依赖 events+双语对话+glyphs；图像和语言项分别链接其精确资源。`battle-team-18.identity` 明确保存 `@09FE`、操作数 `(0012,A073,0000)`、team/object/enemy/count/battlefield、第三操作数 boss/no-flee 特值和语义字段反向编码规则。资源来源身份不替代内容独立核对。
+
+在九项均为 `contract-only` 的 #45 阶段，六项资源引用可绑定工程外的**未满足依赖的合同声明**，而非尚未交付的战斗/对话 payload。此时 reference 文件名必须明确标识未准备合同，声明须注明 `contract-only` / `not-runtime-resource`、资源角色、真实期望身份、ownerTickets 与具体缺口；SHA-256 只证明声明自身 exact bytes，不证明真实资源已转换、准备或加载。声明不加入 author 的恰好两文件目录，也不得被运行时作为数据消费。#53 必须用真正现代资源替换全部声明、重新绑定 author/native envelope 并完成闭包严格校验，才能开放 `@09C3`；静态场景和选定语言的启动 marker 不证明战斗图像、局部双语对白或 glyph 资源已载入。
 
 ## 5. 覆盖审计与明确不扩张
 
