@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using GdUnit4;
@@ -83,7 +84,8 @@ public class NativeBattleContentTests
         var native = NativeBattleContent.Write(content);
         AssertThat(native.Players[0].HasCoveredByRoleId).IsTrue();
         AssertThat(native.Players[0].CoveredByRoleId).IsEqual(0);
-        AssertThat(JsonSerializer.Serialize(NativeBattleContent.CreateCore(native))).IsEqual(JsonSerializer.Serialize(content));
+        var decoded = NativeBattleContent.CreateCore(native);
+        AssertThat(JsonSerializer.Serialize(decoded)).IsEqual(JsonSerializer.Serialize(content));
         AssertThat(content.Player.CoveredByRoleId!.Value).IsEqual(0);
         AssertThat(content.Teams[65535].Attack).IsEqual(-32768);
         AssertThat(content.Growth.LevelUpExperience[99]).IsEqual(0);
@@ -96,11 +98,38 @@ public class NativeBattleContentTests
             string uri = root + "/Battle.tres";
             var written = NativeBattleContent.Write(content);
             AssertThat(ResourceSaver.Save(written, uri)).IsEqual(Error.Ok);
+            AssertThat(File.ReadAllLines(ProjectSettings.GlobalizePath(uri)).Contains("FormatVersion = 1")).IsTrue();
             AssertThat(JsonSerializer.Serialize(NativeBattleContent.Load(uri))).IsEqual(expected);
             written.Roles[0].Equipment[0] = 99; written.Roles[0].HiddenExperience!.Attack!.Count = 99;
-            native.Roles[0].Magics[0] = 99; native.Players[0].Poisons[0] = 99;
-            native.Teams[0].Enemies[0].Cash = 99; native.Growth[0].LevelUpMagics[0].MagicId = 99;
+            native.Roles[0].PrimaryExperience!.Value = 99; native.Roles[0].HiddenExperience!.Attack!.Count = 99;
+            native.Roles[0].Equipment[0] = 99; native.Roles[0].Magics[0] = 99; native.Roles[0].Statuses[0] = 99;
+            native.Players[0].Attack = 99; native.Players[0].Equipment[0] = 99;
+            native.Players[0].Statuses[0] = 99; native.Players[0].Poisons[0] = 99;
+            native.Growth[0].LevelUpExperience[99] = 99;
+            native.Growth[0].LevelUpMagics[0].Level = 99; native.Growth[0].LevelUpMagics[0].MagicId = 99;
+            native.Teams[0].Enemies[0].Attack = 99; native.Teams[0].Enemies[0].Cash = 99;
+            native.Teams[0].Enemies[0].Statuses[0] = 99; native.Teams[0].Enemies[0].Poisons[0] = 99;
             AssertThat(JsonSerializer.Serialize(content)).IsEqual(expected);
+            AssertThat(JsonSerializer.Serialize(decoded)).IsEqual(expected);
+            AssertThat(decoded.InitialRole.PrimaryExperience.Value).IsEqual(65535);
+            AssertThat(decoded.InitialRole.HiddenExperience["attack"].Count).IsEqual(23);
+            AssertThat(decoded.InitialRole.Equipment[0]).IsEqual(1);
+            AssertThat(decoded.InitialRole.Magics[0]).IsEqual(1);
+            AssertThat(decoded.Player.Attack).IsEqual(65535);
+            AssertThat(decoded.Player.Poisons[0]).IsEqual(7);
+            AssertThat(decoded.Growth.LevelUpExperience[99]).IsEqual(0);
+            AssertThat(decoded.Growth.LevelUpMagics[0]).IsEqual(new BattleLevelUpMagic(65535, 65535));
+            AssertThat(decoded.Teams[18].Attack).IsEqual(-32768);
+            AssertThat(decoded.Teams[18].Cash).IsEqual(19);
+            AssertThat(decoded.Teams[18].Statuses[0]).IsEqual(20);
+            AssertThat(decoded.Teams[18].Poisons[0]).IsEqual(9);
+            foreach (var values in new[] { decoded.InitialRole.Equipment, decoded.InitialRole.Magics, decoded.InitialRole.Statuses,
+                decoded.Player.Equipment, decoded.Player.Statuses, decoded.Player.Poisons, decoded.Growth.LevelUpExperience,
+                decoded.Teams[18].Statuses, decoded.Teams[18].Poisons, decoded.Teams[65535].Statuses, decoded.Teams[65535].Poisons })
+                AssertThat(((IList<int>)values).IsReadOnly).IsTrue();
+            AssertThat(((IDictionary<string, BattleExperienceSnapshot>)decoded.InitialRole.HiddenExperience).IsReadOnly).IsTrue();
+            AssertThat(((IList<BattleLevelUpMagic>)decoded.Growth.LevelUpMagics).IsReadOnly).IsTrue();
+            AssertThat(((IDictionary<int, ClassicBattleEnemy>)decoded.Teams).IsReadOnly).IsTrue();
             AssertThat(JsonSerializer.Serialize(NativeBattleContent.Load(uri))).IsEqual(expected);
         }
         finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
@@ -194,6 +223,28 @@ public class NativeBattleContentTests
         try { NativeBattleContent.Load(uri); }
         catch (InvalidDataException error) { rejected = error.Message.Contains(uri, StringComparison.Ordinal); }
         AssertThat(rejected).IsTrue();
+    }
+
+    [TestCase]
+    public void LoadRejectsMissingExplicitFormatVersion()
+    {
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/Battle.tres";
+            AssertThat(ResourceSaver.Save(NativeBattleContent.Write(Data()), uri)).IsEqual(Error.Ok);
+            AssertThat(NativeBattleContent.Load(uri).InitialRole.Hp).IsEqual(100);
+            string path = ProjectSettings.GlobalizePath(uri);
+            File.WriteAllLines(path, File.ReadAllLines(path).Where(line => !line.StartsWith("FormatVersion =", StringComparison.Ordinal)));
+            InvalidDataException? error = null;
+            try { NativeBattleContent.Load(uri); }
+            catch (InvalidDataException caught) { error = caught; }
+            AssertThat(error is not null).OverrideFailureMessage("Load must reject a saved native resource missing explicit FormatVersion").IsTrue();
+            AssertThat(error!.Message.Contains("FormatVersion", StringComparison.Ordinal)).IsTrue();
+            AssertThat(error.Message.Contains(uri, StringComparison.Ordinal)).IsTrue();
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
     }
 
     [TestCase("version")]
