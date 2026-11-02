@@ -7,10 +7,12 @@
 | 阶段 | 当前候选的含义 | 不可据此宣称 |
 | --- | --- | --- |
 | 本地 workflow candidate | `.github/workflows/ci.yml` 提供独立 `unit-check`，由本地有界契约及直接 Unit 验证 | GitHub 调度、check-run 或保护已生效 |
-| 远端检查 | 尚待单独授权发布与实际事件矩阵验收 | required check 已切换 |
+| 远端检查 | integration 候选已发布；opened、无提交 Ready、Ready 标题 edited、转回 Draft 及 manual 已有真实运行，剩余矩阵继续验证 | required check 已切换 |
 | 服务端切换 | 尚待单独授权，配置回读及受控拒绝/允许验收见[保护操作说明](merge-protection.md#unit-only-分阶段切换67) | “Unit 通过即可合并”已生效 |
 
-以上描述当前分支候选，不代表已经发布到 `main`。本地具体命令、提交、原始证据及验收结论保存在任务交接；不能仅凭本页或历史成功补签新候选。完整 spec 的 Standards/Spec 双轴评审留给最终 candidate，不在每张子票重复。
+以上描述当前分支候选，不代表已经发布到 `main`。已验证的事件分别有独立原件与 run/attempt：例如 [Ready/edited](https://github.com/fanxiao92/godot-pal/actions/runs/41426078216)、[converted_to_draft](https://github.com/fanxiao92/godot-pal/actions/runs/41428519546) 和 [manual](https://github.com/fanxiao92/godot-pal/actions/runs/41430853131)。这些运行不替代 Ready 新提交、main push、负向矩阵或服务端拒绝/允许；manual 检出 integration ref，不冒充 PR merge candidate。
+
+本地具体命令、提交、原始证据及验收结论保存在任务交接；不能仅凭本页或历史成功补签新候选。完整 spec 的 Standards/Spec 双轴评审留给最终 candidate，不在每张子票重复。
 
 ## 自动事件与工程集合
 
