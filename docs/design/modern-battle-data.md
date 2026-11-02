@@ -1,6 +1,6 @@
-# 现代战斗数值 v1（#46 有界 Core / native codec seam）
+# 现代战斗数值 v1（#46 有界数值准备 seam）
 
-状态：纯 Core `ModernBattleContent.Parse(string)` → 既有 `TriggerBattleContent`，及独立 typed native Resource 编解码 `NativeBattleContent.Write/CreateCore/Load` 已实现。Core 不读文件、不抽 RNG、不创建战斗或模拟获胜；native runtime 不重读 JSON。**这只是数值 codec 检查点，不是已交付的人工 package、生产离线 Prepare/Editor/PS 入口或 Main 资源链**。测试中的字符串是纯内存人工数值，不是人工资源交付或原版认证。冻结的真实 `first-mandatory-battle-pre-trigger-v1`、envelope/provenance 和 owner28 `@09C3` gate 均未改动。
+状态：纯 Core `ModernBattleContent.Parse(string)` → 既有 `TriggerBattleContent`，及独立 typed native Resource 编解码 `NativeBattleContent.Write/CreateCore/Load` 已实现。Core 不读文件、不抽 RNG、不创建战斗或模拟获胜；native runtime 不重读 JSON。显式离线 `PrepareBattleData.Prepare`、Editor scene 和正常 PowerShell wrapper 也已交付（见下方准备契约）；**数值准备不是完整人工 package 或 Main 资源链**。Core 测试字符串与可提交 `tests/Fixtures/ModernBattleData/battle-data.json` 均为独立人工数值，不是完整 storypackage 或原版认证。冻结的真实 `first-mandatory-battle-pre-trigger-v1`、envelope/provenance 和 owner28 `@09C3` gate 均未改动。
 
 ## 根与严格读取
 
@@ -87,6 +87,29 @@ Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
 
 新增 player/enemy 资源逐项导出 Core 的全部字段（名字对应 PascalCase；enemy 的 attack/defense/dexterity 仍为 signed offset）。`PalBattleGrowth` 显式导出 `RoleId`、100 项 `LevelUpExperience`、完整有序 `PalBattleLearnableMagic[] LevelUpMagics`（`Level/MagicId`）；不排序去重。player 的 nullable cover 用 `HasCoveredByRoleId` 加整数 `CoveredByRoleId`：false 时值必须为0，true 时0..5；true+0 是实际 role0，不等同 null。role snapshot 的 CoveredByRoleId 继续保留原编号，不当作无 cover sentinel。
 
-数值资源没有 profile/source/人工开关、来源认证或 storyprofile hash。本 codec 不能证明源数据完整性、图像/语言/事件闭包或资源来源。完整离线生产准备入口另一个 unit 实施（路径/lease/hash/原子发布/失败 cleanup/argv/marker/进程测试均尚待），Main 从不自动 prepare；本 unit 不提供半套入口或新增 CLI 作者命令。
+数值资源没有 profile/source/人工开关、来源认证或 storyprofile hash。本 codec 不能证明源数据完整性、图像/语言/事件闭包或资源来源。显式离线数值生产准备入口现已追加，契约见下节；Main 从不自动 prepare，也没有新增 CLI 作者命令。
 
 本检查点的 headless native-map 用例真实执行：内存现代 JSON Parse → 正式 Write → ResourceSaver 保存 → ResourceLoader/严格 Load → 正式 trigger/lifecycle 的真实 Won/Lost 与一次性自有 receipt ack。独立字面预期 Won HP125/MP35、Lost HP0/MP20，attack1/health2；并核所有非零字段、signed/WORD 边界、0 阈值/重复成长行、未引用非零队保留、nested 隔离、URI/版本/类型/null/shape/ID/范围及选中不支持内容无 RNG/请求副作用。本次修补精确运行新 native class 43 例（含真实保存文件删除显式版本后的拒绝，以及保留 CreateCore 输出再变更 Resource 的 nested 隔离/只读核对）；旧 frozen profile class 33 例沿用未改源码的既有精确运行证据，不冒称完整 Game/Prepare/Main、GPU、人工或 CI 验收。
+
+
+## 显式离线数值准备（#46 有界 Prepare 检查点）
+
+唯一生产转换入口：`Pal.Game.Editor.PrepareBattleData.Prepare(string inputDirectory, string outputDirectory)`。参数为物理目录路径，返回规范 `res://Assets/.../BattleContent.tres`，不执行选中事件、RNG、战斗模拟或 frozen #45 gate。只负责上文完整格式合法性；合法非零装备、hooks、reward、0 阈值及有序重复成长行原样保留，**不代表未来 selected-entry 能力闭包已满足**。
+
+输入目录必须实际存在、位于 `src/Pal.Game` 外，且恰好一个普通顶层 `battle-data.json`；额外文件或目录（即使为空）均拒绝。本入口限制原文件 **1..16MiB**，严格 UTF-8 解码，可带 UTF-8 BOM（BOM 计入原始字节及稳定性 hash），拒绝 UTF-16/非法 UTF-8；JSON 使用同一个 `ModernBattleContent.Parse`，不补齐缺字段。两侧规范化物理路径，按平台大小写/根规则判边界，双向不得重叠。输出必须为项目 `Assets` 下新或空目录，不能是文件或已有任意 entry。两侧全部 ancestor、输入树及输出树拒绝 link/reparse point（包括悬空链接）；允许输出缺失多层 ancestor。不改变 #45 对空子目录的旧契约。
+
+全路径/格式预检后，持续持有 `OpenStableRead` 只读 lease（Windows `FileShare.Read`），保留原始字节 hash。按阶段复核路径、精确输入/输出 entry、当前文件和 lease 的内容 hash。复用 `NativeBattleContent.Write`，`ResourceSaver` 保存唯一 owned 临时 `.tres`，由正式 `NativeBattleContent.Load` 严格实际回读，再 `File.Move(..., overwrite: false)` 原子发布固定文件。输出复核只容许本次临时文件。失败只尝试清自有临时文件和本次新建空目录，不递归删除已有目录或他者新文件；清理失败不覆盖原始异常。hash 仅用于读稳定性，不是来源认证、canonical digest 或 storyprofile receipt。
+
+正常编辑器入口 `res://Editor/PrepareBattleData.tscn` 的 `_Ready` 只接受精确顺序 `--battle-input <dir> --battle-output <dir>`，调用同一 public Prepare，成功后输出 `PAL_PREPARE_BATTLE_DATA:BattleContent.tres` 并 exit0；失败 stderr `Battle data native import failed: <原诊断>` 并 exit1，不发成功 marker。
+
+```powershell
+# 显式离线操作；不会由正常 Main 自动执行。OutputPath 必须新建或为空。
+pwsh -NoProfile -File ./scripts/Prepare-BattleData.ps1 `
+  -InputPath ./tests/Fixtures/ModernBattleData `
+  -OutputPath ./src/Pal.Game/Assets/MyBattleData `
+  -GodotPath $ApprovedGodotConsole
+```
+
+wrapper 负责唯一参数/路径预检、固定 Godot 版本、正常项目 build、启动上述 Editor scene、实际退出/诊断和 marker 验证，不维护第二 converter。可选 `-TimeoutSeconds` 沿既有准备工具的60秒默认、1..600范围，不修改共享预算；参数错 exit2，其余失败 exit1。实际引擎运行仍全局串行，发现已有未知 Godot 仅查 PID/Name 并暂停。
+
+本检查点的 Game direct 新类32例调用同一 public Prepare，真正 Load 产物后经正常 lifecycle 真实KO验证 HP125/MP35；格式/UTF-8/大小/目录/覆盖/双向重叠/缺失 ancestor/Windows 大小写及 reparse 路径边界分别覆盖。Prepare process 新18例负责正常 PS/Editor argv、exit、marker 和错误传播，完整 Prepare 79例实际通过。两层共读一份可提交独立人工 numeric JSON（Core 不引入文件 I/O）；无新增业务factory或测试装配接口。晚期源替换、他者插入、磁盘/权限/rename失败及 cleanup失败没有确定性故障注入运行证明，只保留生产逐阶段复核及 owned cleanup 的代码审阅边界。它不是完整人工 storypackage、Main/SceneRunner/UI、GPU、物理操作、远端 CI 或整 #46/M4 验收。

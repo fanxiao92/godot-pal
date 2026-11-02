@@ -14,7 +14,7 @@ function Fails([scriptblock]$Action, [string]$Pattern) {
 function Case([string]$Name, [scriptblock]$Action) { & $Action; $results.Add($Name); Write-Host "PASS: $Name" }
 $expected = @('Pal.Game.Tests.Fixture.Alpha', 'Pal.Game.Tests.Fixture.Beta')
 $valid = @'
-<TestRun id="33333333-3333-3333-3333-333333333333" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+<TestRun id="36436433-3643-3643-3643-364364364364" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
   <Results>
     <UnitTestResult testId="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" executionId="11111111-1111-1111-1111-111111111111" testName="Pal.Game.Tests.Fixture.Alpha" outcome="Passed" />
     <UnitTestResult testId="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" executionId="22222222-2222-2222-2222-222222222222" testName="Pal.Game.Tests.Fixture.Beta" outcome="Passed" />
@@ -59,9 +59,9 @@ public class Fixture
         [IO.File]::WriteAllText((Join-Path $source 'Fixture.cs'), $text.Replace('public void Beta()', 'public ValueTask Beta()'))
         Fails { Get-GameSourceInventory $source } 'Unparsed Game test attributes'
     }
-    Case 'real source partitions 74/85/173, preserves controls and solution test projects' {
-        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '74,85,173') 'Wrong batch sizes/order.'
-        Assert ($plan.inventory.Count -eq 335 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+    Case 'real source partitions 74/85/205, preserves controls and solution test projects' {
+        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '74,85,205') 'Wrong batch sizes/order.'
+        Assert ($plan.inventory.Count -eq 367 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
         Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Wrong serial project identities/order.'
         Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj',
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
@@ -70,8 +70,8 @@ public class Fixture
             core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 748, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 268, 2)
-            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 61, 0)
-            game = @('src/Pal.Game/Pal.Game.csproj', 332, 0)
+            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 79, 0)
+            game = @('src/Pal.Game/Pal.Game.csproj', 364, 0)
         }
         foreach ($project in $plan.projects) {
             $expectedProject = $expectedProjects[$project.name]
@@ -90,7 +90,7 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 748 passed; CLI unit 142 passed; CLI integration 268 passed + 2 skipped (270 total); Prepare 61 passed; Godot source/discovery 335; positives 332 as serial 74/85/173 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 748 passed; CLI unit 142 passed; CLI integration 268 passed + 2 skipped (270 total); Prepare 79 passed; Godot source/discovery 367; positives 364 as serial 74/85/205 in each of three complete rounds; 16 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }

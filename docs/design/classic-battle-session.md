@@ -1,6 +1,6 @@
 # ClassicBattleSession：首个 Core 普攻检查点
 
-状态：#46 的 **Core 内部检查点**。单人单敌经典普攻、选令后随机排序、逐动作推进和真实 Won/Lost、下述零成长正式生命周期及 trigger 事件 binding 已实现；不是整张 #46 或 M4 的交付。独立现代数值 native codec 已追加（见[数值契约](modern-battle-data.md)），但完整人工 package、生产 Prepare/Editor/PS、Main/真实输入与表现尚未接通。
+状态：#46 的 **Core 内部检查点**。单人单敌经典普攻、选令后随机排序、逐动作推进和真实 Won/Lost、下述零成长正式生命周期及 trigger 事件 binding 已实现；不是整张 #46 或 M4 的交付。独立现代数值 native codec 及完整显式离线数值 Prepare/Editor/PS 已追加（见[数值契约](modern-battle-data.md)），但完整人工 package、Main/真实输入与表现尚未接通。
 
 ## Interface 与数据
 
@@ -43,7 +43,7 @@
 
 正常显式入口：`TriggerScriptSession(events, language, TriggerBattleContent, IBattleRandom, inheritedColor = ...)`。既有 `(events, language, inheritedColor = ...)` 保持原有 M2/M3 行为及 enum 数值 Ready=0 / WaitingForDisplay=1 / Completed=2，无战斗配置时依然拒绝具名 `startBattle`，raw7 从不执行。WaitingForBattle 追加为3；两种等待均阻塞 `BlocksSceneUpdates`，且 `Start` 拒绝重入，不改变原调用。
 
-`TriggerBattleContent(role, player, growth, teamId→enemy)` 是纯 typed 正式内容，不是测试 profile、工厂或注入结果的 delegate；后续有界检查点已补充[严格现代数值 JSON 读取](modern-battle-data.md)，已有独立 typed numeric native schema，尚无完整 storypackage schema/生产准备入口。role 提供初始持久状态，player 提供无装备效果的有效面板，growth 是该 role 的完整阈值/法术表，每个 team 映射本支持域的一个真实 enemy。初始 role/player 的 roleId、HP、maxHP 必须一致；所有之后仍要使用的嵌套 role、player、enemy、growth 集合均防御拷贝，不保留外部可变 alias。公开 `BattleRole` 是只读、不可变快照，不是可写全局状态库。
+`TriggerBattleContent(role, player, growth, teamId→enemy)` 是纯 typed 正式内容，不是测试 profile、工厂或注入结果的 delegate；后续有界检查点已补充[严格现代数值 JSON 读取](modern-battle-data.md)，已有独立 typed numeric native schema，已有显式数值准备入口，尚无完整 storypackage schema/准备链。role 提供初始持久状态，player 提供无装备效果的有效面板，growth 是该 role 的完整阈值/法术表，每个 team 映射本支持域的一个真实 enemy。初始 role/player 的 roleId、HP、maxHP 必须一致；所有之后仍要使用的嵌套 role、player、enemy、growth 集合均防御拷贝，不保留外部可变 alias。公开 `BattleRole` 是只读、不可变快照，不是可写全局状态库。
 
 同一 trigger session 持有唯一持久角色快照；每场以其当前 HP 覆盖初始 player template HP，正常构造准确且唯一的 `ClassicBattleLifecycleSession`。会话不把 rawHP 当 settledHP，也不在请求创建/真实KO时提前应用角色；**只有合法 ack** 将 lifecycle 的 settled `Current.Role` 一次应用。多次开战和后续 `Start` 承接 HP/MP/XP/法术/counts；开场复活/reset 只发生在下一场 lifecycle 内。独立新 session 从内容初始状态开始。为了保证任意多战 Won 半恢复后都仍在底层 combat HP1..32767 范围，此 VM 的保守支持域额外要求 **maxHP<=32767**；不更改 lifecycle/combat 原有 maxHP WORD 合同。
 
@@ -57,7 +57,7 @@
 
 ## 现代数值读取（#46 有界检查点）
 
-`ModernBattleContent.Parse(string)` 仅严格读取纯数值并返回上述同一 `TriggerBattleContent`；字段和数组演进边界见[现代战斗数据 v1](modern-battle-data.md)。复用既有 role 转换及 combat/growth 类型，不增第二套规则。格式合法不等于选中入口可执行：合法非零能力字段、含0阈值和有序重复法术行均保留，再由正式 `Start` 纯预检拒绝不支持闭包，不消耗RNG。`InitialRole/Player/Growth/Teams` 为public只读投影，全部嵌套集合沿现构造器防御拷贝。公开 Core 字符串用例已真实经Won/Lost与原事件续接；独立 typed native codec 已追加；不是已交付的完整人工资源链，生产 Prepare/Editor/PS/CLI/Main仍待后续。
+`ModernBattleContent.Parse(string)` 仅严格读取纯数值并返回上述同一 `TriggerBattleContent`；字段和数组演进边界见[现代战斗数据 v1](modern-battle-data.md)。复用既有 role 转换及 combat/growth 类型，不增第二套规则。格式合法不等于选中入口可执行：合法非零能力字段、含0阈值和有序重复法术行均保留，再由正式 `Start` 纯预检拒绝不支持闭包，不消耗RNG。`InitialRole/Player/Growth/Teams` 为public只读投影，全部嵌套集合沿现构造器防御拷贝。公开 Core 字符串用例已真实经Won/Lost与原事件续接；独立 typed native codec 已追加；不是已交付的完整人工资源链，数值 Prepare/Editor/PS 已交付，完整 storypackage/CLI 作者链/Main 仍待后续。
 
 ## 固定参考与独立算例
 
