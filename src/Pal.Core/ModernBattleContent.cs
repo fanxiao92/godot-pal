@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Pal.Core;
 
 /// <summary>Strict, pure numeric modern battle data. Parsing does not grant selected-entry combat capability.</summary>
-public static class ModernBattleContent
+public static partial class ModernBattleContent
 {
     private const string Root = "battle-data.json.$";
 
@@ -46,7 +46,9 @@ public static class ModernBattleContent
             if (!teams.TryAdd(id, enemy)) throw Error(path + ".teamId", $"duplicate team ID {id}");
         }
         if (teams.Count == 0) throw Error(Root + ".teams", "expected at least one team");
-        return new(initialRole, combatPlayer, new(thresholds, rows), teams);
+        var content = new TriggerBattleContent(initialRole, combatPlayer, new(thresholds, rows), teams);
+        Validate(content);
+        return content;
     }
 
     private static void ValidateRole(JsonElement role, string path)

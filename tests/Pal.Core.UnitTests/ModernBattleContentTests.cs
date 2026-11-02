@@ -5,6 +5,120 @@ namespace Pal.Core.Tests;
 
 public sealed class ModernBattleContentTests
 {
+    [Theory]
+    [InlineData("role-level")]
+    [InlineData("role-mp")]
+    [InlineData("role-cover")]
+    [InlineData("role-equipment")]
+    [InlineData("role-magics")]
+    [InlineData("role-statuses")]
+    [InlineData("role-xp")]
+    [InlineData("hidden-name")]
+    [InlineData("hidden-null")]
+    [InlineData("player-attack")]
+    [InlineData("player-defense")]
+    [InlineData("player-dexterity")]
+    [InlineData("player-equipment")]
+    [InlineData("player-statuses")]
+    [InlineData("player-poisons")]
+    [InlineData("player-dying")]
+    [InlineData("player-friend")]
+    [InlineData("player-cover")]
+    [InlineData("threshold-shape")]
+    [InlineData("threshold-word")]
+    [InlineData("magic-level")]
+    [InlineData("magic-id")]
+    [InlineData("magic-null")]
+    [InlineData("empty-teams")]
+    [InlineData("team-id")]
+    [InlineData("enemy-id")]
+    [InlineData("enemy-level")]
+    [InlineData("enemy-hp")]
+    [InlineData("enemy-attack")]
+    [InlineData("enemy-defense")]
+    [InlineData("enemy-dexterity")]
+    [InlineData("enemy-resistance")]
+    [InlineData("enemy-statuses")]
+    [InlineData("enemy-poisons")]
+    [InlineData("enemy-start")]
+    [InlineData("enemy-ready")]
+    [InlineData("enemy-end")]
+    [InlineData("enemy-magic")]
+    [InlineData("enemy-dual")]
+    [InlineData("enemy-item")]
+    [InlineData("enemy-rate")]
+    [InlineData("enemy-xp")]
+    [InlineData("enemy-cash")]
+    public void Typed_format_rejects_invalid_shapes_ranges_and_Ordinal_experience(string defect)
+    {
+        var data = ModernBattleContent.Parse(Data().ToJsonString());
+        var role = data.InitialRole;
+        var player = data.Player;
+        var growth = data.Growth;
+        var enemy = data.Teams[18];
+        var hidden = role.HiddenExperience.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+        switch (defect)
+        {
+            case "role-level": role = role with { Level = 65536 }; break;
+            case "role-mp": role = role with { Mp = 51 }; break;
+            case "role-cover": role = role with { CoveredByRoleId = 6 }; break;
+            case "role-equipment": role = role with { Equipment = new int[5] }; break;
+            case "role-magics": role = role with { Magics = new int[33] }; break;
+            case "role-statuses": role = role with { Statuses = [-1,0,0,0,0,0,0,0,0] }; break;
+            case "role-xp": role = role with { PrimaryExperience = new(0, 65536, 0) }; break;
+            case "hidden-name": hidden["magicpower"] = hidden["magicPower"]; hidden.Remove("magicPower"); role = role with { HiddenExperience = hidden }; break;
+            case "hidden-null": hidden["flee"] = null!; role = role with { HiddenExperience = hidden }; break;
+            case "player-attack": player = player with { Attack = -1 }; break;
+            case "player-defense": player = player with { Defense = 65536 }; break;
+            case "player-dexterity": player = player with { Dexterity = -1 }; break;
+            case "player-equipment": player = player with { Equipment = [] }; break;
+            case "player-statuses": player = player with { Statuses = new int[10] }; break;
+            case "player-poisons": player = player with { Poisons = [65536] }; break;
+            case "player-dying": player = player with { DyingScript = -1 }; break;
+            case "player-friend": player = player with { FriendDeathScript = 65536 }; break;
+            case "player-cover": player = player with { CoveredByRoleId = -1 }; break;
+            case "threshold-shape": growth = growth with { LevelUpExperience = new int[99] }; break;
+            case "threshold-word": growth = growth with { LevelUpExperience = Enumerable.Repeat(-1, 100).ToArray() }; break;
+            case "magic-level": growth = growth with { LevelUpMagics = [new(-1, 0)] }; break;
+            case "magic-id": growth = growth with { LevelUpMagics = [new(0, 65536)] }; break;
+            case "magic-null": growth = growth with { LevelUpMagics = [null!] }; break;
+            case "enemy-id": enemy = enemy with { Id = 0 }; break;
+            case "enemy-level": enemy = enemy with { Level = 65536 }; break;
+            case "enemy-hp": enemy = enemy with { Hp = 0 }; break;
+            case "enemy-attack": enemy = enemy with { Attack = -32769 }; break;
+            case "enemy-defense": enemy = enemy with { Defense = 32768 }; break;
+            case "enemy-dexterity": enemy = enemy with { Dexterity = -32769 }; break;
+            case "enemy-resistance": enemy = enemy with { PhysicalResistance = -1 }; break;
+            case "enemy-statuses": enemy = enemy with { Statuses = new int[8] }; break;
+            case "enemy-poisons": enemy = enemy with { Poisons = [-1] }; break;
+            case "enemy-start": enemy = enemy with { TurnStartScript = 65536 }; break;
+            case "enemy-ready": enemy = enemy with { ReadyScript = -1 }; break;
+            case "enemy-end": enemy = enemy with { BattleEndScript = 65536 }; break;
+            case "enemy-magic": enemy = enemy with { MagicId = -1 }; break;
+            case "enemy-dual": enemy = enemy with { DualMove = 65536 }; break;
+            case "enemy-item": enemy = enemy with { AttackEquivItem = -1 }; break;
+            case "enemy-rate": enemy = enemy with { AttackEquivItemRate = 65536 }; break;
+            case "enemy-xp": enemy = enemy with { Experience = -1 }; break;
+            case "enemy-cash": enemy = enemy with { Cash = 65536 }; break;
+        }
+        var teams = new Dictionary<int, ClassicBattleEnemy> { [defect == "team-id" ? 65536 : 18] = enemy };
+        if (defect == "empty-teams") teams.Clear();
+        var invalid = new TriggerBattleContent(role, player, growth, teams);
+        Assert.Contains("battle-data.json.$", Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(invalid)).Message);
+    }
+
+    [Fact]
+    public void Typed_format_validation_accepts_parsed_data_and_rejects_invalid_WORD_without_capability_gate()
+    {
+        var content = ModernBattleContent.Parse(Data().ToJsonString());
+        ModernBattleContent.Validate(content);
+        var legal = new TriggerBattleContent(content.InitialRole, content.Player with { Attack = 65535, AttackAll = true },
+            new(new int[100], [new(0, 0), new(0, 0)]), content.Teams);
+        ModernBattleContent.Validate(legal);
+        var invalid = new TriggerBattleContent(content.InitialRole, content.Player with { Attack = 65536 }, content.Growth, content.Teams);
+        Assert.Contains("attack", Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(invalid)).Message);
+    }
+
     [Fact]
     public void Parsed_content_runs_real_Won_settlement_and_event_dialogue_to_end()
     {

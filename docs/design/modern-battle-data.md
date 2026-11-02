@@ -1,6 +1,6 @@
-# 现代战斗数值 JSON v1（#46 有界 Core seam）
+# 现代战斗数值 v1（#46 有界 Core / native codec seam）
 
-状态：纯 Core `ModernBattleContent.Parse(string)` → 既有 `TriggerBattleContent` 已实现。它不读文件、不抽 RNG、不创建战斗或模拟获胜。供下一显式 native Resource 准备读取同一 typed 内容；**不是已交付的人工 package/native/Editor/CLI/Main 资源链**。测试中的字符串是纯内存人工数值，不是人工资源交付或原版认证。冻结的真实 `first-mandatory-battle-pre-trigger-v1`、envelope/provenance 和 owner28 `@09C3` gate 均未改动。
+状态：纯 Core `ModernBattleContent.Parse(string)` → 既有 `TriggerBattleContent`，及独立 typed native Resource 编解码 `NativeBattleContent.Write/CreateCore/Load` 已实现。Core 不读文件、不抽 RNG、不创建战斗或模拟获胜；native runtime 不重读 JSON。**这只是数值 codec 检查点，不是已交付的人工 package、生产离线 Prepare/Editor/PS 入口或 Main 资源链**。测试中的字符串是纯内存人工数值，不是人工资源交付或原版认证。冻结的真实 `first-mandatory-battle-pre-trigger-v1`、envelope/provenance 和 owner28 `@09C3` gate 均未改动。
 
 ## 根与严格读取
 
@@ -68,6 +68,25 @@
 
 所有合法非零装备、status、毒、cover、hooks、attack-all、魔法/双动/等效物品、奖励，以及不能保证零成长的表，均原样进入 typed content。`TriggerScriptSession.Start` 对选中入口的 next/loss/flee 保守闭包调用既有纯预检，在任何caller/角色/请求副作用与RNG前拒绝不支持内容；未被选择入口引用的其他队可以保留。不会通过simulate获胜来验证内容，也不因来源为人工而放行。
 
-`TriggerBattleContent.InitialRole / Player / Growth / Teams` 为public get-only投影。构造器继续防御拷贝全部嵌套集合，输出只读；record的with只生成独立copy，不能改content中的记录。下一native writer应读取这些同一typed值，不另造业务factory或角色schema。
+`TriggerBattleContent.InitialRole / Player / Growth / Teams` 为public get-only投影。构造器继续防御拷贝全部嵌套集合，输出只读；record的with只生成独立copy，不能改content中的记录。native writer读取这些同一typed值，不另造业务factory或角色schema。
 
-公开 Core 用例从reader输出真正 `Start` → active lifecycle `SelectAttack/ResolveNextAction` → 准确自有completion ack → 原事件display/end：独立字面值43KO后HP125/MP35、attack1/health2；真实Lost HP0/MP20不恢复。另覆盖严格字段/维数/类型/范围/ID、全部现有能力字段不丢失、0阈值及重复成长行保留、选中入口无RNG拒绝和嵌套只读。它们不证明native准备、文件安全、Main输入/渲染、GPU、人工操作或CI。
+公开 Core 用例从reader输出真正 `Start` → active lifecycle `SelectAttack/ResolveNextAction` → 准确自有completion ack → 原事件display/end：独立字面值43KO后HP125/MP35、attack1/health2；真实Lost HP0/MP20不恢复。另覆盖严格字段/维数/类型/范围/ID、全部现有能力字段不丢失、0阈值及重复成长行保留、选中入口无RNG拒绝和嵌套只读。它们本身不证明native准备、文件安全、Main输入/渲染、GPU、人工操作或CI。
+
+
+## Typed 格式验证与 native Resource v1（#46 codec 检查点）
+
+`ModernBattleContent.Validate(TriggerBattleContent)` 是公开、纯数值格式验证，与上述 JSON 数值/维数规则一致。Parse 在严格 JSON 读取后调用；native CreateCore 也调用。它允许合法非零能力、WORD 等级、0 阈值和重复有序成长行，不调用 frozen 真实 profile gate、selected-entry 能力闭包、RNG 或模拟战斗。既有 content 构造与 `Start` 的错误/副作用时机不改。
+
+Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
+
+- `Write(TriggerBattleContent)` 先格式验证，再创建独立 `PalBattleContent` 资源；不写文件、不准备完整包。
+- `CreateCore(PalBattleContent, string identity = "native battle content")` 严格检查根版本、数组 shape、nested null、growth role identity、重复 team ID、canonical cover，再复制字段并做 Core 格式验证。输出的所有 nested 集合独立且只读，不保留可变 Godot Resource alias。
+- `Load(string uri)` 仅接受规范 `res://` URI，要求存在且类型为 `PalBattleContent`，用 `ResourceLoader.CacheMode.IgnoreDeep` 后走同一个 CreateCore。错误带选中 URI。它不读 `battle-data.json`、M1、原档或 MKF，也不解释 JSON blob。
+
+根 `[GlobalClass] PalBattleContent` 的导出字段是 `FormatVersion=1`、`Roles: PalBattleRole[]`、`Players: PalBattlePlayer[]`、`Growth: PalBattleGrowth[]`、`Teams: PalBattleTeam[]`。前三组及每队 `Enemies: PalBattleEnemy[]` 当前必须恰好一项，team 非空且 ID 唯一；保留数组形式不代表 #47 多人能力已实现。Role/primary/hidden XP 复用 #45 的原生类型与最小共享 `NativeBattleRoleAdapter`；共享 adapter 只转换/检查必要 null，不把本格式/单角色/能力限制施加到旧 frozen envelope。
+
+新增 player/enemy 资源逐项导出 Core 的全部字段（名字对应 PascalCase；enemy 的 attack/defense/dexterity 仍为 signed offset）。`PalBattleGrowth` 显式导出 `RoleId`、100 项 `LevelUpExperience`、完整有序 `PalBattleLearnableMagic[] LevelUpMagics`（`Level/MagicId`）；不排序去重。player 的 nullable cover 用 `HasCoveredByRoleId` 加整数 `CoveredByRoleId`：false 时值必须为0，true 时0..5；true+0 是实际 role0，不等同 null。role snapshot 的 CoveredByRoleId 继续保留原编号，不当作无 cover sentinel。
+
+数值资源没有 profile/source/人工开关、来源认证或 storyprofile hash。本 codec 不能证明源数据完整性、图像/语言/事件闭包或资源来源。完整离线生产准备入口另一个 unit 实施（路径/lease/hash/原子发布/失败 cleanup/argv/marker/进程测试均尚待），Main 从不自动 prepare；本 unit 不提供半套入口或新增 CLI 作者命令。
+
+本检查点的 headless native-map 用例真实执行：内存现代 JSON Parse → 正式 Write → ResourceSaver 保存 → ResourceLoader/严格 Load → 正式 trigger/lifecycle 的真实 Won/Lost 与一次性自有 receipt ack。独立字面预期 Won HP125/MP35、Lost HP0/MP20，attack1/health2；并核所有非零字段、signed/WORD 边界、0 阈值/重复成长行、未引用非零队保留、nested 隔离、URI/版本/类型/null/shape/ID/范围及选中不支持内容无 RNG/请求副作用。新 native class 42 例、旧 frozen profile class 33 例精确运行，不冒称完整 Game/Prepare/Main、GPU、人工或 CI 验收。
