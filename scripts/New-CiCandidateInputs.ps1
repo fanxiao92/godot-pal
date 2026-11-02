@@ -23,5 +23,24 @@ if($Mode -in @('draft-quick','ready-full','pr-unit')){
  if($response -isnot [pscustomobject]){throw 'API response must be an object.'};$headProperty=$response.PSObject.Properties['head'];$baseProperty=$response.PSObject.Properties['base'];$candidateProperty=$response.PSObject.Properties['merge_commit_sha'];$draftApi=$response.PSObject.Properties['draft'];if($null -eq $headProperty -or $headProperty.Value -isnot [pscustomobject] -or $null -eq $baseProperty -or $baseProperty.Value -isnot [pscustomobject] -or $null -eq $candidateProperty -or $candidateProperty.Value -isnot [string] -or $candidateProperty.Value -notmatch '^[0-9a-fA-F]{40}$' -or $null -eq $draftApi -or $draftApi.Value -isnot [bool]){throw 'API response has missing or incorrectly typed identity fields.'};$headSha=$headProperty.Value.PSObject.Properties['sha'];$baseSha=$baseProperty.Value.PSObject.Properties['sha'];if($null -eq $headSha -or $headSha.Value -isnot [string] -or $headSha.Value -notmatch '^[0-9a-fA-F]{40}$' -or $null -eq $baseSha -or $baseSha.Value -isnot [string] -or $baseSha.Value -notmatch '^[0-9a-fA-F]{40}$'){throw 'API head/base sha fields are invalid.'};$head=$headSha.Value.ToLowerInvariant();$base=$baseSha.Value.ToLowerInvariant();$candidate=$candidateProperty.Value.ToLowerInvariant();if([bool]$draftApi.Value -ne $Draft){throw 'API draft state does not match original event payload.'};$Draft=[bool]$draftApi.Value
 }
 if($Mode -eq 'draft-quick' -and -not $Draft){throw 'draft-quick requires draft=true.'};if($Mode -eq 'ready-full' -and $Draft){throw 'ready-full requires draft=false.'};if($Mode -in @('push-main','push-unit') -and ($EventName -ne 'push' -or $Action -ne 'main')){throw 'push-main requires push/main event.'};if($Mode -in @('manual-full','manual-unit') -and ($EventName -ne 'workflow_dispatch' -or $Action -ne 'manual')){throw 'manual-full requires workflow_dispatch/manual event.'};$event=[ordered]@{eventName=$EventName;action=$Action;mode=$Mode};$metadata=[ordered]@{githubSha=$GithubSha;runId=$RunId;runAttempt=$RunAttempt;workflowRef=$WorkflowRef;prHeadSha=$head;prBaseSha=$base;draft=$Draft}
+# Only Unit PR mode can attest an equivalent regenerated server merge. The tested
+# candidate remains the run's actual GitHub SHA; legacy full modes stay strict.
+$serverMergeCandidate=$null
+if($Mode -eq 'pr-unit') {
+ [IO.File]::WriteAllText((Join-Path $root 'api-pull-request.json'),($response|ConvertTo-Json -Depth 60),$utf8)
+ if($candidate -cne $actual) {
+  if($GithubSha -notmatch '^[0-9a-fA-F]{40}$' -or $actual -cne $GithubSha.ToLowerInvariant() -or $parents.Count -ne 2 -or $parents[0] -cne $base -or $parents[1] -cne $head){throw 'Unit merge equivalence requires the exact run checkout and current ordered base/head.'}
+  $commitUri="$ApiUrl/repos/$env:GITHUB_REPOSITORY/git/commits/$candidate"
+  $apiMerge=Invoke-RestMethod -Method Get -Uri $commitUri -Headers @{Authorization="Bearer $env:CI_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+  [IO.File]::WriteAllText((Join-Path $root 'api-merge-commit.json'),($apiMerge|ConvertTo-Json -Depth 20),$utf8)
+  if($apiMerge -isnot [pscustomobject] -or $apiMerge.sha -isnot [string] -or $apiMerge.sha -notmatch '^[0-9a-fA-F]{40}$' -or $apiMerge.sha.ToLowerInvariant() -cne $candidate -or $apiMerge.tree -isnot [pscustomobject] -or $apiMerge.tree.sha -isnot [string] -or $apiMerge.tree.sha -notmatch '^[0-9a-fA-F]{40}$' -or $apiMerge.tree.sha.ToLowerInvariant() -cne $tree -or $apiMerge.parents -isnot [array] -or $apiMerge.parents.Count -ne 2){throw 'API regenerated merge must have the requested SHA and exact actual tree/ordered parents.'}
+  for($i=0;$i -lt 2;$i++) {
+   if($apiMerge.parents[$i] -isnot [pscustomobject] -or $apiMerge.parents[$i].sha -isnot [string] -or $apiMerge.parents[$i].sha -notmatch '^[0-9a-fA-F]{40}$' -or $apiMerge.parents[$i].sha.ToLowerInvariant() -cne $parents[$i]){throw 'API regenerated merge has different or malformed ordered parents.'}
+  }
+  $serverMergeCandidate=[ordered]@{relation='same-tree-ordered-parents';sha=$candidate;tree=$tree;parents=@($parents)}
+  $candidate=$actual
+ }
+}
 $snapshot=[ordered]@{eventName=$EventName;action=$Action;mode=$Mode;runId=$RunId;runAttempt=$RunAttempt;workflowRef=$WorkflowRef;draft=$Draft;headSha=$head;baseSha=$base;candidateSha=$candidate;actualCheckout=$actual;tree=$tree;parents=$parents}
+if($null -ne $serverMergeCandidate){$snapshot.serverMergeCandidate=$serverMergeCandidate}
 [IO.File]::WriteAllText((Join-Path $root 'event.json'),($event|ConvertTo-Json),[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText((Join-Path $root 'metadata.json'),($metadata|ConvertTo-Json),[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText((Join-Path $root 'snapshot.json'),($snapshot|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false));Write-Output $root

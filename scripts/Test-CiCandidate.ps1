@@ -96,6 +96,16 @@ try {
     }
     $snapshotParents = $snapshot.PSObject.Properties['parents']; if ($null -eq $snapshotParents -or $snapshotParents.Value -isnot [array] -or @($snapshotParents.Value).Count -ne $parents.Count) { Fail 3 'Server snapshot stale or mismatched: parents.' }
     for ($index=0; $index -lt $parents.Count; $index++) { if ($snapshotParents.Value[$index] -cne $parents[$index]) { Fail 3 'Server snapshot stale or mismatched: parents.' } }
+    $serverMergeProperty = $snapshot.PSObject.Properties['serverMergeCandidate']
+    if ($null -ne $serverMergeProperty) {
+        $serverMerge = $serverMergeProperty.Value
+        if ($mode -cne 'pr-unit' -or $serverMerge -isnot [pscustomobject] -or $serverMerge.relation -isnot [string] -or $serverMerge.relation -cne 'same-tree-ordered-parents' -or $serverMerge.sha -isnot [string] -or $serverMerge.sha -cnotmatch '^[0-9a-f]{40}$' -or $serverMerge.sha -ceq $actualHead -or $serverMerge.tree -isnot [string] -or $serverMerge.tree -cne $tree -or $serverMerge.parents -isnot [array] -or $serverMerge.parents.Count -ne 2 -or $parents.Count -ne 2) {
+            Fail 3 'Server merge equivalence proof has invalid mode, SHA, tree or parent shape.'
+        }
+        for ($index = 0; $index -lt 2; $index++) {
+            if ($serverMerge.parents[$index] -isnot [string] -or $serverMerge.parents[$index] -cne $parents[$index]) { Fail 3 'Server merge equivalence proof has different ordered parents.' }
+        }
+    }
     if (Test-Path -LiteralPath $output) { Fail 4 'Candidate evidence already exists; refusing overwrite.' }
     $json = $initial | ConvertTo-Json -Depth 10
     try { $stream = [IO.File]::Open($output, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None); try { $bytes = $utf8.GetBytes($json); $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() } } catch { Fail 4 "Cannot atomically create candidate evidence: $($_.Exception.Message)" }

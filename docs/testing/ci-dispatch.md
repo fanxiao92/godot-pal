@@ -36,7 +36,8 @@ CI 专用 `scripts/Invoke-CiUnit.ps1` 按上述顺序直接启动 `dotnet test <
 
 - checkout/action、setup-dotnet/action、upload-artifact/action 保持批准的固定 commit；SDK 由 `global.json` 选择，沿用其补丁策略，不自动升级依赖。checkout 使用 `fetch-depth: 2`、`persist-credentials: false`、`lfs: false`，保留直接父层而非全部历史。
 - `GITHUB_EVENT_PATH` 通过 step env 传入并保存原件。`New-CiCandidateInputs.ps1` 从原事件派生 action；PR 在开始和结束分别只读 GET 核对 head/base/merge candidate/Draft，不把表达式数据拼进脚本源码。manual 的 `inputs` 允许对象或 null。
-- `Test-CiCandidate.ps1` 对照实际 Git checkout/tree/有序 parents 与 run/attempt/workflow/event/action/mode/Draft。PR 必须是有序 base/head 双亲的 merge candidate，不能用 head 自测替代；非 PR 不假定只有一个 parent。错型对象、旧候选、旧 run/attempt 或快照变化失败，不覆盖成功身份文件。
+- `Test-CiCandidate.ps1` 对照实际 Git checkout/tree/有序 parents 与 run/attempt/workflow/event/action/mode/Draft。PR 必须是有序 base/head 双亲的 merge candidate，不能用 head 自测替代；非 PR 不假定只有一个 parent。错型对象、旧源码候选、旧 run/attempt 或非等价身份变化失败，不覆盖成功身份文件。
+- GitHub 在 PR 重开或重新计算 merge ref 时可能返回不同的合成 merge SHA，即使 H/B、tree 和有序 parents 未变。仅 `pr-unit` 允许这一**有证据的等价重算**：实际受测提交仍是该运行的 `GITHUB_SHA`；若当前 API M 不同，再 GET 该 commit 并严格核对返回 SHA、完整 tree 及有序 `[B,H]`。`api-pull-request.json`、`api-merge-commit.json` 保留 API 身份，规范化 snapshot 的 `serverMergeCandidate` 单独记录等价关系，validator 再校验其类型/tree/parents。不能把测试提交重标为 API 新 M，也不能只因 H 相同而接受不同 tree/base/parents。缺证明或证明错误即失败；旧 Full 模式不启用此例外。
 - 新的 `pr-unit`/`push-unit`/`manual-unit` 与保留的 `draft-quick`/`ready-full`/`push-main`/`manual-full` 分开；Unit 身份不能作为旧 FullProof 的完整凭据。
 - executor 要求 clean checkout，绑定所有 tracked 文件的路径/SHA-256；命令前后及结束 block 再核对源码。原始命令、SDK 输出、真实数字退出、root exit 和双流 EOF 与本轮 TRX 一并保留。未知退出为 null，不能借内层/旧 `$LASTEXITCODE=0` 补成功。
 - 每项目通过后才执行下一项目。非零退出、restore/build/宿主错误诊断、零执行、skip、会话中止、未知/不完整输出或缺少必要证据均阻断；后续工程保持 `not-run`。原非零退出不被报告错误改成零；原零但采证失败仍使 job 失败。不自动重试、换源、缩范围或加时限。

@@ -100,8 +100,14 @@ $null=G $fixture @('merge','--quiet','--no-ff','topic','-m','merge candidate'); 
 $api=@'
 function Invoke-RestMethod {
  param($Method,$Uri,$Headers)
- if ($Method -cne 'Get' -or $Uri -cne 'https://fixture.invalid/repos/fixture/repo/pulls/42') { throw 'Unexpected external API request' }
- [pscustomobject]@{head=[pscustomobject]@{sha=$env:FIXTURE_HEAD};base=[pscustomobject]@{sha=$env:FIXTURE_BASE};merge_commit_sha=$env:FIXTURE_SHA;draft=[bool]::Parse($env:FIXTURE_DRAFT)}
+ if ($Method -cne 'Get') { throw 'Unexpected external API method' }
+ if ($Uri -ceq 'https://fixture.invalid/repos/fixture/repo/pulls/42') {
+  return [pscustomobject]@{head=[pscustomobject]@{sha=$env:FIXTURE_HEAD};base=[pscustomobject]@{sha=$env:FIXTURE_BASE};merge_commit_sha=$env:FIXTURE_SHA;draft=[bool]::Parse($env:FIXTURE_DRAFT)}
+ }
+ if ($Uri -ceq "https://fixture.invalid/repos/fixture/repo/git/commits/$env:FIXTURE_SHA") {
+  return [pscustomobject]@{sha=$env:FIXTURE_SHA;tree=[pscustomobject]@{sha=$env:FIXTURE_TREE};parents=@([pscustomobject]@{sha=$env:FIXTURE_BASE},[pscustomobject]@{sha=$env:FIXTURE_HEAD})}
+ }
+ throw 'Unexpected external API request'
 }
 function Get-Command {
  param($Name,$CommandType,$ErrorAction)
@@ -135,7 +141,7 @@ function New-Case([string]$Name,[string]$Event='workflow_dispatch',[bool]$Draft=
     $dir=Join-Path $base $Name; $null=New-Item -ItemType Directory $dir
     $payload=if($Event -eq 'pull_request') { @{action='synchronize';pull_request=@{number=42;draft=$Draft}} } elseif($Event -eq 'push') { @{ref='refs/heads/main'} } else { @{inputs=$null} }
     Json "$dir/event.json" $payload
-    return @{dir=$dir;env=@{RUNNER_TEMP=$dir;GITHUB_WORKSPACE=$fixture;CI_EVENT_PATH="$dir/event.json";CI_EVENT_NAME=$Event;CI_SHA=$sha;CI_RUN_ID='owned-unit';CI_RUN_ATTEMPT='1';CI_WORKFLOW_REF='fixture/.github/workflows/ci.yml@refs/heads/main';CI_API_URL='https://fixture.invalid';CI_PR_NUMBER='42';GITHUB_REPOSITORY='fixture/repo';CI_TOKEN='nonsecret-owned-fixture';FIXTURE_HEAD=$head;FIXTURE_BASE=$parent;FIXTURE_SHA=$sha;FIXTURE_DRAFT=$Draft.ToString();FIXTURE_EXE=$shimExe;FIXTURE_CALLS="$dir/calls.txt";FIXTURE_TARGET='core';FIXTURE_MODE='pass'}}
+    return @{dir=$dir;env=@{RUNNER_TEMP=$dir;GITHUB_WORKSPACE=$fixture;CI_EVENT_PATH="$dir/event.json";CI_EVENT_NAME=$Event;CI_SHA=$sha;CI_RUN_ID='owned-unit';CI_RUN_ATTEMPT='1';CI_WORKFLOW_REF='fixture/.github/workflows/ci.yml@refs/heads/main';CI_API_URL='https://fixture.invalid';CI_PR_NUMBER='42';GITHUB_REPOSITORY='fixture/repo';CI_TOKEN='nonsecret-owned-fixture';FIXTURE_HEAD=$head;FIXTURE_BASE=$parent;FIXTURE_SHA=$sha;FIXTURE_TREE=(G $fixture @('show','-s','--format=%T','HEAD'));FIXTURE_DRAFT=$Draft.ToString();FIXTURE_EXE=$shimExe;FIXTURE_CALLS="$dir/calls.txt";FIXTURE_TARGET='core';FIXTURE_MODE='pass'}}
 }
 $count=0
 foreach($entry in @(@{name='draft';event='pull_request';draft=$true},@{name='ready';event='pull_request';draft=$false},@{name='push';event='push';draft=$false},@{name='manual';event='workflow_dispatch';draft=$false})) {
@@ -186,7 +192,7 @@ foreach($fault in @('tamper','missing-log','stale-run','stale-attempt','stale-ca
         'stale-candidate' { $case.env.CI_SHA=('f'*40) }
         'partial-report' { $report.projects=@($report.projects[0]); Json $rp $report }
         'missing-report' { Remove-Item $rp }
-        'changed-api' { $case.env.FIXTURE_SHA=('e'*40) }
+        'changed-api' { $case.env.FIXTURE_SHA=('e'*40); $case.env.FIXTURE_TREE=('0'*40) }
         'missing-source' { $report.PSObject.Properties.Remove('source'); Json $rp $report }
         'source-bytes' { Put "$fixture/head.txt" 'controlled source change' }
         'typed-completion' { $report.commands[0].exitKnown='True'; Json $rp $report }
@@ -196,6 +202,7 @@ foreach($fault in @('tamper','missing-log','stale-run','stale-attempt','stale-ca
     $reason=switch($fault) {
         'missing-log' { 'Unit original artifact missing: core.stdout.log' }
         'missing-report' { 'Unit original report missing.' }
+        'changed-api' { 'API regenerated merge must have the requested SHA and exact actual tree/ordered parents.' }
         default { 'Unit candidate/evidence|Missing complete approved Unit|Unit original artifact|candidate:|Unit source|Missing Unit source|Incomplete Unit command' }
     }
     if($fault -in @('missing-log','missing-report')) { Assert ($r.err.Contains($reason)) "End rejected $fault without its specific missing-evidence diagnostic: $($r.err)" }
@@ -203,6 +210,15 @@ foreach($fault in @('tamper','missing-log','stale-run','stale-attempt','stale-ca
     if($fault -eq 'source-bytes') { Put "$fixture/head.txt" 'owned head' }
     $count++
 }
+# Actual end block accepts a fresh server SHA only with identical tree and ordered parents.
+$case=New-Case 'end-equivalent-server-merge' 'pull_request' $false
+foreach($b in @(@{n='start';c=$start},@{n='run';c=$run})) { $r=Invoke-Block $case $b.n $b.c; Assert ($r.exit -eq 0) 'Equivalent merge setup failed' }
+$case.env.FIXTURE_SHA=('d'*40)
+$r=Invoke-Block $case 'end' $end
+Assert ($r.exit -eq 0) "Actual end rejected same-tree ordered-parent merge regeneration: $($r.err)"
+$snapshot=Get-Content "$($case.dir)/unit-end/snapshot.json" -Raw|ConvertFrom-Json -NoEnumerate
+Assert ($snapshot.candidateSha -ceq $sha -and $snapshot.serverMergeCandidate.sha -ceq ('d'*40)) 'Equivalent merge relabelled the tested candidate or lost API identity'
+$count++
 $case=New-Case 'legacy-block'; $r=Invoke-Block $case 'legacy' $legacy
 Assert ($r.exit -ne 0 -and $r.err.Contains('Unit-only is not full-check')) 'Legacy full-check must explicitly refuse'; $count++
 Json (Join-Path $base 'summary.json') @{count=$count;failed=0;synthetic=$true;realGit=$true;nativeSdkFixture=$true;remoteActions=$false}

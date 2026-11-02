@@ -29,4 +29,47 @@ $global:ApiHead=$head;$global:ApiBase=$base;$global:ApiCandidate=$candidate
 foreach($bad in @(@{Name='event-array';Value='[]'},@{Name='event-singleton-array';Value='[{"ref":"refs/heads/main"}]'},@{Name='event-null';Value='null'},@{Name='event-scalar';Value='7'})){$d=Join-Path $evidence $bad.Name;$null=New-Item -ItemType Directory $d;Set-Content (Join-Path $d 'event.json') $bad.Value -Encoding utf8;try{$o=& $producer -OutputDirectory (Join-Path $d 'out') -RepositoryRoot $fixture -EventName 'push' -Action 'main' -Mode 'push-main' -GithubSha $candidate -RunId 'r' -RunAttempt 1 -WorkflowRef 'w' -EventJsonPath (Join-Path $d 'event.json') 2>&1;$code=$LASTEXITCODE}catch{$code=1};if($code -eq 0){throw "$($bad.Name) accepted"}}
 foreach($badInput in @(@{Name='dispatch-missing-inputs';Value='{}'},@{Name='dispatch-bool-inputs';Value='{"inputs":true}'},@{Name='dispatch-array-inputs';Value='{"inputs":[]}'})){ $d=Join-Path $evidence $badInput.Name;$null=New-Item -ItemType Directory $d;Set-Content (Join-Path $d 'event.json') $badInput.Value -Encoding utf8;try{$o=& $producer -OutputDirectory (Join-Path $d 'out') -RepositoryRoot $fixture -EventName 'workflow_dispatch' -Action 'manual' -Mode 'manual-full' -GithubSha $candidate -RunId 'r' -RunAttempt 1 -WorkflowRef 'w' -EventJsonPath (Join-Path $d 'event.json') 2>&1;$code=$LASTEXITCODE}catch{$code=1};if($code -eq 0){throw "$($badInput.Name) accepted"} }
 $bad=Join-Path $evidence 'invalid-utf8';$null=New-Item -ItemType Directory $bad;[IO.File]::WriteAllBytes((Join-Path $bad 'event.json'),[byte[]](0x7b,0x22,0x78,0x22,0x3a,0xff,0x7d));try{$o=& $producer -OutputDirectory (Join-Path $bad 'out') -RepositoryRoot $fixture -EventName 'push' -Action 'main' -Mode 'push-main' -GithubSha $candidate -RunId 'r' -RunAttempt 1 -WorkflowRef 'w' -EventJsonPath (Join-Path $bad 'event.json') 2>&1;$code=$LASTEXITCODE}catch{$code=1};if($code -eq 0){throw 'invalid UTF-8 accepted'}
-$null=$env:CI_TOKEN;Write-Output 'PASS CiCandidateInputs public pipeline: owned Git merge fixture, producer→validator PR/push/manual cases, API call contract, typed malformed event rejection.';if(-not $EvidenceDirectory){Remove-Item $evidence -Recurse -Force}
+# GitHub may regenerate a synthetic merge commit while keeping its exact tree and ordered parents.
+# These are public producer -> validator contract cases, not product Unit tests.
+$global:RecomputedSha=(& $git -C $fixture commit-tree $tree -p $base -p $head -m recomputed-merge).Trim()
+if($LASTEXITCODE -ne 0 -or $global:RecomputedSha -ceq $candidate){throw 'Distinct equivalent merge fixture was not created.'}
+$env:CI_TOKEN='fixture-token'
+function Invoke-RestMethod {
+ param([string]$Method,[string]$Uri,[hashtable]$Headers)
+ $null=($env:CI_API_CALLS=[int]$env:CI_API_CALLS+1)
+ if($Method -cne 'Get' -or $Headers.Authorization -cne 'Bearer fixture-token' -or $Headers.Accept -cne 'application/vnd.github+json' -or $Headers.'X-GitHub-Api-Version' -cne '2022-11-28'){throw 'equivalent merge API contract mismatch'}
+ if($Uri -ceq $env:CI_EXPECTED_URL){return [pscustomobject]@{head=[pscustomobject]@{sha=$global:FixtureHead};base=[pscustomobject]@{sha=$global:FixtureBase};merge_commit_sha=$global:RecomputedSha;draft=$false}}
+ if($Uri -ceq "https://api.example/repos/fanxiao92/godot-pal/git/commits/$global:RecomputedSha"){return $global:RecomputedCommit}
+ throw 'Unexpected equivalent merge API URL'
+}
+function Run-UnitMergeCase([string]$Name,[object]$Commit,[int]$Expected) {
+ $dir=Join-Path $evidence $Name;$null=New-Item -ItemType Directory $dir
+ $ep=Join-Path $dir 'original-event.json';$prReady|ConvertTo-Json -Depth 20|Set-Content $ep -Encoding utf8
+ $global:RecomputedCommit=$Commit;$env:CI_API_CALLS=0
+ try {$out=& $producer -OutputDirectory (Join-Path $dir 'inputs') -RepositoryRoot $fixture -EventName 'pull_request' -Action 'caller' -Mode 'pr-unit' -GithubSha $candidate -RunId 'equivalent-run' -RunAttempt 1 -WorkflowRef 'refs/workflows/ci.yml' -PrNumber '42' -ApiUrl 'https://api.example' -EventJsonPath $ep 2>&1;$code=$LASTEXITCODE} catch {$out=@($_.Exception.Message);$code=1}
+ if($code -ne $Expected){throw "${Name} expected ${Expected}, got ${code}: $($out -join ' ')"}
+ if($Expected -ne 0){return}
+ $inputs=Join-Path $dir 'inputs';$snapshot=Get-Content (Join-Path $inputs 'snapshot.json') -Raw|ConvertFrom-Json -NoEnumerate
+ if($snapshot.candidateSha -cne $candidate -or $snapshot.serverMergeCandidate.sha -cne $global:RecomputedSha){throw "${Name}: actual and API merge identities were not retained separately"}
+ foreach($file in @('api-pull-request.json','api-merge-commit.json')){if(-not(Test-Path (Join-Path $inputs $file))){throw "${Name}: API original missing: $file"}}
+ if($env:CI_API_CALLS -ne 2){throw "${Name}: expected exactly PR and commit API calls"}
+ $out=& $validator -EventPath (Join-Path $inputs 'event.json') -MetadataPath (Join-Path $inputs 'metadata.json') -RepositoryRoot $fixture -ServerSnapshotPath (Join-Path $inputs 'snapshot.json') -EvidenceDirectory (Join-Path $dir 'proof') 2>&1
+ if($LASTEXITCODE -ne 0){throw "${Name}: validator rejected verified equivalent merge: $($out -join ' ')"}
+ $identity=Get-Content (Join-Path $dir 'proof/candidate-identity.json') -Raw|ConvertFrom-Json -NoEnumerate
+ if($identity.actualCheckout -cne $candidate -or $identity.candidateSha -cne $candidate){throw "${Name}: tested commit was relabelled as API merge"}
+}
+$equivalent=[pscustomobject]@{sha=$global:RecomputedSha;tree=[pscustomobject]@{sha=$tree};parents=@([pscustomobject]@{sha=$base},[pscustomobject]@{sha=$head})}
+Run-UnitMergeCase 'unit-equivalent-merge' $equivalent 0
+foreach($bad in @('returned-sha','tree','parents-order','parents-singleton','missing-tree','parent-type')) {
+ $copy=$equivalent|ConvertTo-Json -Depth 10|ConvertFrom-Json -NoEnumerate
+ switch($bad){
+  'returned-sha' {$copy.sha='0'*40}
+  'tree' {$copy.tree.sha='1'*40}
+  'parents-order' {$copy.parents=@($copy.parents[1],$copy.parents[0])}
+  'parents-singleton' {$copy.parents=@($copy.parents[0])}
+  'missing-tree' {$copy.PSObject.Properties.Remove('tree')}
+  'parent-type' {$copy.parents=@('not-an-object',$copy.parents[1])}
+ }
+ Run-UnitMergeCase ('unit-equivalent-reject-'+$bad) $copy 1
+}
+$null=$env:CI_TOKEN;Write-Output 'PASS CiCandidateInputs public pipeline, including same-tree/ordered-parent merge regeneration and six exact rejection controls; legacy modes remain strict.';if(-not $EvidenceDirectory){Remove-Item $evidence -Recurse -Force}
