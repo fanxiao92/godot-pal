@@ -57,5 +57,34 @@ foreach($field in @('event','metadata','snapshot')){
  if($exit -ne 2 -or (Test-Path (Join-Path $dir 'candidate-identity.json'))){$singletonFailures+=$field}
 }
 if($singletonFailures.Count){throw "Singleton root arrays accepted: $($singletonFailures -join ', ')"}
-Write-Output 'PASS CiCandidate repair regression: baseline identity cases plus 3 singleton-root controls; ordered parents, typed snapshot freshness, strict UTF-8, and atomic no-overwrite verified.'
+# Optional server-merge equivalence must not become a route around exact run/tree/parents.
+$mergeProof=[ordered]@{relation='same-tree-ordered-parents';sha=('f'*40);tree=$tree;parents=@($base,$head)}
+foreach($case in @('valid','wrong-tree','swapped-parents','missing-parents','scalar','array','null','bad-sha','same-sha','legacy-mode')) {
+ $dir=Join-Path $evidence ('unit-api-equivalence-'+$case);$null=New-Item -ItemType Directory $dir
+ $ev=Get-Content (Join-Path $evidence 'matching-merge/event.json') -Raw|ConvertFrom-Json -NoEnumerate
+ $meta=Get-Content (Join-Path $evidence 'matching-merge/metadata.json') -Raw|ConvertFrom-Json -NoEnumerate
+ $snap=Get-Content (Join-Path $evidence 'matching-merge/snapshot.json') -Raw|ConvertFrom-Json -NoEnumerate
+ $proof=$mergeProof|ConvertTo-Json -Depth 10|ConvertFrom-Json -NoEnumerate
+ $ev.mode='pr-unit';$snap.mode='pr-unit';$wanted=3
+ switch($case) {
+  'valid' {$wanted=0}
+  'wrong-tree' {$proof.tree='0'*40}
+  'swapped-parents' {$proof.parents=@($head,$base)}
+  'missing-parents' {$proof.PSObject.Properties.Remove('parents')}
+  'scalar' {$proof='invalid'}
+  'array' {$proof=@($proof)}
+  'null' {$proof=$null}
+  'bad-sha' {$proof.sha='invalid'}
+  'same-sha' {$proof.sha=$candidate}
+  'legacy-mode' {$ev.mode='ready-full';$snap.mode='ready-full'}
+ }
+ $snap|Add-Member -NotePropertyName serverMergeCandidate -NotePropertyValue $proof
+ $ev|ConvertTo-Json -Depth 10|Set-Content (Join-Path $dir 'event.json') -Encoding utf8
+ $meta|ConvertTo-Json -Depth 10|Set-Content (Join-Path $dir 'metadata.json') -Encoding utf8
+ $snap|ConvertTo-Json -Depth 10|Set-Content (Join-Path $dir 'snapshot.json') -Encoding utf8
+ & pwsh -NoProfile -File $helper -EventPath (Join-Path $dir 'event.json') -MetadataPath (Join-Path $dir 'metadata.json') -RepositoryRoot $fixture -ServerSnapshotPath (Join-Path $dir 'snapshot.json') -EvidenceDirectory $dir 1> (Join-Path $dir 'raw.stdout') 2> (Join-Path $dir 'raw.stderr')
+ $actualExit=$LASTEXITCODE
+ if($actualExit -ne $wanted -or (($wanted -ne 0) -and (Test-Path (Join-Path $dir 'candidate-identity.json')))){throw "unit-api-equivalence-${case} expected ${wanted}, got ${actualExit}"}
+}
+Write-Output 'PASS CiCandidate identity, typed freshness, atomic no-overwrite and 10 Unit API merge-equivalence controls; legacy modes remain strict.'
 if(-not $EvidenceDirectory){Remove-Item $evidence -Recurse -Force}
