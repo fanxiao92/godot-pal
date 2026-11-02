@@ -1,80 +1,49 @@
-# Unit-only CI、候选身份与证据
+# 原生 Unit CI 与证据边界
 
-## 三个交付阶段
+## 默认调用链
 
-[规格 #69](https://github.com/fanxiao92/godot-pal/issues/69) 的 [#67](https://github.com/fanxiao92/godot-pal/issues/67) 将自动反馈改为 Unit-only，接受阶段性覆盖降低，不把 Unit 称为完整验收。
+自动反馈采用 [ADR-0003](../adr/0003-native-unit-feedback.md) 的原生基线：checkout → setup-dotnet → HEAD/GITHUB_SHA 比较 → 两个独立 `dotnet test` step → artifact。没有 Python、CI 专用执行器、候选 JSON 协议或外部审计前置。工作 agent 按[短指南](getting-started.md)自行选择项目，不需要学习 CI 编排。
 
-| 阶段 | 当前候选的含义 | 不可据此宣称 |
-| --- | --- | --- |
-| 本地 workflow candidate | 已交付；独立 `unit-check` 及受影响有界契约/直接 Unit 已验证 | 单凭本地结果证明 GitHub 调度或保护 |
-| 远端检查 | 已取得真实 PR 各事件、manual、main push 及负向矩阵的独立原件 | 单凭 Unit success 证明 required check 已切换 |
-| 服务端切换 | 已完成 checks-only 切换、完整字段回读和普通 merge 拒绝/允许；见[保护说明](merge-protection.md#unit-only-分阶段切换67) | 所有主体/权限例外均不可绕过，或完整验收已通过 |
+| 事件 | 执行 |
+| --- | --- |
+| Draft/Ready PR 的 opened、synchronize、reopened、ready_for_review、converted_to_draft、edited | Core Unit → CLI Unit，不按 Draft 状态跳过 |
+| `main` push | 同上 |
+| `workflow_dispatch` | 同上，对手动选择的实际 ref，不冒充 PR merge 结果 |
 
-#67 已由 [PR #70](https://github.com/fanxiao92/godot-pal/pull/70) 合入 main，交付提交 `d9bc96e4cb4166600cab6027a7d6370221d01d55`；真实 [main push](https://github.com/fanxiao92/godot-pal/actions/runs/41440000263) 的全量 Core/CLI Unit 及原件核验通过。事件证据包括 opened、无提交 Ready、[Ready/edited](https://github.com/fanxiao92/godot-pal/actions/runs/41426078216)、[converted_to_draft](https://github.com/fanxiao92/godot-pal/actions/runs/41428519546)、[manual](https://github.com/fanxiao92/godot-pal/actions/runs/41430853131)、[Ready synchronize](https://github.com/fanxiao92/godot-pal/actions/runs/41438144152) 和修复后 [reopened](https://github.com/fanxiao92/godot-pal/actions/runs/41438637342)。每个只属于各自候选/run/attempt；manual 检出 integration ref，不冒充 PR merge candidate，早期事件的成功也不补签后续改动。负控制 PR #71 已关闭、未合并，指定失败、取消和外部核验器失败的原件与独立恢复保持原身份。当前状态与完整行为回执见 [#67](https://github.com/fanxiao92/godot-pal/issues/67)，后续操作仍须实时核对，不能据本页重复切换。
+固定工程为 `tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj` 和 `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj`。每工程独立 step，直接 `dotnet test <csproj> --configuration Debug --settings tests/unit.runsettings --logger 'trx;LogFileName=results.trx' --results-directory <本轮目录>`；无 filter/path 筛选、独立 discovery、solution、`--no-build` 或 `--no-restore`。前项失败后后项按 Actions 默认成功条件不执行，上传仍尽力运行。
 
-本地具体命令、提交、原始证据及验收结论保存在任务交接；不能仅凭本页或历史成功补签新候选。完整 spec 的 Standards/Spec 双轴评审留给最终 candidate，不在每张子票重复。
+自动路径不运行 Source/Offline、Integration、Prepare、Godot 或完整门，也不下载 Godot/GdUnit；它们继续是显式选择。
 
-## 自动事件与工程集合
+## 工具链、身份与失败
 
-| 事件 | Unit 模式 | 执行 |
-| --- | --- | --- |
-| Draft PR 更新、转回 Draft | `pr-unit` | Core Unit → CLI Unit |
-| Ready PR 更新、无新提交 `ready_for_review` | `pr-unit` | 同上，核对当前 merge candidate |
-| `main` push | `push-unit` | 同上，核对实际 checkout |
-| `workflow_dispatch` | `manual-unit` | 同上，对实际检出的 ref，不冒充 PR merge 结果 |
+- checkout/setup-dotnet/upload-artifact 沿用固定 commit。checkout 保持 `persist-credentials: false`、`fetch-depth: 2`、`lfs: false`；SDK 由 `global.json` 与 dotnet 解析，实际 `dotnet --version` 留在日志，不重复实现补丁匹配。
+- 实际 HEAD 必须等于运行的 `GITHUB_SHA`。PR 保留 Actions 的 merge checkout 语义，不指定 PR head；main/manual 核对自己的运行 SHA。记录以 GitHub 的 run/attempt 和日志为准，不在开始/结束查询实时 PR、Draft 或另一个 merge SHA，也不再生成 `pr-unit`/`push-unit`/`manual-unit` 快照。
+- 每项目结果目录必须尚不存在；命令原生非零退出原样传播，不让随后文件检查覆盖它。`tests/unit.runsettings` 的 `TreatNoTestsAsError` 和 `xUnit.FailSkips` 使零执行与 skip 由现有 VSTest/xUnit 拒绝。
+- 原生退出 0 后还检查该工程的本轮 `results.trx` 存在。中止、取消、超时、未知退出或缺报告不能当成功；不重试、不换源、不缩范围。SDK/runner 输出与 Actions 结果是默认判断来源，不额外解释每种宿主诊断。
+- 并发组仍是 workflow + PR number（非 PR 用 ref），新运行可取消同组旧运行。取消不是成功，也不能用局部项目的通过补齐整轮。
 
-PR 事件包含 `opened`、`synchronize`、`reopened`、`ready_for_review`、`converted_to_draft`、`edited`。不以 Draft 状态跳过 Unit，也没有 path/filter 筛选。固定批准集合为：
+原生基线**不提供**全仓文件 hash/长度清单、TRX Results/Definitions/Entries/GUID/时间窗审计、任意 RunInfo 的独立拒绝、前后 API 身份桥接或自定义 root/双流 EOF 证明。它也不证明运行中所有 tracked 文件完全未变。需这些额外保证时明确选择维护层，不能把普通 Unit 成功描述成同等独立审计。
 
-- `tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj`
-- `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj`
+## 日志、报告和预算
 
-CI 专用 `scripts/Invoke-CiUnit.ps1` 按上述顺序直接启动 `dotnet test <csproj> --configuration Debug --logger 'trx;LogFileName=results.trx' --results-directory <本轮独立目录>`，正常隐式 restore/build、普通 NuGet 缓存，不用 `--no-build`、`--no-restore`、discovery 或 solution。它只补 CI 所需的固定集合执行/采证，不是新的 agent 默认入口；agent 仍按[直接 Unit 协议](unit-entry.md#默认反馈协议)自行选择明确项目。`Test-Unit.ps1` 保留为显式维护工具。
+Actions 日志保留实际步骤输出和退出；artifact `ci-unit-evidence-<run_id>-<run_attempt>` 仅上传两份本轮 TRX：`unit-results/core/results.trx`、`unit-results/cli-unit/results.trx`。不生成 `unit-run.json`、`unit-start`/`unit-end`、原事件副本或第二份权威报告。`always()` 尽力保存失败现场，`if-no-files-found: error` 拒绝空上传；有部分产物不表示两个项目通过。不上传缓存、真实资源或 token。
 
-自动 workflow 不运行 Source/Offline 工程编排、Integration、Prepare、Godot、完整门，也不下载 Godot/GdUnit。`Test-M0.ps1`、`Test-CiFullProof.ps1`、旧成本/身份工具及历史证据保留，不因保留就视为当前完整门运行兼容性已验收。恢复重型自动检查须另立任务，验证工具链、候选绑定、重复运行、指定失败 controls 与完整证据，再分别批准调度及保护切换。
+单项目 step 10 分钟，job 20 分钟，交给 Actions 管理超时；不保留自定义命令 600000ms + 清理 5000ms/EOF 的实现，也不宣称两种机制完全等价。成本使用 Actions step/job 的可见时长并标注口径，不再要求每轮额外记录精确命令/round Stopwatch 或 5/10 分钟告警。TRX duration 仍不是 restore/build 的端到端墙钟；未知分项不补零。本地宿主的执行预算由调用者记录，不从 CI 时长推断。
 
-## 候选身份与失败封闭
+## 保留工具与历史
 
-- checkout/action、setup-dotnet/action、upload-artifact/action 保持批准的固定 commit；SDK 由 `global.json` 选择，沿用其补丁策略，不自动升级依赖。checkout 使用 `fetch-depth: 2`、`persist-credentials: false`、`lfs: false`，保留直接父层而非全部历史。
-- `GITHUB_EVENT_PATH` 通过 step env 传入并保存原件。`New-CiCandidateInputs.ps1` 从原事件派生 action；PR 在开始和结束分别只读 GET 核对 head/base/merge candidate/Draft，不把表达式数据拼进脚本源码。manual 的 `inputs` 允许对象或 null。
-- `Test-CiCandidate.ps1` 对照实际 Git checkout/tree/有序 parents 与 run/attempt/workflow/event/action/mode/Draft。PR 必须是有序 base/head 双亲的 merge candidate，不能用 head 自测替代；非 PR 不假定只有一个 parent。错型对象、旧源码候选、旧 run/attempt 或非等价身份变化失败，不覆盖成功身份文件。
-- GitHub 在 PR 重开或重新计算 merge ref 时可能返回不同的合成 merge SHA，即使 H/B、tree 和有序 parents 未变。仅 `pr-unit` 允许这一**有证据的等价重算**：实际受测提交仍是该运行的 `GITHUB_SHA`；若当前 API M 不同，再 GET 该 commit 并严格核对返回 SHA、完整 tree 及有序 `[B,H]`。`api-pull-request.json`、`api-merge-commit.json` 保留 API 身份，规范化 snapshot 的 `serverMergeCandidate` 单独记录等价关系，validator 再校验其类型/tree/parents。不能把测试提交重标为 API 新 M，也不能只因 H 相同而接受不同 tree/base/parents。缺证明或证明错误即失败；旧 Full 模式不启用此例外。
-- 新的 `pr-unit`/`push-unit`/`manual-unit` 与保留的 `draft-quick`/`ready-full`/`push-main`/`manual-full` 分开；Unit 身份不能作为旧 FullProof 的完整凭据。
-- executor 要求 clean checkout，绑定所有 tracked 文件的路径/SHA-256；命令前后及结束 block 再核对源码。原始命令、SDK 输出、真实数字退出、root exit 和双流 EOF 与本轮 TRX 一并保留。未知退出为 null，不能借内层/旧 `$LASTEXITCODE=0` 补成功。
-- 每项目通过后才执行下一项目。非零退出、restore/build/宿主错误诊断、零执行、skip、会话中止、未知/不完整输出或缺少必要证据均阻断；后续工程保持 `not-run`。原非零退出不被报告错误改成零；原零但采证失败仍使 job 失败。不自动重试、换源、缩范围或加时限。
-- TRX 校验复用共享身份图，检查 Times、唯一 Summary/Counters、Completed、无 RunInfo、全部标准 counters 和 Results/Definitions/Entries 一致性，全部 Passed 且非零，绑定预期测试程序集及当前命令时间窗；不同项目不复用 run/execution IDs。**不执行独立 discovery，因此不宣称发现集合与执行集合逐项等价**。
-- 结束 block 重新校验候选，要求开始/结束/report 身份相同、两个批准项目及全部命令完整、源码清单完整、必要原件存在且 hash/长度未变。缺日志/报告有明确诊断；局部 PASS、旧轮/部分项目或缺证据不能拼成整个检查成功。
+`scripts/Invoke-CiUnit.ps1`、`New-CiCandidateInputs.ps1`、`Test-CiCandidate.ps1`、共享 TRX reader、`Test-Unit.ps1` 和完整门仍保留，但不被当前默认 Unit workflow 调用。旧模式和报告的严格契约没有改成原生基线；显式使用时仍按原接口核验。用途见[脚本清单](script-inventory.md)。
 
-并发组仍为 workflow＋PR number（非 PR 用 ref），新运行可以取消同组旧运行。取消/timeout 没有完整证据时不能宣称成功；本地脚本无法证明 GitHub 创建 check-run 的时机、无提交 Ready 转换或旧 success 的服务端放行窗口，须另行受控远端验证。
+[#69](https://github.com/fanxiao92/godot-pal/issues/69)/[#67](https://github.com/fanxiao92/godot-pal/issues/67) 在 [PR #70](https://github.com/fanxiao92/godot-pal/pull/70)、[PR #72](https://github.com/fanxiao92/godot-pal/pull/72) 的原交付及远端控制是历史事实；包括 merge 等价修复、负控制 PR #71 和 [main push 41444146011](https://github.com/fanxiao92/godot-pal/actions/runs/41444146011) 的独立核验。不改写旧原件，也不要求复跑。**这些成功不补签本次原生 workflow 的远端运行或已退出默认路径的审计保证。** 修改本地文件不等于已发布；新候选的远端结果必须单独按提交确认。
 
-## 成本、预算与上传
+required check 仍为 `unit-check`；本次不修改服务端保护。保留的 `full-check` 仍明确抛错、不运行重型检查，它会使整体 workflow failure，即使独立 Unit 成功。清理该过渡 blocker 不属于本次原生化；它不是完整验收成功。配置及普通拒绝/允许历史、权限限制和未来恢复条件见[保护说明](merge-protection.md)。
 
-`unit-evidence/unit-run.json` 记录固定选择、候选/source manifest、SDK、cache、逐命令 argv/cwd/UTC/Stopwatch 墙钟/退出与双流状态、项目状态和原始 artifact 的相对路径/hash/长度。
-
-- 项目命令墙钟从原进程启动前至 root exit、双流落盘及资源释放，包含隐式 restore/build；不是 TRX duration。未独立测量的 restore/build 为 null，不补零或伪拆成本。
-- round 墙钟从初始源码身份留证后到最后判定/失败停止，包含 SDK、项目间检查与采证；当前内部测量在 finally 的最终 artifact 索引/终态报告写入前停止，不是完整 job/外层 host 墙钟。其余结束 API/上传成本不混入该值；需要完整端到端成本另记外层测量，不将子项相加冒充。
-- 单项目 >5 分钟、round >10 分钟只告警，不杀进程、不改变功能结论、不重试。沿用每命令 root exit＋双流 EOF 共用 600000ms、仅自有进程树清理 5000ms、job 20 分钟的预算；这些 timeout 与告警分列，不是性能承诺。
-
-`always()` 尽力上传 `ci-unit-evidence-<run_id>-<run_attempt>`：原事件、`unit-start/**`、`unit-end/**`、`unit-evidence/**`。上传失败或一个文件都没有时 job 不能成功；部分目录可为诊断上传，但不能成为完整检查凭据。新目录不复用旧 artifact，不下载旧轮补齐。不上传 token、真实游戏资源、缓存、私有 reference 输入或全机观察数据。
-
-## 过渡期的旧 full-check
-
-当前候选保留一个**明确抛错**的 `full-check`，不运行重型检查、不依赖 Unit 成功，也不以 skipped/neutral/空成功满足旧 required check。它会使整个 workflow 显示失败，即使独立 `unit-check` 成功；切换前它明确阻断旧要求，切换后它仍不是完整验收成功，且不属于阶段性 required checks；不能因 workflow 总结为 failure 就把独立 Unit success 改写为失败，也不能把 Unit success 写成 full 通过。
-
-#67 已记录旧保护下对 failing `full-check` 的实际拒绝，以及切换后 Unit 成功、旧 full 失败时 PR70 的普通 merge 实际允许。不能仅凭 blocker、一次 GET 或顺序采样宣称不存在任何未观测窗口；发布、事件/拒绝矩阵、保护切换和实际合并的授权与原件分别记录，完整边界见[保护操作说明](merge-protection.md#unit-only-分阶段切换67)。
-
-## 有界本地回归
-
-在仓库根运行，证据目录均须全新；工程回归与产品 Unit 分开，不进入自动 Unit job：
+## 显式本地回归
 
 ```powershell
-pwsh -NoProfile -File tests/Test-CiWorkflow.Tests.ps1 -EvidenceDirectory <new-workflow-evidence>
-pwsh -NoProfile -File tests/Test-CiUnit.Tests.ps1 -EvidenceDirectory <new-trx-evidence>
-pwsh -NoProfile -File tests/Test-CiCandidate.Tests.ps1 -EvidenceDirectory <new-candidate-evidence>
-pwsh -NoProfile -File tests/Test-CiCandidate-Inputs.Tests.ps1 -EvidenceDirectory <new-transport-evidence>
-# 按候选/FullProof兼容影响选择；人工证据，不执行完整门：
-pwsh -NoProfile -File tests/Test-CiFullProof.Tests.ps1 -EvidenceDirectory <new-full-proof-evidence>
+pwsh -NoProfile -File tests/Test-CiWorkflow.Tests.ps1 -EvidenceDirectory <全新目录>
 ```
 
-workflow 回归从**实际 run block**提取代码并先做 AST 检查，使用自有 Git merge、受控 API 与一次本地构建的人工 native SDK executable，覆盖事件/全项目 argv、原退出/UTF-8、失败停止、零/skip/aborted、未知启动、部分项目、旧 run/attempt/candidate、缺失/篡改证据和旧 full 拒绝。TRX 回归覆盖正常完整图与指定损坏形状。现有 `Test-CiCostInput.Tests.ps1`、FullProof/成本工具仍可按需维护；不借它们补签本次 Unit 或完整验收。
+回归提取实际 run block 并先做 AST 检查，在自有 Git/人工项目中使用真实 dotnet 与仓库固定 xUnit 包验证：正常两工程、指定测试失败/skip/零执行及后项停止、缺失 TRX、拒绝已有结果、checkout 错配和旧 full 拒绝。缺报告控制只替换 logger 为 console，验证真实成功测试之后的原报告存在性检查；不模拟 SDK。此维护回归不进入自动 Unit job，不计入产品 Unit。
 
-固定格式 block 提取不是 YAML parser，更不是 Actions 表达式/调度器。静态 YAML/AST 与人工控制也不证明真实 restore/build/test 每一种宿主故障或实际取消/timeout；这些限制及本地实测命令应保留在交接。当前 JSON 接口沿用本地已验证的 PowerShell 7 API，不自动升级工具链。已完成的远端事件及普通拒绝/允许以 #67 的实际原件为准，不能以本地通过或保护 GET 代替；未测主体、权限例外或新的候选/故障仍需独立验收。
+固定缩进的 block 提取不是 YAML parser 或 Actions 调度器；本地测试不能证明真实事件调度、并发取消、artifact 服务或服务端合并行为。`Test-CiUnit.Tests.ps1`、Candidate/Inputs/FullProof/成本工具回归保留为强审计维护能力，不再是默认原生反馈的前置。

@@ -4,7 +4,7 @@
 
 ## 搜索边界与读法
 
-以 #68 的 base `d9bc96e4cb4166600cab6027a7d6370221d01d55` 为库存，覆盖 `scripts/` 全部已跟踪文件（含模块和锁文件）。逐文件核对定义，并在仓内 tracked 文件做文件名/调用表达式搜索：含 `.github/`、`scripts/`、`tests/`、`src/`、当前文档；排除 `reference/` 和 `docs/archive/`。下表区分实际运行调用、仅定义加载、回归夹具与文档入口；字符串命中不直接等同执行。
+初始 #68 库存以 `d9bc96e4cb4166600cab6027a7d6370221d01d55` 为 base，覆盖 `scripts/` 全部已跟踪文件（含模块和锁文件）。本次原生 Unit 调整基于 `a93e9e3694ef0c8a286f4e85559edcf0f75dea3c` 复查受影响的 workflow/维护回归调用；脚本本体未改。搜索含 `.github/`、`scripts/`、`tests/`、`src/`、当前文档，排除 `reference/` 和 `docs/archive/`。下表区分实际运行调用、仅定义加载、回归夹具与文档入口；字符串命中不直接等同执行。
 
 **外部调用方一律未知**：不覆盖未跟踪文件、工作区外工具、旧提交、其他仓库、用户手工命令或服务端临时调度。仓内无调用不证明可删除。源码/调用方变化时同步本表；当前运行能力仍以脚本、配置和对应任务证据为准，本次文档核对没有运行这些工具。
 
@@ -27,8 +27,8 @@
 | 路径 | 职责 | 已知调用方／边界 | 入口身份与处置 |
 | --- | --- | --- | --- |
 | [`DotnetCheckedDefinition.ps1`](../../scripts/DotnetCheckedDefinition.ps1) | dotnet root/双流共用预算、自有清理与原始退出留证 | `Test-M0.ps1`、`Test-Range.ps1`；DotnetBoundary 回归 | 内部定义；保留，不单独当测试入口 |
-| [`GameTestBatches.ps1`](../../scripts/GameTestBatches.ps1) | Game 发现/批次及共享 TRX 身份图定义 | M0、Range、TestCostReport；Unit/CI executor **仅加载定义**，不调用 Game 批次；GameBatches/RangeIdentity/CI 回归 | 内部定义；保留；加载不表示启动 Godot |
-| [`TestRunDefinitions.ps1`](../../scripts/TestRunDefinitions.ps1) | xUnit discovery、Unit TRX 与发现/执行集合校验 | `Test-Unit.ps1`、`Test-Range.ps1`、`Invoke-CiUnit.ps1`；RangeIdentity/CI Unit 回归 | 内部定义；保留；直接 CI Unit 不额外 discovery |
+| [`GameTestBatches.ps1`](../../scripts/GameTestBatches.ps1) | Game 发现/批次及共享 TRX 身份图定义 | M0、Range、TestCostReport；Unit 维护工具及保留的旧 CI executor **仅加载定义**；GameBatches/RangeIdentity/强审计回归 | 内部定义；保留；原生 Unit workflow 不加载它，加载不表示启动 Godot |
+| [`TestRunDefinitions.ps1`](../../scripts/TestRunDefinitions.ps1) | xUnit discovery、Unit TRX 与发现/执行集合校验 | `Test-Unit.ps1`、`Test-Range.ps1`、保留的 `Invoke-CiUnit.ps1`；RangeIdentity/Test-CiUnit 维护回归 | 内部定义；保留；原生 Unit workflow 不调用 |
 | [`TestCostReport.psm1`](../../scripts/TestCostReport.psm1) | 成本解析、证据完整性与可比性逻辑 | `Get-TestCostReport.ps1` 导入；TestCostReport 回归 | 内部模块；保留 |
 
 ## 资源准备与工具链（均非 Unit 前置）
@@ -44,11 +44,13 @@
 
 ## CI／验收证据（当前自动、显式与暂停分开）
 
+当前原生 workflow 直接执行两个项目与 `tests/unit.runsettings`，不调用本节脚本。`tests/Test-CiWorkflow.Tests.ps1` 显式验证实际 block/真实 dotnet；下列强审计工具保留原契约，不因退出默认调用链而删除，取舍见 [ADR-0003](../adr/0003-native-unit-feedback.md)。
+
 | 路径 | 职责 | 已知调用方／边界 | 入口身份与处置 |
 | --- | --- | --- | --- |
-| [`Invoke-CiUnit.ps1`](../../scripts/Invoke-CiUnit.ps1) | CI 固定两工程直接 Unit、失败停止、源码/命令/TRX/成本采证 | `.github/workflows/ci.yml`；`tests/Test-CiWorkflow.Tests.ps1` | **当前自动 CI 专用**；保留，不是 agent 默认编排器 |
-| [`New-CiCandidateInputs.ps1`](../../scripts/New-CiCandidateInputs.ps1) | 原事件与服务端身份传输，保存 API 原件/有证据的 merge 等价关系 | workflow start/end；Candidate-Inputs/Workflow 回归 | **当前自动 CI**；保留 |
-| [`Test-CiCandidate.ps1`](../../scripts/Test-CiCandidate.ps1) | 校验实际 checkout/tree/parents、run/attempt/mode 与候选证明 | workflow start/end；Candidate/Candidate-Inputs/Workflow 回归 | **当前自动 CI**；保留，不把 Unit 身份当 FullProof |
+| [`Invoke-CiUnit.ps1`](../../scripts/Invoke-CiUnit.ps1) | 旧 CI 的两工程执行及强审计/成本采证 | 已退出当前 workflow/Workflow 回归；搜索范围内无其余运行调用，外部未知 | 显式旧能力；保留，使用时仍需原候选接口，不是原生反馈入口 |
+| [`New-CiCandidateInputs.ps1`](../../scripts/New-CiCandidateInputs.ps1) | 原事件与服务端身份传输，保存 API 原件/有证据的 merge 等价关系 | Candidate-Inputs 维护回归；已退出 workflow start/end | 显式强审计；保留 |
+| [`Test-CiCandidate.ps1`](../../scripts/Test-CiCandidate.ps1) | 校验实际 checkout/tree/parents、run/attempt/mode 与候选证明 | Candidate/Candidate-Inputs 维护回归；已退出 workflow start/end | 显式强审计；保留，不把 Unit 身份当 FullProof |
 | [`New-CiCostInput.ps1`](../../scripts/New-CiCostInput.ps1) | 旧完整 CI 的成本输入与候选证据关联 | 当前无 workflow/脚本运行调用；CiCostInput、CiFullProof 回归仍消费；外部未知 | 原自动路径暂停；保留兼容证据工具，恢复另立任务 |
 | [`Test-CiFullProof.ps1`](../../scripts/Test-CiFullProof.ps1) | 旧完整验收候选、产物和成本证明校验，拒绝 Unit mode | 当前无 workflow/脚本运行调用；CiFullProof 回归与 CI 文档仍消费；外部未知 | 原自动路径暂停；显式维护保留，不以旧成功满足 Unit 要求 |
 | [`Test-M0.ps1`](../../scripts/Test-M0.ps1) | 唯一保留的重型完整门：缓存/solution、各测试层、Game 重复轮/负控制及 startup | 根 README、Game README；DotnetBoundary/GdUnitPackages 回归检查定义；无当前自动调用 | 显式完整验收；保留，Unit 阶段不默认运行 |

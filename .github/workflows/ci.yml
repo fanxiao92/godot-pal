@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: m0-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -30,76 +29,31 @@ jobs:
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
-      - name: Validate Unit start candidate
-        shell: pwsh
-        env:
-          CI_TOKEN: ${{ github.token }}
-          CI_EVENT_PATH: ${{ github.event_path }}
-          CI_EVENT_NAME: ${{ github.event_name }}
-          CI_SHA: ${{ github.sha }}
-          CI_RUN_ID: ${{ github.run_id }}
-          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
-          CI_WORKFLOW_REF: ${{ github.workflow_ref }}
-          CI_API_URL: ${{ github.api_url }}
-          CI_PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Copy-Item -LiteralPath $env:CI_EVENT_PATH -Destination "$env:RUNNER_TEMP/original-event.json"
-          $mode = switch ($env:CI_EVENT_NAME) { 'pull_request' { 'pr-unit' } 'push' { 'push-unit' } 'workflow_dispatch' { 'manual-unit' } default { throw 'Unsupported Unit event.' } }
-          $input = "$env:RUNNER_TEMP/unit-start"
-          $params = @{ OutputDirectory=$input; RepositoryRoot=$env:GITHUB_WORKSPACE; EventName=$env:CI_EVENT_NAME; Action='event-derived'; Mode=$mode; GithubSha=$env:CI_SHA; RunId=$env:CI_RUN_ID; RunAttempt=[int]$env:CI_RUN_ATTEMPT; WorkflowRef=$env:CI_WORKFLOW_REF; ApiUrl=$env:CI_API_URL; PrNumber=$env:CI_PR_NUMBER; EventJsonPath="$env:RUNNER_TEMP/original-event.json" }
-          & ./scripts/New-CiCandidateInputs.ps1 @params; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & ./scripts/Test-CiCandidate.ps1 -EventPath "$input/event.json" -MetadataPath "$input/metadata.json" -RepositoryRoot $env:GITHUB_WORKSPACE -ServerSnapshotPath "$input/snapshot.json" -EvidenceDirectory "$input/proof"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Run all approved Unit projects
+      - name: Verify Unit checkout
         shell: pwsh
         run: |
-          & ./scripts/Invoke-CiUnit.ps1 -RepositoryRoot $env:GITHUB_WORKSPACE -CandidateIdentityPath "$env:RUNNER_TEMP/unit-start/proof/candidate-identity.json" -EvidenceDirectory "$env:RUNNER_TEMP/unit-evidence"
-          exit $LASTEXITCODE
-      - name: Validate Unit end candidate and evidence
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($actual -cne $env:GITHUB_SHA) { throw 'Unit checkout does not match GITHUB_SHA.' }
+      - name: Show selected SDK
         shell: pwsh
-        env:
-          CI_TOKEN: ${{ github.token }}
-          CI_EVENT_NAME: ${{ github.event_name }}
-          CI_SHA: ${{ github.sha }}
-          CI_RUN_ID: ${{ github.run_id }}
-          CI_RUN_ATTEMPT: ${{ github.run_attempt }}
-          CI_WORKFLOW_REF: ${{ github.workflow_ref }}
-          CI_API_URL: ${{ github.api_url }}
-          CI_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: dotnet --version
+      - name: Run Core Unit
+        shell: pwsh
+        timeout-minutes: 10
         run: |
-          $ErrorActionPreference = 'Stop'
-          $mode = switch ($env:CI_EVENT_NAME) { 'pull_request' { 'pr-unit' } 'push' { 'push-unit' } 'workflow_dispatch' { 'manual-unit' } default { throw 'Unsupported Unit event.' } }
-          $input = "$env:RUNNER_TEMP/unit-end"
-          $params = @{ OutputDirectory=$input; RepositoryRoot=$env:GITHUB_WORKSPACE; EventName=$env:CI_EVENT_NAME; Action='event-derived'; Mode=$mode; GithubSha=$env:CI_SHA; RunId=$env:CI_RUN_ID; RunAttempt=[int]$env:CI_RUN_ATTEMPT; WorkflowRef=$env:CI_WORKFLOW_REF; ApiUrl=$env:CI_API_URL; PrNumber=$env:CI_PR_NUMBER; EventJsonPath="$env:RUNNER_TEMP/original-event.json" }
-          & ./scripts/New-CiCandidateInputs.ps1 @params; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & ./scripts/Test-CiCandidate.ps1 -EventPath "$input/event.json" -MetadataPath "$input/metadata.json" -RepositoryRoot $env:GITHUB_WORKSPACE -ServerSnapshotPath "$input/snapshot.json" -EvidenceDirectory "$input/proof"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $start = [Text.Json.Nodes.JsonNode]::Parse([IO.File]::ReadAllText("$env:RUNNER_TEMP/unit-start/proof/candidate-identity.json"))
-          $end = [Text.Json.Nodes.JsonNode]::Parse([IO.File]::ReadAllText("$input/proof/candidate-identity.json"))
-          $reportPath = "$env:RUNNER_TEMP/unit-evidence/unit-run.json"
-          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'Unit original report missing.' }
-          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -NoEnumerate -DateKind String
-          if ($report -isnot [pscustomobject] -or $report.kind -cne 'unit-only' -or $report.status -cne 'completed' -or -not [Text.Json.Nodes.JsonNode]::DeepEquals($start,$end) -or -not [Text.Json.Nodes.JsonNode]::DeepEquals($start,[Text.Json.Nodes.JsonNode]::Parse(($report.candidate | ConvertTo-Json -Depth 20)))) { throw 'Unit candidate/evidence incomplete or changed.' }
-          if ($report.projects -isnot [array] -or $report.projects.Count -ne 2 -or ($report.projects.project -join '|') -cne 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj|tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj' -or @($report.projects | Where-Object { $_.status -cne 'completed' -or $_.executed -isnot [long] -or $_.executed -le 0 }).Count) { throw 'Missing complete approved Unit projects.' }
-          if ($report.commands -isnot [array] -or ($report.commands.name -join '|') -cne 'sdk|core|cli-unit' -or @($report.commands | Where-Object { $_.status -cne 'completed' -or $_.exitKnown -isnot [bool] -or $_.exitKnown -cne $true -or $_.exitCode -isnot [long] -or $_.exitCode -ne 0 -or $_.rootExited -isnot [bool] -or $_.rootExited -cne $true -or $_.stdoutComplete -isnot [bool] -or $_.stdoutComplete -cne $true -or $_.stderrComplete -isnot [bool] -or $_.stderrComplete -cne $true }).Count) { throw 'Incomplete Unit command evidence.' }
-          $nativeGit = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
-          $dirty = & $nativeGit -C $env:GITHUB_WORKSPACE status --porcelain --untracked-files=all
-          if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Unit source checkout is not clean at end.' }
-          $tracked = @(& $nativeGit -C $env:GITHUB_WORKSPACE -c core.quotepath=false ls-files)
-          if ($LASTEXITCODE -ne 0 -or $report.source -isnot [array] -or $report.source.Count -ne $tracked.Count -or $tracked.Count -eq 0) { throw 'Missing Unit source manifest.' }
-          foreach ($file in $tracked) {
-            $entry = @($report.source | Where-Object path -CEQ $file)
-            if ($entry.Count -ne 1 -or (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $file) -Algorithm SHA256).Hash -cne $entry[0].sha256) { throw 'Unit source evidence changed.' }
-          }
-          $required = @('sdk.stdout.log','sdk.stderr.log','core.stdout.log','core.stderr.log','core/results.trx','cli-unit.stdout.log','cli-unit.stderr.log','cli-unit/results.trx')
-          if ($report.artifacts -isnot [array] -or $report.artifacts.Count -lt $required.Count) { throw 'Missing original Unit artifacts.' }
-          foreach ($path in $required) { if (@($report.artifacts | Where-Object path -CEQ $path).Count -ne 1) { throw "Missing/duplicate Unit artifact: $path" } }
-          foreach ($file in $report.artifacts) {
-            $path = [IO.Path]::GetFullPath((Join-Path "$env:RUNNER_TEMP/unit-evidence" $file.path))
-            if (-not $path.StartsWith([IO.Path]::GetFullPath("$env:RUNNER_TEMP/unit-evidence")+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { throw 'Unit original artifact path is outside evidence root.' }
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Unit original artifact missing: $($file.path)" }
-            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -cne $file.sha256 -or (Get-Item -LiteralPath $path).Length -ne $file.length) { throw 'Unit original artifact changed.' }
-          }
-          Write-Output 'PASS unit-check: current candidate, both projects, complete original Unit evidence; not full acceptance.'
+          if (Test-Path -LiteralPath "$env:RUNNER_TEMP/unit-results/core") { throw 'Core Unit results directory already exists.' }
+          dotnet test tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj --configuration Debug --settings tests/unit.runsettings --logger 'trx;LogFileName=results.trx' --results-directory "$env:RUNNER_TEMP/unit-results/core"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath "$env:RUNNER_TEMP/unit-results/core/results.trx" -PathType Leaf)) { throw 'Missing current Core Unit TRX.' }
+      - name: Run CLI Unit
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          if (Test-Path -LiteralPath "$env:RUNNER_TEMP/unit-results/cli-unit") { throw 'CLI Unit results directory already exists.' }
+          dotnet test tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj --configuration Debug --settings tests/unit.runsettings --logger 'trx;LogFileName=results.trx' --results-directory "$env:RUNNER_TEMP/unit-results/cli-unit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath "$env:RUNNER_TEMP/unit-results/cli-unit/results.trx" -PathType Leaf)) { throw 'Missing current CLI Unit TRX.' }
       - name: Upload Unit evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
@@ -107,10 +61,8 @@ jobs:
           name: ci-unit-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           path: |
-            ${{ runner.temp }}/original-event.json
-            ${{ runner.temp }}/unit-start/**
-            ${{ runner.temp }}/unit-end/**
-            ${{ runner.temp }}/unit-evidence/**
+            ${{ runner.temp }}/unit-results/core/results.trx
+            ${{ runner.temp }}/unit-results/cli-unit/results.trx
 
   full-check:
     # Transitional explicit refusal: never certify Unit as full while old protection remains.

@@ -36,7 +36,7 @@
 
 ## 测试：第一阶段默认 Unit-only
 
-新人和 work agent 从[唯一短上手入口](docs/testing/getting-started.md)选明确 Core/CLI Unit 工程、直接运行、判定结果并留证，无需先准备 Godot、真实资源或阅读编排脚本。按需的 Integration、Game SceneRunner、真实进程与完整验收由[职责矩阵](docs/testing/test-layers.md)分流，不能由 Unit 补签。
+新人和 work agent 从[唯一短上手入口](docs/testing/getting-started.md)选明确 Core/CLI Unit 工程，直接使用 dotnet CLI 与原生 runsettings，保留输出、退出和本轮 TRX；无需 Python、测试执行框架、Godot 或真实资源。默认信任原生结果，强审计改为显式维护能力，取舍见 [ADR-0003](docs/adr/0003-native-unit-feedback.md)。按需的 Integration、Game SceneRunner、真实进程与完整验收由[职责矩阵](docs/testing/test-layers.md)分流，不能由 Unit 补签。
 
 当前自动 CI 使用独立 `unit-check`，#67 已完成远端检查、保护切换及实际普通拒绝/允许验收；main 的已记录测试要求是 Unit，而非完整门。实时状态及过渡期仍明确失败的旧 `full-check` 见[CI 分流](docs/testing/ci-dispatch.md)和[保护说明](docs/testing/merge-protection.md)；覆盖损失、保留工具与恢复条件见 [ADR-0002](docs/adr/0002-unit-only-first-stage.md)。
 

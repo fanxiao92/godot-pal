@@ -21,6 +21,8 @@
 
 #67 原件分别证明：旧 full 要求仍在时普通 merge 实际 405 拒绝；切换后对 pending/不完整、取消、指定失败、缺失、错误来源同名 success、旧候选和错误实际 checkout 的普通 merge 拒绝；已知良好 [PR #70](https://github.com/fanxiao92/godot-pal/pull/70) 在 Unit success、旧 full failure 时普通 merge 实际允许，合入 `d9bc96e4cb4166600cab6027a7d6370221d01d55`，随后[真实 main push](https://github.com/fanxiao92/godot-pal/actions/runs/41440000263)全量 Unit/原件核验通过。控制 PR #71 关闭且未合并；失败原件和独立恢复均保留，#55 未操作。实际 run/attempt、检查绑定、HTTP 响应和证据限制见 #67 回执，不以本页摘要代替。
 
+后续[原生 Unit 基线](../adr/0003-native-unit-feedback.md)保留检查名和服务端保护，不再做运行前后 API 双重证明或完整证据图审计；旧 #67 的强审计/负向原件不自动证明新 workflow 的远端行为。当前调用与少量 checkout 检查见 [CI 分流](ci-dispatch.md)，本地修改不等于远端已发布；本页历史切换步骤不需要因此重做。
+
 管理员 enforcement 减少普通管理员路径的绕过，但有足够仓库权限的主体仍可能修改规则或工作流，且服务端能力有其例外边界。因此本页不宣称“绝对不可绕过”，也不将 Actions App 的 check-run 绑定描述为 workflow 路径认证。
 
 ## Unit-only 分阶段切换（#67）
