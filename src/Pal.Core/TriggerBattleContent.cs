@@ -6,10 +6,10 @@ namespace Pal.Core;
 /// subsequent battles use the trigger session's settled role, never this initial HP.</summary>
 public sealed class TriggerBattleContent
 {
-    internal BattleRoleSnapshot InitialRole { get; }
-    internal ClassicBattlePlayer Player { get; }
-    internal ClassicBattleGrowthData Growth { get; }
-    private readonly IReadOnlyDictionary<int, ClassicBattleEnemy> teams;
+    public BattleRoleSnapshot InitialRole { get; }
+    public ClassicBattlePlayer Player { get; }
+    public ClassicBattleGrowthData Growth { get; }
+    public IReadOnlyDictionary<int, ClassicBattleEnemy> Teams { get; }
 
     public TriggerBattleContent(BattleRoleSnapshot role, ClassicBattlePlayer player, ClassicBattleGrowthData growth,
         IReadOnlyDictionary<int, ClassicBattleEnemy> teams)
@@ -27,13 +27,13 @@ public sealed class TriggerBattleContent
         };
         Player = player with { Equipment = Copy(player.Equipment), Statuses = Copy(player.Statuses), Poisons = Copy(player.Poisons) };
         Growth = new(Copy(growth.LevelUpExperience), Array.AsReadOnly(growth.LevelUpMagics.ToArray()));
-        this.teams = new ReadOnlyDictionary<int, ClassicBattleEnemy>(teams.ToDictionary(x => x.Key, x => x.Value with
+        Teams = new ReadOnlyDictionary<int, ClassicBattleEnemy>(teams.ToDictionary(x => x.Key, x => x.Value with
         {
             Statuses = Copy(x.Value.Statuses), Poisons = Copy(x.Value.Poisons)
         }));
     }
 
-    internal ClassicBattleEnemy Enemy(int teamId) => teams.TryGetValue(teamId, out var enemy) ? enemy
+    internal ClassicBattleEnemy Enemy(int teamId) => Teams.TryGetValue(teamId, out var enemy) ? enemy
         : throw new InvalidDataException($"Missing battle team {teamId}.");
 
     internal void Validate(int teamId, BattleRoleSnapshot role)

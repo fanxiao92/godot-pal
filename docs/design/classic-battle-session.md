@@ -27,7 +27,7 @@
 
 事件后续不能直接以 raw combat KO 恢复。正常业务入口是 `ClassicBattleLifecycleSession(BattleRoleSnapshot, ClassicBattlePlayer, ClassicBattleEnemy, ClassicBattleGrowthData, IBattleRandom)`；它私有持有唯一 `ClassicBattleSession`，只转交 `SelectAttack` / `ResolveNextAction`，不另建伤害、排序或推进循环。`Current.Combat` 是战内快照，`Current.Role` 是角色持久快照：例如 raw HP180 胜利后可结算为 HP190，两者不得混用。`Current.IsInBattle` 取自真实 active combat 引用；结算及清理后释放该引用，不再接受动作。
 
-既有 `BattleRoleSnapshot` 提供 MP/maxMP、primary/七 hidden EXP、32槽已学法术、六装备与九状态；私有可变角色复用 `BattleRoleState`，外部只得到深拷贝、只读集合的快照。角色和 compact player 的 role/HP/maxHP 必须一致，零装备/status/cover 及 combat 既有全部能力约束仍预检拒绝。新增 `ClassicBattleGrowthData` 仅接收显式完整100项 level-indexed WORD 阈值和本 role 全部 `BattleLevelUpMagic(Level, MagicId)` 行；没有 JSON/native codec、人工 profile ID 特判或默认补齐数据。成长表只在纯预检使用，构造后不保留外部引用；角色数据实际深拷贝。原 frozen v1/profile/envelope 不变。
+既有 `BattleRoleSnapshot` 提供 MP/maxMP、primary/七 hidden EXP、32槽已学法术、六装备与九状态；私有可变角色复用 `BattleRoleState`，外部只得到深拷贝、只读集合的快照。角色和 compact player 的 role/HP/maxHP 必须一致，零装备/status/cover 及 combat 既有全部能力约束仍预检拒绝。新增 `ClassicBattleGrowthData` 仅接收显式完整100项 level-indexed WORD 阈值和本 role 全部 `BattleLevelUpMagic(Level, MagicId)` 行；没有 native codec、人工 profile ID 特判或默认补齐数据；纯数值 JSON 读取现见[现代战斗数据 v1](modern-battle-data.md)。成长表只在纯预检使用，构造后不保留外部引用；角色数据实际深拷贝。原 frozen v1/profile/envelope 不变。
 
 无成长闭包在创建可变角色/抽 RNG 前证明：role level 与七 hidden level 均0..99，所有 XP/level/count 为 WORD，primary XP 严格小于 **role.Level** 对应阈值，七 hidden XP 各严格小于自身 level 对应阈值；阈值完整且正 WORD。七项 hidden 名称按 Ordinal 精确匹配，不因调用方字典使用大小写不敏感比较器而接受别名；规范键配合该比较器仍合法。不是 `reward==0` 就跳过规则：旧 XP 已达阈值、需要 level clamp、任意可新增法术等均拒绝。逐行检查当前等级可学法术，已知/零 ID/未来等级不新增；32槽全满时按 `PAL_AddMagic` 不会新增。非零奖励仍由 combat 预检拒绝。这是合法数据下没有永久成长的封闭子集，不是 #50 通用成长实现。
 
@@ -43,7 +43,7 @@
 
 正常显式入口：`TriggerScriptSession(events, language, TriggerBattleContent, IBattleRandom, inheritedColor = ...)`。既有 `(events, language, inheritedColor = ...)` 保持原有 M2/M3 行为及 enum 数值 Ready=0 / WaitingForDisplay=1 / Completed=2，无战斗配置时依然拒绝具名 `startBattle`，raw7 从不执行。WaitingForBattle 追加为3；两种等待均阻塞 `BlocksSceneUpdates`，且 `Start` 拒绝重入，不改变原调用。
 
-`TriggerBattleContent(role, player, growth, teamId→enemy)` 是纯 typed 正式内容，不是测试 profile、工厂或注入结果的 delegate；没有新增 JSON/native schema。role 提供初始持久状态，player 提供无装备效果的有效面板，growth 是该 role 的完整阈值/法术表，每个 team 映射本支持域的一个真实 enemy。初始 role/player 的 roleId、HP、maxHP 必须一致；所有之后仍要使用的嵌套 role、player、enemy、growth 集合均防御拷贝，不保留外部可变 alias。公开 `BattleRole` 是只读、不可变快照，不是可写全局状态库。
+`TriggerBattleContent(role, player, growth, teamId→enemy)` 是纯 typed 正式内容，不是测试 profile、工厂或注入结果的 delegate；后续有界检查点已补充[严格现代数值 JSON 读取](modern-battle-data.md)，尚无 native/package schema。role 提供初始持久状态，player 提供无装备效果的有效面板，growth 是该 role 的完整阈值/法术表，每个 team 映射本支持域的一个真实 enemy。初始 role/player 的 roleId、HP、maxHP 必须一致；所有之后仍要使用的嵌套 role、player、enemy、growth 集合均防御拷贝，不保留外部可变 alias。公开 `BattleRole` 是只读、不可变快照，不是可写全局状态库。
 
 同一 trigger session 持有唯一持久角色快照；每场以其当前 HP 覆盖初始 player template HP，正常构造准确且唯一的 `ClassicBattleLifecycleSession`。会话不把 rawHP 当 settledHP，也不在请求创建/真实KO时提前应用角色；**只有合法 ack** 将 lifecycle 的 settled `Current.Role` 一次应用。多次开战和后续 `Start` 承接 HP/MP/XP/法术/counts；开场复活/reset 只发生在下一场 lifecycle 内。独立新 session 从内容初始状态开始。为了保证任意多战 Won 半恢复后都仍在底层 combat HP1..32767 范围，此 VM 的保守支持域额外要求 **maxHP<=32767**；不更改 lifecycle/combat 原有 maxHP WORD 合同。
 
@@ -54,6 +54,10 @@
 `Start` 在任何 caller/显示/角色状态副作用前，用 visited 工作表验证全部可能的 next/loss/flee 分支（跨文件、循环及真停止边界），复用 internal 纯 lifecycle/combat validation 和原语言/control preview。它不建战斗实例、不模拟胜利、不抽生产 RNG；每个可达 team/敌方数据、role/growth 和语言范围/control 都必须合法。即使当前无逃跑输入，也不得隐藏 flee 分支的不支持命令。IsBoss/FleeAddress 保留，但当前 lifecycle 仅产生真实 Won/Lost，**不宣称已经实现 Fled/逃跑 UI**；该能力仍属 #51。
 
 公开 Core binding 用例经真实KO验证：Won rawHP100→settled125/MP35，第二场承接125→137/MP42；Lost HP0/MP20 保留，下一场才抬HP1/reset；结果保持原 Caller/ReturnEntry并继续至完整停边界。另核对请求身份隔离、display交叉、跨文件 loss/循环、所有编码分支预检、规范 hidden 键、支持域及深隔离。这只是 Core 证据，不签 native/Main/表现、GPU、人工或 CI。
+
+## 现代数值读取（#46 有界检查点）
+
+`ModernBattleContent.Parse(string)` 仅严格读取纯数值并返回上述同一 `TriggerBattleContent`；字段和数组演进边界见[现代战斗数据 v1](modern-battle-data.md)。复用既有 role 转换及 combat/growth 类型，不增第二套规则。格式合法不等于选中入口可执行：合法非零能力字段、含0阈值和有序重复法术行均保留，再由正式 `Start` 纯预检拒绝不支持闭包，不消耗RNG。`InitialRole/Player/Growth/Teams` 为public只读投影，全部嵌套集合沿现构造器防御拷贝。公开 Core 字符串用例已真实经Won/Lost与原事件续接；不是已交付的人工资源链，native/Editor/CLI/Main仍待后续。
 
 ## 固定参考与独立算例
 
