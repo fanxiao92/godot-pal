@@ -34,3 +34,7 @@ headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证�
 ## 维护边界
 
 保持 `Main.tscn` 的真实入口和现有测试装配，不新增第二 Godot 项目、替代业务实现或内部测试 seam。变更时先冻结独立预期与完整身份，再同步脚本/config/本页；需要时序变异、输出捕获或完整门诊断，进入 Game 分层与当前异常规则，不在本页重写历史证据。
+
+### #46 Story package prepare bounded checks
+
+`PrepareStoryPackageTests` 是 native-map 中的 direct31：真实 public Prepare → typed Save → Story/Visual strict Load、完整events/hash、UTF8/schema/limits/路径/无覆盖/owned cleanup。`StoryPackagePrepareProcessTests` 增10例真实 Editor/wrapper 契约；Prepare严格总数现89，Game metadata为505（502 positives，串行74/85/343）。这些数字是库存，不表示本轮跑了全部Game；本轮只新类31和完整Prepare89。前置依赖、schema与正常命令见[生产准备文档](../../../docs/design/story-package-preparation.md)。无Main/input/动作/effect/GPU/人工/CI或完整可见人工作者包交付声明。

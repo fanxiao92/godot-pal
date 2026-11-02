@@ -28,3 +28,5 @@
 人工测试使用独立 literal 2×1 indexed frames、320×200 background 和作者坐标；SpriteId41/97 与 role0/team18/target7 特意不同。它们是可提交 synthetic 数据，不是原档复制或来源认证。`NativeBattleVisualProfileTests` 覆盖真实 ResourceSaver→严格 Load、版本/身份/精确映射、未选 numeric 数据、帧 aliases/平面、palette、hash/缺失/type/UID/cycle/外引 metadata 和隔离；旧 `NativeStoryProfileTests` 验证兼容。
 
 **未交付**：攻击 effect 图档/索引绑定、动作/动画时间推进、renderer/GPU、Main/input/HUD、完整 package Prepare、真实 SceneRunner 往返。后续 UI 必须消费同一真实 Core 生命周期与本次校验资源，不另写规则引擎。冻结 `first-mandatory-battle-pre-trigger-v1` 与真实 owner28/@09C3 gate 不变，不能靠人工 visual 绑定绕开；#46/M4 尚未完成。
+
+后续 [Story package production prepare](story-package-preparation.md) 已提供 typed Story/Visual 的统一离线绑定入口（checkpoint A，复用已准备依赖）；本 visual binding 自身不负责 Prepare、动作推进或 Main。完整可见人工作者包 B 仍未交付。

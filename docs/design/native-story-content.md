@@ -42,3 +42,7 @@ Godot4.7.2实际探针核定：依赖项是一段path，或三段 `uid::::fallba
 `NativeStoryProfileTests` 通过真实ResourceSaver→ResourceLoader和独立literal synthetic完整事件、typed数值、双语言、font/prompts/画像、external role/glyph/palette及导入SVG验证接口。manifest预期为人工列明路径，不由生产closure反推。验证版本/类型/identity、hash漏多改混、完整faithful、next/loss/flee字形画像、静态role/owner、UID/未知路径/循环、无孤儿节点及隔离。Core requirements行为测试沿同一公开入口。
 
 此内容绑定不包含战场/敌我帧映射、正式人工package准备、Main/input/display连接、真实战斗往返、GPU、人工桌面或远端CI验收；#46和整个M4仍未完成。
+
+## 后续离线生产入口
+
+[Story package preparation](story-package-preparation.md) 现提供正式 public Editor API、真实 argv 场景与正常 PS wrapper，复用本严格 Load 和完整 dependency helper。checkpoint A 输入非自包含；完整可提交可见人工资产包仍由 B 交付，Main/input/display/动画/effect 不由此补签。上文关于本 binding 本身不包含 Prepare 的职责划分不变。
