@@ -11,7 +11,7 @@
 | Core 公开业务规则、状态和显式业务时间 | `tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj` |
 | CLI 内存图像、调色板、PNG、Sprite、YJ2 算法 | `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj` |
 
-文件／进程、资源或引擎接线不由 Unit 证明；涉及这些契约时按[测试职责矩阵](test-layers.md)说明缺失覆盖并另选层，默认反馈不进入 Integration、Prepare、Godot、solution 或编排脚本。
+文件／进程、资源或引擎接线不由 Unit 证明；涉及这些契约时按[测试职责矩阵](test-layers.md)说明缺失覆盖并另选层，默认反馈不进入 Integration、Prepare、Godot、solution 或编排脚本。后续确需 Godot 时，从[Game 专题的现有测试示例与生命周期](game-test-layers.md)进入，再按其指针查 Game README 的实际命令；不先读完整门编排。
 
 纯内存例子来自现有 [`IndexedImageTests.Constructor_keeps_row_major_indices_alpha_and_source_metadata`](../../tests/Pal.Extract.UnitTests/IndexedImageTests.cs)，直接调用生产公开构造和属性（[`IndexedImage`](../../tools/Pal.Extract/IndexedImage.cs)）：
 

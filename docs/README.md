@@ -33,9 +33,10 @@
 
 ## 测试规范与入口：`testing/`
 
-- [测试职责矩阵](testing/test-layers.md)：按契约、依赖和证据选择 Core/CLI unit、CLI 文件集成、Prepare、SceneRunner 或真实进程；不按耗时分类。
-- [工程检查与分层回归](testing/engineering-checks.md)：Source、Offline、OwnedProcess 的边界、退出和证据规则。
-- [Unit 反馈短指南](testing/getting-started.md)：新人和 work agent 的唯一短上手入口，选工程、直接运行、判定与停止留证；[Unit 专题](testing/unit-entry.md)维护协议和显式维护工具细则。
+- [Unit 反馈短指南](testing/getting-started.md)：新人和 work agent 的唯一默认上手入口，选工程、直接运行、判定与停止留证；[Unit 专题](testing/unit-entry.md)维护协议和显式维护工具细则，无需先读编排脚本。
+- [测试职责矩阵](testing/test-layers.md)：需要非 Unit 契约时，按依赖和证据选择 CLI 文件集成、Prepare、SceneRunner 或真实进程；不按耗时分类。
+- [工程检查与分层回归](testing/engineering-checks.md)：显式 Source、Offline、OwnedProcess 的边界、退出和证据规则，不是默认 Unit 或当前自动 CI。
+- [scripts 用途清单](testing/script-inventory.md)：公开入口、内部支持、准备与 CI/验收证据的逐项职责、调用方和静态搜索限制；本批只盘点，不删除工具。
 - [显式范围回归](testing/range-regression.md)：选择 CLI integration、Prepare 或 Game 现有批次；明确参数、准备顺序和非完整门证据。
 - [时序验证细则](testing/time-boundaries.md)：业务时间、输入更新边界、相关断言、Game 迁移或调度偶发时先读；普通选层不加载长细则。
 - [CLI 测试迁移](testing/cli-test-migration.md)：unit/integration 项目边界、映射和完整门接线。
@@ -45,7 +46,7 @@
 - [CI 分流与候选身份](testing/ci-dispatch.md)：Draft/Ready/main/manual 的实际调度契约、候选绑定与证据边界；远端状态仍以 GitHub 实时结果为准。
 - [固定 GdUnit 源码包](testing/gdunit-source-packages.md)：固定包的来源和消费；仅在还原、排查或获准运行 Game 时阅读。
 - [测试异常说明](agents/test-diagnostics.md)：当前处理规则与历史症状分开；遇到中止、崩溃、输出捕获或已知诊断时按指针进入。
-- [合并保护操作说明](testing/merge-protection.md)：#38 已应用的配置、适用主体和恢复边界；不代替 GitHub 受控拒绝/允许验收结果。
+- [合并保护操作说明](testing/merge-protection.md)：#67 已完成的阶段性 Unit 要求、#38 历史配置与受控操作/恢复边界；实时 GET 与实际拒绝/允许证据分开。
 
 ## 历史归档：`archive/`
 
@@ -69,4 +70,4 @@ M0 原有报告保留在此，内容描述当时的环境和验证结果，不�
 
 按根目录 [AGENTS.md](../AGENTS.md) 的入口读取，用于任务系统、标签映射及领域文档规则。
 
-领域术语见根目录 [GLOSSARY.md](../GLOSSARY.md)。正式架构决策位于 `docs/adr/`，当前有 [ADR-0001：原版事件采用忠实低层转写](adr/0001-faithful-event-transcription.md)；进入相关设计或实现前阅读。
+领域术语见根目录 [GLOSSARY.md](../GLOSSARY.md)。正式架构决策位于 `docs/adr/`，当前有 [ADR-0001：原版事件采用忠实低层转写](adr/0001-faithful-event-transcription.md)及 [ADR-0002：第一阶段 Unit-only](adr/0002-unit-only-first-stage.md)；后者记录覆盖损失、完整门保留原因与另立任务的恢复条件，进入相关设计或实现前阅读。

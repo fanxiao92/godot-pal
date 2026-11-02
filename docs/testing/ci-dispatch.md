@@ -6,11 +6,11 @@
 
 | 阶段 | 当前候选的含义 | 不可据此宣称 |
 | --- | --- | --- |
-| 本地 workflow candidate | `.github/workflows/ci.yml` 提供独立 `unit-check`，由本地有界契约及直接 Unit 验证 | GitHub 调度、check-run 或保护已生效 |
-| 远端检查 | integration 候选已发布；opened、无提交 Ready、Ready 标题 edited、转回 Draft 及 manual 已有真实运行，剩余矩阵继续验证 | required check 已切换 |
-| 服务端切换 | 尚待单独授权，配置回读及受控拒绝/允许验收见[保护操作说明](merge-protection.md#unit-only-分阶段切换67) | “Unit 通过即可合并”已生效 |
+| 本地 workflow candidate | 已交付；独立 `unit-check` 及受影响有界契约/直接 Unit 已验证 | 单凭本地结果证明 GitHub 调度或保护 |
+| 远端检查 | 已取得真实 PR 各事件、manual、main push 及负向矩阵的独立原件 | 单凭 Unit success 证明 required check 已切换 |
+| 服务端切换 | 已完成 checks-only 切换、完整字段回读和普通 merge 拒绝/允许；见[保护说明](merge-protection.md#unit-only-分阶段切换67) | 所有主体/权限例外均不可绕过，或完整验收已通过 |
 
-以上描述当前分支候选，不代表已经发布到 `main`。已验证的事件分别有独立原件与 run/attempt：例如 [Ready/edited](https://github.com/fanxiao92/godot-pal/actions/runs/41426078216)、[converted_to_draft](https://github.com/fanxiao92/godot-pal/actions/runs/41428519546) 和 [manual](https://github.com/fanxiao92/godot-pal/actions/runs/41430853131)。这些运行不替代 Ready 新提交、main push、负向矩阵或服务端拒绝/允许；manual 检出 integration ref，不冒充 PR merge candidate。
+#67 已由 [PR #70](https://github.com/fanxiao92/godot-pal/pull/70) 合入 main，交付提交 `d9bc96e4cb4166600cab6027a7d6370221d01d55`；真实 [main push](https://github.com/fanxiao92/godot-pal/actions/runs/41440000263) 的全量 Core/CLI Unit 及原件核验通过。事件证据包括 opened、无提交 Ready、[Ready/edited](https://github.com/fanxiao92/godot-pal/actions/runs/41426078216)、[converted_to_draft](https://github.com/fanxiao92/godot-pal/actions/runs/41428519546)、[manual](https://github.com/fanxiao92/godot-pal/actions/runs/41430853131)、[Ready synchronize](https://github.com/fanxiao92/godot-pal/actions/runs/41438144152) 和修复后 [reopened](https://github.com/fanxiao92/godot-pal/actions/runs/41438637342)。每个只属于各自候选/run/attempt；manual 检出 integration ref，不冒充 PR merge candidate，早期事件的成功也不补签后续改动。负控制 PR #71 已关闭、未合并，指定失败、取消和外部核验器失败的原件与独立恢复保持原身份。当前状态与完整行为回执见 [#67](https://github.com/fanxiao92/godot-pal/issues/67)，后续操作仍须实时核对，不能据本页重复切换。
 
 本地具体命令、提交、原始证据及验收结论保存在任务交接；不能仅凭本页或历史成功补签新候选。完整 spec 的 Standards/Spec 双轴评审留给最终 candidate，不在每张子票重复。
 
@@ -58,9 +58,9 @@ CI 专用 `scripts/Invoke-CiUnit.ps1` 按上述顺序直接启动 `dotnet test <
 
 ## 过渡期的旧 full-check
 
-当前候选保留一个**明确抛错**的 `full-check`，不运行重型检查、不依赖 Unit 成功，也不以 skipped/neutral/空成功满足旧 required check。它会使整个 workflow 显示失败，即使独立 `unit-check` 成功；这是切换前允许的明确阻断，不是 Unit 冒充 full。
+当前候选保留一个**明确抛错**的 `full-check`，不运行重型检查、不依赖 Unit 成功，也不以 skipped/neutral/空成功满足旧 required check。它会使整个 workflow 显示失败，即使独立 `unit-check` 成功；切换前它明确阻断旧要求，切换后它仍不是完整验收成功，且不属于阶段性 required checks；不能因 workflow 总结为 failure 就把独立 Unit success 改写为失败，也不能把 Unit success 写成 full 通过。
 
-在旧保护仍生效时，不允许无保护窗口；不能凭这个 blocker 就断言旧成功不会被服务端复用。发布、实际远端事件/拒绝矩阵、required check 切换及实际合并均分别授权，完整顺序见[保护操作说明](merge-protection.md#unit-only-分阶段切换67)。
+#67 已记录旧保护下对 failing `full-check` 的实际拒绝，以及切换后 Unit 成功、旧 full 失败时 PR70 的普通 merge 实际允许。不能仅凭 blocker、一次 GET 或顺序采样宣称不存在任何未观测窗口；发布、事件/拒绝矩阵、保护切换和实际合并的授权与原件分别记录，完整边界见[保护操作说明](merge-protection.md#unit-only-分阶段切换67)。
 
 ## 有界本地回归
 
@@ -77,4 +77,4 @@ pwsh -NoProfile -File tests/Test-CiFullProof.Tests.ps1 -EvidenceDirectory <new-f
 
 workflow 回归从**实际 run block**提取代码并先做 AST 检查，使用自有 Git merge、受控 API 与一次本地构建的人工 native SDK executable，覆盖事件/全项目 argv、原退出/UTF-8、失败停止、零/skip/aborted、未知启动、部分项目、旧 run/attempt/candidate、缺失/篡改证据和旧 full 拒绝。TRX 回归覆盖正常完整图与指定损坏形状。现有 `Test-CiCostInput.Tests.ps1`、FullProof/成本工具仍可按需维护；不借它们补签本次 Unit 或完整验收。
 
-固定格式 block 提取不是 YAML parser，更不是 Actions 表达式/调度器。静态 YAML/AST 与人工控制也不证明真实 restore/build/test 每一种宿主故障或实际取消/timeout；这些限制及本地实测命令应保留在交接。当前 JSON 接口沿用本地已验证的 PowerShell 7 API，不自动升级工具链。远端 Draft/Ready/main/manual、取消、失败、缺失/不完整及错误候选的行为保持待验，不能以本地通过或保护 GET 代替。
+固定格式 block 提取不是 YAML parser，更不是 Actions 表达式/调度器。静态 YAML/AST 与人工控制也不证明真实 restore/build/test 每一种宿主故障或实际取消/timeout；这些限制及本地实测命令应保留在交接。当前 JSON 接口沿用本地已验证的 PowerShell 7 API，不自动升级工具链。已完成的远端事件及普通拒绝/允许以 #67 的实际原件为准，不能以本地通过或保护 GET 代替；未测主体、权限例外或新的候选/故障仍需独立验收。
