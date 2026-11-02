@@ -1,23 +1,27 @@
 namespace Pal.Core;
 
-public enum TriggerScriptPhase { Ready, WaitingForDisplay, Completed }
+public enum TriggerScriptPhase { Ready, WaitingForDisplay, Completed, WaitingForBattle }
 
-/// <summary>Runs the supported trigger slice to a real display boundary, never one opcode per tick.</summary>
+/// <summary>Runs the supported trigger slice to a real display, battle or stop boundary, never one opcode per tick.</summary>
 public sealed class TriggerScriptSession
 {
     private readonly TriggerEventCollection _events;
     private readonly DialogueLanguagePackage _language;
     private int _address;
     private int _lastCaller;
+    private readonly TriggerBattleContent? _battleContent;
+    private readonly IBattleRandom? _battleRandom;
 
     // Metadata discovery for the host's selected interaction; does not start or preview a call.
     public IReadOnlyList<TriggerEventEntry> Entries => _events.Entries;
     public TriggerScriptPhase Phase { get; private set; }
-    public bool BlocksSceneUpdates => Phase == TriggerScriptPhase.WaitingForDisplay;
+    public bool BlocksSceneUpdates => Phase is TriggerScriptPhase.WaitingForDisplay or TriggerScriptPhase.WaitingForBattle;
     public int Caller { get; private set; }
     public int ReturnEntry { get; private set; }
     public TriggerPosition? CurrentPosition { get; private set; }
     public TriggerDialogueRequest? PendingDisplay { get; private set; }
+    public TriggerBattleRequest? PendingBattle { get; private set; }
+    public BattleRoleSnapshot? BattleRole { get; private set; }
     public TriggerDialogueContext Context { get; private set; }
 
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language, int inheritedColor = DialogueTextTokenizer.DefaultColor)
@@ -30,9 +34,20 @@ public sealed class TriggerScriptSession
         Context = new TriggerDialogueContext("upper", 0, inheritedColor, false, 24);
     }
 
+    public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
+        TriggerBattleContent battleContent, IBattleRandom battleRandom, int inheritedColor = DialogueTextTokenizer.DefaultColor)
+        : this(events, language, inheritedColor)
+    {
+        ArgumentNullException.ThrowIfNull(battleContent);
+        ArgumentNullException.ThrowIfNull(battleRandom);
+        _battleContent = battleContent;
+        _battleRandom = battleRandom;
+        BattleRole = battleContent.InitialRole;
+    }
+
     public void Start(string fileId, string entryId, int caller)
     {
-        if (Phase == TriggerScriptPhase.WaitingForDisplay) throw new InvalidOperationException("A trigger call is already active.");
+        if (BlocksSceneUpdates) throw new InvalidOperationException("A trigger call is already active.");
         if (caller is < 0 or > 65535) throw new ArgumentOutOfRangeException(nameof(caller));
         var entry = _events.GetEntry(fileId, entryId);
         if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
@@ -47,7 +62,7 @@ public sealed class TriggerScriptSession
     /// <summary>Accepts only the current, actually completed display; stale or premature receipts are inert.</summary>
     public bool AcknowledgeDisplay(Guid requestId)
     {
-        if (PendingDisplay is not { } request || request.Id != requestId || request.Display.Current.Phase != DialogueDisplayPhase.Completed)
+        if (Phase != TriggerScriptPhase.WaitingForDisplay || PendingDisplay is not { } request || request.Id != requestId || request.Display.Current.Phase != DialogueDisplayPhase.Completed)
             return false;
         Context = Context with { Color = request.Display.TextColor, DelayMilliseconds = request.Display.DelayMilliseconds };
         PendingDisplay = null;
@@ -55,37 +70,50 @@ public sealed class TriggerScriptSession
         return true;
     }
 
+    /// <summary>Only this request's settled lifecycle completion can release the event; presentation timing belongs to the host.</summary>
+    public bool AcknowledgeBattle(Guid requestId, ClassicBattleLifecycleSession.CompletionReceipt? completion)
+    {
+        if (Phase != TriggerScriptPhase.WaitingForBattle || PendingBattle is not { } request || request.Id != requestId
+            || !request.Lifecycle.OwnsCompletion(completion)) return false;
+        BattleRole = request.Lifecycle.Current.Role;
+        _address = completion!.Outcome == ClassicBattlePhase.Lost ? request.LossAddress ?? request.NextAddress : request.NextAddress;
+        PendingBattle = null;
+        Continue();
+        return true;
+    }
+
     private void ValidateCapabilityClosure(int address)
     {
-        // Only a finite sequential slice is supported. Any branch/call/unknown action rejects
-        // the whole call before side effects; it cannot conceal another executable path.
-        int startAddress = address;
-        while (address != 0)
+        var pending = new Stack<int>();
+        var visited = new HashSet<int>();
+        pending.Push(address);
+        while (pending.TryPop(out address))
         {
+            if (address == 0 || !visited.Add(address)) continue;
             var command = _events.CommandAt(address);
-            if (command.Op == "end" && command.Mode == "keep") break;
-            if (command.Op != "showDialog" && !(command.Op == "setDialog" && command.Box == "upper" && command.RngWord == 0))
-                throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
-            address = Next(command);
-        }
-        address = startAddress;
-        while (address != 0)
-        {
-            var command = _events.CommandAt(address);
-            if (command.Op == "end") break;
-            if (command.Op == "showDialog")
+            if (command.Op == "end" && command.Mode == "keep") continue;
+            if (command.Op == "startBattle" && _battleContent is not null)
+            {
+                try { _battleContent.Validate(command.TeamId, BattleRole!); }
+                catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
+                pending.Push(Next(command));
+                if (command.LossAddress is { } loss) pending.Push(loss);
+                if (command.FleeAddress is { } flee) pending.Push(flee);
+            }
+            else if (command.Op == "showDialog")
             {
                 var content = ReadDisplay(ref address);
                 try
                 {
-                    // Exercise the existing display rules on a separate preview, so even a later
-                    // unsupported control fails before the real call changes caller or shows text.
+                    // Keep the existing language/control rules, on a separate display without production state or RNG.
                     var preview = new DialogueDisplaySession(content.Block, Context.Color, 0);
                     while (preview.Current.Phase != DialogueDisplayPhase.Completed) preview.Update(preview.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
                 }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
+                pending.Push(address);
             }
-            else address = Next(command);
+            else if (command.Op == "setDialog" && command.Box == "upper" && command.RngWord == 0) pending.Push(Next(command));
+            else throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
         }
     }
 
@@ -127,6 +155,13 @@ public sealed class TriggerScriptSession
                     Context = Context with { Box = command.Box, PortraitId = command.PortraitId, Color = command.Color == 0 ? Context.Color : command.Color };
                     _address = Next(command);
                     break;
+                case "startBattle" when _battleContent is not null:
+                    var lifecycle = new ClassicBattleLifecycleSession(BattleRole!, _battleContent.Player with { Hp = BattleRole!.Hp },
+                        _battleContent.Enemy(command.TeamId), _battleContent.Growth, _battleRandom!);
+                    PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.TeamId, command.IsBoss,
+                        Next(command), command.LossAddress, command.FleeAddress, lifecycle);
+                    Phase = TriggerScriptPhase.WaitingForBattle;
+                    return;
                 case "showDialog":
                     var content = ReadDisplay(ref _address);
                     var display = new DialogueDisplaySession(content.Block, Context.Color, 0, Context.DelayMilliseconds);

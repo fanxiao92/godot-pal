@@ -1,6 +1,6 @@
 # ClassicBattleSession：首个 Core 普攻检查点
 
-状态：#46 的 **Core 内部检查点**。单人单敌经典普攻、选令后随机排序、逐动作推进和真实 Won/Lost，以及下述零成长正式生命周期已实现；不是整张 #46 或 M4 的交付。事件往返、Main/真实输入、CLI/Prepare/native 人工内容与表现尚未接通。
+状态：#46 的 **Core 内部检查点**。单人单敌经典普攻、选令后随机排序、逐动作推进和真实 Won/Lost、下述零成长正式生命周期及 trigger 事件 binding 已实现；不是整张 #46 或 M4 的交付。Main/真实输入、CLI/Prepare/native 人工内容与表现尚未接通。
 
 ## Interface 与数据
 
@@ -8,7 +8,7 @@
 
 `Current` 是不可变 view，公开 phase、round、双方 HP、最近动作与战内 attack/health 动作计数。Damage 保留参考规则的命中伤害（玩家对敌可过量，敌对玩家先截至剩余 HP）；Evaded 与 Critical 独立表示。输入定义/外部角色不原地写入，旧 view 不随更新改变。战内计数按 WORD 增加并保留，不因奖励为零省略；不是永久属性或经验升级。其他动作尚不可选。
 
-只有真实 KO 才生成 `CompletionReceipt`，没有公共构造器或接受任意 outcome 的完成接口；终态保持同一个 receipt，不能重开或重复结算。后续事件请求须持有其唯一 active session，并比较该 session 的非空 `Completion` 的**对象身份**，再读 Outcome；不能仅根据相同结果、枚举、调用者或地址接续，也不能接受另一 session 的 receipt。本检查点尚未实现请求/事件续接。
+只有真实 KO 才生成 `CompletionReceipt`，没有公共构造器或接受任意 outcome 的完成接口；终态保持同一个 receipt，不能重开或重复结算。后续事件请求须持有其唯一 active session，并比较该 session 的非空 `Completion` 的**对象身份**，再读 Outcome；不能仅根据相同结果、枚举、调用者或地址接续，也不能接受另一 session 的 receipt。下述 trigger binding 实现了该约束；它只接受 lifecycle 而非 raw combat 的完成回执。
 
 `IBattleRandom` 是正常业务依赖，不是测试开关。整数和 float 区间均含端点，退化区间必须不消耗底层熵；Core 仍如参考请求敌目标 `0..0`。float 使用单精度。此处规定规则所请求的区间及顺序，不提供宿主随机适配器或承诺与原程序按 seed 重放。外层以后提供生产随机源；Unit 只在这个外部 seam 提供逐项可核的随机输入，不复制战斗引擎。
 
@@ -33,11 +33,27 @@
 
 参考 `PAL_StartBattle` 开场将 HP0 抬至1（零 status 所以 puppet 已为零），七 hidden count 归零而 primary count 保留；不放松底层 combat HP1..32767。每个真实动作后将真实 attack/health counts 写回角色，包括最后 **Lost**；其他五项仍为开场0。Won 在零结束钩子后按 `(max-current)/2` 截断恢复 HP/MP；Lost 不恢复，保留 HP0。清理真实 owned role status（参考 `<=999` 条件），并释放 active combat owner；本子集从不接收/产生 inventory-in-use、毒或 extra-equipment effect，不声称验证这些非零系统的清理，也不删除 hand-slot/dual。
 
-独立 `ClassicBattleLifecycleSession.CompletionReceipt` 仅在真实 KO、适用结算及清理之后发布，与 raw combat receipt 类型不同，无公开构造或任意结果入口。终态推进返回 false，选令拒绝，快照和 receipt 身份不变；`OwnsCompletion` 只对自身非空 receipt 的对象身份返回 true（两个 null 不匹配）。它不消费 receipt；后续事件请求仍须绑定准确 active lifecycle session，并自行实现一次性继续，不能接受另一 session、枚举或 raw KO。本检查点不接 VM。
+独立 `ClassicBattleLifecycleSession.CompletionReceipt` 仅在真实 KO、适用结算及清理之后发布，与 raw combat receipt 类型不同，无公开构造或任意结果入口。终态推进返回 false，选令拒绝，快照和 receipt 身份不变；`OwnsCompletion` 只对自身非空 receipt 的对象身份返回 true（两个 null 不匹配）。它不消费 receipt；后续事件请求仍须绑定准确 active lifecycle session，并自行实现一次性继续，不能接受另一 session、枚举或 raw KO。下述 trigger binding 复用此入口，不以 raw combat KO 绕过结算。
 
 下一场显式传入上场 `Current.Role`，正常承接 HP/MP/XP/法术与动作计数，然后按开场规则 reset；不静默重置 HP。Lost 的0HP只在下一场开场复活，不在战后伪恢复。公开 Core 测试包含：缺HP50/49→125、缺MP30/29→35；Lost HP0/MP20 不恢复；其后开场HP1、胜后HP75/MP35；双回合 rawHP180→结算HP190、attack2/health5，XP值与level不变；预检、深隔离、终态与跨会话身份。它们不是事件/Main/引擎接线证据。
 
 新增只读参考位置：battle.c:991–1390（主/hidden阈值、逐行学法术、半恢复），1531–1603（开场复活/reset），1780–1860（结果/清理/退出）；global.c:2084–2135（已知/空槽法术规则），2311–2348（状态清理）；palcommon.h:66/82（32槽/99级）。毒清除仅 party（global.c:1567–1636）、装备 extra slot 非 hand slot，均保留后续能力边界。
+
+## Trigger 事件binding（#46 有界检查点）
+
+正常显式入口：`TriggerScriptSession(events, language, TriggerBattleContent, IBattleRandom, inheritedColor = ...)`。既有 `(events, language, inheritedColor = ...)` 保持原有 M2/M3 行为及 enum 数值 Ready=0 / WaitingForDisplay=1 / Completed=2，无战斗配置时依然拒绝具名 `startBattle`，raw7 从不执行。WaitingForBattle 追加为3；两种等待均阻塞 `BlocksSceneUpdates`，且 `Start` 拒绝重入，不改变原调用。
+
+`TriggerBattleContent(role, player, growth, teamId→enemy)` 是纯 typed 正式内容，不是测试 profile、工厂或注入结果的 delegate；没有新增 JSON/native schema。role 提供初始持久状态，player 提供无装备效果的有效面板，growth 是该 role 的完整阈值/法术表，每个 team 映射本支持域的一个真实 enemy。初始 role/player 的 roleId、HP、maxHP 必须一致；所有之后仍要使用的嵌套 role、player、enemy、growth 集合均防御拷贝，不保留外部可变 alias。公开 `BattleRole` 是只读、不可变快照，不是可写全局状态库。
+
+同一 trigger session 持有唯一持久角色快照；每场以其当前 HP 覆盖初始 player template HP，正常构造准确且唯一的 `ClassicBattleLifecycleSession`。会话不把 rawHP 当 settledHP，也不在请求创建/真实KO时提前应用角色；**只有合法 ack** 将 lifecycle 的 settled `Current.Role` 一次应用。多次开战和后续 `Start` 承接 HP/MP/XP/法术/counts；开场复活/reset 只发生在下一场 lifecycle 内。独立新 session 从内容初始状态开始。为了保证任意多战 Won 半恢复后都仍在底层 combat HP1..32767 范围，此 VM 的保守支持域额外要求 **maxHP<=32767**；不更改 lifecycle/combat 原有 maxHP WORD 合同。
+
+`PendingBattle` 保存唯一 Guid、原 Caller、调用 Position、具名 teamId/IsBoss、原 NextAddress、LossAddress/FleeAddress 及准确 `Lifecycle`。等待时 `CurrentPosition` 留在开战指令。外层通过该生命周期的 `SelectAttack` / `ResolveNextAction` 进行真实战斗，结算/释放后才能得到其独立 Completion。`AcknowledgeBattle(requestId, completion)` 同时匹配当前 WaitingForBattle、准确 Guid 和该 active lifecycle 自己非空 completion 的对象身份；null、未完成、错 Guid、跨 lifecycle/脚本、旧场/重复或 display 回执都 inert，不改 PC/caller/context/持久角色、不重结算、不抽随机。
+
+合法 ack 按参考 `script.c:3316–3335` 的 Won→next、Lost→非空 lossTarget 否则 next 续接，持续执行至真实 display/battle/end(keep)/零地址边界，而非每 tick 一 opcode；原保存的 `ReturnEntry` 不因开战/结果分支改写。表现结束后何时 ack 是外层未来唯一推进者的责任，本接口没有 clock、动画或第二套循环。当前没有 autoBattle 可变 owner，不添加假标志宣称清除该尚未建模状态；引入实际 owner 时须补齐参考清除副作用。
+
+`Start` 在任何 caller/显示/角色状态副作用前，用 visited 工作表验证全部可能的 next/loss/flee 分支（跨文件、循环及真停止边界），复用 internal 纯 lifecycle/combat validation 和原语言/control preview。它不建战斗实例、不模拟胜利、不抽生产 RNG；每个可达 team/敌方数据、role/growth 和语言范围/control 都必须合法。即使当前无逃跑输入，也不得隐藏 flee 分支的不支持命令。IsBoss/FleeAddress 保留，但当前 lifecycle 仅产生真实 Won/Lost，**不宣称已经实现 Fled/逃跑 UI**；该能力仍属 #51。
+
+公开 Core binding 用例经真实KO验证：Won rawHP100→settled125/MP35，第二场承接125→137/MP42；Lost HP0/MP20 保留，下一场才抬HP1/reset；结果保持原 Caller/ReturnEntry并继续至完整停边界。另核对请求身份隔离、display交叉、跨文件 loss/循环、所有编码分支预检、规范 hidden 键、支持域及深隔离。这只是 Core 证据，不签 native/Main/表现、GPU、人工或 CI。
 
 ## 固定参考与独立算例
 

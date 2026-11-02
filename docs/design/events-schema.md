@@ -171,7 +171,8 @@ data/extracted/events/
 - 非空 `lossTarget` / `fleeTarget` 必须按本文件或 `file#label` 解析到集合内**非零**地址。引用下标 0 会与原始零值特殊含义冲突，故拒绝，必须用 `null`。`0xFFFF` 在本指令没有 sentinel 含义：teamId 可为 65535，结果目标 65535 仅在完整 65536 条集合中引用实际命令。
 - 三个 WORD 全部由语义字段重新编码：`teamId`、已解析的 loss 地址或 0、已解析的 flee 地址或 0。`source.operands` 完整保留作来源诊断，但不能覆盖编辑后的字段；`next` 仍严格遵守完整数组的 WORD 顺序后继，包括回绕和真末端 `null`。即使真末端也校验所有结果引用。
 - 新导出总是使用具名 `startBattle`。为兼容此前合法 M2/M3 完整包，旧 `raw` opcode 7 仍可严格仅携带公共字段，离线无损重建及 Core 集合加载；其原始操作数不按引用解析。此例外不放松 `0x0000` / `0x003C` / `0xFFFF` 必须具名的既有规则，也不为运行时提供 raw 执行通道，不要求迁移旧资源或改变 v1/profile。
-- 本检查点只交付离线双向编解码和 Core 严格集合加载/引用解析；`TriggerScriptSession` 的能力预检仍在副作用前明确拒绝 `startBattle` 与 `raw`。auto 没有在本检查点获得战斗执行语义，事件请求/续接、Main 与 native 准备属于后续 seam。
+- Core 已追加显式 `TriggerBattleContent` + `IBattleRandom` 的 trigger 战斗 binding 检查点：具名 `startBattle` 暂停于准确 active `ClassicBattleLifecycleSession`，真实结算完成且匹配回执后 Won 走 next、Lost 走 lossTarget（null 则 next），不改原 ReturnEntry。详见[正式接口及支持域](classic-battle-session.md#trigger-事件binding46-有界检查点)。原有无战斗配置的构造器仍在副作用前拒绝 `startBattle`，所有构造器都拒绝执行 `raw`。
+- 能力预检覆盖选中入口的 next、lossTarget、编码的 fleeTarget 完整保守闭包（包括跨文件与循环），至 end(keep)/零地址停止；不因当前只会产生 Won/Lost 而忽略 fleeTarget。预检使用纯数据验证与独立语言 preview，不创建预演战斗或消耗生产随机值。auto 没有获得战斗执行语义；逃跑动作/结果仍属 #51，Main、native 准备与表现尚未接通。
 
 注意：
 

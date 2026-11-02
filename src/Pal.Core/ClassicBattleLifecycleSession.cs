@@ -75,6 +75,12 @@ public sealed class ClassicBattleLifecycleSession
             x => new BattleExperienceSnapshot(x.Value.Value, x.Value.Level, x.Value.Count), StringComparer.Ordinal)),
         Array.AsReadOnly(role.Equipment.ToArray()), Array.AsReadOnly(role.Magics.ToArray()), Array.AsReadOnly(role.Statuses.ToArray()), role.CoveredByRoleId);
 
+    internal static void Validate(BattleRoleSnapshot role, ClassicBattlePlayer player, ClassicBattleEnemy enemy, ClassicBattleGrowthData growth)
+    {
+        ValidateNoGrowth(role, player, growth);
+        ClassicBattleSession.Validate(new([player with { Hp = Math.Max(1, role.Hp) }], [enemy]));
+    }
+
     private static void ValidateNoGrowth(BattleRoleSnapshot role, ClassicBattlePlayer player, ClassicBattleGrowthData growth)
     {
         if (role.RoleId != player.RoleId || role.Hp != player.Hp || role.MaxHp != player.MaxHp

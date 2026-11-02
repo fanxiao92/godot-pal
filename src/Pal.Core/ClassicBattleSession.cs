@@ -99,7 +99,7 @@ public sealed class ClassicBattleSession
         ? unchecked((short)(attack * 2 - defense * 1.6 + .5))
         : attack > defense * .6 ? unchecked((short)(attack - defense * .6 + .5)) : (short)0;
 
-    private static void Validate(ClassicBattleDefinition definition)
+    internal static void Validate(ClassicBattleDefinition definition)
     {
         if (definition.Players is not { Count: 1 } || definition.Enemies is not { Count: 1 }
             || definition.Players[0] is not { } p || definition.Enemies[0] is not { } e)
