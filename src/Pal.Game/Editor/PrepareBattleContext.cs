@@ -38,14 +38,16 @@ public partial class PrepareBattleContext : Node
         var createdDirectories = new List<string>();
         try
         {
-            string input = Path.GetFullPath(inputDirectory);
-            string output = ProjectSettings.LocalizePath(Path.GetFullPath(outputDirectory)).TrimEnd('/');
-            Require(output == "res://Assets" || output.StartsWith("res://Assets/", StringComparison.Ordinal), "battle native output must be under project Assets");
+            string input = Path.TrimEndingDirectorySeparator(Path.GetFullPath(inputDirectory));
+            string outputPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDirectory));
+            string output = ProjectSettings.LocalizePath(outputPath).TrimEnd('/');
+            Require(IsInside(outputPath, ProjectSettings.GlobalizePath("res://Assets")), "battle native output must be under project Assets");
+            ValidatePreparationPaths(input, outputPath);
+            RequireEmptyOutput(outputPath);
             NativeSceneLoader.ValidateRoot(staticResources);
             NativeExplorationProfile.ValidateUri(staticProfile);
             string staticRootPath = PreparationPathSafety.AssetResourcePath(staticResources, directory: true);
             string staticProfilePath = PreparationPathSafety.AssetResourcePath(staticProfile, directory: false);
-            string outputPath = ProjectSettings.GlobalizePath(output);
             Require(IsInside(staticProfilePath, staticRootPath), "selected static profile must be inside selected static resources");
             Require(!IsInside(outputPath, staticRootPath) && !IsInside(staticRootPath, outputPath),
                 "battle native output and selected static resources must not overlap in either direction");
@@ -70,12 +72,12 @@ public partial class PrepareBattleContext : Node
             };
             NativeBattleEnvelopeAdapter.Write(native, profile.ToTypedEnvelope());
 
-            RecheckSources(indexPath, contextPath, indexBytes, contextBytes,
+            RecheckSources(input, outputPath, indexPath, contextPath, indexBytes, contextBytes,
                 staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
                 sceneLease, profileLease, sceneHash, staticProfileHash);
             CheckedFirstMandatoryBattleProfile checkedNative = NativeFirstMandatoryBattleProfile.ValidateForPreparation(native);
             ValidateStaticSelection(checkedNative);
-            RecheckSources(indexPath, contextPath, indexBytes, contextBytes,
+            RecheckSources(input, outputPath, indexPath, contextPath, indexBytes, contextBytes,
                 staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
                 sceneLease, profileLease, sceneHash, staticProfileHash);
 
@@ -83,18 +85,19 @@ public partial class PrepareBattleContext : Node
             string destinationPath = ProjectSettings.GlobalizePath(destination);
             Require(!File.Exists(destinationPath), "native battle profile already exists");
             string destinationDirectory = Path.GetDirectoryName(destinationPath)!;
+            RequireEmptyOutput(outputPath);
             CreateOwnedDirectory(outputPath, createdDirectories);
             CreateOwnedDirectory(destinationDirectory, createdDirectories);
             temporary = destinationPath + ".tmp-" + Guid.NewGuid().ToString("N") + ".tres";
             string temporaryUri = ProjectSettings.LocalizePath(temporary);
             Require(ResourceSaver.Save(native, temporaryUri) == Error.Ok, "could not save native battle profile");
 
-            RecheckSources(indexPath, contextPath, indexBytes, contextBytes,
+            RecheckSources(input, outputPath, indexPath, contextPath, indexBytes, contextBytes,
                 staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
                 sceneLease, profileLease, sceneHash, staticProfileHash);
             CheckedFirstMandatoryBattleProfile saved = NativeFirstMandatoryBattleProfile.Load(temporaryUri);
             ValidateStaticSelection(saved);
-            RecheckSources(indexPath, contextPath, indexBytes, contextBytes,
+            RecheckSources(input, outputPath, indexPath, contextPath, indexBytes, contextBytes,
                 staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
                 sceneLease, profileLease, sceneHash, staticProfileHash);
             File.Move(temporary, destinationPath, false);
@@ -121,11 +124,12 @@ public partial class PrepareBattleContext : Node
         finally { map?.Free(); }
     }
 
-    private static void RecheckSources(string indexPath, string contextPath, byte[] indexBytes, byte[] contextBytes,
+    private static void RecheckSources(string input, string output, string indexPath, string contextPath, byte[] indexBytes, byte[] contextBytes,
         string staticRootUri, string staticRootPath, string staticSceneUri, string staticScenePath,
         string staticProfileUri, string staticProfilePath, FileStream sceneLease, FileStream profileLease,
         string sceneHash, string profileHash)
     {
+        ValidatePreparationPaths(input, output);
         Require(File.ReadAllBytes(indexPath).SequenceEqual(indexBytes) && File.ReadAllBytes(contextPath).SequenceEqual(contextBytes),
             "battle context source changed during preparation");
         Require(PreparationPathSafety.AssetResourcePath(staticRootUri, directory: true) == staticRootPath
@@ -137,6 +141,26 @@ public partial class PrepareBattleContext : Node
             && PreparationPathSafety.MatchesStableRead(staticProfilePath, profileLease, profileHash),
             "selected static native resource changed during preparation");
     }
+
+    private static void ValidatePreparationPaths(string input, string output)
+    {
+        Require(!IsInside(input, output) && !IsInside(output, input),
+            "battle input and output must not overlap in either direction");
+        Require(!IsInside(input, ProjectSettings.GlobalizePath("res://")), "battle input must be outside src/Pal.Game");
+        PreparationPathSafety.CheckNoReparse(input, allowMissing: true);
+        Require(Directory.Exists(input), "battle input must be an existing authored battle-context directory");
+        PreparationPathSafety.CheckTreeNoReparse(input);
+        string[] files = Directory.EnumerateFiles(input, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(input, path).Replace(Path.DirectorySeparatorChar, '/')).Order(StringComparer.Ordinal).ToArray();
+        Require(files.SequenceEqual(new[] { "battle-context.json", "index.json" }),
+            "battle input must contain exactly index.json and battle-context.json");
+        PreparationPathSafety.CheckNoReparse(output, allowMissing: true);
+        Require(!File.Exists(output), "battle native output is an existing file");
+    }
+
+    private static void RequireEmptyOutput(string output) =>
+        Require(!Directory.Exists(output) || !Directory.EnumerateFileSystemEntries(output).Any(),
+            "battle native output must be new or empty; no overwrite is supported");
 
     private static void CreateOwnedDirectory(string path, List<string> created)
     {
@@ -160,8 +184,10 @@ public partial class PrepareBattleContext : Node
     private static bool IsInside(string child, string parent)
     {
         StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        parent = Path.TrimEndingDirectorySeparator(parent);
-        return child.Equals(parent, comparison) || child.StartsWith(parent + Path.DirectorySeparatorChar, comparison);
+        child = Path.TrimEndingDirectorySeparator(Path.GetFullPath(child));
+        parent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(parent));
+        string prefix = Path.EndsInDirectorySeparator(parent) ? parent : parent + Path.DirectorySeparatorChar;
+        return child.Equals(parent, comparison) || child.StartsWith(prefix, comparison);
     }
 
     private static void Require(bool condition, string diagnostic)

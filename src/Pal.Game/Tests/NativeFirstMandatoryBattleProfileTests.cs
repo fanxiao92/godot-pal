@@ -118,6 +118,170 @@ public class NativeFirstMandatoryBattleProfileTests
         AssertThrown(() => GameSceneConfiguration.FromArguments("--m4-first-battle-profile", "res://Tests/Battle.tres", "--m4-first-battle-language", "fr"));
     }
 
+    [TestCase]
+    public void DirectPrepareRejectsNonemptyOutputWithoutPublishingOrChangingSources()
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        fixture.AuthorPreparationSources();
+        Directory.CreateDirectory(fixture.PreparationOutput);
+        string sentinel = Path.Combine(fixture.PreparationOutput, "keep.txt");
+        File.WriteAllText(sentinel, "existing output must survive");
+        InvalidDataException? error = null;
+        try
+        {
+            Editor.PrepareBattleContext.Prepare(fixture.PreparationInput, fixture.PreparationOutput,
+                fixture.Static.ResourceRoot, fixture.PreparationStaticProfile);
+        }
+        catch (InvalidDataException caught) { error = caught; }
+        AssertThat(error is not null).OverrideFailureMessage("Direct Prepare must reject nonempty output even without Battle/Profile.tres").IsTrue();
+        AssertThat(error!.Message.Contains("new or empty", StringComparison.Ordinal)).IsTrue();
+        AssertThat(string.Join("|", Directory.GetFileSystemEntries(fixture.PreparationOutput))).IsEqual(sentinel);
+        AssertThat(File.ReadAllText(sentinel)).IsEqual("existing output must survive");
+        foreach (var source in fixture.PreparationSourceHashes)
+            AssertThat(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(source.Key))))
+                .IsEqual(source.Value);
+    }
+
+    [TestCase("extra-file")]
+    [TestCase("nested-extra-file")]
+    [TestCase("project-input")]
+    [TestCase("same-path")]
+    [TestCase("input-inside-output")]
+    [TestCase("output-inside-input")]
+    [TestCase("output-file")]
+    public void DirectPrepareRejectsUnsafePathsWithoutChangingExistingFiles(string defect)
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        fixture.AuthorPreparationSources();
+        string input = fixture.PreparationInput, output = fixture.PreparationOutput;
+        string diagnostic;
+        switch (defect)
+        {
+            case "extra-file":
+                File.WriteAllText(Path.Combine(input, "extra.txt"), "keep extra input");
+                diagnostic = "exactly index.json and battle-context.json";
+                break;
+            case "nested-extra-file":
+                Directory.CreateDirectory(Path.Combine(input, "nested"));
+                File.WriteAllText(Path.Combine(input, "nested", "extra.txt"), "keep nested input");
+                diagnostic = "exactly index.json and battle-context.json";
+                break;
+            case "project-input": input = ProjectSettings.GlobalizePath(fixture.Root + "/Input"); diagnostic = "outside"; break;
+            case "same-path": input = output; diagnostic = "overlap"; break;
+            case "input-inside-output": input = Path.Combine(output, "Input"); diagnostic = "overlap"; break;
+            case "output-inside-input": input = output; output = Path.Combine(input, "Output"); diagnostic = "overlap"; break;
+            default:
+                Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+                File.WriteAllText(output, "keep output file");
+                diagnostic = "existing file";
+                break;
+        }
+        if (input != fixture.PreparationInput)
+        {
+            Directory.CreateDirectory(input);
+            foreach (string file in Directory.GetFiles(fixture.PreparationInput))
+                File.Copy(file, Path.Combine(input, Path.GetFileName(file)));
+        }
+        string inputBefore = Snapshot(input), staticBefore = Snapshot(ProjectSettings.GlobalizePath(fixture.Static.ResourceRoot));
+        string outputBefore = Snapshot(fixture.PreparationOutput);
+        InvalidDataException? error = null;
+        try { Editor.PrepareBattleContext.Prepare(input, output, fixture.Static.ResourceRoot, fixture.PreparationStaticProfile); }
+        catch (InvalidDataException caught) { error = caught; }
+        AssertThat(error is not null).IsTrue();
+        AssertThat(error!.Message.Contains(diagnostic, StringComparison.Ordinal))
+            .OverrideFailureMessage($"Expected '{diagnostic}' for {defect}, got: {error.Message}").IsTrue();
+        AssertThat(Snapshot(input)).IsEqual(inputBefore);
+        AssertThat(Snapshot(ProjectSettings.GlobalizePath(fixture.Static.ResourceRoot))).IsEqual(staticBefore);
+        AssertThat(Snapshot(fixture.PreparationOutput)).IsEqual(outputBefore);
+    }
+
+    [TestCase("input-ancestor")]
+    [TestCase("input-descendant")]
+    [TestCase("output-link")]
+    [TestCase("output-ancestor")]
+    [TestCase("dangling-output-ancestor")]
+    public void DirectPrepareRejectsLinksIncludingMissingOutputDescendants(string defect)
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        fixture.AuthorPreparationSources();
+        string input = fixture.PreparationInput, output = fixture.PreparationOutput;
+        string target = ProjectSettings.GlobalizePath(fixture.Root + "/LinkTarget");
+        Directory.CreateDirectory(target);
+        string link = defect == "input-descendant" ? Path.Combine(input, "linked")
+            : defect.StartsWith("input", StringComparison.Ordinal) ? input + "-link" : output;
+        string inputBefore = Snapshot(input), staticBefore = Snapshot(ProjectSettings.GlobalizePath(fixture.Static.ResourceRoot));
+        string targetBefore = Snapshot(target);
+        Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+        CreateDirectoryLink(link, defect == "input-ancestor" ? input : target);
+        try
+        {
+            if (defect == "input-ancestor") input = link;
+            if (defect.EndsWith("ancestor", StringComparison.Ordinal) && defect != "input-ancestor")
+                output = Path.Combine(link, "missing", "output");
+            if (defect == "dangling-output-ancestor") Directory.Delete(target);
+            InvalidDataException? error = null;
+            try { Editor.PrepareBattleContext.Prepare(input, output, fixture.Static.ResourceRoot, fixture.PreparationStaticProfile); }
+            catch (InvalidDataException caught) { error = caught; }
+            AssertThat(error is not null).IsTrue();
+            AssertThat(error!.Message.Contains("link/reparse", StringComparison.Ordinal))
+                .OverrideFailureMessage($"Expected link/reparse rejection for {defect}, got: {error.Message}").IsTrue();
+            AssertThat((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0).IsTrue();
+            AssertThat(Snapshot(ProjectSettings.GlobalizePath(fixture.Static.ResourceRoot))).IsEqual(staticBefore);
+            AssertThat(Snapshot(target)).IsEqual(defect == "dangling-output-ancestor" ? "missing" : targetBefore);
+            if (defect.StartsWith("input", StringComparison.Ordinal)) AssertThat(Directory.Exists(output)).IsFalse();
+        }
+        finally { Directory.Delete(link); }
+        AssertThat(Snapshot(fixture.PreparationInput)).IsEqual(inputBefore);
+        AssertThat(Directory.Exists(fixture.PreparationOutput)).IsFalse();
+    }
+
+    [TestCase("new")]
+    [TestCase("empty")]
+    [TestCase("missing-ancestors")]
+    public void DirectPrepareAcceptsNewOrEmptyOutputAndEmptyInputSubdirectories(string outputKind)
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        fixture.AuthorPreparationSources();
+        Directory.CreateDirectory(Path.Combine(fixture.PreparationInput, "empty", "nested"));
+        string output = fixture.PreparationOutput;
+        if (outputKind == "empty") Directory.CreateDirectory(output);
+        if (outputKind == "missing-ancestors") output = Path.Combine(output, "new", "nested");
+        string inputBefore = Snapshot(fixture.PreparationInput), staticBefore = Snapshot(ProjectSettings.GlobalizePath(fixture.Static.ResourceRoot));
+        string uri = Editor.PrepareBattleContext.Prepare(fixture.PreparationInput, output,
+            fixture.Static.ResourceRoot, fixture.PreparationStaticProfile);
+        AssertThat(uri).IsEqual(ProjectSettings.LocalizePath(output).TrimEnd('/') + "/Battle/Profile.tres");
+        AssertThat(File.Exists(ProjectSettings.GlobalizePath(uri))).IsTrue();
+        AssertThat(Directory.GetFiles(output, "*", SearchOption.AllDirectories).Length).IsEqual(1);
+        AssertThat(NativeFirstMandatoryBattleProfile.Load(uri).Profile.ContextSha256).IsEqual(fixture.Core.ContextSha256);
+        AssertThat(Snapshot(fixture.PreparationInput)).IsEqual(inputBefore);
+        AssertThat(Snapshot(ProjectSettings.GlobalizePath(fixture.Static.ResourceRoot))).IsEqual(staticBefore);
+    }
+
+    private static void CreateDirectoryLink(string link, string target)
+    {
+        // Same non-admin Windows junction mechanism as PreparePathSafetyTests.
+        if (!OperatingSystem.IsWindows()) { Directory.CreateSymbolicLink(link, target); return; }
+        var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+        };
+        foreach (string argument in new[] { "/c", "mklink", "/J", Path.GetFullPath(link), Path.GetFullPath(target) })
+            start.ArgumentList.Add(argument);
+        using var process = System.Diagnostics.Process.Start(start)!;
+        string stdout = process.StandardOutput.ReadToEnd(), stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        AssertThat(process.ExitCode).OverrideFailureMessage(stdout + stderr).IsEqual(0);
+    }
+
+    private static string Snapshot(string root)
+    {
+        if (File.Exists(root)) return "file:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(root)));
+        if (!Directory.Exists(root)) return "missing";
+        return "directory:" + string.Join("|", Directory.GetFileSystemEntries(root, "*", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal).Select(path => Path.GetRelativePath(root, path) + ":" +
+                (Directory.Exists(path) ? "directory" : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))))));
+    }
+
     private static void AssertThrown(Action action)
     {
         bool rejected = false;

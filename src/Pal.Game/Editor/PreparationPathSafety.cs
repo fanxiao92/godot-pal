@@ -24,13 +24,19 @@ internal static class PreparationPathSafety
         return path;
     }
 
-    internal static void CheckNoReparse(string path)
+    internal static void CheckNoReparse(string path, bool allowMissing = false)
     {
         string? cursor = Path.GetFullPath(path);
         while (cursor is not null)
         {
-            if ((File.GetAttributes(cursor) & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException("selected static resource contains a link/reparse point: " + cursor);
+            // Probe attributes even when Exists is false: dangling links must not be skipped.
+            FileAttributes attributes;
+            try { attributes = File.GetAttributes(cursor); }
+            catch (FileNotFoundException) when (allowMissing) { attributes = 0; }
+            catch (DirectoryNotFoundException) when (allowMissing) { attributes = 0; }
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidDataException((allowMissing ? "preparation path" : "selected static resource")
+                    + " contains a link/reparse point: " + cursor);
             cursor = Path.GetDirectoryName(cursor);
         }
     }

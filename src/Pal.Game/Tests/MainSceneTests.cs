@@ -350,12 +350,13 @@ public class MainSceneTests
         AssertThat(fixture.Static.Scene.Objects.Single(item => item.Id == 28).WTriggerScript).IsEqual(0x09c3);
     }
 
-    [TestCase(Timeout = 20000)]
-    public async Task PreparedFirstBattleContextLoadsThroughMainAndKeepsSameUriSessionIndependent()
+    [TestCase("new", Timeout = 20000)]
+    [TestCase("empty", Timeout = 20000)]
+    public async Task PreparedFirstBattleContextLoadsThroughMainAndKeepsSameUriSessionIndependent(string outputKind)
     {
         using var fixture = new NativeBattleProfileFixture();
         // Offline preparation finishes synchronously before either Main enters the tree.
-        string preparedUri = fixture.PrepareProductionProfile();
+        string preparedUri = fixture.PrepareProductionProfile(existingEmptyOutput: outputKind == "empty");
         AssertThat(preparedUri.EndsWith("/Battle/Profile.tres", StringComparison.Ordinal)).IsTrue();
         string preparedHash = Godot.FileAccess.GetSha256(preparedUri);
         var selection = GameSceneConfiguration.FromArguments("--m4-first-battle-profile", preparedUri);

@@ -61,25 +61,35 @@ internal sealed class NativeBattleProfileFixture : IDisposable
 
     public void Save() => NativeProfileFixture.SaveResource(Native, Uri);
 
-    public string PrepareProductionProfile()
+    public string PreparationInput => inputDirectory;
+    public string PreparationOutput => ProjectSettings.GlobalizePath(preparedRoot);
+    public string PreparationStaticProfile => Static.ResourceRoot + "/Profile.tres";
+
+    public string PrepareProductionProfile(bool existingEmptyOutput = false)
+    {
+        AuthorPreparationSources();
+        if (existingEmptyOutput) Directory.CreateDirectory(PreparationOutput);
+        return Editor.PrepareBattleContext.Prepare(PreparationInput, PreparationOutput,
+            Static.ResourceRoot, PreparationStaticProfile);
+    }
+
+    public void AuthorPreparationSources()
     {
         Directory.CreateDirectory(inputDirectory);
         File.WriteAllBytes(Path.Combine(inputDirectory, "index.json"), indexBytes);
         File.WriteAllBytes(Path.Combine(inputDirectory, "battle-context.json"), contextBytes);
-        string staticProfile = Static.ResourceRoot + "/Profile.tres";
-        NativeProfileFixture.SaveResource(Static.Profile, staticProfile);
+        NativeProfileFixture.SaveResource(Static.Profile, PreparationStaticProfile);
         foreach (string path in Directory.GetFiles(inputDirectory).Concat(
             Directory.GetFiles(ProjectSettings.GlobalizePath(Static.ResourceRoot), "*", SearchOption.AllDirectories)))
             PreparationSourceHashes.Add(path, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))));
-        return Editor.PrepareBattleContext.Prepare(inputDirectory, ProjectSettings.GlobalizePath(preparedRoot),
-            Static.ResourceRoot, staticProfile);
     }
 
     public void Dispose()
     {
         Static.Dispose();
         if (Directory.Exists(inputDirectory)) Directory.Delete(inputDirectory, true);
-        if (Directory.Exists(ProjectSettings.GlobalizePath(preparedRoot))) Directory.Delete(ProjectSettings.GlobalizePath(preparedRoot), true);
+        if (Directory.Exists(PreparationOutput)) Directory.Delete(PreparationOutput, true);
+        else if (File.Exists(PreparationOutput)) File.Delete(PreparationOutput);
         if (Directory.Exists(ProjectSettings.GlobalizePath(Root))) Directory.Delete(ProjectSettings.GlobalizePath(Root), true);
     }
 }
