@@ -57,7 +57,7 @@
 
 ## 公开纯入口预检（#46 native binding 前置检查点）
 
-`TriggerScriptSession.ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language, TriggerBattleContent battleContent, string fileId, string entryId, int inheritedColor = DialogueTextTokenizer.DefaultColor)` 为外层严格加载提供纯 capability seam。三个依赖不能为 null，颜色须为0..255，入口必须存在且 kind 为 trigger；禁用零入口沿既有语义不执行任何命令。它只针对 `battleContent.InitialRole` 校验选中入口的完整 next/loss/flee 保守闭包，复用与 `Start` 相同的私有静态 walker、消息范围读取及独立 display/control preview。遇不支持数据或命令抛出带原位置的 `InvalidDataException`，不创建 trigger session、战斗或 lifecycle，不接收/消耗 RNG，不调用 `Start` 或模拟胜利，也不改变任何现有会话、请求或初始角色。
+`TriggerEntryRequirements TriggerScriptSession.ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language, TriggerBattleContent battleContent, string fileId, string entryId, int inheritedColor = DialogueTextTokenizer.DefaultColor)` 为外层严格加载提供纯 capability seam。三个依赖不能为 null，颜色须为0..255，入口必须存在且 kind 为 trigger；禁用零入口沿既有语义不执行任何命令。它只针对 `battleContent.InitialRole` 校验选中入口的完整 next/loss/flee 保守闭包，复用与 `Start` 相同的私有静态 walker、消息范围读取及独立 display/control preview。遇不支持数据或命令抛出带原位置的 `InvalidDataException`，不创建 trigger session、战斗或 lifecycle，不接收/消耗 RNG，不调用 `Start` 或模拟胜利，也不改变任何现有会话、请求或初始角色。 返回的深不可变requirements包含选中闭包的真实DisplayBlocks/MessageReferences、非零PortraitIds和BattleTeamIds；native实际消费者见[原生story内容绑定](native-story-content.md)。
 
 `Start` 的调用/副作用时机保持不变：仍以该会话当前 settled `BattleRole` 和 `Context.Color` 在 caller/PC/request 改变前调用同一 walker；后续 Start 不因静态预检而重置为初始角色。旧无 battle 配置的路径仍在原边界拒绝 `startBattle`。数据格式合法与选中入口能力不混淆：仅沿该闭包验证，归档的非零能力/未引用 team 不因此变成格式错误；本入口不验证来源认证、native hash、scene/owner identity、字形/画像或战斗视觉资源。完整 static native story profile、production package preparation 和正常 Main/输入/显示仍未交付。
 

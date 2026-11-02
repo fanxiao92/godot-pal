@@ -47,7 +47,7 @@ public sealed class TriggerScriptSession
 
     /// <summary>Pure selected-entry capability check against the content's initial role. Does not start a call,
     /// create a battle or require randomness; later Start calls still validate their current settled role.</summary>
-    public static void ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language,
+    public static TriggerEntryRequirements ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent battleContent, string fileId, string entryId, int inheritedColor = DialogueTextTokenizer.DefaultColor)
     {
         ArgumentNullException.ThrowIfNull(events);
@@ -56,7 +56,9 @@ public sealed class TriggerScriptSession
         if (inheritedColor is < 0 or > 255) throw new ArgumentOutOfRangeException(nameof(inheritedColor));
         var entry = events.GetEntry(fileId, entryId);
         if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
-        ValidateCapabilityClosure(events, language, battleContent, battleContent.InitialRole, inheritedColor, entry.SourceAddress);
+        var requirements = new EntryRequirementsCollector();
+        ValidateCapabilityClosure(events, language, battleContent, battleContent.InitialRole, inheritedColor, entry.SourceAddress, requirements);
+        return new(requirements.Displays, requirements.Portraits, requirements.Teams);
     }
 
     public void Start(string fileId, string entryId, int caller)
@@ -99,8 +101,16 @@ public sealed class TriggerScriptSession
     private void ValidateCapabilityClosure(int address) =>
         ValidateCapabilityClosure(_events, _language, _battleContent, BattleRole, Context.Color, address);
 
+    private sealed class EntryRequirementsCollector
+    {
+        internal readonly List<TriggerDisplayRequirement> Displays = new();
+        internal readonly HashSet<int> Portraits = new();
+        internal readonly HashSet<int> Teams = new();
+    }
+
     private static void ValidateCapabilityClosure(TriggerEventCollection events, DialogueLanguagePackage language,
-        TriggerBattleContent? battleContent, BattleRoleSnapshot? battleRole, int color, int address)
+        TriggerBattleContent? battleContent, BattleRoleSnapshot? battleRole, int color, int address,
+        EntryRequirementsCollector? requirements = null)
     {
         var pending = new Stack<int>();
         var visited = new HashSet<int>();
@@ -114,6 +124,7 @@ public sealed class TriggerScriptSession
             {
                 try { battleContent.Validate(command.TeamId, battleRole!); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
+                requirements?.Teams.Add(command.TeamId);
                 pending.Push(Next(command));
                 if (command.LossAddress is { } loss) pending.Push(loss);
                 if (command.FleeAddress is { } flee) pending.Push(flee);
@@ -128,9 +139,14 @@ public sealed class TriggerScriptSession
                     while (preview.Current.Phase != DialogueDisplayPhase.Completed) preview.Update(preview.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
                 }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
+                requirements?.Displays.Add(new(content.Block, content.References));
                 pending.Push(address);
             }
-            else if (command.Op == "setDialog" && command.Box == "upper" && command.RngWord == 0) pending.Push(Next(command));
+            else if (command.Op == "setDialog" && command.Box == "upper" && command.RngWord == 0)
+            {
+                if (command.PortraitId != 0) requirements?.Portraits.Add(command.PortraitId);
+                pending.Push(Next(command));
+            }
             else throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
         }
     }

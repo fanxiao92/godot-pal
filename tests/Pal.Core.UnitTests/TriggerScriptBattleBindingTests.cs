@@ -5,6 +5,51 @@ namespace Pal.Core.Tests;
 
 public sealed class TriggerScriptBattleBindingTests
 {
+    [Fact]
+    public void ValidateEntry_returns_selected_named_requirements_without_executing_battles()
+    {
+        var fixture = Fixture(); // TeamId=18 is edited; source operands deliberately still say 99.
+        var requirements = TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), Content(), "shared", "npc");
+        Assert.Equal(new[] { 18 }, requirements.BattleTeamIds);
+        Assert.Empty(requirements.PortraitIds);
+        var display = Assert.Single(requirements.DisplayBlocks);
+        Assert.Equal(new TriggerPosition("shared", "L0002", 2), display.MessageReferences[0].Position);
+        Assert.Equal(61, display.Content.StartMessageId);
+        Assert.Equal(1, display.Content.Span);
+        Assert.Throws<NotSupportedException>(() => ((IList<int>)requirements.BattleTeamIds).Add(99));
+        Assert.Throws<NotSupportedException>(() => ((IList<TriggerMessageReference>)display.MessageReferences).Clear());
+        Assert.Throws<NotSupportedException>(() => ((IList<DialogueMessagePart>)display.Content.Parts).Clear());
+        fixture.Commands.Clear();
+        Assert.Equal(61, display.MessageReferences[0].StartMessageId);
+    }
+
+    [Fact]
+    public void ValidateEntry_collects_named_portraits_and_immutable_display_ranges_not_retained_operands()
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[1]!["portraitId"] = 7;
+        var requirements = TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), Content(), "shared", "npc");
+        Assert.Equal(new[] { 7 }, requirements.PortraitIds);
+        Assert.Empty(requirements.BattleTeamIds);
+        Assert.Equal(new TriggerPosition("shared", "L0002", 2), Assert.Single(requirements.DisplayBlocks).MessageReferences[0].Position);
+        Assert.Throws<NotSupportedException>(() => ((IList<int>)requirements.PortraitIds)[0] = 59);
+        fixture.Commands[1]!["portraitId"] = 8;
+        Assert.Equal(7, requirements.PortraitIds[0]);
+    }
+
+    [Fact]
+    public void ValidateEntry_loop_requirements_are_deduplicated_without_running_any_battle()
+    {
+        var fixture = Fixture();
+        fixture.Commands[1] = Battle(1, boss: false, flee: "L0001");
+        fixture.Commands[3] = End(3);
+        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("after battle")])]);
+        var requirements = TriggerScriptSession.ValidateEntry(fixture.Load(), language, Content(), "shared", "npc");
+        Assert.Equal(new[] { 18 }, requirements.BattleTeamIds);
+        Assert.Single(requirements.DisplayBlocks);
+        Assert.Equal("after battle", requirements.DisplayBlocks[0].Content.Parts[0].Text);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(100)]
@@ -99,7 +144,10 @@ public sealed class TriggerScriptBattleBindingTests
         fixture.Entry["target"] = null;
         fixture.Entry["sourceAddress"] = 0;
         var content = Content(enemy: new(7, 0, 43, 0, 0, 0, 1) { Experience = 1 });
-        TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), content, "shared", "npc");
+        var requirements = TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), content, "shared", "npc");
+        Assert.Empty(requirements.DisplayBlocks);
+        Assert.Empty(requirements.PortraitIds);
+        Assert.Empty(requirements.BattleTeamIds);
         Assert.Equal(1, content.Teams[18].Experience);
         Assert.Equal(100, content.InitialRole.Hp);
     }
