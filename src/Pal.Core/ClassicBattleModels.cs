@@ -37,7 +37,21 @@ public sealed record ClassicBattleEnemy(int Id, int Level, int Hp, int Attack, i
 public sealed record ClassicBattleDefinition(IReadOnlyList<ClassicBattlePlayer> Players, IReadOnlyList<ClassicBattleEnemy> Enemies);
 public enum ClassicBattlePhase { Selecting, Resolving, Won, Lost }
 public enum ClassicBattleSide { Player, Enemy }
-public sealed record ClassicBattleAction(int Round, ClassicBattleSide Attacker, int TargetId, int Damage, bool Critical, bool Evaded);
+public sealed record ClassicBattleAction(int Round, ClassicBattleSide Attacker, int TargetId, int Damage, bool Critical, bool Evaded)
+{
+    public int ActorIndex { get; init; }
+    public int TargetIndex { get; init; }
+}
+public sealed record ClassicBattlePlayerView(int PartyIndex, int RoleId, int Hp, ClassicBattleCounts Counts, int? SelectedEnemySlot);
+public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp);
+public sealed record ClassicBattleQueueEntry(ClassicBattleSide Side, int ActorIndex, ushort Dexterity);
 public sealed record ClassicBattleCounts(int Attack, int Health);
 public sealed record ClassicBattleView(ClassicBattlePhase Phase, int Round, int PlayerHp, int EnemyHp,
-    ClassicBattleCounts Counts, ClassicBattleAction? LastAction);
+    ClassicBattleCounts Counts, ClassicBattleAction? LastAction)
+{
+    // Positional HP/counts are compatibility projections of index zero, not party totals.
+    public IReadOnlyList<ClassicBattlePlayerView> Players { get; init; } = [];
+    public IReadOnlyList<ClassicBattleEnemyView> Enemies { get; init; } = [];
+    public IReadOnlyList<ClassicBattleQueueEntry> ActionQueue { get; init; } = [];
+    public int? SelectingPlayerIndex { get; init; }
+}

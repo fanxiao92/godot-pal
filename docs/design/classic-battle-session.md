@@ -1,4 +1,17 @@
-# ClassicBattleSession：首个 Core 普攻检查点
+# ClassicBattleSession：Core 普攻与整轮选令
+
+## #47 纯 Core 多人检查点
+
+同一 `ClassicBattleSession` 现支持每侧1或2个初始存活参与者；不是全游戏战斗或 #47 整票交付。下文 #46 的 lifecycle/trigger/modern/native 入口仍保持单人单敌，后继 unit 才扩展这些正式 typed 契约与 Main。装备、双击、掩护、状态、钩子、奖励和成长的非零能力仍在副作用前拒绝。
+
+- `Players` 顺序是 party index，`RoleId` 是独立角色身份（0..5，不重复）；`Enemies` 顺序是 enemy slot，旧 `ClassicBattleEnemy.Id` 意义不变且允许重复，不能用它代替战场 actor 身份。不把 role0/1 隐式转换为 party index。
+- `SelectAttack(partyIndex, enemySlot)` 仅接受 `Current.SelectingPlayerIndex`，按 party 顺序为存活队员选令；目标须为存活 slot。第一人选完仍 Selecting、Round 不增、没有 queue 或排序 RNG。全员选完才按敌 slot、party index 顺序请求随机身法并建立整轮队列。
+- 旧 `SelectAttack(targetId)` 只适用于每侧恰1人的原调用；任一侧多人时明确拒绝歧义。旧 `PlayerHp/EnemyHp/Counts` 是 index0 的兼容投影，**不是全队合计**。旧 action 的 `TargetId` 仍为被攻击敌人的 Id 或玩家 RoleId；新增 `ActorIndex/TargetIndex` 由 side 决定其索引域，single 默认0，保留旧 action 构造与相等比较。
+- `Current.Players(PartyIndex,RoleId,Hp,Counts,SelectedEnemySlot)`、`Enemies(Slot,Id,Hp)`、`ActionQueue(Side,ActorIndex,Dexterity)` 是深只读快照；输入列表已拷贝。每人选中目标及 `LastAction` 是真实选令/执行历史；新回合清选令。没有新可写 UI previous 状态：固定参考 battle.c:1771 初始 `iPrevEnemyTarget=-1`，uibattle.c 两处赋值均注释禁用。因此失效目标从原 slot 循环寻找存活敌人，不擅自记忆另一队员的目标。
+- `ResolveNextAction` 一次消费一个可执行队列位置。已死玩家/已清除敌人的位置只 pass，不抽动作 RNG、不重复 LastAction 或增加计数。敌每次执行先在完整 party 索引区间抽目标，对死者重新抽；全敌 KO 才 Won，全队 HP0 才 Lost，终态不再执行，回执仍唯一。
+- 严格照 fight.c:1450–1601 对完整13槽（battle.h:166，3+5×2）执行嵌套 SHORT 比较，非 stable sort。公开 queue **仅含首个 WORD `0xFFFF` 之前的可执行前缀**，不暴露虚构空 actor。空槽 SHORT -1 会排在负 SHORT 身法之前，actor 的 WORD65535 本身也结束本轮。这是经参考证实、获准修正的旧 single 两项比较遗漏；合法 numeric 输入仍接受，普通 single 路径 API/伤害/RNG 顺序不变，不宣称极端负 SHORT 路径行为完全兼容旧实现。
+
+参考：fight.c:87–130（失效目标循环），1384–1586（选令/WORD/SHORT队列），1705–1770（执行时死亡 pass），3504附近（普攻目标验证），4520–4581（敌随机目标及死者重抽），744–776/1116–1160（敌清除、整队胜负）；battle.c:1771（previous初值）。所有测试通过正常公开选令/执行到达死亡与失效，不写私态、不注入战果。
 
 状态：#46 的 **Core 内部检查点**。单人单敌经典普攻、选令后随机排序、逐动作推进和真实 Won/Lost、下述零成长正式生命周期及 trigger 事件 binding 已实现；不是整张 #46 或 M4 的交付。独立现代数值 native codec 及完整显式离线数值 Prepare/Editor/PS 已追加（见[数值契约](modern-battle-data.md)），但完整人工 package、Main/真实输入与表现尚未接通。
 

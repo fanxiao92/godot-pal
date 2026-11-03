@@ -85,7 +85,7 @@ function Get-GameBatchPlan([string]$Repository) {
     if ($inventory.Count -ne 570) { throw "Game inventory differs: $($inventory.Count)/570." }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
-        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 786; skipped = 0 }
+        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 806; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 142; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 268; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
