@@ -23,6 +23,10 @@
 采用 single-context：根目录 `GLOSSARY.md` 与 `docs/adr/`。
 读取规则见 `docs/agents/domain.md`。
 
+## 长任务协调
+
+执行多票里程碑、协调子代理或恢复长会话前，读取[长任务信息分工](docs/agents/large-task-handoffs.md)。
+
 ## 项目边界
 
 - `src/Pal.Core` 保持纯 .NET 业务逻辑；Godot 节点、输入、渲染和平台 I/O 留在外层。测试优先使用公开构造、事件与更新接口，预期值来自独立规格或参考核对，而非被测实现生成。
