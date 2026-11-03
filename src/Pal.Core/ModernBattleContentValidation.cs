@@ -69,5 +69,8 @@ public static partial class ModernBattleContent
                 Range(e.Experience, path + $".enemies[{slot}].experience"); Range(e.Cash, path + $".enemies[{slot}].cash");
             }
         }
+        if (content.RoleEquipment.Count != 0 || content.EquipmentObjects.Count != 0)
+            BattleEquipmentState.ValidateEquipmentClosure(content.RoleEquipment,
+                content.EquipmentObjects.Values.ToList(), content.InitialRoles.Values);
     }
 }

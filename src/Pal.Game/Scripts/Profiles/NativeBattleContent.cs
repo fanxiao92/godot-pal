@@ -45,7 +45,7 @@ public static class NativeBattleContent
             foreach (var team in Items(native.Teams, "Teams"))
                 if (!teams.TryAdd(team.TeamId, Items(team.Enemies, "Team.Enemies").Select(ReadEnemy).ToArray()))
                     throw new InvalidDataException("duplicate TeamId");
-            var content = new TriggerBattleContent(roles, players, growth, teams);
+            var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments));
             ModernBattleContent.Validate(content);
             return content;
         }
@@ -63,13 +63,41 @@ public static class NativeBattleContent
             Players = content.Players.Select(WritePlayer).ToArray(),
             Growth = content.GrowthByRole.Select(x => new PalBattleGrowth { RoleId = x.Key, LevelUpExperience = x.Value.LevelUpExperience.ToArray(),
                 LevelUpMagics = x.Value.LevelUpMagics.Select(row => new PalBattleLearnableMagic { Level = row.Level, MagicId = row.MagicId }).ToArray() }).ToArray(),
-            Teams = content.EnemyTeams.Select(x => new PalBattleTeam { TeamId = x.Key, Enemies = x.Value.Select(WriteEnemy).ToArray() }).ToArray()
+            Teams = content.EnemyTeams.Select(x => new PalBattleTeam { TeamId = x.Key, Enemies = x.Value.Select(WriteEnemy).ToArray() }).ToArray(),
+            RoleEquipment = content.RoleEquipment.SelectMany(row => row).ToArray(),
+            Equipments = content.EquipmentObjects.Select(x => new PalBattleEquipment { ObjectId = x.Key,
+                Effects = x.Value.Effects.Select(effect => new PalBattleEquipmentEffect { Attack = effect.Attack, Defense = effect.Defense,
+                    Dexterity = effect.Dexterity, BattleSprite = effect.BattleSprite, Statuses = effect.Statuses.ToArray() }).ToArray() }).ToArray()
         };
     }
 
     private static T[] Items<T>(T[]? values, string field) where T : class =>
         values is not null && values.All(x => x is not null) ? values : throw new InvalidDataException(field + " contains null");
     private static int[] Copy(int[]? values, string field) => values?.ToArray() ?? throw new InvalidDataException(field + " is null");
+
+    private static IReadOnlyList<IReadOnlyList<int>> ReadGrid(int[]? values)
+    {
+        var flat = values ?? throw new InvalidDataException("RoleEquipment is null");
+        if (flat.Length == 0) return [];
+        if (flat.Length != BattleEquipmentState.RoleCount * BattleEquipmentState.SlotCount)
+            throw new InvalidDataException($"RoleEquipment requires {BattleEquipmentState.RoleCount * BattleEquipmentState.SlotCount} words");
+        return Enumerable.Range(0, BattleEquipmentState.RoleCount)
+            .Select(role => Array.AsReadOnly(flat.Skip(role * BattleEquipmentState.SlotCount).Take(BattleEquipmentState.SlotCount).ToArray())).ToList();
+    }
+
+    private static IReadOnlyList<BattleEquipmentObject> ReadEquipments(PalBattleEquipment[]? equipments)
+    {
+        var objects = new List<BattleEquipmentObject>();
+        foreach (PalBattleEquipment obj in Items(equipments, "Equipments"))
+        {
+            PalBattleEquipmentEffect[] rows = Items(obj.Effects, "Equipments.Effects");
+            if (rows.Length != BattleEquipmentState.RoleCount)
+                throw new InvalidDataException($"Equipments.Effects requires exactly {BattleEquipmentState.RoleCount} rows");
+            objects.Add(new(obj.ObjectId, rows.Select(row => new BattleEquipmentEffect(row.Attack, row.Defense,
+                row.Dexterity, row.BattleSprite, Copy(row.Statuses, "Equipments.Effects.Statuses"))).ToArray()));
+        }
+        return objects;
+    }
 
     private static ClassicBattlePlayer ReadPlayer(PalBattlePlayer x) => new(x.RoleId, x.Hp, x.MaxHp, x.Attack, x.Defense, x.Dexterity)
     {
