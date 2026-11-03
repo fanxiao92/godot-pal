@@ -96,7 +96,7 @@ public sealed class RetailVerbsTests
                 ["sha256"] = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" },
             ["files"] = new JsonArray("story")
         };
-        public JsonObject File { get; } = Build();
+        public JsonObject EventFile { get; } = Build();
         private static JsonObject Build()
         {
             var commands = new JsonArray();
@@ -133,7 +133,7 @@ public sealed class RetailVerbsTests
             };
         }
         public TriggerEventCollection Load() => TriggerEventCollection.Parse(Index.ToJsonString(),
-            new Dictionary<string, string> { ["story"] = File.ToJsonString() });
+            new Dictionary<string, string> { ["story"] = EventFile.ToJsonString() });
     }
 
     internal static VerbsFixture Fixture(bool revive)
