@@ -59,6 +59,28 @@ public partial class PalTriggerDialogue : Node
 
     private CheckedStoryProfile? _story;
 
+    /// <summary>The active 256-color scene palette, set by the host before the first-battle
+    /// initialization (the #53 host owns the scene, not a story profile).</summary>
+    public Color[]? PaletteFromScene { private get; set; }
+
+    /// <summary>#53 first-battle host: the same production dialogue/battle executor over the
+    /// strict-loaded resources the verified closure bound.</summary>
+    public void Initialize(PalDialogueDisplay display, FirstBattleRealResources resources, string language, IBattleRandom random)
+    {
+        ArgumentNullException.ThrowIfNull(display); ArgumentNullException.ThrowIfNull(resources); ArgumentNullException.ThrowIfNull(random);
+        if (language is not ("zh-Hans" or "en")) throw new InvalidDataException($"Unsupported dialogue language: {language}");
+        if (_display is not null || display.Session is { Current.Phase: not DialogueDisplayPhase.Completed })
+            throw new InvalidOperationException("Trigger dialogue or display is already in use.");
+        _events = resources.Events;
+        _language = language == "zh-Hans" ? resources.Chinese : resources.English;
+        _font = resources.Font;
+        _prompts = resources.Prompts.ToArray();
+        _palette = PaletteFromScene ?? throw new InvalidOperationException("The first-battle host must supply the active scene palette first.");
+        foreach (var pair in resources.Portraits) _portraits.Add(pair.Key, pair.Value);
+        Session = new TriggerScriptSession(resources.Events, _language, resources.BattleContent, random);
+        _display = display; display.UpdateCompleted += OnDisplayUpdated;
+    }
+
     public void Initialize(PalDialogueDisplay display, CheckedStoryProfile story, IBattleRandom random)
     {
         ArgumentNullException.ThrowIfNull(display); ArgumentNullException.ThrowIfNull(story); ArgumentNullException.ThrowIfNull(random);

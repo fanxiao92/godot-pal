@@ -21,6 +21,10 @@ public partial class Main : Node2D
     private FirstMandatoryBattleSession? battle;
     private PalMapScene? mapScene;
     private NpcInteractionRequest? activeTrigger;
+    private FirstMandatoryBattleTriggerRequest? firstBattleActiveTrigger;
+    private bool awaitingFirstBattleDraw;
+    private bool firstBattleRendererSubscribed;
+    private GodotBattleRandom? firstBattleRandom;
     private bool awaitingSceneDraw;
     private bool rendererSubscribed;
     private GameSceneConfiguration? configuration;
@@ -137,7 +141,34 @@ public partial class Main : Node2D
                 GD.Print($"PAL_M3_DIALOGUE_ACCEPTANCE:scene4/map10; owner60/0188; language={language}; not normal scene story/free exploration");
             }
             GD.Print($"PAL_MAP_LOADED:{root}/Scenes/Scene.tscn");
-            if (firstBattle is not null) GD.Print($"PAL_M4_FIRST_BATTLE_CONTEXT:scene2/map12; owner28/09C3; language={language}; trigger closure unavailable");
+            if (firstBattle is { Closure: not null, Resources: not null } real)
+            {
+                // #53 real host: the verified closure opens @09C3 through the production
+                // dialogue/battle executor; the search-trigger transition rides the same
+                // draw boundary as the story host.
+                Display = new PalDialogueDisplay();
+                Display.Failed += DisplayFailed;
+                AddChild(Display);
+                Dialogue = new PalTriggerDialogue(); AddChild(Dialogue);
+                Display.ActivePaletteChanged += colors =>
+                {
+                    if (Failure is not null || exited) return;
+                    checkedProfile.SetPalette(map.Data, colors);
+                    map.UpdateScene(Exploration!.Plan);
+                };
+                Display.BackgroundRestoreRequested += () =>
+                {
+                    if (Failure is null && !exited) map.UpdateScene(Exploration!.Plan);
+                };
+                Dialogue.PaletteFromScene = Palette(map.Data);
+                Dialogue.Initialize(Display, real.Resources, language, new GodotBattleRandom(selected.BattleSeed));
+                Display.UpdateCompleted += CompleteFirstBattleTrigger;
+                RenderingServer.FramePostDraw += StartFirstBattleAfterSceneDraw;
+                firstBattleRendererSubscribed = true;
+                firstBattleRandom = new GodotBattleRandom(selected.BattleSeed);
+                GD.Print($"PAL_M4_FIRST_BATTLE_REAL:scene2/map12; owner28/09C3; language={language}; closure verified; teams=[{string.Join(",", real.Closure.VerifiedBattleTeamIds)}]");
+            }
+            else if (firstBattle is not null) GD.Print($"PAL_M4_FIRST_BATTLE_CONTEXT:scene2/map12; owner28/09C3; language={language}; trigger closure unavailable");
             if (staticAcceptance) GD.Print("PAL_M3_STATIC_ACCEPTANCE:scene4/map10; events are not scheduled");
             GD.Print($"PAL_GAME_READY:{Pal.Core.Startup.Status}");
         }
@@ -260,6 +291,7 @@ public partial class Main : Node2D
             // The headless dummy renderer has no presented frame. Preserve the command/redraw
             // submission boundary across actual callbacks; graphical runs wait for FramePostDraw.
             if (awaitingSceneDraw && DisplayServer.GetName() == "headless") StartAfterSceneDraw();
+            if (awaitingFirstBattleDraw && DisplayServer.GetName() == "headless") StartFirstBattleAfterSceneDraw();
             if (Failure is not null) return;
             bool changed = battle?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
@@ -269,6 +301,11 @@ public partial class Main : Node2D
             {
                 activeTrigger = request;
                 awaitingSceneDraw = true;
+            }
+            if (firstBattleActiveTrigger is null && Battle?.PendingTrigger is { } battleRequest)
+            {
+                firstBattleActiveTrigger = battleRequest;
+                awaitingFirstBattleDraw = true;
             }
             // Exploration/dialogue observers consume every real Main callback; first-battle
             // observers only consume committed updates, leaving no-change/rejection unpublished.
@@ -290,6 +327,33 @@ public partial class Main : Node2D
             CompleteTrigger(); // Also handles synchronous, no-wait completion.
         }
         catch (Exception e) { Fail($"NPC trigger failed: {e.Message}"); }
+    }
+
+    /// <summary>Starts the verified @09C3 call after the committed search update's draw.</summary>
+    private void StartFirstBattleAfterSceneDraw()
+    {
+        if (Failure is not null || exited || !awaitingFirstBattleDraw || Battle?.PendingTrigger is not { } request) return;
+        awaitingFirstBattleDraw = false;
+        try
+        {
+            var entry = Dialogue!.Session!.Entries.Single(e =>
+                e is { OwnerType: "eventObject", OwnerId: 28, Slot: "wTriggerScript", Kind: "trigger" } && e.SourceAddress == request.EntryAddress);
+            Dialogue.Start(entry.FileId, entry.Id, request.OwnerId);
+            CompleteFirstBattleTrigger(); // also handles synchronous, no-display completion
+        }
+        catch (Exception e) { Fail($"First battle trigger failed: {e.Message}"); }
+    }
+
+    private void CompleteFirstBattleTrigger()
+    {
+        if (Failure is not null || exited || firstBattleActiveTrigger is not { } request
+            || Dialogue?.Session is not { Phase: TriggerScriptPhase.Completed } session) return;
+        // The completed pre-battle/Won/Lost call has done its world mutations; hand control
+        // back to the changed exploration. PendingBattle states are an error here because the
+        // battle request path is driven by the story-battle host wiring delivered with it.
+        firstBattleActiveTrigger = null;
+        _ = request; _ = session;
+        mapScene!.UpdateScene(Exploration!.Plan);
     }
 
     private void CompleteTrigger()
@@ -359,7 +423,12 @@ public partial class Main : Node2D
         DisconnectRuntime();
         ReleaseStory();
         ReleaseDynamic();
-        activeTrigger = null; Interaction = null; input = null; battle = null; mapScene = null;
+        activeTrigger = null; firstBattleActiveTrigger = null; Interaction = null; input = null; battle = null; mapScene = null;
+        if (firstBattleRendererSubscribed)
+        {
+            RenderingServer.FramePostDraw -= StartFirstBattleAfterSceneDraw;
+            firstBattleRendererSubscribed = false;
+        }
         Display = null; Dialogue = null; SelectedLanguage = null;
     }
 }
