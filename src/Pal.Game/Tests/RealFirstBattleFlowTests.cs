@@ -42,10 +42,16 @@ public class RealFirstBattleFlowTests
             int pages = 0;
             while (main.StoryBattle is null && main.Dialogue?.Session?.PendingLostReload is null && pages++ < 200)
             {
-                scene.Press(Key.Enter); // advance dialogue / confirm
-                for (int idle = 0; idle < 6 && main.StoryBattle is null
-                    && main.Dialogue?.Session?.PendingLostReload is null; idle++)
-                    await scene.RunnerIdle();
+                // Advance only when the current display reached its advance boundary; typing
+                // phases consume their own real frames first (the fast-fail fix).
+                await scene.WaitFor(() =>
+                    main.Dialogue?.Session?.PendingDisplay is not { } display
+                    || display.Display.Current.Phase is Pal.Core.DialogueDisplayPhase.WaitingForAdvance
+                        or Pal.Core.DialogueDisplayPhase.Completed
+                    || main.StoryBattle is not null || main.Dialogue?.Session?.PendingLostReload is not null,
+                    "page ready", 8000);
+                scene.Press(Key.Enter);
+                await scene.RunnerIdle();
             }
             AssertThat(main.StoryBattle is not null).IsTrue(); // @09FE engaged through the facade
 
@@ -137,12 +143,14 @@ public class RealFirstBattleFlowTests
 
         public async Task RunnerIdle() => await runner.AwaitIdleFrame();
 
-        public async Task WaitFor(Func<bool> predicate, string boundary)
+        public async Task WaitFor(Func<bool> predicate, string boundary) => await WaitFor(predicate, boundary, 2000);
+
+        public async Task WaitFor(Func<bool> predicate, string boundary, uint timeoutMs)
         {
             ulong start = Time.GetTicksMsec();
             while (!predicate())
             {
-                if (Time.GetTicksMsec() - start > 2000)
+                if (Time.GetTicksMsec() - start > timeoutMs)
                     throw new TimeoutException("Required production boundary not observed: " + boundary + "; failure=" + Main.Failure);
                 await runner.AwaitIdleFrame();
             }
