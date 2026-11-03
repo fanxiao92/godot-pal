@@ -47,12 +47,20 @@ public class RealFirstBattleFlowTests
                 // Press only when a display reached its advance boundary; parked waits and
                 // counted movements advance on their own committed update ticks.
                 var display = main.Dialogue?.Session?.PendingDisplay;
-                if (display is not null && display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance)
+                if (display is { } shown)
                 {
-                    scene.Press(Key.Enter);
-                    pages++;
+                    // Enter accelerates typing and advances at the boundary alike (the display
+                    // consumes it by phase); the headless frame delta can be zero.
+                    if (shown.Display.Current.Phase is Pal.Core.DialogueDisplayPhase.Typing
+                        or Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 15) == 0 || (frames & 63) == 0)
+                    {
+                        if ((frames & 15) == 0) { scene.Press(Key.Enter); pages++; }
+                    }
+                    if (shown.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0)
+                    { scene.Press(Key.Enter); pages++; }
                 }
-                else if ((frames++ & 511) == 0)
+                frames++;
+                if ((frames & 511) == 0)
                     System.Console.WriteLine($"REAL_TRACE:frame={frames} phase={display?.Display.Current.Phase} text={display?.Display.Current.VisibleText?.Length} pos={main.Dialogue?.Session?.CurrentPosition}");
                 await scene.RunnerIdle();
             }
