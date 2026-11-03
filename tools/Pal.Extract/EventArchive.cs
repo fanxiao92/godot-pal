@@ -147,10 +147,38 @@ internal static class EventArchive
         ushort a = Read(script, offset + 2), b = Read(script, offset + 4), c = Read(script, offset + 6);
         string label = LabelAt(index);
         var result = new JsonObject { ["label"] = label };
-        if (opcode == 0x003c)
+        if (opcode == 0x003b)
+        {
+            result["op"] = "setDialog"; result["box"] = "center";
+            result["color"] = a & 255; result["rngWord"] = c;
+        }
+        else if (opcode == 0x003c)
         {
             result["op"] = "setDialog"; result["box"] = "upper"; result["portraitId"] = a;
             result["color"] = b & 255; result["rngWord"] = c;
+        }
+        else if (opcode == 0x003d)
+        {
+            result["op"] = "setDialog"; result["box"] = "lower"; result["portraitId"] = a;
+            result["color"] = b & 255; result["rngWord"] = c;
+        }
+        else if (opcode == 0x003e)
+        {
+            result["op"] = "setDialog"; result["box"] = "centerWindow";
+            result["color"] = a & 255;
+        }
+        else if (opcode == 6)
+        {
+            result["op"] = "randomJump"; result["rate"] = a; result["to"] = LabelAt(b);
+        }
+        else if (opcode == 27 || opcode == 28)
+        {
+            result["op"] = opcode == 27 ? "changeHp" : "changeMp";
+            result["scope"] = a; result["amount"] = (short)b;
+        }
+        else if (opcode == 48)
+        {
+            result["op"] = "boostStat"; result["field"] = a; result["percent"] = (short)b; result["roleOperand"] = c;
         }
         else if (opcode == 7)
         {
@@ -215,14 +243,42 @@ internal static class EventArchive
         string op = String(command, "op");
         if (op == "raw") { }
         else if (opcode == 0 && op == "end" && String(command, "mode") == "keep") { }
+        else if (opcode == 0x003b && op == "setDialog" && String(command, "box") == "center")
+        {
+            WriteDialogColor(command, ref a);
+            c = checked((ushort)Int(command, "rngWord"));
+        }
         else if (opcode == 0x003c && op == "setDialog" && String(command, "box") == "upper")
         {
             a = checked((ushort)Int(command, "portraitId"));
-            int color = Int(command, "color");
-            if (color is < 0 or > 255) throw new InvalidDataException("setDialog.color must be 0..255.");
-            b = (ushort)((b & 0xff00) | color);
-            _ = checked((ushort)Int(command, "rngWord"));
-            c = (ushort)Int(command, "rngWord");
+            b = EncodeDialogColor(command, b);
+            c = checked((ushort)Int(command, "rngWord"));
+        }
+        else if (opcode == 0x003d && op == "setDialog" && String(command, "box") == "lower")
+        {
+            a = checked((ushort)Int(command, "portraitId"));
+            b = EncodeDialogColor(command, b);
+            c = checked((ushort)Int(command, "rngWord"));
+        }
+        else if (opcode == 0x003e && op == "setDialog" && String(command, "box") == "centerWindow")
+        {
+            WriteDialogColor(command, ref a);
+        }
+        else if (opcode == 6 && op == "randomJump")
+        {
+            a = checked((ushort)Int(command, "rate"));
+            b = EncodeReference(command, "to", fileId, labelsByFile);
+        }
+        else if ((opcode == 27 && op == "changeHp") || (opcode == 28 && op == "changeMp"))
+        {
+            a = checked((ushort)Int(command, "scope"));
+            b = unchecked((ushort)CheckedSigned(command, "amount"));
+        }
+        else if (opcode == 48 && op == "boostStat")
+        {
+            a = checked((ushort)Int(command, "field"));
+            b = unchecked((ushort)CheckedSigned(command, "percent"));
+            c = checked((ushort)Int(command, "roleOperand"));
         }
         else if (opcode == 7 && op == "startBattle")
         {
@@ -236,6 +292,32 @@ internal static class EventArchive
         }
         else throw new InvalidDataException($"{String(command, "label")}: op does not match registered source opcode.");
         Write(destination, opcode); Write(destination[2..], a); Write(destination[4..], b); Write(destination[6..], c);
+    }
+
+    private static void WriteDialogColor(JsonObject command, ref ushort word)
+    {
+        int color = Int(command, "color");
+        if (color is < 0 or > 255) throw new InvalidDataException("setDialog.color must be 0..255.");
+        word = (ushort)((word & 0xff00) | color);
+    }
+
+    private static ushort EncodeDialogColor(JsonObject command, ushort word)
+    {
+        WriteDialogColor(command, ref word);
+        return word;
+    }
+
+    private static int CheckedSigned(JsonObject command, string field)
+    {
+        int value = Int(command, field);
+        return value is >= -32768 and <= 32767 ? value : throw new InvalidDataException($"{String(command, "label")}.{field} must be a signed WORD.");
+    }
+
+    private static ushort EncodeReference(JsonObject command, string field, string fileId, IReadOnlyDictionary<string, Dictionary<string, int>> labelsByFile)
+    {
+        string reference = NullableString(command, field) ?? throw new InvalidDataException($"{String(command, "label")}.{field} must be a reference.");
+        string context = $"{fileId}.json#{String(command, "label")} @{Int(Required(command, "source"), "index"):X4}.{field}";
+        return checked((ushort)ResolveReference(reference, fileId, labelsByFile, context));
     }
 
     private static ushort EncodeBattleTarget(JsonObject command, string field, string fileId, IReadOnlyDictionary<string, Dictionary<string, int>> labelsByFile)
@@ -253,7 +335,7 @@ internal static class EventArchive
         string label = String(command, "label");
         if (!Identifier.IsMatch(label)) throw new InvalidDataException($"{fileId}.json: invalid command label.");
         string op = String(command, "op");
-        if (op is not ("raw" or "end" or "setDialog" or "showDialog" or "startBattle")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
+        if (op is not ("raw" or "end" or "setDialog" or "showDialog" or "startBattle" or "randomJump" or "changeHp" or "changeMp" or "boostStat")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
         string? next = NullableString(command, "next");
         if (next is not null) ValidateReferenceSyntax(next, $"{label}.next");
         var source = Required(command, "source");
@@ -267,7 +349,16 @@ internal static class EventArchive
         {
             "raw" => new[] { "label", "op", "next", "source" },
             "end" => new[] { "label", "op", "mode", "next", "source" },
-            "setDialog" => new[] { "label", "op", "box", "portraitId", "color", "rngWord", "next", "source" },
+            "setDialog" => String(command, "box") switch
+            {
+                "upper" or "lower" => new[] { "label", "op", "box", "portraitId", "color", "rngWord", "next", "source" },
+                "center" => new[] { "label", "op", "box", "color", "rngWord", "next", "source" },
+                "centerWindow" => new[] { "label", "op", "box", "color", "next", "source" },
+                _ => throw new InvalidDataException($"{label}: unknown dialogue box.")
+            },
+            "randomJump" => new[] { "label", "op", "rate", "to", "next", "source" },
+            "changeHp" or "changeMp" => new[] { "label", "op", "scope", "amount", "next", "source" },
+            "boostStat" => new[] { "label", "op", "field", "percent", "roleOperand", "next", "source" },
             "startBattle" => new[] { "label", "op", "teamId", "lossTarget", "isBoss", "fleeTarget", "next", "source" },
             _ => new[] { "label", "op", "messageId", "descriptionLineWord", "next", "source" }
         };
@@ -285,9 +376,18 @@ internal static class EventArchive
             if (flee is not null) ValidateReferenceSyntax(flee, context + ".fleeTarget");
         }
         if (op == "end" && (opcodeValue != 0 || String(command, "mode") != "keep")) throw new InvalidDataException($"{label}: invalid end mapping.");
-        if (op == "setDialog" && (opcodeValue != 0x003c || String(command, "box") != "upper")) throw new InvalidDataException($"{label}: invalid setDialog mapping.");
+        if (op == "setDialog" && (opcodeValue != (String(command, "box") switch { "center" => 0x003b, "upper" => 0x003c, "lower" => 0x003d, "centerWindow" => 0x003e, _ => -1 })
+            || String(command, "box") is not ("upper" or "lower" or "center" or "centerWindow"))) throw new InvalidDataException($"{label}: invalid setDialog mapping.");
         if (op == "showDialog" && opcodeValue != 0xffff) throw new InvalidDataException($"{label}: invalid showDialog mapping.");
-        if (op == "raw" && opcodeValue is 0 or 0x003c or 0xffff) throw new InvalidDataException($"{label}: registered opcode must use its named mapping.");
+        if (op == "randomJump")
+        {
+            if (opcodeValue != 6) throw new InvalidDataException($"{label}: invalid randomJump mapping.");
+            _ = Word(command["rate"]);
+            ValidateReferenceSyntax(String(command, "to"), $"{label}.to");
+        }
+        if (op is "changeHp" or "changeMp" && opcodeValue != (op == "changeHp" ? 27 : 28)) throw new InvalidDataException($"{label}: invalid {op} mapping.");
+        if (op == "boostStat" && opcodeValue != 48) throw new InvalidDataException($"{label}: invalid boostStat mapping.");
+        if (op == "raw" && opcodeValue is 0 or 0x003b or 0x003c or 0x003d or 0x003e or 0xffff or 6 or 27 or 28 or 48) throw new InvalidDataException($"{label}: registered opcode must use its named mapping.");
         if (op == "raw" && (command.ContainsKey("mode") || command.ContainsKey("text"))) throw new InvalidDataException($"{label}: raw command cannot carry semantic fields.");
     }
 

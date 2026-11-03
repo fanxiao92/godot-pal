@@ -85,7 +85,11 @@ public sealed class TriggerEventCollection
             int? actual = command.NextReference is null ? null : collection.Resolve(command.NextReference, command.Position.FileId, command.Position.ToString());
             if (expected != actual) throw new InvalidDataException($"{command.Position}: next must resolve to its WORD-order successor.");
             command.NextAddress = actual;
-            if (command.TargetReference is not null) _ = collection.Resolve(command.TargetReference, command.Position.FileId, command.Position.ToString());
+            if (command.TargetReference is not null)
+            {
+                int target = collection.Resolve(command.TargetReference, command.Position.FileId, command.Position.ToString());
+                if (command.Op == "randomJump") command.TargetAddress = target;
+            }
             if (command.Op == "startBattle")
             {
                 command.LossAddress = collection.ResolveBattleTarget(command.LossReference, command.Position, "lossTarget");
@@ -151,6 +155,9 @@ public sealed class TriggerEventCollection
                 "raw" => [],
                 "end" => EventJson.Text(node, "mode") == "redirect" ? ["mode", "to", "limit"] : ["mode"],
                 "goto" => ["to", "limit"], "giveItem" => ["itemId", "count"],
+                "randomJump" => ["rate", "to"],
+                "changeHp" => ["scope", "amount"], "changeMp" => ["scope", "amount"],
+                "boostStat" => ["field", "percent", "roleOperand"],
                 "setDialog" => EventJson.Text(node, "box") switch
                 {
                     "upper" or "lower" => ["box", "portraitId", "color", "rngWord"],
@@ -169,7 +176,9 @@ public sealed class TriggerEventCollection
             switch (op)
             {
                 case "raw":
-                    if (opcode is 0 or 0x3c or 0xffff) throw new InvalidDataException("Registered opcode must use named mapping.");
+                    // Registered opcodes must use their named mapping: end/setDialog/showDialog/startBattle
+                    // since M3, plus the #49 role-hook verbs randomJump/changeHp/changeMp/boostStat.
+                    if (opcode is 0 or 0x3c or 0xffff or 6 or 27 or 28 or 48) throw new InvalidDataException("Registered opcode must use named mapping.");
                     break;
                 case "end":
                     command.Mode = EventJson.Text(node, "mode");
@@ -185,6 +194,28 @@ public sealed class TriggerEventCollection
                     if (opcode != 31) throw new InvalidDataException("Invalid giveItem mapping.");
                     _ = EventJson.Word(node, "itemId");
                     if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("giveItem.count must be a signed WORD.");
+                    break;
+                case "randomJump":
+                    // script.c:3301-3312: draw RandomLong(1,100); the jump is taken when draw >= rate.
+                    if (opcode != 6) throw new InvalidDataException("Invalid randomJump mapping.");
+                    command.Rate = EventJson.Word(node, "rate");
+                    command.TargetReference = EventJson.Reference(node, "to");
+                    break;
+                case "changeHp":
+                case "changeMp":
+                    // script.c 0x001B/0x001C: operand 0 selects the caller (0) or the whole party (nonzero).
+                    if (opcode != (op == "changeHp" ? 27 : 28)) throw new InvalidDataException($"Invalid {op} mapping.");
+                    command.Scope = EventJson.Word(node, "scope");
+                    if (EventJson.Number(node, "amount") is < -32768 or > 32767) throw new InvalidDataException($"{op}.amount must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "amount");
+                    break;
+                case "boostStat":
+                    // script.c 0x0030: extra[field][role] = base panel field * percent / 100 (WORD).
+                    if (opcode != 48) throw new InvalidDataException("Invalid boostStat mapping.");
+                    command.StatField = EventJson.Word(node, "field");
+                    if (EventJson.Number(node, "percent") is < -32768 or > 32767) throw new InvalidDataException("boostStat.percent must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "percent");
+                    command.RoleOperand = EventJson.Word(node, "roleOperand");
                     break;
                 case "setDialog":
                     command.Box = EventJson.Text(node, "box");
@@ -250,6 +281,12 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal string? FleeReference { get; set; }
     internal int? LossAddress { get; set; }
     internal int? FleeAddress { get; set; }
+    internal int Rate { get; set; }
+    internal int? TargetAddress { get; set; }
+    internal int Scope { get; set; }
+    internal int Amount { get; set; }
+    internal int StatField { get; set; }
+    internal int RoleOperand { get; set; }
 }
 
 internal static class EventJson
