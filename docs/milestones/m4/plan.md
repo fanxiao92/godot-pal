@@ -6,7 +6,7 @@
 
 ### 当前本地验收
 
-- #45 已验证并集成，#46 人工单人单敌正式资源与真实 Main 普攻事件往返已在 `4c4dad72c04cf82aa4307c0b1e54262f3c6e9054` 本地验收并集成；下一票为 #47 双人双敌。
+- #45 已验证并集成；#46 在 `4c4dad72c04cf82aa4307c0b1e54262f3c6e9054` 本地验收并集成；#47 双人双敌已在 `f3a1aaa`（集成合并 `dc6ddfde`）本地整票验收：同一引擎多人队列 Core（`02ede4b`）、多人 lifecycle/trigger/codec/native/公共 Prepare 内容链（`26943eb`，Core816）、EnemySlots 资源与选中闭包守卫（`8e430bc`）、真实 Main 双人双敌选令/表现/SceneRunner 往返（`f3a1aaa`，scene-dialogue 109/109）；收据 `47/ticket-acceptance.md`。下一票为 #48 装备属性/双击/掩护。
 - #46 包含实际 Won/Lost 续接、输入/owned 回执隔离、玩家/敌方动作、命中 HP、原生数字与反馈生命周期；敌方数字在真实 prehit 入队、等待后的 impact 首绘，非伪造出生时间。
 - 最后受影响 scene-dialogue 整批 107/107 通过；启动进程 10/10 保留其 `0a84315` 源码条件（之后只改敌方动作接线及回归），不重签为最终源码的新进程运行。Core786、原生/公共准备69/42/2、Prepare89沿未变层原证据复用；当前库存570，正向567，串行84/107/376。
 - 这是逐票本地完成，不是 GitHub 关闭或 main 发布。真实 owner28/`@09C3` 仍待 #53 闭包；完整 M4 共享门、GPU、Windows 人工、远端 CI 与完整 fresh 双轴评审仍待 #54，音频与存档限制不变。
@@ -33,8 +33,8 @@ Lost 进入原失败剧情至 `0x004E` 重载请求，输出一次可定位诊�
 |---|---|---|
 | [#45](https://github.com/fanxiao92/godot-pal/issues/45) | 来源明确的战前上下文、严格 author/Prepare/native/Main、合法站位及副作用前拒绝 | 无 |
 | [#46](https://github.com/fanxiao92/godot-pal/issues/46) | 人工单人单敌普攻事件，经正式资源与真实交互完成胜负往返 | #45 |
-| [#47](https://github.com/fanxiao92/godot-pal/issues/47) | 双人双敌选令、目标变化与经典执行顺序 | #46 |
-| [#48](https://github.com/fanxiao92/godot-pal/issues/48) | 六角色装备初始化、有效属性、双击、掩护 | #47 |
+| [#47](https://github.com/fanxiao92/godot-pal/issues/47) | 双人双敌选令、目标变化与经典执行顺序 | #46 | 已本地整票验收 `f3a1aaa`；远端收尾随最终交付 |
+| [#48](https://github.com/fanxiao92/godot-pal/issues/48) | 六角色装备初始化、有效属性、双击、掩护 | #47 | 未交付 |
 | [#49](https://github.com/fanxiao92/godot-pal/issues/49) | 濒死/友亡剧情全随机闭包及返回原战斗位置 | #48 |
 | [#50](https://github.com/fanxiao92/godot-pal/issues/50) | 胜利成长、奖励、法术列表及清理/恢复顺序 | #48 |
 | [#51](https://github.com/fanxiao92/godot-pal/issues/51) | boss 逃跑失败、Lost 分支及重载 TODO 终态 | #46 |
