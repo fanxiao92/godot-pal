@@ -605,6 +605,94 @@ public sealed class TriggerScriptBattleBindingTests
         Assert.Throws<InvalidDataException>(() => new TriggerBattleContent(Role(), player, Growth(), new Dictionary<int, ClassicBattleEnemy>()));
     }
 
+    [Fact]
+    public void Lost_failure_branch_runs_centered_dialogue_music_red_then_parks_at_reload()
+    {
+        var fixture = new EventFixture();
+        fixture.Index["source"]!["instructionCount"] = 10;
+        fixture.Index["source"]!["byteLength"] = 80;
+        Pad(fixture, 10);
+        fixture.Commands[1] = Battle(1); // Lost jumps to L0004; the won path stops at L0002.
+        fixture.Commands[2] = End(2);
+        fixture.Commands[3] = End(3);
+        fixture.Commands[4] = JsonNode.Parse("""
+          {"label":"L0004","op":"setDialog","box":"centerWindow","color":0,"next":"L0005","source":{"index":4,"opcode":62,"operands":[0,0,0]}}
+          """);
+        fixture.Commands[5] = JsonNode.Parse("""
+          {"label":"L0005","op":"showDialog","messageId":61,"descriptionLineWord":0,"next":"L0006","source":{"index":5,"opcode":65535,"operands":[61,0,0]}}
+          """);
+        fixture.Commands[6] = JsonNode.Parse("""
+          {"label":"L0006","op":"setMusic","musicId":0,"mode":0,"next":"L0007","source":{"index":6,"opcode":67,"operands":[0,0,0]}}
+          """);
+        fixture.Commands[7] = JsonNode.Parse("""
+          {"label":"L0007","op":"fadeToRed","next":"L0008","source":{"index":7,"opcode":79,"operands":[0,0,0]}}
+          """);
+        fixture.Commands[8] = JsonNode.Parse("""
+          {"label":"L0008","op":"requestReload","next":"L0009","source":{"index":8,"opcode":78,"operands":[0,0,0]}}
+          """);
+        var random = new BindingRandom();
+        var language = new DialogueLanguagePackage("zh-Hans", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("lost")])]);
+        var script = new TriggerScriptSession(fixture.Load(), language,
+            Content(Role() with { Hp = 20 }, new(7, 0, 100, 0, 0, 0, 1)), random);
+        script.Start("shared", "npc", 28);
+        var request = script.PendingBattle!;
+        request.Lifecycle.SelectAttack(7);
+        request.Lifecycle.ResolveNextAction();
+        request.Lifecycle.ResolveNextAction();
+        Assert.Equal(ClassicBattlePhase.Lost, request.Lifecycle.Completion!.Outcome);
+        Assert.True(script.AcknowledgeBattle(request.Id, request.Lifecycle.Completion));
+        // The failure branch re-enters through the centered dialogue context before the effects.
+        Assert.Equal(TriggerScriptPhase.WaitingForDisplay, script.Phase);
+        Assert.Equal("centerWindow", script.PendingDisplay!.Context.Box);
+        Assert.Null(script.Music);
+        Assert.False(script.FadedToRed);
+        FinishDisplay(script);
+        // setMusic and fadeToRed are pure formal transitions; 0x004E parks the call forever.
+        Assert.Equal(new TriggerMusicState(0, 0), script.Music);
+        Assert.True(script.FadedToRed);
+        Assert.Equal(TriggerScriptPhase.WaitingForLostReload, script.Phase);
+        Assert.True(script.BlocksSceneUpdates);
+        Assert.Equal(new TriggerLostReloadRequest(new("shared", "L0008", 8), 18, true), script.PendingLostReload);
+        Assert.Null(script.PendingDisplay);
+        Assert.Equal(new TriggerPosition("shared", "L0008", 8), script.CurrentPosition);
+        Assert.Equal(28, script.Caller);
+        var parked = (script.Phase, script.PendingLostReload, script.Music, script.FadedToRed, script.CurrentPosition);
+        Assert.False(script.AcknowledgeDisplay(Guid.NewGuid()));
+        Assert.Throws<InvalidOperationException>(() => script.Start("shared", "npc", 28));
+        Assert.Equal(parked, (script.Phase, script.PendingLostReload, script.Music, script.FadedToRed, script.CurrentPosition));
+    }
+
+    [Fact]
+    public void Reload_without_a_lost_battle_carries_no_enemy_team_context()
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[1] = JsonNode.Parse("""
+          {"label":"L0001","op":"requestReload","next":"L0002","source":{"index":1,"opcode":78,"operands":[0,0,0]}}
+          """);
+        var script = new TriggerScriptSession(fixture.Load(), TriggerScriptSessionTests.Language());
+        script.Start("shared", "npc", 60);
+        Assert.Equal(TriggerScriptPhase.WaitingForLostReload, script.Phase);
+        Assert.Equal(new TriggerLostReloadRequest(new("shared", "L0001", 1), null, false), script.PendingLostReload);
+    }
+
+    [Fact]
+    public void Preflight_stops_at_the_reload_boundary_and_never_walks_past_it()
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[1] = JsonNode.Parse("""
+          {"label":"L0001","op":"requestReload","next":"L0002","source":{"index":1,"opcode":78,"operands":[0,0,0]}}
+          """);
+        // An unsupported op after the reload never executes (script.c 0x004E returns 0),
+        // so the selected-entry preflight accepts the call without requiring it.
+        fixture.Commands[2] = JsonNode.Parse("""
+          {"label":"L0002","op":"giveItem","itemId":5,"count":1,"next":"L0003","source":{"index":2,"opcode":31,"operands":[5,1,0]}}
+          """);
+        TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), Content(), "shared", "npc");
+        var script = Script(fixture, new BindingRandom());
+        script.Start("shared", "npc", 28);
+        Assert.Equal(TriggerScriptPhase.WaitingForLostReload, script.Phase);
+    }
+
     private static void Pad(EventFixture fixture, int count)
     {
         while (fixture.Commands.Count < count)

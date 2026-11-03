@@ -234,6 +234,9 @@ public class TriggerEventCollectionTests
     [InlineData("{\"op\":\"setDialog\",\"box\":\"center\",\"color\":0,\"rngWord\":1}", 59)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"lower\",\"portraitId\":0,\"color\":255,\"rngWord\":0}", 61)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"centerWindow\",\"color\":79}", 62)]
+    [InlineData("{\"op\":\"setMusic\",\"musicId\":65535,\"mode\":3}", 0x43)]
+    [InlineData("{\"op\":\"fadeToRed\"}", 0x4f)]
+    [InlineData("{\"op\":\"requestReload\"}", 0x4e)]
     public void Faithful_base_mappings_can_be_archived_without_claiming_execution_support(string semanticJson, int opcode)
     {
         var fixture = new EventFixture();
