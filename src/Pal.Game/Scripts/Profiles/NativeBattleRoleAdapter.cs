@@ -29,12 +29,14 @@ internal static class NativeBattleRoleAdapter
             Exp(Need(x.PrimaryExperience, "Role.PrimaryExperience")), hidden,
             Array.AsReadOnly(Ints(x.Equipment, "Role.Equipment").ToArray()),
             Array.AsReadOnly(Ints(x.Magics, "Role.Magics").ToArray()),
-            Array.AsReadOnly(Ints(x.Statuses, "Role.Statuses").ToArray()), x.CoveredByRoleId);
+            Array.AsReadOnly(Ints(x.Statuses, "Role.Statuses").ToArray()), x.CoveredByRoleId,
+            x.Attack, x.MagicPower, x.Defense, x.Dexterity, x.FleeRate);
     }
 
     internal static PalBattleRole Write(BattleRoleSnapshot x)
     {
         PalBattleExperience Exp(BattleExperienceSnapshot value) => new() { Value = value.Value, Level = value.Level, Count = value.Count };
-        return new PalBattleRole{RoleId=x.RoleId,Level=x.Level,Hp=x.Hp,MaxHp=x.MaxHp,Mp=x.Mp,MaxMp=x.MaxMp,PrimaryExperience=Exp(x.PrimaryExperience),HiddenExperience=new(){Health=Exp(x.HiddenExperience["health"]),Magic=Exp(x.HiddenExperience["magic"]),Attack=Exp(x.HiddenExperience["attack"]),MagicPower=Exp(x.HiddenExperience["magicPower"]),Defense=Exp(x.HiddenExperience["defense"]),Dexterity=Exp(x.HiddenExperience["dexterity"]),Flee=Exp(x.HiddenExperience["flee"])},Equipment=x.Equipment.ToArray(),Magics=x.Magics.ToArray(),Statuses=x.Statuses.ToArray(),CoveredByRoleId=x.CoveredByRoleId};
+        return new PalBattleRole{RoleId=x.RoleId,Level=x.Level,Hp=x.Hp,MaxHp=x.MaxHp,Mp=x.Mp,MaxMp=x.MaxMp,PrimaryExperience=Exp(x.PrimaryExperience),HiddenExperience=new(){Health=Exp(x.HiddenExperience["health"]),Magic=Exp(x.HiddenExperience["magic"]),Attack=Exp(x.HiddenExperience["attack"]),MagicPower=Exp(x.HiddenExperience["magicPower"]),Defense=Exp(x.HiddenExperience["defense"]),Dexterity=Exp(x.HiddenExperience["dexterity"]),Flee=Exp(x.HiddenExperience["flee"])},Equipment=x.Equipment.ToArray(),Magics=x.Magics.ToArray(),Statuses=x.Statuses.ToArray(),CoveredByRoleId=x.CoveredByRoleId,
+            Attack=x.Attack,MagicPower=x.MagicPower,Defense=x.Defense,Dexterity=x.Dexterity,FleeRate=x.FleeRate};
     }
 }

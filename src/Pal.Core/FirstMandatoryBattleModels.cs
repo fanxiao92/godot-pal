@@ -19,7 +19,8 @@ public sealed record BattleRoleSnapshot(
     int RoleId, int Level, int Hp, int MaxHp, int Mp, int MaxMp,
     BattleExperienceSnapshot PrimaryExperience,
     IReadOnlyDictionary<string, BattleExperienceSnapshot> HiddenExperience,
-    IReadOnlyList<int> Equipment, IReadOnlyList<int> Magics, IReadOnlyList<int> Statuses, int CoveredByRoleId);
+    IReadOnlyList<int> Equipment, IReadOnlyList<int> Magics, IReadOnlyList<int> Statuses, int CoveredByRoleId,
+    int Attack = 0, int MagicPower = 0, int Defense = 0, int Dexterity = 0, int FleeRate = 0);
 
 public sealed record BattleWorldSnapshot(
     int SceneId, int MapId, int PaletteId, bool NightPalette, int MusicId, int BattleMusicId,
@@ -200,6 +201,14 @@ public sealed class BattleRoleState
     public int MaxHp { get; set; }
     public int Mp { get; set; }
     public int MaxMp { get; set; }
+    /// <summary>The five base PLAYERROLES panel words PAL_PlayerLevelUp and the hidden tracks grow
+    /// (global.c 2347, battle.c 1258). Absent declarations carry zero, like the combat player's
+    /// optional magicPower/fleeRate words.</summary>
+    public int Attack { get; set; }
+    public int MagicPower { get; set; }
+    public int Defense { get; set; }
+    public int Dexterity { get; set; }
+    public int FleeRate { get; set; }
     public BattleExperienceState PrimaryExperience { get; }
     public Dictionary<string, BattleExperienceState> HiddenExperience { get; }
     public int[] Equipment { get; }
@@ -211,6 +220,8 @@ public sealed class BattleRoleState
     {
         (RoleId, Level, Hp, MaxHp, Mp, MaxMp, CoveredByRoleId) =
             (source.RoleId, source.Level, source.Hp, source.MaxHp, source.Mp, source.MaxMp, source.CoveredByRoleId);
+        (Attack, MagicPower, Defense, Dexterity, FleeRate) =
+            (source.Attack, source.MagicPower, source.Defense, source.Dexterity, source.FleeRate);
         PrimaryExperience = new(source.PrimaryExperience);
         HiddenExperience = source.HiddenExperience.ToDictionary(pair => pair.Key, pair => new BattleExperienceState(pair.Value), StringComparer.Ordinal);
         Equipment = source.Equipment.ToArray();
@@ -307,8 +318,10 @@ internal static class BattleModels
         foreach (JsonProperty property in e.GetProperty("hiddenExperience").EnumerateObject())
             if (!property.Name.StartsWith('_')) hidden.Add(property.Name, Experience(property.Value));
         return new(N(e, "roleId"), N(e, "level"), N(e, "hp"), N(e, "maxHp"), N(e, "mp"), N(e, "maxMp"), Experience(e.GetProperty("primaryExperience")),
-            new ReadOnlyDictionary<string, BattleExperienceSnapshot>(hidden), ReadOnlyInts(e.GetProperty("equipment")), ReadOnlyInts(e.GetProperty("magics")), ReadOnlyInts(e.GetProperty("statuses")), N(e, "coveredByRoleId"));
+            new ReadOnlyDictionary<string, BattleExperienceSnapshot>(hidden), ReadOnlyInts(e.GetProperty("equipment")), ReadOnlyInts(e.GetProperty("magics")), ReadOnlyInts(e.GetProperty("statuses")), N(e, "coveredByRoleId"),
+            Optional(e, "attack"), Optional(e, "magicPower"), Optional(e, "defense"), Optional(e, "dexterity"), Optional(e, "fleeRate"));
     }
+    private static int Optional(JsonElement e, string name) => e.TryGetProperty(name, out JsonElement value) ? value.GetInt32() : 0;
     internal static BattleWorldSnapshot World(JsonElement e)
     {
         JsonElement leader = e.GetProperty("leader"), proof = e.GetProperty("searchProof");

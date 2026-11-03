@@ -66,7 +66,7 @@ public sealed class TriggerBattleContent
         : throw new InvalidDataException($"Missing battle team {teamId}.");
 
     internal IReadOnlyList<ClassicBattlePlayer> SettledPlayers(IReadOnlyDictionary<int, BattleRoleSnapshot> roles) =>
-        Players.Select(x => x with { Hp = roles[x.RoleId].Hp }).ToArray();
+        Players.Select(x => x with { Hp = roles[x.RoleId].Hp, MaxHp = roles[x.RoleId].MaxHp }).ToArray();
 
     internal void Validate(int teamId, IReadOnlyDictionary<int, BattleRoleSnapshot> roles)
     {

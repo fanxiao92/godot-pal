@@ -98,6 +98,7 @@ public class NativeBattleContentTests
         var role = initial.InitialRole with
         {
             Level = 65535, Hp = 0, MaxHp = 65535, Mp = 65535, MaxMp = 65535,
+            Attack = 41, MagicPower = 42, Defense = 43, Dexterity = 44, FleeRate = 45,
             Equipment = [1, 2, 3, 4, 5, 65535], Magics = Enumerable.Range(1, 32).ToArray(),
             Statuses = Enumerable.Range(1, 9).ToArray(), CoveredByRoleId = 5,
             PrimaryExperience = new(65535, 65534, 65533),
@@ -151,6 +152,11 @@ public class NativeBattleContentTests
             AssertThat(JsonSerializer.Serialize(content)).IsEqual(expected);
             AssertThat(JsonSerializer.Serialize(decoded)).IsEqual(expected);
             AssertThat(decoded.InitialRole.PrimaryExperience.Value).IsEqual(65535);
+        AssertThat(decoded.InitialRole.Attack).IsEqual(41);
+        AssertThat(decoded.InitialRole.MagicPower).IsEqual(42);
+        AssertThat(decoded.InitialRole.Defense).IsEqual(43);
+        AssertThat(decoded.InitialRole.Dexterity).IsEqual(44);
+        AssertThat(decoded.InitialRole.FleeRate).IsEqual(45);
             AssertThat(decoded.InitialRole.HiddenExperience["attack"].Count).IsEqual(23);
             AssertThat(decoded.InitialRole.Equipment[0]).IsEqual(1);
             AssertThat(decoded.InitialRole.Magics[0]).IsEqual(1);
@@ -369,16 +375,16 @@ public class NativeBattleContentTests
     public void UnreferencedNonzeroTeamSurvivesButSelectedUnsupportedTeamRejectsBeforeRngOrRequest()
     {
         var native = NativeBattleContent.Write(Data());
-        var extra = new PalBattleTeam { TeamId = 19, Enemies = [new() { Id = 7, Hp = 43, Statuses = new int[9], Cash = 1 }] };
+        var extra = new PalBattleTeam { TeamId = 19, Enemies = [new() { Id = 7, Hp = 43, Statuses = new int[9], MagicId = 1 }] };
         native.Teams = [native.Teams[0], extra];
         var random = new BattleRandom();
         var content = NativeBattleContent.CreateCore(native);
-        AssertThat(content.Teams[19].Cash).IsEqual(1);
+        AssertThat(content.Teams[19].MagicId).IsEqual(1);
         var script = Script(content, random);
         script.Start("shared", "npc", 28);
         AssertThat(script.PendingBattle is not null).IsTrue();
         AssertThat(random.Draws).IsEqual(0);
-        native.Teams[0].Enemies[0].Cash = 1;
+        native.Teams[0].Enemies[0].MagicId = 1;
         script = Script(NativeBattleContent.CreateCore(native), random);
         bool rejected = false;
         try { script.Start("shared", "npc", 28); }

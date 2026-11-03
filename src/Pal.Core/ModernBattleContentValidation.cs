@@ -28,6 +28,8 @@ public static partial class ModernBattleContent
             Range(r.MaxHp, rp + ".maxHp", 1); Range(r.Hp, rp + ".hp", 0, r.MaxHp);
             Range(r.MaxMp, rp + ".maxMp"); Range(r.Mp, rp + ".mp", 0, r.MaxMp);
             Range(r.CoveredByRoleId, rp + ".coveredByRoleId", 0, 5);
+            Range(r.Attack, rp + ".attack"); Range(r.MagicPower, rp + ".magicPower"); Range(r.Defense, rp + ".defense");
+            Range(r.Dexterity, rp + ".dexterity"); Range(r.FleeRate, rp + ".fleeRate");
             Exp(r.PrimaryExperience, rp + ".primaryExperience");
             string[] names = ["health", "magic", "attack", "magicPower", "defense", "dexterity", "flee"];
             if (r.HiddenExperience is null || !r.HiddenExperience.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(names))

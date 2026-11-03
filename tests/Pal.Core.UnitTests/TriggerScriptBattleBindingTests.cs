@@ -181,7 +181,7 @@ public sealed class TriggerScriptBattleBindingTests
         var display = script.PendingDisplay?.Display.Current;
         if (reject)
         {
-            var unsupported = Content(growth: new(Enumerable.Repeat(5, 100).ToArray(), []));
+            var unsupported = Content(growth: new(new int[100], []));
             Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(events, language, unsupported, "shared", "npc"));
         }
         else TriggerScriptSession.ValidateEntry(events, language, content, "shared", "npc");
@@ -417,7 +417,7 @@ public sealed class TriggerScriptBattleBindingTests
             _ => Battle(3, team: 19)
         };
         var teams = new Dictionary<int, ClassicBattleEnemy> { [18] = new(7, 0, 43, 0, 0, 0, 1) };
-        if (fault == "enemy") teams[19] = new(8, 0, 43, 0, 0, 0, 1) { Experience = 1 };
+        if (fault == "enemy") teams[19] = new(8, 0, 43, 0, 0, 0, 1) { MagicId = 1 };
         var content = new TriggerBattleContent(Role(), new(1, 100, 150, 40, 20, 100), Growth(), teams);
         var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(62, 62, [DialogueMessagePart.FromText("~01A")])]);
         var random = new BindingRandom();
@@ -456,8 +456,8 @@ public sealed class TriggerScriptBattleBindingTests
         switch (fault)
         {
             case "hp-domain": role = role with { MaxHp = 32768 }; player = player with { MaxHp = 32768 }; break;
-            case "threshold": growth = growth with { LevelUpExperience = Enumerable.Repeat(5, 100).ToArray() }; break;
-            case "magic": growth = growth with { LevelUpMagics = [new(2, 11)] }; break;
+            case "threshold": growth = growth with { LevelUpExperience = new int[100] }; break;
+            case "magic": growth = growth with { LevelUpMagics = [new(65537, 11)] }; break;
             case "hidden-alias": role = role with { HiddenExperience = role.HiddenExperience.ToDictionary(x => x.Key == "attack" ? "ATTACK" : x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase) }; break;
             case "player-hook": player = player with { DyingScript = 6 }; break;
         }
