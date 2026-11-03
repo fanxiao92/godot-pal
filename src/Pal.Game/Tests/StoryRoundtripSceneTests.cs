@@ -1093,6 +1093,7 @@ public class StoryRoundtripSceneTests
         var script = host.Main.Dialogue!.Session!;
         await host.FinishDisplay();
         await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+        var battle = host.Main.StoryBattle!;
         while (script.PendingBattle is not null)
         {
             AssertThat(script.PendingBattleHook).IsNull();
@@ -1108,8 +1109,10 @@ public class StoryRoundtripSceneTests
                 await host.Wait(() => host.Main.StoryBattleMode is StoryBattlePresentation.AttackMenu
                     or StoryBattlePresentation.Feedback || script.PendingBattle is null);
         }
-        AssertThat(host.Main.StoryBattle!.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
-        AssertThat(host.Actions.Count(a => a.SecondStrike)).IsEqual(2); // role1's dual action: two strikes
+        AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+        // role1's one dual action presented as two strikes: the first plus exactly one flagged second.
+        AssertThat(host.Actions.Count(a => a.Attacker == Pal.Core.ClassicBattleSide.Player && a.ActorIndex == 1)).IsEqual(2);
+        AssertThat(host.Actions.Count(a => a.SecondStrike)).IsEqual(1);
         AssertThat(host.Main.StoryBattleMode).IsNull();
     }
 
