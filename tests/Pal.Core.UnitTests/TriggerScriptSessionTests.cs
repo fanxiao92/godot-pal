@@ -54,7 +54,9 @@ public class TriggerScriptSessionTests
             "raw" => JsonNode.Parse("""{"op":"raw","source":{"index":3,"opcode":142,"operands":[0,0,0]}}""")!,
             "rng" => JsonNode.Parse("""{"op":"setDialog","box":"upper","portraitId":59,"color":0,"rngWord":1,"source":{"index":3,"opcode":60,"operands":[59,0,0]}}""")!,
             // #49 opened the lower/centerWindow role-hook dialog contexts; the centered box stays closed.
-            "center" => JsonNode.Parse("""{"op":"setDialog","box":"center","color":0,"rngWord":0,"source":{"index":3,"opcode":59,"operands":[0,0,0]}}""")!,
+            // The plain center box is now the retail game-over presentation; the still-closed
+            // control is the randomized dialog word (rngWord != 0).
+            "center" => JsonNode.Parse("""{"op":"setDialog","box":"center","color":0,"rngWord":1,"source":{"index":3,"opcode":59,"operands":[0,1,0]}}""")!,
             "giveItem" => JsonNode.Parse("""{"op":"giveItem","itemId":5,"count":-1,"source":{"index":3,"opcode":31,"operands":[0,0,0]}}""")!,
             "goto" => JsonNode.Parse("""{"op":"goto","to":"L0000","limit":0,"source":{"index":3,"opcode":3,"operands":[0,0,0]}}""")!,
             _ => JsonNode.Parse("""{"op":"end","mode":"advance","source":{"index":3,"opcode":1,"operands":[0,0,0]}}""")!
