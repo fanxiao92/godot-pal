@@ -305,7 +305,7 @@ public class PrepareBattleDataTests
         JsonNode Object(int id, params JsonNode[] rows) => new JsonObject
         { ["objectId"] = id, ["effects"] = new JsonArray(
             rows.Concat(Enumerable.Range(0, 6 - rows.Length).Select(_ => Row(0, 0, 0, 0, 0))).ToArray()) };
-        var zero = Row(0, 0, 0, 0, 0);
+        JsonNode Zero() => Row(0, 0, 0, 0, 0);
         data["roles"]![0]!["equipment"] = new JsonArray(197, 0, 210, 170, 237, 248);
         data["players"]![0]!["equipment"] = new JsonArray(197, 0, 210, 170, 237, 248);
         data["players"]![0]!["attack"] = 35;
@@ -315,10 +315,10 @@ public class PrepareBattleDataTests
             new JsonArray(0, 0, 0, 0, 0, 0), new JsonArray(0, 0, 0, 0, 0, 0));
         data["equipments"] = new JsonArray(
             Object(197, Row(0, 0, 0, 0, 0), Row(3, 1, 0, 0, 0)),
-            Object(210, zero, Row(4, 0, 0, 400, 0)),
-            Object(170, zero, Row(0, 0, 0, 0, 60000)),
-            Object(237, zero, Row(0, 6, 0, 0, 0)),
-            Object(248, zero, Row(0, 0, 8, 450, 0)),
+            Object(210, Zero(), Row(4, 0, 0, 400, 0)),
+            Object(170, Zero(), Row(0, 0, 0, 0, 60000)),
+            Object(237, Zero(), Row(0, 6, 0, 0, 0)),
+            Object(248, Zero(), Row(0, 0, 8, 450, 0)),
             Object(196, Row(5, 2, 0, 0, 0)),
             Object(225, Row(0, 4, 0, 0, 0)),
             Object(208, Row(0, 0, 0, 500, 0)),
