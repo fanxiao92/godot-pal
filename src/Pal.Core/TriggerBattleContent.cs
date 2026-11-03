@@ -15,6 +15,11 @@ public sealed class TriggerBattleContent
     public IReadOnlyList<IReadOnlyList<int>> RoleEquipment { get; }
     /// <summary>Declared equip-script closure objects (empty = none declared).</summary>
     public IReadOnlyDictionary<int, BattleEquipmentObject> EquipmentObjects { get; }
+    /// <summary>Roles whose five base panel words are declared as the growth source: their settled
+    /// panels flow into every subsequent battle's base declaration (equipment effects recompute
+    /// on that base, global.c 1736-1886). Roles outside the set keep their per-battle player
+    /// declaration, so legacy content without declared role panels is unchanged.</summary>
+    public IReadOnlySet<int> PanelDeclaredRoles { get; }
 
     [JsonIgnore] public BattleRoleSnapshot InitialRole => Single(InitialRoles.Values);
     [JsonIgnore] public ClassicBattlePlayer Player => Single(Players);
@@ -31,7 +36,8 @@ public sealed class TriggerBattleContent
         IReadOnlyDictionary<int, ClassicBattleGrowthData> growth,
         IReadOnlyDictionary<int, IReadOnlyList<ClassicBattleEnemy>> teams,
         IReadOnlyList<IReadOnlyList<int>>? roleEquipment = null,
-        IReadOnlyList<BattleEquipmentObject>? equipmentObjects = null)
+        IReadOnlyList<BattleEquipmentObject>? equipmentObjects = null,
+        IReadOnlyCollection<int>? panelDeclaredRoles = null)
     {
         ArgumentNullException.ThrowIfNull(roles); ArgumentNullException.ThrowIfNull(players);
         ArgumentNullException.ThrowIfNull(growth); ArgumentNullException.ThrowIfNull(teams);
@@ -56,6 +62,9 @@ public sealed class TriggerBattleContent
             return (IReadOnlyList<ClassicBattleEnemy>)Array.AsReadOnly(x.Value.Select(e => e with { Statuses = Copy(e.Statuses), Poisons = Copy(e.Poisons) }).ToArray());
         }));
         BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);
+        if (panelDeclaredRoles is not null && panelDeclaredRoles.Any(role => !byId.ContainsKey(role)))
+            throw new InvalidDataException("Declared panel roles must name a declared battle role.");
+        PanelDeclaredRoles = new HashSet<int>(panelDeclaredRoles ?? []);
         RoleEquipment = roleEquipment is null || roleEquipment.Count == 0 ? Array.Empty<IReadOnlyList<int>>()
             : Array.AsReadOnly(roleEquipment.Select(row => (IReadOnlyList<int>)Array.AsReadOnly(row.ToArray())).ToArray());
         EquipmentObjects = new ReadOnlyDictionary<int, BattleEquipmentObject>((equipmentObjects ?? []).ToDictionary(
@@ -66,7 +75,14 @@ public sealed class TriggerBattleContent
         : throw new InvalidDataException($"Missing battle team {teamId}.");
 
     internal IReadOnlyList<ClassicBattlePlayer> SettledPlayers(IReadOnlyDictionary<int, BattleRoleSnapshot> roles) =>
-        Players.Select(x => x with { Hp = roles[x.RoleId].Hp, MaxHp = roles[x.RoleId].MaxHp }).ToArray();
+        Players.Select(x =>
+        {
+            BattleRoleSnapshot settled = roles[x.RoleId];
+            return PanelDeclaredRoles.Contains(x.RoleId)
+                ? x with { Hp = settled.Hp, MaxHp = settled.MaxHp, Attack = settled.Attack, Defense = settled.Defense,
+                    Dexterity = settled.Dexterity, MagicPower = settled.MagicPower, FleeRate = settled.FleeRate }
+                : x with { Hp = settled.Hp, MaxHp = settled.MaxHp };
+        }).ToArray();
 
     internal void Validate(int teamId, IReadOnlyDictionary<int, BattleRoleSnapshot> roles)
     {

@@ -453,9 +453,11 @@ public sealed class ClassicBattleSession
         if (e.Id is < 1 or > 65535 || !Word(e.Level) || e.Hp is < 1 or > 32767
             || !SignedWord(e.Attack) || !SignedWord(e.Defense) || !SignedWord(e.Dexterity) || !Word(e.PhysicalResistance))
             throw new InvalidDataException("Classic combat has invalid or unsupported numeric data (current HP must be 1..32767).");
-        if (!Zero(e.Statuses, 9) || !Zero(e.Poisons) || e.TurnStartScript != 0 || e.ReadyScript != 0 || e.BattleEndScript != 0
+        if (!Zero(e.Statuses, 9) || !Zero(e.Poisons) || e.TurnStartScript != 0 || e.ReadyScript != 0
             || e.MagicId != 0 || e.DualMove != 0 || e.AttackEquivItem != 0 || e.AttackEquivItemRate != 0)
             throw new InvalidDataException("Classic combat does not yet support equipment, statuses, poisons, hooks, cover, attack-all, magic, dual moves or equivalent items.");
+        // BattleEndScript is not consumed by combat: the lifecycle settles it as a post-victory
+        // script step, so its gate lives in ClassicBattleLifecycleSession, not here.
     }
 
     private static bool Word(int value) => value is >= 0 and <= 65535;

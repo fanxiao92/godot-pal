@@ -222,7 +222,7 @@ public sealed class ClassicBattleSessionTests
         foreach (var enemy in new[] {
             d.Enemies[0] with { Statuses = [1, 0, 0, 0, 0, 0, 0, 0, 0] }, d.Enemies[0] with { Poisons = [1] },
             d.Enemies[0] with { TurnStartScript = 1 }, d.Enemies[0] with { ReadyScript = 1 },
-            d.Enemies[0] with { BattleEndScript = 1 }, d.Enemies[0] with { MagicId = 1 },
+            d.Enemies[0] with { MagicId = 1 },
             d.Enemies[0] with { DualMove = 1 }, d.Enemies[0] with { AttackEquivItem = 1 },
             d.Enemies[0] with { AttackEquivItemRate = 1 },
             d.Enemies[0] with { Hp = 0 }, d.Enemies[0] with { Hp = 32768 }, d.Enemies[0] with { PhysicalResistance = -1 },
