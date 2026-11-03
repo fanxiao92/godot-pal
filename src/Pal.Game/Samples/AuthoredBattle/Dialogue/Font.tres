@@ -331,7 +331,311 @@ Height = 16
 RowBytes = 2
 Bitmap = PackedByteArray(0, 0, 1, 0, 2, 128, 4, 64, 8, 32, 55, 216, 64, 4, 63, 120, 33, 72, 33, 72, 33, 72, 63, 88, 1, 64, 1, 64, 0, 0, 0, 0)
 
+[sub_resource type="Resource" id="ui25105"]
+script = ExtResource("1")
+Codepoint = 25105
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 15, 240, 1, 0, 1, 0, 127, 254, 1, 0, 1, 0, 255, 255, 1, 0, 1, 64, 33, 36, 253, 63, 33, 12, 33, 4, 47, 244, 0, 0)
+
+[sub_resource type="Resource" id="ui33021"]
+script = ExtResource("1")
+Codepoint = 33021
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 15, 240, 8, 16, 30, 120, 0, 0, 31, 248, 0, 0, 66, 244, 34, 4, 18, 60, 10, 4, 6, 4, 2, 252, 63, 254, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui21035"]
+script = ExtResource("1")
+Codepoint = 21035
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 62, 16, 16, 124, 16, 16, 63, 16, 16, 16, 16, 124, 62, 16, 16, 16, 16, 16, 63, 124, 16, 16, 16, 16, 62, 124, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui31649"]
+script = ExtResource("1")
+Codepoint = 31649
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 63, 252, 2, 64, 15, 240, 2, 64, 3, 192, 0, 0, 127, 254, 1, 0, 1, 0, 9, 16, 9, 16, 9, 16, 31, 248, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui24555"]
+script = ExtResource("1")
+Codepoint = 24555
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 126, 0, 32, 254, 32, 72, 32, 120, 32, 72, 32, 254, 126, 72, 32, 72, 32, 72, 32, 72, 32, 72, 32, 254, 62, 0, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui23567"]
+script = ExtResource("1")
+Codepoint = 23567
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 1, 128, 1, 192, 1, 192, 65, 32, 33, 16, 17, 8, 9, 4, 5, 2, 0, 0, 0, 0, 16, 64, 8, 32, 4, 16, 2, 8, 0, 0)
+
+[sub_resource type="Resource" id="ui24515"]
+script = ExtResource("1")
+Codepoint = 24515
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 0, 0, 1, 128, 1, 192, 0, 192, 124, 62, 0, 0, 0, 0, 56, 28, 0, 0, 4, 0, 2, 0, 241, 15, 0, 128, 0, 64, 0, 32)
+
+[sub_resource type="Resource" id="ui20102"]
+script = ExtResource("1")
+Codepoint = 20102
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 31, 248, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 3, 0, 1, 0, 8, 160, 16, 16, 32, 8, 64, 4, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui25253"]
+script = ExtResource("1")
+Codepoint = 25253
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 63, 16, 8, 126, 8, 16, 63, 16, 8, 16, 8, 126, 63, 16, 8, 16, 8, 16, 63, 126, 8, 16, 8, 16, 63, 126, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui20167"]
+script = ExtResource("1")
+Codepoint = 20167
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 62, 0, 16, 254, 16, 0, 16, 0, 16, 252, 16, 68, 62, 68, 16, 68, 16, 4, 16, 254, 16, 32, 16, 16, 62, 8, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui21741"]
+script = ExtResource("1")
+Codepoint = 21741
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 31, 236, 32, 16, 32, 16, 63, 240, 0, 0, 7, 128, 7, 128, 4, 128, 0, 0, 4, 0, 2, 0, 3, 0, 1, 128, 0, 192, 0, 96)
+
+[sub_resource type="Resource" id="ui25252"]
+script = ExtResource("1")
+Codepoint = 25252
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 124, 0, 33, 254, 32, 72, 32, 72, 33, 248, 32, 72, 124, 72, 33, 254, 32, 72, 32, 72, 32, 252, 32, 0, 61, 254, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui22823"]
+script = ExtResource("1")
+Codepoint = 22823
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 1, 0, 1, 0, 1, 0, 63, 252, 1, 0, 1, 0, 31, 240, 17, 64, 9, 32, 5, 16, 3, 8, 15, 240, 0, 0, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui23478"]
+script = ExtResource("1")
+Codepoint = 23478
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(1, 0, 1, 0, 31, 248, 0, 0, 15, 240, 8, 16, 8, 16, 127, 254, 9, 16, 9, 16, 15, 240, 8, 16, 8, 16, 15, 240, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui35874"]
+script = ExtResource("1")
+Codepoint = 35874
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 252, 224, 67, 248, 64, 144, 252, 144, 65, 252, 64, 16, 252, 20, 65, 254, 64, 20, 252, 20, 65, 252, 64, 20, 253, 254, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui24517"]
+script = ExtResource("1")
+Codepoint = 24517
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 1, 128, 1, 192, 0, 192, 32, 64, 16, 32, 10, 16, 5, 8, 2, 132, 1, 64, 65, 32, 33, 16, 17, 8, 9, 4, 4, 2, 0, 0)
+
+[sub_resource type="Resource" id="ui38598"]
+script = ExtResource("1")
+Codepoint = 38598
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 15, 240, 0, 0, 31, 248, 0, 0, 3, 192, 0, 0, 127, 254, 0, 0, 15, 240, 8, 16, 8, 16, 15, 240, 0, 0, 3, 192, 0, 0)
+
+[sub_resource type="Resource" id="ui20013"]
+script = ExtResource("1")
+Codepoint = 20013
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 1, 128, 1, 192, 1, 192, 1, 0, 127, 254, 1, 0, 1, 0, 1, 0, 1, 0, 127, 254, 1, 0, 1, 0, 63, 252, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui24908"]
+script = ExtResource("1")
+Codepoint = 24908
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 3, 192, 1, 0, 1, 0, 61, 60, 0, 0, 7, 224, 0, 0, 56, 28, 0, 0, 15, 240, 0, 0, 3, 192, 1, 128, 1, 192, 0, 192)
+
+[sub_resource type="Resource" id="ui20804"]
+script = ExtResource("1")
+Codepoint = 20804
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 15, 240, 9, 144, 9, 208, 15, 240, 0, 0, 7, 224, 4, 32, 4, 32, 15, 240, 0, 0, 2, 64, 2, 64, 2, 64, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui24351"]
+script = ExtResource("1")
+Codepoint = 24351
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 15, 240, 8, 16, 8, 16, 15, 240, 1, 128, 1, 192, 7, 224, 1, 0, 63, 252, 0, 0, 8, 64, 4, 32, 2, 16, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui23433"]
+script = ExtResource("1")
+Codepoint = 23433
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 3, 192, 1, 128, 1, 192, 0, 192, 63, 252, 0, 0, 15, 240, 8, 16, 9, 144, 9, 208, 8, 208, 8, 16, 15, 240, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui24687"]
+script = ExtResource("1")
+Codepoint = 24687
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 31, 248, 1, 0, 7, 224, 0, 0, 15, 240, 1, 0, 1, 0, 62, 124, 8, 16, 8, 16, 8, 16, 31, 248, 0, 0, 63, 252, 0, 0)
+
+[sub_resource type="Resource" id="ui20250"]
+script = ExtResource("1")
+Codepoint = 20250
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 1, 128, 1, 192, 0, 192, 31, 248, 1, 0, 7, 224, 1, 0, 63, 124, 1, 0, 1, 0, 15, 240, 9, 16, 9, 16, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui24754"]
+script = ExtResource("1")
+Codepoint = 24754
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 63, 252, 1, 128, 7, 224, 0, 192, 3, 192, 0, 0, 15, 240, 8, 16, 8, 16, 15, 240, 1, 128, 1, 192, 31, 248, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui20026"]
+script = ExtResource("1")
+Codepoint = 20026
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 0, 192, 1, 192, 1, 128, 1, 64, 63, 32, 1, 16, 0, 8, 15, 244, 0, 0, 4, 0, 2, 0, 33, 32, 16, 144, 8, 72, 4, 36)
+
+[sub_resource type="Resource" id="ui21147"]
+script = ExtResource("1")
+Codepoint = 21147
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 31, 240, 1, 0, 1, 0, 63, 0, 1, 0, 1, 0, 15, 248, 0, 32, 0, 16, 2, 8, 1, 4, 0, 128, 0, 64, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui20498"]
+script = ExtResource("1")
+Codepoint = 20498
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 63, 0, 8, 126, 8, 0, 63, 0, 8, 126, 8, 0, 63, 0, 8, 124, 8, 8, 63, 8, 8, 126, 8, 8, 63, 126, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui31449"]
+script = ExtResource("1")
+Codepoint = 31449
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 124, 112, 33, 254, 32, 32, 32, 32, 33, 254, 32, 32, 124, 252, 32, 132, 32, 132, 32, 252, 32, 0, 32, 120, 60, 32, 0, 16, 0, 0)
+
+[sub_resource type="Resource" id="ui36215"]
+script = ExtResource("1")
+Codepoint = 36215
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 2, 8, 36, 63, 152, 8, 24, 127, 172, 8, 10, 0, 0, 63, 126, 8, 16, 8, 16, 63, 126, 8, 16, 8, 16, 63, 126, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui22238"]
+script = ExtResource("1")
+Codepoint = 22238
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 31, 248, 16, 8, 16, 8, 19, 200, 18, 72, 18, 72, 18, 72, 18, 72, 18, 72, 19, 200, 16, 8, 16, 8, 31, 248, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui25552"]
+script = ExtResource("1")
+Codepoint = 25552
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 16, 254, 126, 16, 16, 16, 16, 254, 126, 16, 16, 16, 63, 252, 1, 0, 9, 16, 9, 16, 9, 16, 9, 16, 31, 248, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="ui21319"]
+script = ExtResource("1")
+Codepoint = 21319
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0, 0, 3, 192, 3, 192, 1, 0, 127, 126, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 127, 254, 1, 0, 17, 32, 8, 16, 4, 8, 0, 0)
+
+[sub_resource type="Resource" id="ui66"]
+script = ExtResource("1")
+Codepoint = 66
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(60, 36, 34, 60, 34, 34, 34, 60, 36, 34, 32, 60, 34, 34, 60)
+
+[sub_resource type="Resource" id="ui85"]
+script = ExtResource("1")
+Codepoint = 85
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(34, 34, 34, 34, 34, 34, 34, 34, 34, 34, 34, 34, 32, 16, 8)
+
+[sub_resource type="Resource" id="ui86"]
+script = ExtResource("1")
+Codepoint = 86
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(34, 34, 34, 34, 34, 34, 34, 34, 34, 0, 16, 8, 4, 8, 8)
+
+[sub_resource type="Resource" id="ui68"]
+script = ExtResource("1")
+Codepoint = 68
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(56, 36, 34, 33, 34, 34, 34, 34, 34, 34, 34, 36, 34, 33, 56)
+
+[sub_resource type="Resource" id="ui39"]
+script = ExtResource("1")
+Codepoint = 39
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
 [resource]
 script = ExtResource("2")
 SourceIdentity = "Original pixel art and bitmap lettering authored for godot-pal #46; no retail assets or extraction evidence."
-Glyphs = Array[ExtResource("1")]([SubResource("s0"), SubResource("s1"), SubResource("s2"), SubResource("s3"), SubResource("s4"), SubResource("s5"), SubResource("s6"), SubResource("s7"), SubResource("s8"), SubResource("s9"), SubResource("s10"), SubResource("s11"), SubResource("s12"), SubResource("s13"), SubResource("ui65"), SubResource("ui67"), SubResource("ui75"), SubResource("ui77"), SubResource("ui80"), SubResource("ui82"), SubResource("ui48"), SubResource("ui49"), SubResource("ui50"), SubResource("ui51"), SubResource("ui52"), SubResource("ui53"), SubResource("ui54"), SubResource("ui55"), SubResource("ui56"), SubResource("ui57"), SubResource("ui58"), SubResource("ui47"), SubResource("ui25915"), SubResource("ui20987"), SubResource("ui30446"), SubResource("ui26631"), SubResource("ui38378"), SubResource("ui36991"), SubResource("ui26292"), SubResource("ui29983"), SubResource("ui21629")])
+Glyphs = Array[ExtResource("1")]([SubResource("s0"), SubResource("s1"), SubResource("s2"), SubResource("s3"), SubResource("s4"), SubResource("s5"), SubResource("s6"), SubResource("s7"), SubResource("s8"), SubResource("s9"), SubResource("s10"), SubResource("s11"), SubResource("s12"), SubResource("s13"), SubResource("ui65"), SubResource("ui67"), SubResource("ui75"), SubResource("ui77"), SubResource("ui80"), SubResource("ui82"), SubResource("ui48"), SubResource("ui49"), SubResource("ui50"), SubResource("ui51"), SubResource("ui52"), SubResource("ui53"), SubResource("ui54"), SubResource("ui55"), SubResource("ui56"), SubResource("ui57"), SubResource("ui58"), SubResource("ui47"), SubResource("ui25915"), SubResource("ui20987"), SubResource("ui30446"), SubResource("ui26631"), SubResource("ui38378"), SubResource("ui36991"), SubResource("ui26292"), SubResource("ui29983"), SubResource("ui21629"), SubResource("ui25105"), SubResource("ui33021"), SubResource("ui21035"), SubResource("ui31649"), SubResource("ui24555"), SubResource("ui23567"), SubResource("ui24515"), SubResource("ui20102"), SubResource("ui25253"), SubResource("ui20167"), SubResource("ui21741"), SubResource("ui25252"), SubResource("ui22823"), SubResource("ui23478"), SubResource("ui35874"), SubResource("ui24517"), SubResource("ui38598"), SubResource("ui20013"), SubResource("ui24908"), SubResource("ui20804"), SubResource("ui24351"), SubResource("ui23433"), SubResource("ui24687"), SubResource("ui20250"), SubResource("ui24754"), SubResource("ui20026"), SubResource("ui21147"), SubResource("ui20498"), SubResource("ui31449"), SubResource("ui36215"), SubResource("ui22238"), SubResource("ui25552"), SubResource("ui21319"), SubResource("ui66"), SubResource("ui85"), SubResource("ui86"), SubResource("ui68"), SubResource("ui39")])
