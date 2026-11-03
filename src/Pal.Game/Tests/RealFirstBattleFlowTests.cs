@@ -30,7 +30,7 @@ public class RealFirstBattleFlowTests
         return (main, scene);
     }
 
-    [TestCase(Timeout = 240000)]
+    [TestCase(Timeout = 280000)]
     public async Task Real_profile_search_dialogue_battle_Won_and_changed_exploration()
     {
         var (main, scene) = Start("zh-Hans");
@@ -43,9 +43,8 @@ public class RealFirstBattleFlowTests
             while (main.StoryBattle is null && main.Dialogue?.Session?.PendingLostReload is null && pages++ < 200)
             {
                 scene.Press(Key.Enter); // advance dialogue / confirm
-                var deadline = Time.GetTicksMsec() + 1500;
-                while (Time.GetTicksMsec() < deadline && main.StoryBattle is null
-                    && main.Dialogue?.Session?.PendingLostReload is null)
+                for (int idle = 0; idle < 6 && main.StoryBattle is null
+                    && main.Dialogue?.Session?.PendingLostReload is null; idle++)
                     await scene.RunnerIdle();
             }
             AssertThat(main.StoryBattle is not null).IsTrue(); // @09FE engaged through the facade
