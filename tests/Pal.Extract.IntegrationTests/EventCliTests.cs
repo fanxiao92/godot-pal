@@ -145,6 +145,107 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(rebuilt));
     }
 
+    [Fact]
+    public async Task Role_hook_verbs_export_decode_semantic_edit_and_rebuild_roundtrip()
+    {
+        // Original authored stream in the #49 role-hook shape: random bands, dialog contexts and
+        // per-WORD effects; not retail data. Four-WORD rows are little-endian.
+        byte[] original = Words(
+            6, 75, 2, 0,        // randomJump rate 75 -> @2
+            61, 0, 5, 0,        // setDialog lower, no portrait, color 5
+            0xffff, 101, 0, 0,  // showDialog 101
+            27, 0, 9999, 0,     // changeHp caller +9999
+            48, 17, 5, 0,       // boostStat attack +5% of the caller
+            62, 15, 0, 0,       // setDialog centerWindow color 15
+            0xffff, 102, 0, 0,
+            28, 0, 9999, 0,     // changeMp caller +9999
+            0, 0, 0, 0);        // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal("randomJump", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(75, commands[0]!["rate"]!.GetValue<int>());
+        Assert.Equal("L0002", commands[0]!["to"]!.GetValue<string>());
+        Assert.Equal("setDialog", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("lower", commands[1]!["box"]!.GetValue<string>());
+        Assert.Equal(5, commands[1]!["color"]!.GetValue<int>());
+        Assert.Equal("changeHp", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(9999, commands[3]!["amount"]!.GetValue<int>());
+        Assert.Equal("boostStat", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(17, commands[4]!["field"]!.GetValue<int>());
+        Assert.Equal(5, commands[4]!["percent"]!.GetValue<int>());
+        Assert.Equal(0, commands[4]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("setDialog", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal("centerWindow", commands[5]!["box"]!.GetValue<string>());
+        Assert.Equal("changeMp", commands[7]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt));
+
+        // Semantic edits re-encode from fields, not source words: a new band rate, a larger heal,
+        // a negative percent and a re-targeted jump all rewrite their WORDs.
+        commands[0]!["rate"] = 50;
+        commands[0]!["to"] = "L0006";
+        commands[3]!["amount"] = -300;
+        commands[4]!["percent"] = -25;
+        commands[4]!["field"] = 20;
+        commands[7]!["scope"] = 1;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Equal(Words(
+            6, 50, 6, 0,
+            61, 0, 5, 0,
+            0xffff, 101, 0, 0,
+            27, 0, 65236, 0,
+            48, 20, 65511, 0,
+            62, 15, 0, 0,
+            0xffff, 102, 0, 0,
+            28, 1, 9999, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+    }
+
+    [Theory]
+    [InlineData("rate-overflow")]
+    [InlineData("rate-type")]
+    [InlineData("to-dangling")]
+    [InlineData("amount-overflow")]
+    [InlineData("percent-type")]
+    [InlineData("field-missing")]
+    [InlineData("raw-registered")]
+    [InlineData("wrong-opcode")]
+    [InlineData("unknown-field")]
+    public async Task Role_hook_verbs_validate_strictly_on_rebuild(string fault)
+    {
+        byte[] original = Words(6, 75, 2, 0, 27, 0, 9999, 0);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var command = events["commands"]![0]!.AsObject();
+        switch (fault)
+        {
+            case "rate-overflow": command["rate"] = 65536; break;
+            case "rate-type": command["rate"] = "75"; break;
+            case "to-dangling": command["to"] = "L0009"; break;
+            case "amount-overflow": events["commands"]![1]!["amount"] = 32768; break;
+            case "percent-type": events["commands"]![1] = null; break;
+            case "field-missing": events["commands"]![1]!.AsObject().Remove("amount"); break;
+            case "raw-registered": events["commands"]![1] = new System.Text.Json.Nodes.JsonObject { ["label"] = "L0001", ["op"] = "raw", ["next"] = "L0002", ["source"] = new System.Text.Json.Nodes.JsonObject { ["index"] = 1, ["opcode"] = 27, ["operands"] = new System.Text.Json.Nodes.JsonArray(0, 9999, 0) } }; break;
+            case "wrong-opcode": command["source"]!["opcode"] = 28; break;
+            case "unknown-field": command["limit"] = 0; break;
+        }
+        File.WriteAllText(path, events.ToJsonString());
+        var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(1, result.ExitCode);
+        Assert.NotEmpty(result.Stderr);
+        Assert.False(File.Exists(rebuilt));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
