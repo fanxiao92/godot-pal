@@ -25,6 +25,9 @@ public partial class Main
     private StoryEnemyIdleState? enemyIdle;
     private StoryBattlePoseClock outerClock;
     private bool outerDue;
+    private readonly StoryBattleNumbers storyNumbers = new();
+    private bool feedbackBorn;
+    private int feedbackBeforeHp;
     internal StoryEnemyAttackSnapshot? StoryEnemyPresentation => storyView?.EnemyPresentation;
     internal StoryBattleDrawSnapshot? StoryDrawSnapshot => storyView?.DrawSnapshot;
     internal uint StoryPresentationTicks => presentationNow;
@@ -42,6 +45,7 @@ public partial class Main
         var checkedStory = NativeStoryProfile.Load(selected.StoryProfile!, selected.Language);
         var checkedVisual = NativeBattleVisualProfile.Load(selected.VisualProfile!, checkedStory);
         checkedVisual.RequireReferencePresentation();
+        checkedVisual.RequireNumberPresentation();
         PalStoryBattleView.ValidateUi(checkedStory);
         var map = (PalMapScene)checkedStory.Scene.Instantiate();
         PalDialogueDisplay? display = null;
@@ -142,6 +146,8 @@ public partial class Main
                 int beforeEnemyHp = lifecycle.Current.Combat.EnemyHp;
                 if (!lifecycle.ResolveNextAction()) throw new InvalidOperationException("Battle action owner did not resolve an action.");
                 var action = lifecycle.Current.Combat.LastAction!;
+                storyNumbers.BeginAction(); feedbackBorn = false;
+                feedbackBeforeHp = action.Attacker == ClassicBattleSide.Player ? beforeEnemyHp : beforeHp;
                 var actingTeam = storyVisual!.Teams[storyRequest.TeamId];
                 enemyPresentation = action.Attacker != ClassicBattleSide.Enemy ? null : new(
                     actingTeam.IdleFrames, actingTeam.MagicFrames, actingTeam.AttackFrames, actingTeam.ActWaitFrames,
@@ -168,6 +174,7 @@ public partial class Main
                 {
                     var request = storyRequest;
                     // Remove the complete feedback overlay and restore the map before the owned receipt.
+                    storyNumbers.Clear();
                     RemoveChild(storyView!); storyView!.Free(); storyView = null;
                     mapScene!.Visible = true; RestoreStoryMap();
                     storyRequest = null; StoryBattleMode = null; enemyPresentation = null; playerPresentation = null; enemyIdle = null;
@@ -186,8 +193,22 @@ public partial class Main
         }
         var shownEnemy = StoryBattleMode == StoryBattlePresentation.Feedback ? enemyPresentation?.At(poseClock.Pose) : null;
         if (shownEnemy is { } shown) shownEnemy = shown with { EnemyFrame = enemyIdle!.Frame };
+        if (StoryBattleMode == StoryBattlePresentation.Feedback)
+        {
+            var action = lifecycle.Current.Combat.LastAction!;
+            bool playerHit = playerPresentation is not null && poseClock.Pose >= 7;
+            if (!feedbackBorn && (playerHit || shownEnemy is { ResultVisible: true }))
+            {
+                Vector2 target = playerHit ? storyVisual!.Teams[storyRequest.TeamId].EnemyPosition : storyVisual!.PlayerPosition;
+                target.Y = Math.Max(10, target.Y - (playerHit ? 115 : 75));
+                storyNumbers.EnqueueAction(feedbackBeforeHp, action, target, now, playerHit);
+                feedbackBorn = true;
+            }
+            if (playerPresentation is not null && poseClock.Pose >= 8) storyNumbers.RevealPending();
+        }
         storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, enemyIdle!.Frame, enemyIdle.Counter,
-            shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null);
+            shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null,
+            storyNumbers.At(now), storyNumbers.LabelAt(now));
         return true;
     }
     private void AdvanceStoryGesture(int pose)
@@ -222,6 +243,7 @@ public partial class Main
         }
         storyView = null; storyRequest = null; StoryBattleMode = null; battleConfirm = false; resumeStoryDisplay = false;
         enemyPresentation = null; playerPresentation = null; enemyIdle = null; outerDue = false;
+        storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
     }
 }

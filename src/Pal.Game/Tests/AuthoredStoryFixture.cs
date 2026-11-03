@@ -47,6 +47,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 metadata["visual"]!.AsObject().Remove("attackEffectSpriteUri");
                 metadata["visual"]!.AsObject().Remove("attackEffectIndex");
             }
+            if (missingPresentation == "number") metadata["visual"]!.AsObject().Remove("numberSpriteUri");
             if (missingPresentation == "idle") metadata["visual"]!["teams"]![0]!.AsObject().Remove("idleAnimSpeed");
             if (enemyHp is { } authoredHp)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()

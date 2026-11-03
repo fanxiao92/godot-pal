@@ -10,13 +10,14 @@ public class StoryMainProcessTests
 {
     [TestCase("effect", Timeout = 20000)]
     [TestCase("idle", Timeout = 20000)]
+    [TestCase("number", Timeout = 20000)]
     public async Task MissingSelectedReferencePresentationExitsBeforeReady(string missing)
     {
         using var fixture = new AuthoredStoryFixture("Win", missing);
         var result = await MainProcessTests.RunMain("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
         AssertThat(result.ExitCode).IsEqual(1);
-        AssertThat(result.Text.Contains(missing == "effect" ? "attack effect" : "IdleAnimSpeed", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains(missing == "effect" ? "attack effect" : missing == "number" ? "NumberSpriteUri" : "IdleAnimSpeed", StringComparison.Ordinal)).IsTrue();
         AssertThat(result.Text.Contains("selected-profile=" + fixture.StoryUri, StringComparison.Ordinal)).IsTrue();
         AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
         AssertThat(result.Text.Contains("PAL_MAP_LOADED", StringComparison.Ordinal)).IsFalse();

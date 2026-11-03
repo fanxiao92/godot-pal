@@ -28,6 +28,7 @@ internal partial class PalStoryBattleView : Node2D
     private int idleFrame;
     private int idleCounter;
     private readonly Dictionary<int, ImageTexture> effects = new();
+    private readonly Dictionary<(StoryNumberColor Color, int Digit), ImageTexture> numbers = new();
     internal StoryEnemyAttackSnapshot? EnemyPresentation { get; private set; }
     internal int DisplayedPlayerHp => DrawSnapshot.DisplayedPlayerHp;
     internal int DisplayedEnemyHp => DrawSnapshot.DisplayedEnemyHp;
@@ -66,6 +67,13 @@ internal partial class PalStoryBattleView : Node2D
             var frame = visual.AttackEffectFrames[i];
             effects.Add(i, Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha));
         }
+        foreach (var (color, group) in new[] { (StoryNumberColor.Yellow, visual.YellowNumberFrames),
+            (StoryNumberColor.Blue, visual.BlueNumberFrames), (StoryNumberColor.Cyan, visual.CyanNumberFrames) })
+            for (int digit = 0; digit < group.Count; digit++)
+            {
+                var frame = group[digit];
+                numbers.Add((color, digit), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha));
+            }
         ZIndex = 100; TextureFilter = TextureFilterEnum.Nearest;
     }
     private ImageTexture Texture(int width, int height, byte[] indices, byte[] alpha, int shift = 0)
@@ -81,13 +89,18 @@ internal partial class PalStoryBattleView : Node2D
         var result = ImageTexture.CreateFromImage(image); owned.Add(result); return result;
     }
     internal void Present(ClassicBattleView combat, StoryBattlePresentation mode, int idleFrame, int idleCounter,
-        StoryEnemyAttackSnapshot? enemyPresentation = null, StoryPlayerAttackSnapshot? playerPresentation = null)
+        StoryEnemyAttackSnapshot? enemyPresentation = null, StoryPlayerAttackSnapshot? playerPresentation = null,
+        IReadOnlyList<StoryNumberDigit>? numberDigits = null, int? feedbackWord = null)
     {
         this.combat = combat; this.mode = mode; this.idleFrame = idleFrame; this.idleCounter = idleCounter;
         EnemyPresentation = enemyPresentation; this.playerPresentation = playerPresentation;
+        NumberDigits = numberDigits ?? Array.Empty<StoryNumberDigit>();
+        FeedbackWord = feedbackWord;
         BuildDrawSnapshot(); QueueRedraw();
     }
 
+    internal IReadOnlyList<StoryNumberDigit> NumberDigits { get; private set; } = Array.Empty<StoryNumberDigit>();
+    internal int? FeedbackWord { get; private set; }
     internal StoryBattleDrawSnapshot DrawSnapshot { get; private set; }
     private void BuildDrawSnapshot()
     {
@@ -108,7 +121,8 @@ internal partial class PalStoryBattleView : Node2D
             enemyShift = hit.EnemyColorShift; ehp = hit.DisplayedEnemyHp; result = hit.ResultVisible;
             fx = hit.EffectFrame; fxPosition = hit.EffectPosition;
         }
-        DrawSnapshot = new(pf, ef, player, enemy, playerShift, enemyShift, fx, fxPosition, php, ehp, result, idleCounter);
+        DrawSnapshot = new(pf, ef, player, enemy, playerShift, enemyShift, fx, fxPosition, php, ehp, result, idleCounter)
+            { NumberDigits = NumberDigits, FeedbackWord = FeedbackWord };
     }
 
     public override void _Draw()
@@ -126,9 +140,9 @@ internal partial class PalStoryBattleView : Node2D
         Text(story.SelectedWords[HpWord] + ":" + DisplayedPlayerHp + "/" + DisplayedEnemyHp, new Vector2(4, 176));
         string label = mode == StoryBattlePresentation.AttackMenu ? story.SelectedWords[AttackWord]
             : mode == StoryBattlePresentation.TargetMenu ? story.SelectedWords[TargetWord] + ":" + team.TargetId
-            : ResultVisible && combat.LastAction is { } last ? last.Evaded ? story.SelectedWords[MissWord]
-            : (last.Critical ? story.SelectedWords[CriticalWord] + " " : "") + last.Damage : "";
+            : shown.FeedbackWord is { } word ? story.SelectedWords[word] : "";
         Text(label, new Vector2(155, 176));
+        foreach (var digit in shown.NumberDigits) DrawTexture(numbers[(digit.Color, digit.Digit)], digit.Position);
     }
     private void Sprite(bool player, int frame, Vector2 bottomCenter, int shift = 0)
     {
@@ -147,9 +161,13 @@ internal partial class PalStoryBattleView : Node2D
         }
     }
     public override void _ExitTree() { ReleaseTextures(); }
-    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); }
+    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; }
 }
 
 internal readonly record struct StoryBattleDrawSnapshot(int PlayerFrame, int EnemyFrame, Vector2 PlayerPosition, Vector2 EnemyPosition, int PlayerColorShift,
     int EnemyColorShift, int? EffectFrame, Vector2 EffectPosition, int DisplayedPlayerHp, int DisplayedEnemyHp,
-    bool ResultVisible, int EnemyIdleCounter);
+    bool ResultVisible, int EnemyIdleCounter)
+{
+    internal IReadOnlyList<StoryNumberDigit> NumberDigits { get; init; } = Array.Empty<StoryNumberDigit>();
+    internal int? FeedbackWord { get; init; }
+}

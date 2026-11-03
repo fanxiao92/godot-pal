@@ -14,6 +14,54 @@ namespace Pal.Game.Tests;
 public class StoryRoundtripSceneTests
 {
     [TestCase]
+    public void FloatingNumbersUseUnsignedWallAgeRightAlignedBlueDigitsAndWrap()
+    {
+        foreach (uint start in new[] { 100u, uint.MaxValue - 19 })
+        {
+            var numbers = new StoryBattleNumbers();
+            numbers.EnqueueAction(43, new(1, ClassicBattleSide.Player, 7, 297, true, false), new(100,10), start, true);
+            AssertThat(numbers.At(start).Count).IsEqual(0);
+            AssertThat(numbers.LabelAt(start) is null).IsTrue();
+            numbers.RevealPending();
+            foreach (var (age, y) in new[] { (0u,10), (39u,10), (40u,9), (439u,0) })
+            {
+                var digits = numbers.At(unchecked(start + age));
+                AssertThat(digits.Count).IsEqual(3); // overkill297, never clamped43
+                AssertThat(digits.Select(d => d.Digit).SequenceEqual(new[] { 7,9,2 })).IsTrue();
+                AssertThat(digits.Select(d => d.Position).SequenceEqual(new[] { new Vector2(100,y),new Vector2(94,y),new Vector2(88,y) })).IsTrue();
+                AssertThat(digits.All(d => d.Color == StoryNumberColor.Blue && d.BornAt == start)).IsTrue();
+                AssertThat(numbers.LabelAt(unchecked(start + age)) == 60003).IsTrue();
+            }
+            AssertThat(numbers.At(unchecked(start + 440)).Count).IsEqual(0);
+            AssertThat(numbers.LabelAt(unchecked(start + 440)) is null).IsTrue();
+            var late = new StoryBattleNumbers();
+            late.Enqueue(1, new(10,10), StoryNumberColor.Blue, start);
+            AssertThat(late.At(unchecked(start + 900)).Count).IsEqual(0);
+        }
+    }
+
+    [TestCase]
+    public void FloatingNumberSlotsUseFirstEmptySixPixelFiveDigitLayoutZeroEvadeAndClear()
+    {
+        var numbers = new StoryBattleNumbers();
+        AssertThat(numbers.Enqueue(0, Vector2.Zero, StoryNumberColor.Blue, 0)).IsFalse();
+        numbers.EnqueueAction(20, new(1, ClassicBattleSide.Enemy, 0, 0, false, true), new(240,95), 0, false);
+        AssertThat(numbers.At(0).Count).IsEqual(0);
+        AssertThat(numbers.LabelAt(0) == 60002).IsTrue();
+        numbers.BeginAction(); AssertThat(numbers.LabelAt(0) is null).IsTrue();
+        for (int i = 0; i < 16; i++) AssertThat(numbers.Enqueue(65535, new(100,10), StoryNumberColor.Cyan, i == 0 ? 0u : 40u)).IsTrue();
+        AssertThat(numbers.Enqueue(1, Vector2.Zero, StoryNumberColor.Blue, 40)).IsFalse();
+        var digits = numbers.At(40);
+        AssertThat(digits.Count).IsEqual(80);
+        AssertThat(digits.Take(5).Select(d => d.Digit).SequenceEqual(new[] { 5,3,5,5,6 })).IsTrue();
+        AssertThat(digits.Take(5).Select(d => d.Position.X).SequenceEqual(new[] { 109f,103f,97f,91f,85f })).IsTrue();
+        AssertThat(numbers.At(440).Count).IsEqual(75);
+        AssertThat(numbers.Enqueue(1, new(100,10), StoryNumberColor.Yellow, 440)).IsTrue();
+        AssertThat(numbers.At(440)[0].Slot).IsEqual(0);
+        numbers.Clear(); AssertThat(numbers.At(440).Count).IsEqual(0); AssertThat(numbers.LabelAt(440) is null).IsTrue();
+    }
+
+    [TestCase]
     public void PlayerPhysicalLiteralFramesEffectsRecoilAndHitOnlyHp()
     {
         var sequence = new StoryPlayerAttackPresentation(new(240,170), new(100,120), 80, 0, 1);
@@ -65,6 +113,7 @@ public class StoryRoundtripSceneTests
 
     [TestCase("effect")]
     [TestCase("idle")]
+    [TestCase("number")]
     public void BaseFormatWithoutSelectedPresentationFailsBeforePartialMain(string missing)
     {
         using var fixture = new AuthoredStoryFixture("Win", missing);
@@ -73,7 +122,7 @@ public class StoryRoundtripSceneTests
         AssertThat(visual.Teams.Count).IsEqual(1); // Format remains legal independently of selected capability.
         using var host = new StoryHost(GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1"));
-        AssertThat(host.Main.Failure!.Contains(missing == "effect" ? "attack effect" : "IdleAnimSpeed")).IsTrue();
+        AssertThat(host.Main.Failure!.Contains(missing == "effect" ? "attack effect" : missing == "number" ? "NumberSpriteUri" : "IdleAnimSpeed")).IsTrue();
         AssertThat(host.Main.GetChildCount()).IsEqual(0);
         AssertThat(host.Main.Dialogue).IsNull(); AssertThat(host.Main.StoryBattle).IsNull();
     }
@@ -96,6 +145,9 @@ public class StoryRoundtripSceneTests
         AssertThat(host.Main.StoryDisplayedEnemyHp == 43).IsTrue();
         AssertThat(host.Main.StoryBattle!.Current.Combat.EnemyHp < 43).IsTrue();
         AssertThat(host.Main.StoryResultVisible).IsFalse();
+        await host.Wait(() => host.Main.StoryBattlePose is { Pose: 8 });
+        var numbers = host.Main.GetChildren().OfType<PalStoryBattleView>().Single().NumberDigits;
+        AssertThat(numbers.Count > 0).IsTrue(); // FX0 enqueues after UI; FX1 is first eligible draw.
     }
 
     [TestCase(Timeout = 20000)]
@@ -159,6 +211,8 @@ public class StoryRoundtripSceneTests
             await host.Wait(() => host.Actions.Count == 3);
             AssertThat(host.Actions.Count).IsEqual(3);
             AssertThat(host.ActionStarts.Count).IsEqual(3);
+            AssertThat(host.NumberBirths).IsEqual(2);
+            AssertThat(host.NumberDraws > 0).IsTrue();
             AssertThat(host.Actions[0].Attacker).IsEqual(ClassicBattleSide.Player);
             AssertThat(host.Actions[1].Attacker).IsEqual(ClassicBattleSide.Enemy);
             AssertThat(host.Actions[2].Attacker).IsEqual(ClassicBattleSide.Player);
@@ -520,6 +574,9 @@ public class StoryRoundtripSceneTests
         private uint outerStartedAt;
         private bool outerPending;
         private ClassicBattleAction? last;
+        private uint? numberBornAt;
+        internal int NumberBirths { get; private set; }
+        internal int NumberDraws { get; private set; }
         private int updates;
         private Exception? observationFailure;
         private StoryBattlePresentation? previousMode;
@@ -544,6 +601,34 @@ public class StoryRoundtripSceneTests
                 var combat = Main.StoryBattle?.Current.Combat;
                 var pose = Main.StoryBattlePose;
                 var draw = Main.StoryDrawSnapshot;
+                if (pose is { Pose: 0 } && previousPose is null) numberBornAt = null;
+                if (pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction)
+                {
+                    int birthPose = feedbackAction.Attacker == ClassicBattleSide.Player ? 7 : 5;
+                    if (feedbackPose.Pose == birthPose && numberBornAt is null)
+                    { numberBornAt = Main.StoryPresentationTicks; NumberBirths++; }
+                    if (numberBornAt is { } birth)
+                    {
+                        uint elapsed = unchecked(Main.StoryPresentationTicks - birth);
+                        bool visible = elapsed < 440 && (feedbackAction.Attacker == ClassicBattleSide.Enemy || feedbackPose.Pose >= 8);
+                        var currentDigits = feedbackDraw.NumberDigits.Where(d => d.BornAt == birth).ToArray();
+                        bool numeric = visible && !feedbackAction.Evaded && feedbackAction.Damage > 0;
+                        AssertThat(currentDigits.Length > 0 == numeric).IsTrue();
+                        if (numeric)
+                        {
+                            NumberDraws++;
+                            string text = string.Concat(currentDigits.Reverse().Select(d => d.Digit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                            AssertThat(text).IsEqual(feedbackAction.Damage.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                            AssertThat(currentDigits.All(d => d.Color == StoryNumberColor.Blue)).IsTrue();
+                            int x = feedbackAction.Attacker == ClassicBattleSide.Player ? 100 : 240;
+                            int y = feedbackAction.Attacker == ClassicBattleSide.Player ? 10 : 95;
+                            AssertThat(currentDigits[0].Position == new Vector2(x,y-(int)(elapsed/40))).IsTrue();
+                        }
+                        int? word = visible && (feedbackAction.Critical || feedbackAction.Evaded) ? feedbackAction.Evaded ? 60002 : 60003 : null;
+                        AssertThat(feedbackDraw.FeedbackWord == word).IsTrue();
+                    }
+                    else AssertThat(feedbackDraw.FeedbackWord is null).IsTrue();
+                }
                 if (pose is { Pose: 0 } && previousPose is null) beforeEnemyHp = previousCombat!.EnemyHp;
                 if (pose is { } playerPose && combat?.LastAction?.Attacker == ClassicBattleSide.Player && draw is { } playerDraw)
                 {
