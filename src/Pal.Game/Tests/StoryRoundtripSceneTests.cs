@@ -289,6 +289,7 @@ public class StoryRoundtripSceneTests
             var battle = old.StoryBattle!;
             var request = script.PendingBattle!;
             AssertThat(ReferenceEquals(old.StoryBattle, request.Lifecycle)).IsTrue();
+            short leaderX = old.Exploration!.Leader.X, leaderY = old.Exploration!.Leader.Y;
             AssertThat(battle.Current.Combat.Players.Count).IsEqual(2);
             AssertThat(battle.Current.Combat.Enemies.Count).IsEqual(2);
             AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(0);
@@ -301,17 +302,28 @@ public class StoryRoundtripSceneTests
             AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsNull();
             AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(1);
             await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
-            // Cycle the highlighted target to slot 1, then confirm member 1's attack.
+            // Cycle the highlighted target to slot 1, then confirm member 1's attack with one Enter.
             host.Tap(Key.Right);
-            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Resolving);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
             AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(1);
             AssertThat(battle.Current.Combat.Phase).IsEqual(ClassicBattlePhase.Resolving);
             AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(4);
             while (script.PendingBattle is not null)
             {
-                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback || script.PendingBattle is null);
-                if (script.PendingBattle is null) break;
-                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+                if (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                {
+                    // If a 43hp slot survived the first hit, the next round selects again.
+                    await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                    await host.ConfirmMemberTarget(battle);
+                }
+                else
+                {
+                    await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback
+                        || old.StoryBattleMode == StoryBattlePresentation.AttackMenu || script.PendingBattle is null);
+                    if (script.PendingBattle is null) break;
+                    if (old.StoryBattleMode == StoryBattlePresentation.Feedback)
+                        await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+                }
             }
             AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
             AssertThat(script.CallId).IsEqual(call);
@@ -330,6 +342,9 @@ public class StoryRoundtripSceneTests
             AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
             await host.FinishDisplay();
             await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            // The Right target cycle never moved the hidden exploration leader.
+            AssertThat(old.Exploration!.Leader.X).IsEqual(leaderX);
+            AssertThat(old.Exploration!.Leader.Y).IsEqual(leaderY);
             AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
             AssertThat(old.Failure).IsNull();
         }
@@ -384,8 +399,13 @@ public class StoryRoundtripSceneTests
                         AssertThat(selecting).IsNotEqual(deadMember);
                         AssertThat(battle.Current.Combat.Players[deadMember].Hp).IsEqual(0);
                     }
-                    await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
-                    await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+                    while (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                    {
+                        // Each alive member confirms attack then target; the final member's
+                        // target confirm builds the queue and enters Resolving.
+                        await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                        await host.ConfirmMemberTarget(battle);
+                    }
                 }
                 await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback
                     || old.StoryBattleMode == StoryBattlePresentation.AttackMenu || script.PendingBattle is null);
@@ -779,6 +799,59 @@ public class StoryRoundtripSceneTests
                 var pose = Main.StoryBattlePose;
                 var draw = Main.StoryDrawSnapshot;
                 if (!party && pose is { Pose: 0 } && previousPose is null) numberBornAt = null;
+                if (party)
+                {
+                    if (pose is { Pose: 0 } && previousPose is null) numberBornAt = null;
+                    if (draw is { PartyPlayers: { Count: 2 } members, PartyEnemies: { Count: 2 } slots } partyDraw)
+                    {
+                        var currentAction = combat?.LastAction;
+                        bool feedback = Main.StoryBattleMode == StoryBattlePresentation.Feedback;
+                        for (int i = 0; i < 2; i++)
+                        {
+                            bool animating = feedback && currentAction is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i;
+                            if (!animating) AssertThat(members[i].Position == partyPlayers[i]).IsTrue();
+                        }
+                        for (int slot = 0; slot < 2; slot++)
+                        {
+                            bool targeted = feedback && currentAction is { Attacker: ClassicBattleSide.Player, TargetIndex: var hit } && hit == slot;
+                            bool moving = feedback && currentAction is { Attacker: ClassicBattleSide.Enemy, ActorIndex: var mover } && mover == slot;
+                            if (!targeted && !moving) AssertThat(slots[slot].Position == partyEnemies[slot]).IsTrue();
+                        }
+                        if (Main.StoryBattleMode is StoryBattlePresentation.AttackMenu or StoryBattlePresentation.TargetMenu)
+                            AssertThat(partyDraw.SelectingPlayer).IsEqual(combat!.SelectingPlayerIndex);
+                        // Index-zero compat projections follow party actor zero, not a merged total.
+                        AssertThat(partyDraw.DisplayedPlayerHp).IsEqual(members[0].Hp);
+                        AssertThat(partyDraw.DisplayedEnemyHp).IsEqual(slots[0].Hp);
+                        AssertThat(Main.StoryDisplayedPlayerHp).IsEqual(members[0].Hp);
+                        AssertThat(Main.StoryDisplayedEnemyHp).IsEqual(slots[0].Hp);
+                    }
+                    if (pose is { } partyPose && draw is { } numberDraw && combat?.LastAction is { } partyAction
+                        && numberDraw.PartyEnemies.Count == 2)
+                    {
+                        int birthPose = partyAction.Attacker == ClassicBattleSide.Player ? 7 : 4;
+                        if (partyPose.Pose == birthPose && numberBornAt is null)
+                        { numberBornAt = Main.StoryPresentationTicks; NumberBirths++; }
+                        if (numberBornAt is { } birth)
+                        {
+                            uint elapsed = unchecked(Main.StoryPresentationTicks - birth);
+                            bool visible = elapsed < 440 && partyPose.Pose >= (partyAction.Attacker == ClassicBattleSide.Player ? 8 : 5);
+                            var currentDigits = numberDraw.NumberDigits.Where(d => d.BornAt == birth).ToArray();
+                            bool numeric = visible && !partyAction.Evaded && partyAction.Damage > 0;
+                            AssertThat(currentDigits.Length > 0 == numeric).IsTrue();
+                            if (numeric)
+                            {
+                                NumberDraws++;
+                                Vector2 anchor = partyAction.Attacker == ClassicBattleSide.Player
+                                    ? partyEnemies[partyAction.TargetIndex] : partyPlayers[partyAction.TargetIndex];
+                                float y = Math.Max(10, anchor.Y - (partyAction.Attacker == ClassicBattleSide.Player ? 115 : 75)) - elapsed / 40;
+                                AssertThat(currentDigits[0].Position == new Vector2(anchor.X, y)).IsTrue();
+                                string text = string.Concat(currentDigits.Reverse().Select(d => d.Digit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                                AssertThat(text).IsEqual(partyAction.Damage.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                                AssertThat(currentDigits.All(d => d.Color == StoryNumberColor.Blue)).IsTrue();
+                            }
+                        }
+                    }
+                }
                 if (!party && pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction)
                 {
                     // Author B: idle1/magic1/attack1/wait0. fight.c5078 enqueues after the
@@ -948,6 +1021,17 @@ public class StoryRoundtripSceneTests
             Main.UpdateCompleted += Capture;
             try { Tap(Key.Enter); await Wait(() => observed); }
             finally { Main.UpdateCompleted -= Capture; }
+        }
+        // The target-confirm Enter either starts the next alive member's selection or, for
+        // the final selecting member, builds the queue and enters Resolving.
+        internal async Task ConfirmMemberTarget(Pal.Core.ClassicBattleLifecycleSession battle)
+        {
+            var combat = Main.StoryBattle!.Current.Combat;
+            int selecting = combat.SelectingPlayerIndex
+                ?? throw new InvalidOperationException("Target menu has no selecting member.");
+            bool final = Enumerable.Range(selecting + 1, combat.Players.Count - selecting - 1)
+                .All(index => combat.Players[index].Hp == 0);
+            await ConfirmMenu(final ? StoryBattlePresentation.Resolving : StoryBattlePresentation.AttackMenu);
         }
         internal void Tap(Key key) { Send(key, true); Send(key, false); }
         private static void Send(Key key, bool pressed)
