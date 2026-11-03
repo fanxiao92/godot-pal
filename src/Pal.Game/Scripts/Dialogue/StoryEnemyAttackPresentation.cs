@@ -12,6 +12,7 @@ internal sealed class StoryEnemyAttackPresentation
     private readonly List<(long End, StoryEnemyAttackSnapshot Snapshot)> segments = new();
     private readonly StoryEnemyAttackSnapshot returned;
     internal long Duration { get; private set; }
+    internal long ImpactPose { get; }
     internal StoryEnemyAttackSnapshot At(int pose)
     {
         foreach (var segment in segments) if (pose < segment.End) return segment.Snapshot;
@@ -40,6 +41,7 @@ internal sealed class StoryEnemyAttackPresentation
         else
             // Inclusive loop and -1 are intentional; wait=0 adds no timed pose.
             for (int i = 0; i <= attack; i++) { ef = idle + magic + i - 1; Hold(wait); }
+        ImpactPose = Duration;
         impact = true;
         if (!action.Evaded) { pf = 4; shift = 6; }
         Hold(1);

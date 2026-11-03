@@ -279,6 +279,7 @@ public class StoryRoundtripSceneTests
             var sequence = new StoryEnemyAttackPresentation(2, magic, attack, wait, player, enemy,
                 80, evaded ? 80 : 0, 150, new(1, ClassicBattleSide.Enemy, 0, evaded ? 0 : 80, false, evaded));
             AssertThat(sequence.Duration == hit + 11).IsTrue();
+            AssertThat(sequence.ImpactPose == hit).IsTrue();
             AssertThat(sequence.At(hit - 1).DisplayedPlayerHp).IsEqual(80);
             AssertThat(sequence.At(hit - 1).ResultVisible).IsFalse();
             var impact = sequence.At(hit);
@@ -604,13 +605,25 @@ public class StoryRoundtripSceneTests
                 if (pose is { Pose: 0 } && previousPose is null) numberBornAt = null;
                 if (pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction)
                 {
-                    int birthPose = feedbackAction.Attacker == ClassicBattleSide.Player ? 7 : 5;
+                    // Author B: idle1/magic1/attack1/wait0. fight.c5078 enqueues after the
+                    // last prehit draw (4); Delay(FALSE) waits40 before its first impact UIUpdate (5).
+                    int birthPose = feedbackAction.Attacker == ClassicBattleSide.Player ? 7 : 4;
                     if (feedbackPose.Pose == birthPose && numberBornAt is null)
                     { numberBornAt = Main.StoryPresentationTicks; NumberBirths++; }
                     if (numberBornAt is { } birth)
                     {
                         uint elapsed = unchecked(Main.StoryPresentationTicks - birth);
-                        bool visible = elapsed < 440 && (feedbackAction.Attacker == ClassicBattleSide.Enemy || feedbackPose.Pose >= 8);
+                        bool visible = elapsed < 440 && feedbackPose.Pose >= (feedbackAction.Attacker == ClassicBattleSide.Player ? 8 : 5);
+                        if (feedbackAction.Attacker == ClassicBattleSide.Enemy)
+                        {
+                            var enemyDigits = feedbackDraw.NumberDigits.Where(d => d.Position.Y > 50).ToArray();
+                            AssertThat(enemyDigits.All(d => d.BornAt == birth))
+                                .OverrideFailureMessage($"Enemy number BornAt must be real prehit callback {birth}, not impact {Main.StoryPresentationTicks}; actual={string.Join(',', enemyDigits.Select(d => d.BornAt))}")
+                                .IsTrue();
+                            AssertThat(enemyDigits.Length > 0 == (visible && !feedbackAction.Evaded && feedbackAction.Damage > 0)).IsTrue();
+                            if (feedbackPose.Pose == 5 && previousPose?.Pose == 4)
+                                GD.Print($"PAL_ENEMY_NUMBER_BIRTH:prehit={birth};hit={Main.StoryPresentationTicks};age={elapsed/40};digits={enemyDigits.Length}");
+                        }
                         var currentDigits = feedbackDraw.NumberDigits.Where(d => d.BornAt == birth).ToArray();
                         bool numeric = visible && !feedbackAction.Evaded && feedbackAction.Damage > 0;
                         AssertThat(currentDigits.Length > 0 == numeric).IsTrue();

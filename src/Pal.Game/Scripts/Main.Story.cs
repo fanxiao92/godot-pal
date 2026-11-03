@@ -197,14 +197,18 @@ public partial class Main
         {
             var action = lifecycle.Current.Combat.LastAction!;
             bool playerHit = playerPresentation is not null && poseClock.Pose >= 7;
-            if (!feedbackBorn && (playerHit || shownEnemy is { ResultVisible: true }))
+            // Enemy stat-change queues after the last prehit UIUpdate, before the impact
+            // Delay(FALSE) waits40ms. Preserve that real birth even if the next callback is late.
+            bool enemyEnqueue = enemyPresentation is { } enemy && poseClock.Pose >= enemy.ImpactPose - 1;
+            if (!feedbackBorn && (playerHit || enemyEnqueue))
             {
                 Vector2 target = playerHit ? storyVisual!.Teams[storyRequest.TeamId].EnemyPosition : storyVisual!.PlayerPosition;
                 target.Y = Math.Max(10, target.Y - (playerHit ? 115 : 75));
-                storyNumbers.EnqueueAction(feedbackBeforeHp, action, target, now, playerHit);
+                storyNumbers.EnqueueAction(feedbackBeforeHp, action, target, now, pending: true);
                 feedbackBorn = true;
             }
-            if (playerPresentation is not null && poseClock.Pose >= 8) storyNumbers.RevealPending();
+            if ((playerPresentation is not null && poseClock.Pose >= 8) || shownEnemy is { ResultVisible: true })
+                storyNumbers.RevealPending();
         }
         storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, enemyIdle!.Frame, enemyIdle.Counter,
             shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null,
