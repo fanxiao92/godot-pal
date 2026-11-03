@@ -91,6 +91,7 @@ public class PrepareStoryPackageTests
         switch (fault)
         {
             case "unknown-item-field":
+                team.Remove("targetId"); team.Remove("enemyPosition");
                 team["enemies"] = new JsonArray(new JsonObject { ["targetId"] = 7,
                     ["enemyPosition"] = new JsonArray(100, 120), ["unknown"] = 0 });
                 break;
