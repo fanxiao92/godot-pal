@@ -454,6 +454,64 @@ public sealed class ClassicBattleLifecycleSessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Battle_end_script_enemy_still_rejects_at_construction_without_the_capable_executor()
+    {
+        // The gate moved from raw combat to the lifecycle: only the capable trigger executor
+        // (which preflighted the closure) may construct a session that will run the scripts.
+        var role = Role();
+        Assert.Throws<InvalidDataException>(() => Start(role, WinningRandom(),
+            enemies: [new(7, 0, 43, 0, 0, 0, 1) { BattleEndScript = 20 }]));
+    }
+
+    [Fact]
+    public void Won_battle_end_scripts_pause_between_growth_and_recovery_in_slot_order()
+    {
+        // battle.c 1334-1337/1332-1349: both enemy slots declare scripts; the settlement publishes
+        // growth first, then pauses per slot with no recovery yet, and the last acknowledgement
+        // applies the half recovery and cleanup before the completion receipt. The weak enemies'
+        // one-point strikes keep the pre/post-recovery HP visibly different.
+        var role = Role() with { Hp = 101, MaxHp = 150, Mp = 21, MaxMp = 50 };
+        Draw[] Strike() => [I(0, 0, 0), I(0, 16, 5), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1)];
+        Draw[] Hit() => [I(1, 2, 2), I(0, 5, 5), F(1, 1.125f, 1), I(2, 3, 2)];
+        var random = new ScriptedRandom([
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            .. Strike(), .. Strike(), .. Hit(),
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), .. Strike(), .. Hit()]);
+        var session = new ClassicBattleLifecycleSession([role],
+            [new(1, role.Hp, role.MaxHp, 40, 20, 100)],
+            [new(7, 0, 43, -36, 0, 500, 1) { BattleEndScript = 20 }, new(7, 0, 43, -36, 0, 500, 1) { BattleEndScript = 21 }],
+            new Dictionary<int, ClassicBattleGrowthData> { [role.RoleId] = Growth() }, random, runEnemyBattleEndScripts: true);
+        session.SelectAttack(0, 0);
+        while (session.Completion is null && session.PendingBattleEndScript is null)
+            if (!session.ResolveNextAction()) break;
+        if (session.PendingBattleEndScript is null && session.Completion is null) session.SelectAttack(0, 1);
+        while (session.Completion is null && session.PendingBattleEndScript is null)
+            if (!session.ResolveNextAction()) break;
+        Assert.Equal(ClassicBattlePhase.Won, session.Current.Combat.Phase);
+        Assert.Null(session.Completion);
+        Assert.Equal(new ClassicBattleEndScript(0, 7, 20), session.PendingBattleEndScript);
+        var settlement = session.VictorySettlement!;
+        Assert.Equal(0, settlement.ExperienceGranted);
+        Assert.Equal(0, settlement.CashGranted);
+        var report = Assert.Single(settlement.Growth);
+        Assert.Equal(new ClassicBattleRoleGrowth(1, 2, 2, Array.Empty<int>()).LevelBefore, report.LevelBefore);
+        Assert.Equal(2, report.LevelAfter);
+        Assert.Empty(report.LearnedMagics);
+        int hpBeforeScripts = session.Current.Role.Hp; // growth settled, recovery not applied yet
+        Assert.Equal(98, hpBeforeScripts);
+        session.AcknowledgeBattleEndScript();
+        Assert.Equal(new ClassicBattleEndScript(1, 7, 21), session.PendingBattleEndScript);
+        Assert.Null(session.Completion);
+        Assert.Equal(hpBeforeScripts, session.Current.Role.Hp);
+        session.AcknowledgeBattleEndScript();
+        Assert.Null(session.PendingBattleEndScript);
+        Assert.Equal(ClassicBattlePhase.Won, session.Completion!.Outcome);
+        Assert.Equal(hpBeforeScripts + (150 - hpBeforeScripts) / 2, session.Current.Role.Hp);
+        Assert.Throws<InvalidOperationException>(session.AcknowledgeBattleEndScript);
+        random.AssertExhausted();
+    }
+
     private static BattleRoleSnapshot Role(int roleId = 1) => new(roleId, 2, 100, 150, 20, 50, new(5, 2, 17),
         new Dictionary<string, BattleExperienceSnapshot> {
             ["health"] = new(7, 3, 55), ["magic"] = new(7, 3, 55), ["attack"] = new(7, 3, 55),

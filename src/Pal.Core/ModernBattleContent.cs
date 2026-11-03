@@ -21,9 +21,11 @@ public static partial class ModernBattleContent
         if (Number(root, "formatVersion", Root) != 1)
             throw Error(Root, "unsupported formatVersion");
         var roles = new List<BattleRoleSnapshot>();
+        var panelDeclaredRoles = new HashSet<int>();
         foreach (var (item, i) in Array(root, "roles", Root).Select((x, i) => (x, i)))
         {
-            ValidateRole(item, Root + $".roles[{i}]");
+            string path = Root + $".roles[{i}]";
+            if (ValidateRole(item, path)) panelDeclaredRoles.Add(Number(item, "roleId", path, 0, 5));
             roles.Add(BattleModels.Role(item));
         }
         var players = Array(root, "players", Root).Select((x, i) => Player(x, Root + $".players[{i}]")).ToArray();
@@ -59,7 +61,7 @@ public static partial class ModernBattleContent
         var equipmentObjects = objectsDeclared ? EquipmentObjects(objectsElement) : null;
         BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);
         TriggerBattleContent content;
-        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects); }
+        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles); }
         catch (InvalidDataException error) { throw Error(Root, error.Message); }
         Validate(content);
         return content;
@@ -112,14 +114,20 @@ public static partial class ModernBattleContent
         return objects;
     }
 
-    private static void ValidateRole(JsonElement role, string path)
+    /// <summary>Strict role validation. Returns true when all five base panel words are declared
+    /// (the growth source that flows into subsequent battles); a partial declaration is rejected.</summary>
+    private static bool ValidateRole(JsonElement role, string path)
     {
         // The base panel words are optional like the player's magicPower/fleeRate: absent words
-        // carry zero; present ones are strictly ranged.
+        // carry zero; present ones are strictly ranged. The five words declare together.
         EventJson.Keys(role, path,
             ["roleId", "level", "hp", "maxHp", "mp", "maxMp", "primaryExperience",
              "hiddenExperience", "equipment", "magics", "statuses", "coveredByRoleId"],
             ["attack", "magicPower", "defense", "dexterity", "fleeRate"]);
+        int declared = new[] { "attack", "magicPower", "defense", "dexterity", "fleeRate" }
+            .Count(panel => role.TryGetProperty(panel, out _));
+        if (declared is not 0 and not 5)
+            throw Error(path, "role panel words attack, magicPower, defense, dexterity and fleeRate must be declared together");
         Number(role, "roleId", path, 0, 5);
         Number(role, "level", path);
         int hp = Number(role, "hp", path), maxHp = Number(role, "maxHp", path, 1);
@@ -139,6 +147,7 @@ public static partial class ModernBattleContent
         Words(role, "magics", path, 32);
         Words(role, "statuses", path, 9);
         Number(role, "coveredByRoleId", path, 0, 5);
+        return declared == 5;
     }
 
     private static void Experience(JsonElement value, string path)

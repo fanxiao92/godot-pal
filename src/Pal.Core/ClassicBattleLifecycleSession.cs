@@ -11,10 +11,18 @@ public sealed class ClassicBattleLifecycleSession
     private readonly Dictionary<int, BattleRoleState> roles;
     private readonly IReadOnlyDictionary<int, ClassicBattleGrowthData> growth;
     private readonly IBattleRandom random;
+    private readonly ClassicBattleEndScript[] battleEndScripts;
+    private int battleEndScriptIndex = -1;
     private ClassicBattleSession? activeCombat;
     private int experienceGranted, cashGranted;
     public ClassicBattleLifecycleView Current { get; private set; }
     public CompletionReceipt? Completion { get; private set; }
+    /// <summary>The enemy post-victory script awaiting host execution (battle.c 1334-1337); non-null
+    /// only between the growth settlement and the automatic recovery of a Won outcome.</summary>
+    public ClassicBattleEndScript? PendingBattleEndScript =>
+        battleEndScriptIndex >= 0 && battleEndScriptIndex < battleEndScripts.Length ? battleEndScripts[battleEndScriptIndex] : null;
+    /// <summary>The victory settlement facts once growth has settled; null before a Won settlement.</summary>
+    public ClassicBattleVictorySettlement? VictorySettlement { get; private set; }
 
     public ClassicBattleLifecycleSession(BattleRoleSnapshot role, ClassicBattlePlayer player, ClassicBattleEnemy enemy,
         ClassicBattleGrowthData growth, IBattleRandom random, BattleEquipmentState? equipment = null)
@@ -22,10 +30,16 @@ public sealed class ClassicBattleLifecycleSession
 
     public ClassicBattleLifecycleSession(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
         IReadOnlyList<ClassicBattleEnemy> enemies, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth, IBattleRandom random,
-        BattleEquipmentState? equipment = null)
+        BattleEquipmentState? equipment = null, bool runEnemyBattleEndScripts = false)
     {
         ArgumentNullException.ThrowIfNull(random);
         Validate(roles, players, enemies, growth, equipment);
+        // A declared battle-end script is only executable through its capable host (the trigger
+        // battle executor that preflighted the closure); direct construction still rejects it.
+        battleEndScripts = enemies.Select((enemy, slot) => (enemy, slot)).Where(x => x.enemy.BattleEndScript != 0)
+            .Select(x => new ClassicBattleEndScript(x.slot, x.enemy.Id, x.enemy.BattleEndScript)).ToArray();
+        if (battleEndScripts.Length > 0 && !runEnemyBattleEndScripts)
+            throw new InvalidDataException("Classic combat requires the capable script executor to run a declared enemy battle-end script.");
         var byId = roles.ToDictionary(x => x.RoleId);
         var combat = new ClassicBattleSession(new(players.Select(x => x with { Hp = Math.Max(1, byId[x.RoleId].Hp) }).ToArray(), enemies), random, equipment);
         this.roles = byId.ToDictionary(x => x.Key, x => new BattleRoleState(x.Value));
@@ -97,32 +111,59 @@ public sealed class ClassicBattleLifecycleSession
         ClassicBattleView combat = activeCombat!.Current;
         if (activeCombat.Completion is not null)
         {
-            if (combat.Phase == ClassicBattlePhase.Won) SettleVictory(combat);
-            foreach (var role in roles.Values)
-                for (int i = 0; i < role.Statuses.Length; i++)
-                    if (role.Statuses[i] <= 999) role.Statuses[i] = 0;
-            // No inventory, poison or extra-slot effects exist in this supported baseline. A
-            // declared battle-end script is still a rejected enemy domain (ValidateEnemy).
-            // Release the action owner before publishing a lifecycle (not raw combat) completion.
-            activeCombat = null;
-            Current = View(combat);
-            Completion = new(this);
+            if (combat.Phase == ClassicBattlePhase.Won)
+            {
+                SettleGrowth(combat);
+                // battle.c 1334-1337: every enemy's post-victory script runs between the growth
+                // and the automatic recovery; the host executes one declared slot at a time.
+                if (battleEndScripts.Length > 0)
+                {
+                    battleEndScriptIndex = 0;
+                    Current = View(combat);
+                    return;
+                }
+                FinishVictory(combat);
+                return;
+            }
+            FinishSettlement(combat);
         }
         else Current = View(combat);
     }
 
-    /// <summary>PAL_BattleWon (battle.c 1003-1349) in the reference order: grant the KO-accumulated
-    /// rewards, grow every surviving member (primary levels, hidden tracks, magic scan), then
-    /// recover half the missing HP/MP for the whole party, dead members included.</summary>
-    private void SettleVictory(ClassicBattleView combat)
+    /// <summary>Host acknowledgement of the running enemy post-victory script: advances to the next
+    /// declared slot, or finishes the settlement (recovery, cleanup, completion) after the last one.</summary>
+    public void AcknowledgeBattleEndScript()
+    {
+        if (PendingBattleEndScript is null) throw new InvalidOperationException("No enemy battle-end script is pending.");
+        battleEndScriptIndex++;
+        if (battleEndScriptIndex >= battleEndScripts.Length)
+        {
+            battleEndScriptIndex = -1;
+            FinishVictory(activeCombat!.Current);
+        }
+        else Current = View(activeCombat!.Current);
+    }
+
+    /// <summary>PAL_BattleWon (battle.c 1003-1330) growth half: grant the KO-accumulated rewards and
+    /// grow every surviving member (primary levels, hidden tracks, magic scan). The recovery half
+    /// (battle.c 1332-1349) only runs after the enemy post-victory scripts.</summary>
+    private void SettleGrowth(ClassicBattleView combat)
     {
         experienceGranted = activeCombat!.ExperienceGained;
         cashGranted = activeCombat.CashGained;
+        var growthReports = new List<ClassicBattleRoleGrowth>();
         foreach (var player in combat.Players)
         {
             BattleRoleState role = roles[player.RoleId];
             IReadOnlyList<int> table = growth[player.RoleId].LevelUpExperience;
-            if (role.Hp == 0) continue; // battle.c 1094: dead members skip every growth step
+            int levelBefore = role.Level;
+            var learnedMagics = new List<int>();
+            if (role.Hp == 0)
+            {
+                // battle.c 1094: dead members skip every growth step but still report for display.
+                growthReports.Add(new(role.RoleId, levelBefore, role.Level, Array.Empty<int>()));
+                continue;
+            }
 
             // Primary track: the full battle experience (never a share) crosses level thresholds
             // in a loop; each formal level restores HP/MP to the grown maxima (battle.c 1098-1120).
@@ -177,17 +218,38 @@ public sealed class ClassicBattleLifecycleSession
                 int slot = Array.IndexOf(role.Magics, 0);
                 if (slot < 0) continue;
                 role.Magics[slot] = row.MagicId;
+                learnedMagics.Add(row.MagicId);
             }
+            growthReports.Add(new(role.RoleId, levelBefore, role.Level, learnedMagics));
         }
+        VictorySettlement = new(experienceGranted, cashGranted, growthReports);
+    }
 
-        // battle.c 1332-1349: every party member, dead included, recovers half the missing
-        // HP/MP after all growth; a dead member revives at half its maximum.
+    /// <summary>battle.c 1332-1349: every party member, dead included, recovers half the missing
+    /// HP/MP after all growth and post-battle scripts; a dead member revives at half its maximum.</summary>
+    private void FinishVictory(ClassicBattleView combat)
+    {
         foreach (var player in combat.Players)
         {
             BattleRoleState role = roles[player.RoleId];
             role.Hp += (role.MaxHp - role.Hp) / 2;
             role.Mp += (role.MaxMp - role.Mp) / 2;
         }
+        FinishSettlement(combat);
+    }
+
+    /// <summary>PAL_BattleEnd cleanup (battle.c 1815-1830 through global.c 2297): timed statuses
+    /// (at most 999) clear while persistent equipment statuses survive. No inventory, poison or
+    /// extra-slot effects exist in this supported baseline. The action owner is released before
+    /// publishing a lifecycle (not raw combat) completion.</summary>
+    private void FinishSettlement(ClassicBattleView combat)
+    {
+        foreach (var role in roles.Values)
+            for (int i = 0; i < role.Statuses.Length; i++)
+                if (role.Statuses[i] <= 999) role.Statuses[i] = 0;
+        activeCombat = null;
+        Current = View(combat);
+        Completion = new(this);
     }
 
     /// <summary>PAL_PlayerLevelUp (global.c 2347) for one level: the fixed draw order is

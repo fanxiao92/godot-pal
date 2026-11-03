@@ -9,13 +9,15 @@ using Pal.Game.Resources;
 
 namespace Pal.Game.Dialogue;
 
-public enum StoryBattlePresentation { AttackMenu, TargetMenu, Resolving, Feedback, HookDialogue }
+public enum StoryBattlePresentation { AttackMenu, TargetMenu, Resolving, Feedback, HookDialogue, Settlement }
 
 /// <summary>Indexed native art and authored WORD labels. Main alone advances combat and presentation.</summary>
 internal partial class PalStoryBattleView : Node2D
 {
     // Modern demo WORD convention, not retail SDL IDs (SDL attack selection uses an icon).
     internal const int AttackWord = 60000, TargetWord = 60001, MissWord = 60002, CriticalWord = 60003, HpWord = 60004, BoostWord = 60005;
+    // #50 settlement labels (battle.c 1019-1032/1130/1314: exp/cash box, level-up, learned magic).
+    internal const int ExpWord = 60006, CashWord = 60007, LevelUpWord = 60008, LearnedMagicWord = 60009;
     private CheckedStoryProfile story = null!;
     private CheckedBattleVisualProfile visual = null!;
     private CheckedBattleVisualTeam team = null!;
@@ -37,7 +39,8 @@ internal partial class PalStoryBattleView : Node2D
 
     internal static void ValidateUi(CheckedStoryProfile story)
     {
-        foreach (int id in new[] { AttackWord, TargetWord, MissWord, CriticalWord, HpWord, BoostWord })
+        foreach (int id in new[] { AttackWord, TargetWord, MissWord, CriticalWord, HpWord, BoostWord,
+            ExpWord, CashWord, LevelUpWord, LearnedMagicWord })
         {
             if (!story.SelectedWords.TryGetValue(id, out string? text) || string.IsNullOrWhiteSpace(text))
                 throw new InvalidDataException($"Story battle UI requires nonempty WORD {id}.");
@@ -91,18 +94,22 @@ internal partial class PalStoryBattleView : Node2D
     }
     internal void Present(ClassicBattleView combat, StoryBattlePresentation mode, int idleFrame, int idleCounter,
         StoryEnemyAttackSnapshot? enemyPresentation = null, StoryPlayerAttackSnapshot? playerPresentation = null,
-        IReadOnlyList<StoryNumberDigit>? numberDigits = null, int? feedbackWord = null, int highlightedEnemySlot = 0)
+        IReadOnlyList<StoryNumberDigit>? numberDigits = null, int? feedbackWord = null, int highlightedEnemySlot = 0,
+        string? settlementLine = null)
     {
         this.combat = combat; this.mode = mode; this.idleFrame = idleFrame; this.idleCounter = idleCounter;
         highlightedSlot = highlightedEnemySlot;
         EnemyPresentation = enemyPresentation; this.playerPresentation = playerPresentation;
         NumberDigits = numberDigits ?? Array.Empty<StoryNumberDigit>();
         FeedbackWord = feedbackWord;
+        SettlementLine = settlementLine;
         BuildDrawSnapshot(); QueueRedraw();
     }
 
     internal IReadOnlyList<StoryNumberDigit> NumberDigits { get; private set; } = Array.Empty<StoryNumberDigit>();
     internal int? FeedbackWord { get; private set; }
+    /// <summary>The current victory-settlement line (authored WORD labels plus numbers); null outside Settlement.</summary>
+    internal string? SettlementLine { get; private set; }
     internal StoryBattleDrawSnapshot DrawSnapshot { get; private set; }
     private void BuildDrawSnapshot()
     {
@@ -239,6 +246,12 @@ internal partial class PalStoryBattleView : Node2D
                     : story.SelectedWords[TargetWord] + ":" + team.TargetId
             : shown.FeedbackWord is { } word ? story.SelectedWords[word] : "";
         Text(label, new Vector2(155, 176));
+        if (mode == StoryBattlePresentation.Settlement && SettlementLine is { } settlement)
+        {
+            // The reference draws the settlement boxes over the battle screen (battle.c 1019-1032).
+            DrawRect(new Rect2(20, 62, 280, 28), new Color(0, 0, 0, .92f));
+            Text(settlement, new Vector2(28, 71));
+        }
         foreach (var digit in shown.NumberDigits) DrawTexture(numbers[(digit.Color, digit.Digit)], digit.Position);
     }
     private void Sprite(bool player, int frame, Vector2 bottomCenter, int shift = 0)
@@ -258,7 +271,7 @@ internal partial class PalStoryBattleView : Node2D
         }
     }
     public override void _ExitTree() { ReleaseTextures(); }
-    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; }
+    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; SettlementLine = null; }
 }
 
 internal readonly record struct StoryBattleDrawSnapshot(int PlayerFrame, int EnemyFrame, Vector2 PlayerPosition, Vector2 EnemyPosition, int PlayerColorShift,

@@ -1246,6 +1246,173 @@ public class StoryRoundtripSceneTests
         AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
     }
 
+    [TestCase("zh-Hans", Timeout = 120000)]
+    [TestCase("en", Timeout = 120000)]
+    public async Task VictorySettlementDisplaysGrowthRunsPostBattleScriptAndFlowsPanels(string language)
+    {
+        // Rewards: battle 1 (team18, experience120/cash250) settles through the authored boxes —
+        // exp/cash, the level-up line (5+120 crosses the level-2 threshold once: a split-experience
+        // mutation would show none of these) and the learned magic 10 — then battle 2 consumes
+        // the settled grown panels as its base declaration and runs the enemy's post-victory
+        // dialogue before the event resumes to the victory line.
+        using var fixture = new AuthoredStoryFixture("Rewards");
+        string hash = Godot.FileAccess.GetSha256(fixture.StoryUri);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", language, "--battle-seed", "1");
+        bool zh = language == "zh-Hans";
+        Main old;
+        using (var host = new StoryHost(selection))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var first = script.PendingBattle!.Lifecycle;
+            // Battle 1: one round kills the 43hp slot through the real menus.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Settlement);
+            AssertThat(old.StorySettlementLine).IsEqual(zh ? "经验:120 现金:250" : "EXP:120 CASH:250");
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StorySettlementLine == (zh ? "升级:1:3" : "LEVEL UP:1:3"));
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StorySettlementLine == (zh ? "习得法术:1:10" : "LEARNED MAGIC:1:10"));
+            // The confirming Enter is consumed by the settlement box only; the next display needs a new tap.
+            AssertThat(old.Dialogue!.Session!.PendingDisplay).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var second = script.PendingBattle!.Lifecycle;
+            AssertThat(second.Completion).IsNull();
+            var settled = first.Current.Role;
+            AssertThat(settled.Level).IsEqual(3);
+            AssertThat(settled.PrimaryExperience.Value).IsEqual(25);
+            AssertThat(settled.Magics.ToArray()[..2].SequenceEqual(new[] { 9, 10 })).IsTrue();
+            // The settled grown panels are battle 2's base declaration (no equipment overlay here).
+            var basePlayer = second.Current.Combat.Players[0];
+            AssertThat(basePlayer.Attack).IsEqual(settled.Attack);
+            AssertThat(basePlayer.Defense).IsEqual(settled.Defense);
+            AssertThat(basePlayer.Dexterity).IsEqual(settled.Dexterity);
+            AssertThat(second.Current.Role.MaxHp).IsEqual(settled.MaxHp);
+            // Battle 2 has no rewards, so no settlement box: the enemy's post-victory script runs
+            // its dialogue over the finished battle (battle.c 1334-1337) before the recovery.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.HookDialogue
+                && script.PendingDisplay is not null);
+            AssertThat(script.RunningBattleEndScript!.ScriptAddress).IsEqual(8);
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(1);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual(zh ? "我会报仇" : "I WILL RETURN");
+            await host.FinishDisplay();
+            await host.Wait(() => script.PendingBattle is null);
+            AssertThat(old.StoryBattleMode).IsNull();
+            // The ledger consumed exactly one owned Won receipt per granted battle.
+            AssertThat(old.StoryExperienceGranted).IsEqual(120);
+            AssertThat(old.StoryCashGranted).IsEqual(250);
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual(zh ? "胜" : "WIN");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Godot.FileAccess.GetSha256(fixture.StoryUri)).IsEqual(hash);
+        // Same-URI fresh Main: the settled growth of the first session never leaks into a new run.
+        using (var fresh = new StoryHost(selection))
+        {
+            AssertThat(fresh.Main.Failure).IsNull();
+            AssertThat(fresh.Main.StoryCashGranted).IsEqual(0);
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            await fresh.FinishDisplay();
+            await fresh.Wait(() => fresh.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var restart = fresh.Main.Dialogue!.Session!.PendingBattle!.Lifecycle;
+            AssertThat(restart.Current.Role.Level).IsEqual(2);
+            AssertThat(restart.Current.Role.MaxHp).IsEqual(150);
+        }
+    }
+
+    [TestCase(Timeout = 120000)]
+    public async Task EquipmentStatusAbove999SurvivesTheWonSettlementCleanup()
+    {
+        // Targeted counterexample: the persistent dual-attack equipment status (60000 > 999) must
+        // survive the battle-end cleanup of the Won settlement (global.c 2297 keeps >999 words).
+        using var fixture = new AuthoredStoryFixture("PartyEquip");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        using var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]);
+        AssertThat(host.Main.Failure).IsNull();
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        var script = host.Main.Dialogue!.Session!;
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+        var battle = host.Main.StoryBattle!;
+        while (script.PendingBattle is not null)
+        {
+            if (host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+            {
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMemberTarget(battle);
+            }
+            else
+            {
+                await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.Feedback
+                    || host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu || script.PendingBattle is null);
+                if (script.PendingBattle is null) break;
+                if (host.Main.StoryBattleMode == StoryBattlePresentation.Feedback)
+                    await host.Wait(() => host.Main.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+            }
+        }
+        AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+        AssertThat(battle.Current.Roles[1].Statuses[8]).IsEqual(60000);
+        AssertThat(host.Main.StoryCashGranted).IsEqual(0);
+        AssertThat(host.Main.StoryExperienceGranted).IsEqual(0);
+    }
+
+    [TestCase(Timeout = 120000)]
+    public async Task DeadMemberRevivesAtHalfMaximumThroughTheVictorySettlement()
+    {
+        // Targeted counterexample: the dying member is dead when the battle ends Won; the automatic
+        // half recovery must still include it (battle.c 1332-1349: revive at half the maximum),
+        // while its growth records stay untouched.
+        using var fixture = new AuthoredStoryFixture("Midbattle");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        using var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]);
+        AssertThat(host.Main.Failure).IsNull();
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        var script = host.Main.Dialogue!.Session!;
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+        var battle = host.Main.StoryBattle!;
+        var initial = battle.Current.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
+        while (script.PendingBattle is not null) await DriveMidbattleMenus(host, host.Main);
+        AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+        // The dying member is dead at the end of combat (hp0 in the frozen combat view).
+        int dead = battle.Current.Combat.Players.Select((player, index) => (player, index))
+            .Single(x => x.player.Hp == 0).index;
+        var revived = battle.Current.Roles[battle.Current.Combat.Players[dead].RoleId];
+        AssertThat(revived.Hp).IsEqual(revived.MaxHp / 2);
+        AssertThat(revived.Level).IsEqual(initial[revived.RoleId].Level);
+        AssertThat(revived.PrimaryExperience).IsEqual(initial[revived.RoleId].PrimaryExperience);
+        // The survivor recovers half its missing HP; no exp was granted, so nothing else changes.
+        int survivor = dead == 0 ? 1 : 0;
+        var survivorRole = battle.Current.Roles[battle.Current.Combat.Players[survivor].RoleId];
+        int combatHp = battle.Current.Combat.Players[survivor].Hp;
+        AssertThat(survivorRole.Hp).IsEqual(combatHp + (survivorRole.MaxHp - combatHp) / 2);
+        AssertThat(host.Main.StoryExperienceGranted).IsEqual(0);
+    }
+
     private sealed class StoryHost : IDisposable
     {
         internal Main Main { get; } = new();

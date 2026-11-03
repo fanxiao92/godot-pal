@@ -30,6 +30,10 @@ public partial class Main
     private StoryPlayerAttackPresentation? playerPresentation;
     private int effectEnemyHeight;
     private StoryEnemyIdleState? enemyIdle;
+    private List<string>? settlementLines;
+    private int settlementStage;
+    private uint settlementShownAt;
+    private bool settlementPresented;
     private StoryBattlePoseClock outerClock;
     private bool outerDue;
     private readonly StoryBattleNumbers storyNumbers = new();
@@ -44,6 +48,13 @@ public partial class Main
     internal IReadOnlyList<int> StoryBattleBoosts => storyView?.DrawSnapshot.PartyBoosts ?? [];
     public StoryBattlePresentation? StoryBattleMode { get; private set; }
     public ClassicBattleLifecycleSession? StoryBattle => storyRequest?.Lifecycle;
+    /// <summary>The current victory-settlement line, or null outside the Settlement presentation.</summary>
+    internal string? StorySettlementLine => StoryBattleMode == StoryBattlePresentation.Settlement
+        ? storyView?.SettlementLine : null;
+    /// <summary>Story ledger of the granted victory totals (gpGlobals dwCash, battle.c 1054); one
+    /// consumption per owned Won receipt, never re-granted by a repeat acknowledgement.</summary>
+    public int StoryCashGranted { get; private set; }
+    public int StoryExperienceGranted { get; private set; }
     internal int? StoryDisplayedPlayerHp => storyView?.DisplayedPlayerHp;
     internal int? StoryDisplayedEnemyHp => storyView?.DisplayedEnemyHp;
     internal bool StoryResultVisible => storyView?.ResultVisible ?? false;
@@ -122,7 +133,7 @@ public partial class Main
             // battle.c1782 startup, then the immediately due first StartFrame (battle.c763–792).
             enemyIdle.Advance(); enemyIdle.Advance();
             outerClock = StoryBattlePoseClock.Start(now); outerDue = false;
-            storyRequest = pending; storyView = view; battleConfirm = false;
+            storyRequest = pending; storyView = view; battleConfirm = false; settlementPresented = false;
             storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
             StoryBattleMode = StoryBattlePresentation.AttackMenu;
             Display!.SetProcess(false);
@@ -228,9 +239,9 @@ public partial class Main
                 if (poseClock.Pose < poses) break;
                 // Enemy action's final UpdateFighters is not another timed pose (fight.c5137).
                 if (enemyPresentation is not null) enemyIdle!.Advance();
-                if (lifecycle.Completion is { } completion)
+                if (lifecycle.Completion is not null || lifecycle.VictorySettlement is not null || lifecycle.PendingBattleEndScript is not null)
                 {
-                    CompleteStoryBattle(completion);
+                    HandleStoryVictoryBoundary();
                     return true;
                 }
                 // The triggering action's feedback is done; a paused role hook shows its script now.
@@ -240,12 +251,33 @@ public partial class Main
                 StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Selecting
                     ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
                 break;
+            case StoryBattlePresentation.Settlement:
+                // PAL_WaitForAnyKey (battle.c 1031/1140/1323): confirm or the boss/normal timeout advances.
+                if (confirm || unchecked(now - settlementShownAt) >= (storyRequest!.IsBoss ? 5500u : 3000u))
+                {
+                    settlementStage++;
+                    if (settlementStage < settlementLines!.Count)
+                    {
+                        settlementShownAt = now;
+                        PresentStorySettlement();
+                    }
+                    else
+                    {
+                        settlementLines = null;
+                        HandleStoryVictoryBoundary();
+                        return true; // the boundary may complete the battle and free the view
+                    }
+                }
+                break;
             case StoryBattlePresentation.HookDialogue:
                 // The hook script runs on the real display; its completion acknowledges the paused
                 // battle (TriggerScriptSession.Complete), which is observed through the combat phase.
-                if (lifecycle.Current.Combat.Phase != ClassicBattlePhase.RoleHook)
+                // A battle-end script keeps the Won combat phase, so its running record gates the end.
+                if (lifecycle.Current.Combat.Phase != ClassicBattlePhase.RoleHook
+                    && Dialogue!.Session!.RunningBattleEndScript is null)
                 {
                     EndStoryBattleHook();
+                    if (lifecycle.PendingBattleEndScript is not null) { BeginStoryBattleEndScript(); break; }
                     if (lifecycle.Completion is { } hookCompletion)
                     {
                         CompleteStoryBattle(hookCompletion);
@@ -283,9 +315,11 @@ public partial class Main
             if ((playerPresentation is not null && poseClock.Pose >= 8) || shownEnemy is { ResultVisible: true })
                 storyNumbers.RevealPending();
         }
+        string? settlementLine = StoryBattleMode == StoryBattlePresentation.Settlement && settlementLines is { } current
+            ? current[Math.Clamp(settlementStage, 0, current.Count - 1)] : null;
         storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, enemyIdle!.Frame, enemyIdle.Counter,
             shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null,
-            storyNumbers.At(now), storyNumbers.LabelAt(now), storyTargetSlot);
+            storyNumbers.At(now), storyNumbers.LabelAt(now), storyTargetSlot, settlementLine);
         return true;
     }
     private void BeginStoryBattleHook()
@@ -300,6 +334,74 @@ public partial class Main
             enemyIdle!.Frame, enemyIdle!.Counter, highlightedEnemySlot: storyTargetSlot);
     }
 
+    private void BeginStoryBattleEndScript()
+    {
+        // battle.c 1334-1337: the enemy's post-victory script runs its dialogue over the finished
+        // battle before the automatic recovery; same presentation rules as the role hook.
+        StoryBattleMode = StoryBattlePresentation.HookDialogue;
+        Display!.ZIndex = 200;
+        Display!.SetProcess(true);
+        Dialogue!.StartBattleEndScript();
+        storyView!.Present(storyRequest!.Lifecycle.Current.Combat, StoryBattleMode.Value,
+            enemyIdle!.Frame, enemyIdle!.Counter, highlightedEnemySlot: storyTargetSlot);
+    }
+
+    /// <summary>The victory boundary after the final action feedback: the authored settlement boxes
+    /// first (exp/cash, level-up, learned magic), then the enemy post-victory scripts, then the
+    /// owned completion. PAL_BattleWon order (battle.c 1003-1349).</summary>
+    private void HandleStoryVictoryBoundary()
+    {
+        var lifecycle = storyRequest!.Lifecycle;
+        if (!settlementPresented && lifecycle.VictorySettlement is { } victory)
+        {
+            settlementPresented = true;
+            settlementLines = SettlementLines(victory);
+            if (settlementLines.Count > 0)
+            {
+                settlementStage = 0;
+                settlementShownAt = presentationNow;
+                StoryBattleMode = StoryBattlePresentation.Settlement;
+                PresentStorySettlement();
+                return;
+            }
+        }
+        if (lifecycle.PendingBattleEndScript is not null) { BeginStoryBattleEndScript(); return; }
+        if (lifecycle.Completion is { } completion) { CompleteStoryBattle(completion); return; }
+        // A non-victory completion (e.g. Loss) resumes the queue normally.
+        outerDue = true;
+        StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Selecting
+            ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
+    }
+
+    private List<string> SettlementLines(ClassicBattleVictorySettlement victory)
+    {
+        var words = story!.SelectedWords;
+        var lines = new List<string>();
+        // battle.c 1022-1031: the exp/cash box appears only when experience was gained.
+        if (victory.ExperienceGranted > 0)
+            lines.Add(words[PalStoryBattleView.ExpWord] + ":" + victory.ExperienceGranted
+                + " " + words[PalStoryBattleView.CashWord] + ":" + victory.CashGranted);
+        var members = storyRequest.Lifecycle.Current.Combat.Players;
+        foreach (var growth in victory.Growth)
+        {
+            int member = 0;
+            for (int i = 0; i < members.Count; i++) if (members[i].RoleId == growth.RoleId) { member = i + 1; break; }
+            if (member == 0) continue;
+            if (growth.LevelAfter > growth.LevelBefore)
+                lines.Add(words[PalStoryBattleView.LevelUpWord] + ":" + member + ":" + growth.LevelAfter);
+            foreach (int magic in growth.LearnedMagics)
+                lines.Add(words[PalStoryBattleView.LearnedMagicWord] + ":" + member + ":" + magic);
+        }
+        return lines;
+    }
+
+    private void PresentStorySettlement()
+    {
+        storyView!.Present(storyRequest!.Lifecycle.Current.Combat, StoryBattlePresentation.Settlement,
+            enemyIdle!.Frame, enemyIdle!.Counter, highlightedEnemySlot: storyTargetSlot,
+            settlementLine: settlementLines![settlementStage]);
+    }
+
     private void EndStoryBattleHook()
     {
         Display!.ZIndex = 0;
@@ -309,6 +411,13 @@ public partial class Main
     private void CompleteStoryBattle(ClassicBattleLifecycleSession.CompletionReceipt completion)
     {
         var request = storyRequest;
+        // The story ledger consumes the granted totals exactly once per owned Won receipt.
+        if (completion.Outcome == ClassicBattlePhase.Won)
+        {
+            StoryCashGranted += completion.CashGranted;
+            StoryExperienceGranted += completion.ExperienceGranted;
+        }
+        settlementLines = null; settlementStage = 0; settlementPresented = false;
         // Remove the complete feedback overlay and restore the map before the owned receipt.
         storyNumbers.Clear();
         RemoveChild(storyView!); storyView!.Free(); storyView = null;
@@ -354,6 +463,7 @@ public partial class Main
         storyView = null; storyRequest = null; storyTeam = null; StoryBattleMode = null; battleConfirm = false; resumeStoryDisplay = false;
         enemyPresentation = null; playerPresentation = null; enemyIdle = null; outerDue = false;
         storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
+        settlementLines = null; settlementStage = 0; settlementPresented = false;
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
     }

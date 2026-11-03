@@ -165,7 +165,7 @@ try {
     $trxFiles = foreach ($directory in @('solution', 'game', 'game-repeat', 'IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
         Get-ChildItem -LiteralPath (Join-Path $evidence $directory) -Filter '*.trx' | ForEach-Object FullName
     }
-    if ($checks.Count -ne 16 -or $completedBatches.Count -ne 9) { throw 'Incomplete gate: expected 16 TRX and 9 Game batches.' }
+    if ($checks.Count -ne 31 -or $completedBatches.Count -ne 24) { throw 'Incomplete gate: expected 31 TRX and 24 Game batch results.' }
     Assert-ExactTestNames @($trxFiles) @($checks.trx) 'Complete gate TRX files'
     & (Join-Path $PSScriptRoot 'Test-GameStartup.ps1') -GodotPath $GodotPath -LogDirectory (Join-Path $evidence 'godot')
     Save-ProcessSnapshot 'processes-final'

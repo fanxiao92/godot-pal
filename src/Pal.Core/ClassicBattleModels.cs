@@ -72,6 +72,19 @@ public sealed record ClassicBattlePlayerView(int PartyIndex, int RoleId, int Hp,
 }
 public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp);
 public sealed record ClassicBattleQueueEntry(ClassicBattleSide Side, int ActorIndex, ushort Dexterity);
+
+/// <summary>One enemy's post-victory script. PAL_BattleWon runs wScriptOnBattleEnd for every enemy
+/// slot in order with that slot as the caller (battle.c 1334-1337), between growth and recovery.</summary>
+public sealed record ClassicBattleEndScript(int EnemySlot, int EnemyId, int ScriptAddress);
+
+/// <summary>One role's victory growth facts: the level before/after the settlement and the magic
+/// rows learned now (battle.c 1098-1330). Dead members carry unchanged levels and no magics.</summary>
+public sealed record ClassicBattleRoleGrowth(int RoleId, int LevelBefore, int LevelAfter, IReadOnlyList<int> LearnedMagics);
+
+/// <summary>The victory settlement facts published when growth settles, before the post-battle
+/// scripts and the automatic recovery run: the granted totals (gpGlobals dwCash/iExpGained at
+/// battle.c 1050-1054) and every party role's growth.</summary>
+public sealed record ClassicBattleVictorySettlement(int ExperienceGranted, int CashGranted, IReadOnlyList<ClassicBattleRoleGrowth> Growth);
 public sealed record ClassicBattleCounts(int Attack, int Health);
 public sealed record ClassicBattleView(ClassicBattlePhase Phase, int Round, int PlayerHp, int EnemyHp,
     ClassicBattleCounts Counts, ClassicBattleAction? LastAction)
