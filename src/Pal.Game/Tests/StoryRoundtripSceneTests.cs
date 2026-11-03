@@ -971,6 +971,7 @@ public class StoryRoundtripSceneTests
             var battle = old.StoryBattle!;
             int hpBeforeHook = 0, mpBeforeHook = 0, attackBeforeHook = 0;
             bool friendDeathSeen = false;
+            string? friendFirstText = null;
             var observedBoosts = new System.Collections.Generic.List<IReadOnlyList<int>>();
             void CaptureFriendDeath()
             {
@@ -990,6 +991,7 @@ public class StoryRoundtripSceneTests
                     // The paused battle shows the coverer's script over the visible battle.
                     AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.HookDialogue);
                     AssertThat(FriendDeathHookFirstDisplays.Contains(friendDisplay.Content.Parts[0].Text!)).IsTrue();
+                    friendFirstText ??= friendDisplay.Content.Parts[0].Text!;
                 }
                 var panel = old.StoryBattleBoosts;
                 if (panel.Count > 0 && (observedBoosts.Count == 0 || !observedBoosts[^1].SequenceEqual(panel)))
@@ -1005,14 +1007,35 @@ public class StoryRoundtripSceneTests
             AssertThat(observedBoosts.Count > 0).IsTrue();
             foreach (var panel in observedBoosts)
             {
+                GD.Print("PAL_BOOST_PANEL:" + string.Join('/', panel));
                 AssertThat(panel.Count).IsEqual(2);
                 AssertThat(panel[1]).IsEqual(0); // only the caller (coverer) is boosted
-                AssertThat(panel[0] is 2 or 15 or 99).IsTrue(); // 5%/10% attack|mana or 25% or 90% bands
+                // Native battle content declares no base magicPower/flee panels (PalBattlePlayer),
+                // so only the attack/dexterity-scaled registers surface through the authored chain:
+                // 5% attack band=2, 25% band=10 (40*25%), 90% dexterity band=90 (100*90%).
+                AssertThat(panel[0] is 2 or 10 or 90).OverrideFailureMessage("panel=" + string.Join('/', panel)).IsTrue();
             }
             GD.Print("PAL_BOOST_PANELS:" + string.Join("|", observedBoosts.Select(p => string.Join('/', p))));
             AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
-            // Won halves recovery for both roles; the hook's +9999 heal landed full before it.
-            AssertThat(healed.Mp).IsEqual(Math.Min(50, mpBeforeHook + 9999 + (50 - Math.Min(50, mpBeforeHook + 9999)) / 2));
+            // The hook's per-block effects are visible in the settled roles: the 兄弟 block healed
+            // the coverer full before the Won half recovery, the 我会胜 block restored the mana, and
+            // 悲为力/回家 leave both to the half recovery (hp 149+0/2, mp 20+(50-20)/2=35).
+            GD.Print($"PAL_FRIEND_DEATH_AFTER:block={friendFirstText};hp={healed.Hp};mp={healed.Mp}");
+            if (friendFirstText == "兄弟")
+            {
+                AssertThat(healed.Hp).IsEqual(150); // changeHp +9999 capped at maxHp, half recovery keeps 150
+                AssertThat(healed.Mp).IsEqual(35); // no mana change, then 20+(50-20)/2
+            }
+            else if (friendFirstText == "我会胜")
+            {
+                AssertThat(healed.Hp).IsEqual(150); // Won keeps a full-HP coverer at 150
+                AssertThat(healed.Mp).IsEqual(50); // changeMp +9999 capped at maxMp
+            }
+            else
+            {
+                AssertThat(healed.Hp).IsEqual(hpBeforeHook + (150 - hpBeforeHook) / 2);
+                AssertThat(healed.Mp).IsEqual(mpBeforeHook + (50 - mpBeforeHook) / 2);
+            }
             AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
             await host.FinishDisplay();
             await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
