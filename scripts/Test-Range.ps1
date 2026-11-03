@@ -226,14 +226,15 @@ try {
         }
         [IO.File]::WriteAllText((Join-Path $out "$s.discovery.json"), ($snapshot | ConvertTo-Json -Depth 40), $utf8)
         $args = @('test', $project, '--configuration', 'Debug', '--no-build', '--no-restore', '--logger', 'trx;LogFileName=results.trx', '--results-directory', (Join-Path $out $s))
+        if ($s -ceq 'game') { $args += @('--settings', (Join-Path $root 'tests/Pal.Game.Tests/game.runsettings')) }
+        if ($actualFilter) { $args += @('--filter', $actualFilter) }
         if ($s -ceq 'game') {
-            $args += @('--settings', (Join-Path $root 'tests/Pal.Game.Tests/game.runsettings'))
             # Selected batches may pin a longer session timeout than the shared 120s default;
-            # the override goes through the CLI runsettings argument, never a settings file.
+            # the override rides the CLI runsettings argument tail, never a settings file, and
+            # stays after --filter so the filter remains a dotnet argument.
             $sessionTimeout = [int](@($plan.batches | Where-Object { $batches.Contains($_.name) } | ForEach-Object { [int]$_.sessionTimeoutMs }) | Measure-Object -Maximum).Maximum
             if ($sessionTimeout -gt 120000) { $args += @('--', "RunConfiguration.TestSessionTimeout=$sessionTimeout") }
         }
-        if ($actualFilter) { $args += @('--filter', $actualFilter) }
         $runnerAdded = $false
         if ($s -ceq 'game') {
             $runner = Join-Path $root 'src/Pal.Game/gdunit4_testadapter_v5/GdUnit4TestRunnerScene.cs'
