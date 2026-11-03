@@ -47,6 +47,37 @@ public sealed class DynamicEventWorld
 
     internal event Action? WorldChanged;
 
+    /// <summary>Host update ownership for a world-wired trigger call: advances one parked
+    /// scene-wait (0x0009) or walk movement (0x0010) step exactly like the dynamic host's
+    /// per-tick block; other phases return false and stay frozen.</summary>
+    public bool AdvanceTriggerTick(TriggerScriptSession trigger)
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        switch (trigger.Phase)
+        {
+            case TriggerScriptPhase.WaitingForSceneWait:
+            {
+                var wait = trigger.PendingSceneWait!;
+                if (wait.RunTriggers)
+                {
+                    CountVanishTimes();
+                    RestoreNegativeStates();
+                }
+                if (wait.UpdateGestures) Leader = Leader with { StepPhase = (Leader.StepPhase + 1) % 4 };
+                return trigger.AcknowledgeSceneWait(wait.Id);
+            }
+            case TriggerScriptPhase.WaitingForMovement:
+            {
+                var movement = trigger.PendingMovement!;
+                bool arrived = WalkTowards(movement.ObjectId, movement.TargetX, movement.TargetY, 3);
+                if (arrived) trigger.AcknowledgeMovement(movement.Id, true);
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
     /// <summary>Host factory for a first-battle world bound to the same static rules the
     /// exploration session uses; object words start from the static records.</summary>
     public static DynamicEventWorld ForHost(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport)

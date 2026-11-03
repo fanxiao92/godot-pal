@@ -322,7 +322,15 @@ public partial class Main : Node2D
             bool changed = battle?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? input!.Update(unchecked((uint)Time.GetTicksMsec()));
+            // World-wired first-battle call: the parked scene waits and counted movements
+            // advance one step per committed update tick (the same per-tick ownership the
+            // dynamic host uses); the map only redraws when the exploration really changed.
+            if (changed && firstBattleWorld is { } world && Dialogue?.Session is { Phase: Pal.Core.TriggerScriptPhase.WaitingForSceneWait or Pal.Core.TriggerScriptPhase.WaitingForMovement } trigger)
+                world.AdvanceTriggerTick(trigger);
             if (changed) mapScene.UpdateScene(Exploration.Plan);
+            // Presentation transitions (redraw/fadeScene/fadeOut) in the world-wired call:
+            // redraw the retained scene, then receipt after the delay elapsed.
+            CompleteFirstBattleTransition();
             if (activeTrigger is null && Interaction?.PendingTrigger is { } request)
             {
                 activeTrigger = request;
@@ -368,6 +376,28 @@ public partial class Main : Node2D
             CompleteFirstBattleTrigger(); // also handles synchronous, no-display completion
         }
         catch (Exception e) { Fail($"First battle trigger failed: {e.Message}"); }
+    }
+
+    private uint firstBattleTransitionDeadline;
+
+    private void CompleteFirstBattleTransition()
+    {
+        if (firstBattleWorld is null || Dialogue?.Session?.PendingTransition is not { } transition)
+        {
+            firstBattleTransitionDeadline = 0;
+            return;
+        }
+        uint now = unchecked((uint)Time.GetTicksMsec());
+        if (firstBattleTransitionDeadline == 0)
+        {
+            int delay = transition.Kind == "redraw" ? Math.Max(60, transition.Parameter) : 60;
+            firstBattleTransitionDeadline = unchecked(now + (uint)delay);
+            mapScene!.UpdateScene(Exploration!.Plan);
+            return;
+        }
+        if (unchecked((int)(now - firstBattleTransitionDeadline)) < 0) return;
+        firstBattleTransitionDeadline = 0;
+        _ = Dialogue.Session.AcknowledgeTransition(transition.Id);
     }
 
     private static PackedScene mapScenePackedScene(string staticResources) =>
