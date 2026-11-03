@@ -94,7 +94,7 @@ Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
 
 ## 六角色装备闭包与有效面板投影（#48 unit 1）
 
-状态：数据/typed/Prepare 链已交付；战斗执行语义（DualAttack/cover 执行、两击表现、SceneRunner）属后续 unit，未接入。指定 RED 于 `6cfce2a` 真实失败（现有公开 Parse 拒绝 `roleEquipment` 未知字段），Core 15 例新增后完整 Core **831**，NativeBattleContentTests **55**（44+11，含装备 roundtrip 与 10 个 typed 边界）、公开 PrepareBattleDataTests **35**（33+2）；native-map 批次 408、库存 604、game 601，同步于 GameTestBatches/GameBatches 回归。
+状态：数据/typed/Prepare 链已交付；#48 unit 2 已把执行语义接入 session/Main（DualAttack 双击、cover、有效面板、持续状态保留，见[经典战斗契约](classic-battle-session.md)），装备 battleSprite override 仍在副作用前拒绝。指定 RED 于 `6cfce2a` 真实失败（现有公开 Parse 拒绝 `roleEquipment` 未知字段），Core 15 例新增后完整 Core **831**，NativeBattleContentTests **55**（44+11，含装备 roundtrip 与 10 个 typed 边界）、公开 PrepareBattleDataTests **35**（33+2）；native-map 批次 408、库存 604、game 601，同步于 GameTestBatches/GameBatches 回归。
 
 根对象新增两个可选 section（旧零装备文件不变合法）。
 

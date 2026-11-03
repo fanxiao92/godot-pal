@@ -12,6 +12,19 @@
 - 严格照 fight.c:1450–1601 对完整13槽（battle.h:166，3+5×2）执行嵌套 SHORT 比较，非 stable sort。公开 queue **仅含首个 WORD `0xFFFF` 之前的可执行前缀**，不暴露虚构空 actor。空槽 SHORT -1 会排在负 SHORT 身法之前，actor 的 WORD65535 本身也结束本轮。这是经参考证实、获准修正的旧 single 两项比较遗漏；合法 numeric 输入仍接受，普通 single 路径 API/伤害/RNG 顺序不变，不宣称极端负 SHORT 路径行为完全兼容旧实现。
 
 参考：fight.c:87–130（失效目标循环），1384–1586（选令/WORD/SHORT队列），1705–1770（执行时死亡 pass），3504附近（普攻目标验证），4520–4581（敌随机目标及死者重抽），744–776/1116–1160（敌清除、整队胜负）；battle.c:1771（previous初值）。所有测试通过正常公开选令/执行到达死亡与失效，不写私态、不注入战果。
+## #48 unit 2：装备执行语义、双击与掩护接入 session/Main
+
+`ClassicBattleSession(definition, random, BattleEquipmentState?)` 追加可选装备闭包参数；声明的闭包（`Declared`）即所穿对象的正式执行语义，session 消费投影后的有效面板与状态覆盖，从不执行 source opcode：
+
+- 有效 attack/defense/dexterity 由 `EffectivePlayer` 投影后进入伤害、身法与 `Current.Players[i]` 的每成员发布字段（attack/defense/dexterity）；未声明闭包时保持旧零装备域。
+- `kStatusDualAttack`（fight.c:3628）：一个攻击动作两次打击，`ResolveNextAction` 每次推进一击，两次都发布独立 `LastAction`（`SecondStrike` 标记第二击）；第二击保持已验证目标槽（首击击杀后不再换目标，HP 也不低于0再扣），胜负与回合只在整动作后结算，attack/health 计数每动作一次（fight.c:3753）。
+- `kStatusBravery` 恒走会心分支但保留掷骰（fight.c:3633）；`kStatusProtect` 在 HP 截断前将敌方伤害减半（fight.c:5086）；`kStatusHaste` 按 CLASSIC 将队列身法×3 后再取999上限（fight.c:336）。
+- cover（fight.c:4943–4973）：目标濒死/失控且防御掷成功时，由 `CoveredByRoleId` 对应的在场且可响应（自身不濒死、无 confused/paralyzed/sleep）队友掩护；掩护动作 Damage 0、Evaded false、`CovererPartyIndex` 指向掩护者，友亡对白与本回调无关。`ValidatePlayer`/`ValidateNoGrowth` 打开非零装备与 0..5 cover 的拒绝面；装备 battleSprite override 因视觉链仅绑定一个 authored 基础精灵而仍按"缺少/未支持装备依赖"在副作用前拒绝（`OverridesBattleSprite`）。
+- 生命周期把闭包好状态覆盖进角色状态（`ApplyStatuses` 取大），战后基础清理（<=999 清零）因此保留 >999 持续装备状态；再次初始化/新会话按 max 不叠加。普通有期限状态与 extra 临时效果仍为零域；每回合状态递减（fight.c:1636）未建模，属后续边界。
+
+Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 frame3 站到目标侧前（fight.c:5012–5022），目标不再取闪避/受击帧。`samples/authored-battle/PartyEquip` 提供 role1 五对象闭包（有效 46/52/119，对象170持续双击）+ 濒死 coveredBy 与双快敌槽的人工场景；SceneRunner 增两例（两击表现/删除双击反例），scene 批次 109→111、库存 604→606、game 601→603、Core 831→847。
+
+参考：fight.c:336–349（haste×3）、3628–3673（双击循环/目标保持）、3753–3755（计数一次）、4943–4973/5008–5028（掩护条件与表现）、5086–5090（protect 减半）；global.c:2255/2304（好状态取大/清理保留 >999）。
 
 状态：#46 的 **Core 内部检查点**。单人单敌经典普攻、选令后随机排序、逐动作推进和真实 Won/Lost、下述零成长正式生命周期及 trigger 事件 binding 已实现；不是整张 #46 或 M4 的交付。独立现代数值 native codec 及完整显式离线数值 Prepare/Editor/PS 已追加（见[数值契约](modern-battle-data.md)），但完整人工 package、Main/真实输入与表现尚未接通。
 
