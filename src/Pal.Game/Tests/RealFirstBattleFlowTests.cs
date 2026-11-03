@@ -37,6 +37,8 @@ public class RealFirstBattleFlowTests
         using (scene)
         {
             await scene.WaitFor(() => scene.Updates.Count > 0, "first update");
+            long displayTicks = 0;
+            main.Display!.UpdateCompleted += () => displayTicks++;
             scene.Press(Key.Enter); // search owner28 -> @09C3 opens through the verified closure
 
             int pages = 0; int frames = 0;
@@ -61,7 +63,7 @@ public class RealFirstBattleFlowTests
                 }
                 frames++;
                 if ((frames & 511) == 0)
-                    System.Console.WriteLine($"REAL_TRACE:frame={frames} phase={display?.Display.Current.Phase} text={display?.Display.Current.VisibleText?.Length} pos={main.Dialogue?.Session?.CurrentPosition} inTree={main.Display?.IsInsideTree()} canProc={main.Display?.CanProcess()} procIn={main.Display?.IsProcessingInput()} child={main.Display?.GetParent() is not null} vis={main.Display?.Visible}");
+                    System.Console.WriteLine($"REAL_TRACE:frame={frames} phase={display?.Display.Current.Phase} text={display?.Display.Current.VisibleText?.Length} pos={main.Dialogue?.Session?.CurrentPosition} displayTicks={displayTicks} inTree={main.Display?.IsInsideTree()} canProc={main.Display?.CanProcess()} procIn={main.Display?.IsProcessingInput()} child={main.Display?.GetParent() is not null} vis={main.Display?.Visible}");
                 await scene.RunnerIdle();
             }
             System.Console.WriteLine($"REAL_PARK:phase={main.Dialogue?.Session?.Phase} pos={main.Dialogue?.Session?.CurrentPosition} " +
