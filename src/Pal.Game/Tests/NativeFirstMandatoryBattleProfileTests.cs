@@ -89,12 +89,13 @@ public class NativeFirstMandatoryBattleProfileTests
         fixture.Native.ImagePlayerSpriteUris = ["res://Tests/FirstBattle/F0.tres", "res://Tests/FirstBattle/F1.tres"];
         fixture.Native.ImageBattlefieldId = 24;
         fixture.Native.ImageBattlefieldArchiveEntry = "FBP24";
+        fixture.Native.ResourceSha256.Add("res://Tests/FirstBattle/BattleContent.tres", new string('a', 64));
         fixture.Save();
         InvalidDataException? error = null;
         try { NativeFirstMandatoryBattleProfile.Load(fixture.Uri); }
         catch (InvalidDataException caught) { error = caught; }
         AssertThat(error is not null).IsTrue();
-        AssertThat(error!.Message.Contains("res://Tests/FirstBattle", StringComparison.Ordinal)).IsTrue();
+        AssertThat(error!.Message.Contains("res://Tests/FirstBattle/BattleContent.tres", StringComparison.Ordinal)).IsTrue();
     }
 
     [TestCase("events-only")]

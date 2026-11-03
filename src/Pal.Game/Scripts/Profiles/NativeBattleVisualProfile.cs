@@ -99,7 +99,7 @@ public static class NativeBattleVisualProfile
             for (int i = 0; i < 256; i++)
             {
                 var expected = new Color(paletteResource.Rgb[i * 3] / 255f, paletteResource.Rgb[i * 3 + 1] / 255f, paletteResource.Rgb[i * 3 + 2] / 255f);
-                Require(expected == palette[i], "visual palette must match the active scene palette");
+                Require(expected == palette[i], "visual palette must match active story palette");
             }
             var player = LoadSprite(native.PlayerSpriteUri);
             Require(Enumerable.Range(0, 10).All(player.Frames.Select(x => x.Index).ToHashSet().Contains),
