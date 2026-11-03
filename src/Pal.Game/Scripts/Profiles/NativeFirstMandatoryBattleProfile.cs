@@ -55,8 +55,9 @@ public static class NativeFirstMandatoryBattleProfile
         CheckNativeFile(staticProfile, Need(native.StaticProfileSha256, identity, "StaticProfileSha256"));
         FirstMandatoryBattleClosureReceipt? closure = null;
         CheckedBattleVisualProfile? visual = null;
-        if (HasResourceBinding(native)) (closure, visual) = VerifyRealClosure(native, profile, staticResources, identity);
-        return new(profile, staticResources, staticProfile, closure, visual);
+        FirstBattleRealResources? resources = null;
+        if (HasResourceBinding(native)) (closure, visual, resources) = VerifyRealClosure(native, profile, staticResources, identity);
+        return new(profile, staticResources, staticProfile, closure, visual, resources);
     }
 
     private static bool HasResourceBinding(PalFirstMandatoryBattleProfile native) =>
@@ -69,7 +70,7 @@ public static class NativeFirstMandatoryBattleProfile
     /// <summary>The #53 real resource closure: strict load of every bound native resource, the
     /// Core capability precheck over the real events/content/languages, and the visual binding.
     /// Any missing or mismatched resource rejects here, before any runtime side effect.</summary>
-    private static (FirstMandatoryBattleClosureReceipt Closure, CheckedBattleVisualProfile Visual) VerifyRealClosure(
+    private static (FirstMandatoryBattleClosureReceipt Closure, CheckedBattleVisualProfile Visual, FirstBattleRealResources Resources) VerifyRealClosure(
         PalFirstMandatoryBattleProfile native, FirstMandatoryBattleProfile profile, string staticResources, string identity)
     {
         foreach (string path in new[] { native.EventsIndex, native.BattleContentUri, native.DialogueDirectory, native.VisualUri })
@@ -102,12 +103,12 @@ public static class NativeFirstMandatoryBattleProfile
         var font = LoadTyped<PalDialogueFont>(dialogue + "/Font.tres", resource =>
             Require(!string.IsNullOrWhiteSpace(resource.SourceIdentity) && resource.FormatVersion == 1 && resource.LineHeight == 16,
                 dialogue + "/Font.tres: font identity/version/line height is invalid"));
-        _ = font;
-        _ = Enumerable.Range(0, 3).Select(i => LoadImage(string.Format("{0}/Prompt-{1:D2}.tres", dialogue, i))).ToArray();
+        var prompts = Enumerable.Range(0, 3).Select(i => LoadImage(string.Format("{0}/Prompt-{1:D2}.tres", dialogue, i))).ToArray();
         DialogueLanguagePackage Package(string id) => LoadTyped<PalDialogueLanguage>(string.Format("{0}/Language.{1}.tres", dialogue, id), resource =>
             Require(resource.Language == id && !string.IsNullOrWhiteSpace(resource.SourceIdentity),
                 string.Format("{0}/Language.{1}.tres", dialogue, id) + ": language identity mismatch")).ToCorePackage();
-        var closure = FirstMandatoryBattleClosure.Verify(profile, events, Package("zh-Hans"), Package("en"), content,
+        DialogueLanguagePackage chinese = Package("zh-Hans"), english = Package("en");
+        var closure = FirstMandatoryBattleClosure.Verify(profile, events, chinese, english, content,
             new(native.ImageEnemyId, native.ImageEnemyArchiveEntry, native.ImageRoleSpriteIds,
                 native.ImageBattlefieldId, native.ImageBattlefieldArchiveEntry, native.ImageIncludesLayoutAndEffectFrames));
         var portraitIds = native.Portraits?.Keys ?? Enumerable.Empty<int>();
@@ -134,7 +135,9 @@ public static class NativeFirstMandatoryBattleProfile
         Require(team.Background.SourceIdentity == native.ImageBattlefieldArchiveEntry,
             native.VisualUri + ": battle background source identity must be " + native.ImageBattlefieldArchiveEntry);
         foreach (string path in hashes.Keys) CheckFile(path, hashes);
-        return (closure, visual);
+        var portraits = (native.Portraits ?? new Godot.Collections.Dictionary<int, string>()).ToDictionary(x => x.Key, x => LoadImage(x.Value));
+        return (closure, visual, new FirstBattleRealResources(events, chinese, english, content, font, prompts, portraits,
+            TriggerEventLoader.DependencyUris(native.EventsIndex).ToArray(), hashes));
     }
 
     private static T LoadTyped<T>(string uri, Action<T> validate) where T : Resource
@@ -178,10 +181,13 @@ public sealed class CheckedFirstMandatoryBattleProfile
     /// <summary>The verified real resource closure; null keeps the pre-#53 shape and the @09C3 gate closed.</summary>
     public FirstMandatoryBattleClosureReceipt? Closure { get; }
     public CheckedBattleVisualProfile? Visual { get; }
+    /// <summary>The strict-loaded modern resources the verified closure bound (default language).</summary>
+    public FirstBattleRealResources? Resources { get; }
 
     internal CheckedFirstMandatoryBattleProfile(FirstMandatoryBattleProfile profile,string staticResources,string staticProfile,
-        FirstMandatoryBattleClosureReceipt? closure = null, CheckedBattleVisualProfile? visual = null)
-        => (Profile,StaticResources,StaticProfile,Closure,Visual)=(profile,staticResources,staticProfile,closure,visual);
+        FirstMandatoryBattleClosureReceipt? closure = null, CheckedBattleVisualProfile? visual = null,
+        FirstBattleRealResources? resources = null)
+        => (Profile,StaticResources,StaticProfile,Closure,Visual,Resources)=(profile,staticResources,staticProfile,closure,visual,resources);
 
     public FirstMandatoryBattleSession CreateSession(int sceneId, CheckedExplorationProfile scene) => new(Profile, sceneId, scene.Rules, scene.Leader);
 
@@ -202,4 +208,32 @@ public sealed class CheckedFirstMandatoryBattleProfile
     }
 
     private static int Direction(string value) => value switch { "south"=>0,"west"=>1,"north"=>2,"east"=>3,_=>throw new InvalidDataException("First mandatory battle direction identity mismatch.") };
+}
+
+/// <summary>The strict-loaded modern resources behind one verified first-battle closure;
+/// isolated IgnoreDeep instances owned by this load (read-only consumption contract).</summary>
+public sealed class FirstBattleRealResources
+{
+    private readonly System.Collections.Generic.Dictionary<int, PalDialogueIndexedImage> portraitMap;
+    private readonly string[] eventUris;
+    private readonly System.Collections.Generic.Dictionary<string, string> hashMap;
+
+    public TriggerEventCollection Events { get; }
+    public DialogueLanguagePackage Chinese { get; }
+    public DialogueLanguagePackage English { get; }
+    public TriggerBattleContent BattleContent { get; }
+    public PalDialogueFont Font { get; }
+    public System.Collections.Generic.IReadOnlyList<PalDialogueIndexedImage> Prompts { get; }
+    public System.Collections.Generic.IReadOnlyDictionary<int, PalDialogueIndexedImage> Portraits => portraitMap;
+    public System.Collections.Generic.IReadOnlyList<string> EventFileUris => eventUris;
+    public System.Collections.Generic.IReadOnlyDictionary<string, string> ResourceSha256 => hashMap;
+
+    internal FirstBattleRealResources(TriggerEventCollection events, DialogueLanguagePackage chinese, DialogueLanguagePackage english,
+        TriggerBattleContent battleContent, PalDialogueFont font, PalDialogueIndexedImage[] prompts,
+        System.Collections.Generic.Dictionary<int, PalDialogueIndexedImage> portraits, string[] eventFileUris, System.Collections.Generic.Dictionary<string, string> hashes)
+    {
+        Events = events; Chinese = chinese; English = english; BattleContent = battleContent; Font = font;
+        Prompts = Array.AsReadOnly(prompts);
+        portraitMap = portraits; eventUris = eventFileUris; hashMap = hashes;
+    }
 }
