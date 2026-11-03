@@ -28,6 +28,11 @@ public partial class Main : Node2D
     private bool exited;
     public string? Failure { get; private set; }
     public event Action<string>? Failed;
+    /// <summary>True once the 0x004E lost-reload boundary parked the story call: business
+    /// advancement stops for the rest of this run, distinct from an unexpected Failure.</summary>
+    public bool StoryLostTerminal { get; private set; }
+    /// <summary>How many lost-reload diagnostics this Main printed; the boundary prints exactly once.</summary>
+    public int StoryLostReloadDiagnostics { get; private set; }
 
     /// <summary>Configure once before entering the tree. The host owns this node, including on failure.
     /// Initialization occurs in _Ready; failed or removed scenes must be freed, not reused.</summary>
@@ -216,6 +221,14 @@ public partial class Main : Node2D
                 else return;
                 GetViewport().SetInputAsHandled();
             }
+            // input.c: 'q' is kKeyFlee. Only the story battle's action menu consumes it; the
+            // parked display never sees battle-frame input.
+            if (key.Pressed && !key.Echo && key.Keycode == Key.Q && storyRequest is not null
+                && StoryBattleMode == StoryBattlePresentation.AttackMenu)
+            {
+                storyFlee = true;
+                GetViewport().SetInputAsHandled();
+            }
         }
         catch (Exception error) { Fail($"Exploration input failed: {error.Message}"); }
     }
@@ -226,6 +239,15 @@ public partial class Main : Node2D
         try
         {
             ResumeStoryDisplay();
+            ObserveStoryLostTerminal();
+            if (StoryLostTerminal)
+            {
+                // The failure terminal only advances its presentation (red fade); no event,
+                // battle or exploration business runs and no reward path can trigger.
+                AdvanceStoryRedFade(unchecked((uint)Time.GetTicksMsec()));
+                UpdateCompleted?.Invoke();
+                return;
+            }
             if (ProcessStoryBattle()) { UpdateCompleted?.Invoke(); return; }
             // The headless dummy renderer has no presented frame. Preserve the command/redraw
             // submission boundary across actual callbacks; graphical runs wait for FramePostDraw.
@@ -273,6 +295,27 @@ public partial class Main : Node2D
     }
 
     private void DisplayFailed(Exception error) => Fail($"Dialogue update failed: {error.Message}");
+
+    /// <summary>Observes the failure branch's formal state: starts the red fade when the
+    /// 0x004F transition lands, and enters the 0x004E failure terminal exactly once.</summary>
+    private void ObserveStoryLostTerminal()
+    {
+        if (story is not null && storyRedStep < 0 && Dialogue?.Session?.FadedToRed == true)
+        {
+            storyRedStep = 0;
+            storyRedStepAt = presentationNow;
+        }
+        if (StoryLostTerminal || Dialogue?.Session?.PendingLostReload is not { } request) return;
+        // TODO(#51): implement the real script.c 0x004E save-slot reload (PAL_FadeOut(1) then
+        // PAL_ReloadInNextTick): no save system exists yet, so this run stays in the lost
+        // terminal state (red screen, no business advancement) until the window closes.
+        StoryLostTerminal = true;
+        StoryLostReloadDiagnostics++;
+        string team = request.EnemyTeamId is { } enemyTeam ? enemyTeam.ToString(System.Globalization.CultureInfo.InvariantCulture) : "none";
+        string music = Dialogue.Session.Music is { } state ? state.MusicId.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unchanged";
+        GD.Print($"PAL_LOST_RELOAD_TODO:{request.Position}; team={team}; boss={request.IsBoss}; caller={Dialogue.Session.Caller}; music={music}; "
+            + "save-slot reload not implemented; lost terminal until window close");
+    }
 
     protected void Fail(string message)
     {

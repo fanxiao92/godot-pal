@@ -14,7 +14,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
     internal string VisualUri { get; }
     private string? numericInput;
     internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null,
-        bool removeDualAttack = false)
+        bool removeDualAttack = false, int? playerHp = null)
     {
         string repository = Path.GetFullPath(Path.Combine(ProjectSettings.GlobalizePath("res://"), "../.."));
         string source = Path.Combine(repository, "samples/authored-battle", scenario);
@@ -36,6 +36,12 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 var team = System.Linq.Enumerable.Single(data["teams"]!.AsArray(), t => (int)t!["teamId"]! == 18)!;
                 var enemy = System.Linq.Enumerable.Single(team["enemies"]!.AsArray(), e => (int)e!["id"]! == 7)!;
                 enemy["hp"] = hp;
+                if (playerHp is { } memberHp)
+                {
+                    // Both the role snapshot and its player must keep matching HP words.
+                    data["roles"]![0]!["hp"] = memberHp;
+                    data["players"]![0]!["hp"] = memberHp;
+                }
                 File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
                 numbers = numericInput;
             }
@@ -67,8 +73,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (missingPresentation == "idle") metadata["visual"]!["teams"]![0]!.AsObject().Remove("idleAnimSpeed");
             if (enemyHp is { } hp2)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
-                    + $" Test-owned numeric copy: team18/enemy7 hp={hp2} only; not retail data.";
-            metadata["staticResources"] = Root + "/Static";
+                    + $" Test-owned numeric copy: team18/enemy7 hp={hp2} only; not retail data.";            metadata["staticResources"] = Root + "/Static";
             metadata["battleContentUri"] = numeric;
             File.WriteAllText(Path.Combine(input, "story-package.json"), metadata.ToJsonString());
             var prepared = PrepareStoryPackage.Prepare(input, Path.Combine(output, "Story"));

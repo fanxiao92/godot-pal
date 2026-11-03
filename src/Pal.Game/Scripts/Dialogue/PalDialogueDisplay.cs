@@ -20,6 +20,9 @@ public partial class PalDialogueDisplay : Control
     private bool _advancePressed;
     private bool _acceleratePressed;
     private int _lastPaletteRotation;
+    private string _box = "upper";
+    /// <summary>The dialogue box the current request selected (kDialogCenterWindow etc.).</summary>
+    internal string DisplayBox => _box;
 
     public event Action<Color[]>? ActivePaletteChanged;
     public event Action? BackgroundRestoreRequested;
@@ -53,6 +56,7 @@ public partial class PalDialogueDisplay : Control
         PalDialogueIndexedImage[] prompts, Color[] currentScenePalette)
     {
         ValidateContent(request.Content, request.Context.Color, font, portrait, prompts, currentScenePalette);
+        _box = request.Context.Box;
         Attach(request.Display, font, portrait, prompts, currentScenePalette, request.Context.PortraitId);
     }
 
@@ -179,13 +183,16 @@ public partial class PalDialogueDisplay : Control
 
         if (snapshot.TitleText.Length > 0)
             DrawBitmapText(snapshot.TitleText, _portraitId > 0 ? 80 : 12, 8, 0x8C);
-        int textX = _portraitId > 0 ? 96 : 44;
+        // script.c 0x003E/0x003B: a centered box draws its block mid-screen (authored layout:
+        // vertically centered around y=100 of the 320x200 field, no portrait).
+        int textX = _box is "centerWindow" or "center" || _portraitId > 0 ? _portraitId > 0 ? 96 : 44 : 44;
+        int firstLineY = _box is "centerWindow" or "center" ? 84 : 26;
         int promptX = textX;
-        int promptY = 26;
+        int promptY = firstLineY;
         foreach (DialogueVisibleLine line in snapshot.VisibleLines)
         {
             promptX = textX;
-            promptY = 26 + line.LineIndex * 18;
+            promptY = firstLineY + line.LineIndex * 18;
             foreach (DialogueVisibleRun run in line.Runs)
                 promptX = DrawBitmapText(run.Text, promptX, promptY, run.Color);
         }

@@ -23,6 +23,18 @@ public partial class Main
     private int storyTargetSlot;
     private int storyCycle;
     private ClassicBattleAction? storyLastPresentedAction;
+    // #51 boss flee: the pending Q press and the newest presented flee attempt.
+    private bool storyFlee;
+    private ClassicBattleFleeAttempt? storyLastFleeAttempt;
+    private Vector2? fleeOrigin;
+    private int fleePartyIndex = -1;
+    // palette.c PAL_FadeToRed: 32 steps of 75ms; -1 = not started.
+    private int storyRedStep = -1;
+    private uint storyRedStepAt;
+    /// <summary>Current red-fade step (-1 none, 0..31 in progress, 32 converged).</summary>
+    internal int StoryRedFadeStep => storyRedStep;
+    /// <summary>The red-faded world palette the map currently shows; null outside the fade.</summary>
+    internal Color[]? StoryRedPalette => storyRedStep < 0 ? null : RedFadePalette(story!.Palette, storyRedStep);
     private bool resumeStoryDisplay;
     private StoryBattlePoseClock poseClock;
     private uint presentationNow;
@@ -154,6 +166,18 @@ public partial class Main
         switch (StoryBattleMode)
         {
             case StoryBattlePresentation.AttackMenu:
+                if (storyFlee)
+                {
+                    // input.c kKeyFlee ('q'): the committer's flee covers every later member
+                    // (fight.c 1965-1978), so the queue builds without further menus.
+                    storyFlee = false;
+                    var selectingFlee = lifecycle.Current.Combat.SelectingPlayerIndex
+                        ?? throw new InvalidOperationException("Flee menu has no selecting party member.");
+                    lifecycle.SelectFlee(selectingFlee);
+                    StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Resolving
+                        ? StoryBattlePresentation.Resolving : StoryBattlePresentation.AttackMenu;
+                    break;
+                }
                 if (confirm)
                 {
                     var enemies = lifecycle.Current.Combat.Enemies;
@@ -190,6 +214,7 @@ public partial class Main
                 // Dead actors' queue entries pass without a new LastAction; queue advancement and
                 // action feedback are distinguished by reference so a pass never re-presents it.
                 ClassicBattleAction? presented = null;
+                ClassicBattleFleeAttempt? presentedFlee = null;
                 int[] playersBefore = [], enemiesBefore = [];
                 while (lifecycle.Current.Combat.Phase == ClassicBattlePhase.Resolving)
                 {
@@ -198,14 +223,30 @@ public partial class Main
                     enemiesBefore = before.Enemies.Select(slot => slot.Hp).ToArray();
                     if (!lifecycle.ResolveNextAction())
                         throw new InvalidOperationException("Battle action owner did not resolve an action.");
+                    var fleeCandidate = lifecycle.Current.Combat.LastFleeAttempt;
+                    if (fleeCandidate is not null && !ReferenceEquals(fleeCandidate, storyLastFleeAttempt))
+                    { presentedFlee = fleeCandidate; storyLastFleeAttempt = fleeCandidate; break; }
                     var candidate = lifecycle.Current.Combat.LastAction;
                     if (candidate is not null && !ReferenceEquals(candidate, storyLastPresentedAction))
                     { presented = candidate; storyLastPresentedAction = candidate; break; }
                 }
-                if (presented is null)
+                if (presented is null && presentedFlee is null)
                 {
                     // The queue ended on passes; the next round selects without new feedback.
                     StoryBattleMode = StoryBattlePresentation.AttackMenu;
+                    break;
+                }
+                if (presentedFlee is { } flee)
+                {
+                    // fight.c 4153-4171: three +4/+2 escape steps, then the failed-escape label
+                    // holds for eight frames (BATTLE_LABEL_ESCAPEFAIL, fight.c 4168).
+                    storyNumbers.BeginAction(); feedbackBorn = true;
+                    var origins = storyVisual!.PlayerOrigins(lifecycle.Current.Combat.Players.Count);
+                    fleeOrigin = origins[flee.PartyIndex];
+                    fleePartyIndex = flee.PartyIndex;
+                    enemyPresentation = null; playerPresentation = null;
+                    StoryBattleMode = StoryBattlePresentation.Feedback;
+                    poseClock = StoryBattlePoseClock.Start(now);
                     break;
                 }
                 var action = presented;
@@ -234,11 +275,13 @@ public partial class Main
                 var nextPose = poseClock.Advance(now);
                 if (nextPose == poseClock) break;
                 poseClock = nextPose;
-                long poses = enemyPresentation?.Duration ?? StoryPlayerAttackPresentation.Duration;
+                long poses = fleeOrigin is not null ? StoryPlayerFleePresentation.Duration
+                    : enemyPresentation?.Duration ?? StoryPlayerAttackPresentation.Duration;
                 if (poseClock.Pose < poses) AdvanceStoryGesture(poseClock.Pose);
                 if (poseClock.Pose < poses) break;
                 // Enemy action's final UpdateFighters is not another timed pose (fight.c5137).
                 if (enemyPresentation is not null) enemyIdle!.Advance();
+                if (fleeOrigin is not null) fleeOrigin = null;
                 if (lifecycle.Completion is not null || lifecycle.VictorySettlement is not null || lifecycle.PendingBattleEndScript is not null)
                 {
                     HandleStoryVictoryBoundary();
@@ -296,7 +339,9 @@ public partial class Main
         }
         var shownEnemy = StoryBattleMode == StoryBattlePresentation.Feedback ? enemyPresentation?.At(poseClock.Pose) : null;
         if (shownEnemy is { } shown) shownEnemy = shown with { EnemyFrame = enemyIdle!.Frame };
-        if (StoryBattleMode == StoryBattlePresentation.Feedback)
+        var fleeSnapshot = StoryBattleMode == StoryBattlePresentation.Feedback && fleeOrigin is { } fleeAt
+            ? (StoryPlayerFleeSnapshot?)StoryPlayerFleePresentation.At(poseClock.Pose, fleeAt, fleePartyIndex) : null;
+        if (StoryBattleMode == StoryBattlePresentation.Feedback && fleeSnapshot is null)
         {
             var action = lifecycle.Current.Combat.LastAction!;
             bool playerHit = playerPresentation is not null && poseClock.Pose >= 7;
@@ -319,9 +364,40 @@ public partial class Main
             ? current[Math.Clamp(settlementStage, 0, current.Count - 1)] : null;
         storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, enemyIdle!.Frame, enemyIdle.Counter,
             shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null,
-            storyNumbers.At(now), storyNumbers.LabelAt(now), storyTargetSlot, settlementLine);
+            storyNumbers.At(now), fleeSnapshot is null ? storyNumbers.LabelAt(now)
+                : poseClock.Pose >= StoryPlayerFleePresentation.LabelPose ? PalStoryBattleView.EscapeFailWord : null,
+            storyTargetSlot, settlementLine, fleeSnapshot);
         return true;
     }
+    /// <summary>palette.c PAL_FadeToRed (script.c 0x004F game-over fade): every palette entry
+    /// except the preserved 0x4F text color moves red by 8 per step for 32 steps of 75ms;
+    /// this is the step-<paramref name="step"/> palette of that reference convergence.</summary>
+    internal static Color[] RedFadePalette(IReadOnlyList<Color> palette, int step)
+    {
+        var faded = palette.ToArray();
+        for (int index = 0; index < faded.Length; index++)
+        {
+            if (index == 0x4F) continue; // so that texts will not be affected (palette.c)
+            Color color = palette[index];
+            int target = (color.R8 + color.G8 + color.B8) / 4 + 64;
+            int red = color.R8, green = color.G8, blue = color.B8;
+            if (red > target) red -= Math.Min(8 * step, red - target);
+            else if (red < target) red += Math.Min(8 * step, target - red);
+            faded[index] = Color.Color8((byte)red, (byte)Math.Max(0, green - 8 * step), (byte)Math.Max(0, blue - 8 * step));
+        }
+        return faded;
+    }
+
+    /// <summary>Steps the started red fade once per 75ms until convergence; presentation only.</summary>
+    private void AdvanceStoryRedFade(uint now)
+    {
+        if (storyRedStep is < 0 or >= 32 || unchecked(now - storyRedStepAt) < 75u) return;
+        storyRedStepAt = now;
+        storyRedStep++;
+        story.Exploration.SetPalette(mapScene!.Data, RedFadePalette(story.Palette, storyRedStep));
+        mapScene.UpdateScene(Exploration!.Plan);
+    }
+
     private void BeginStoryBattleHook()
     {
         // The paused battle stays visible behind the real dialogue display; the display is parked
@@ -463,8 +539,20 @@ public partial class Main
         storyView = null; storyRequest = null; storyTeam = null; StoryBattleMode = null; battleConfirm = false; resumeStoryDisplay = false;
         enemyPresentation = null; playerPresentation = null; enemyIdle = null; outerDue = false;
         storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
+        storyFlee = false; storyLastFleeAttempt = null; fleeOrigin = null; fleePartyIndex = -1; storyRedStep = -1;
         settlementLines = null; settlementStage = 0; settlementPresented = false;
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
     }
+}
+
+/// <summary>fight.c 4153-4171 failed-escape presentation: three +4/+2 steps then the escape-fail
+/// label holds for eight frames; poses advance on the shared 40ms battle pose clock.</summary>
+internal static class StoryPlayerFleePresentation
+{
+    internal const int LabelPose = 3;
+    internal const long Duration = 11;
+    internal static StoryPlayerFleeSnapshot At(int pose, Vector2 origin, int partyIndex) =>
+        new(partyIndex, pose < LabelPose ? 0 : 1,
+            new Vector2(4 * Math.Min(pose + 1, LabelPose), 2 * Math.Min(pose + 1, LabelPose)));
 }

@@ -18,6 +18,8 @@ internal partial class PalStoryBattleView : Node2D
     internal const int AttackWord = 60000, TargetWord = 60001, MissWord = 60002, CriticalWord = 60003, HpWord = 60004, BoostWord = 60005;
     // #50 settlement labels (battle.c 1019-1032/1130/1314: exp/cash box, level-up, learned magic).
     internal const int ExpWord = 60006, CashWord = 60007, LevelUpWord = 60008, LearnedMagicWord = 60009;
+    // #51 failed escape label (fight.c 4168 BATTLE_LABEL_ESCAPEFAIL); authored WORD, not retail SDL id 31.
+    internal const int EscapeFailWord = 60010;
     private CheckedStoryProfile story = null!;
     private CheckedBattleVisualProfile visual = null!;
     private CheckedBattleVisualTeam team = null!;
@@ -28,6 +30,7 @@ internal partial class PalStoryBattleView : Node2D
     private StoryBattlePresentation mode;
     private int highlightedSlot;
     private StoryPlayerAttackSnapshot? playerPresentation;
+    private StoryPlayerFleeSnapshot? fleePresentation;
     private int idleFrame;
     private int idleCounter;
     private readonly Dictionary<int, ImageTexture> effects = new();
@@ -40,7 +43,7 @@ internal partial class PalStoryBattleView : Node2D
     internal static void ValidateUi(CheckedStoryProfile story)
     {
         foreach (int id in new[] { AttackWord, TargetWord, MissWord, CriticalWord, HpWord, BoostWord,
-            ExpWord, CashWord, LevelUpWord, LearnedMagicWord })
+            ExpWord, CashWord, LevelUpWord, LearnedMagicWord, EscapeFailWord })
         {
             if (!story.SelectedWords.TryGetValue(id, out string? text) || string.IsNullOrWhiteSpace(text))
                 throw new InvalidDataException($"Story battle UI requires nonempty WORD {id}.");
@@ -95,11 +98,12 @@ internal partial class PalStoryBattleView : Node2D
     internal void Present(ClassicBattleView combat, StoryBattlePresentation mode, int idleFrame, int idleCounter,
         StoryEnemyAttackSnapshot? enemyPresentation = null, StoryPlayerAttackSnapshot? playerPresentation = null,
         IReadOnlyList<StoryNumberDigit>? numberDigits = null, int? feedbackWord = null, int highlightedEnemySlot = 0,
-        string? settlementLine = null)
+        string? settlementLine = null, StoryPlayerFleeSnapshot? fleePresentation = null)
     {
         this.combat = combat; this.mode = mode; this.idleFrame = idleFrame; this.idleCounter = idleCounter;
         highlightedSlot = highlightedEnemySlot;
         EnemyPresentation = enemyPresentation; this.playerPresentation = playerPresentation;
+        this.fleePresentation = fleePresentation;
         NumberDigits = numberDigits ?? Array.Empty<StoryNumberDigit>();
         FeedbackWord = feedbackWord;
         SettlementLine = settlementLine;
@@ -123,6 +127,13 @@ internal partial class PalStoryBattleView : Node2D
         int playerShift = 0, enemyShift = 0, php = combat.PlayerHp, ehp = combat.EnemyHp;
         int? fx = null;
         bool result = false;
+        if (fleePresentation is { } fleeing)
+        {
+            // fight.c 4153-4171: the failed escaper steps +4/+2 three times, then stands at
+            // frame 1 under the escape-fail label; no strike, effect or result frame shows.
+            pf = fleeing.Frame;
+            player = visual.PlayerPosition + fleeing.Offset;
+        }
         if (EnemyPresentation is { } shown)
         {
             pf = shown.PlayerFrame; ef = shown.EnemyFrame;
@@ -172,6 +183,8 @@ internal partial class PalStoryBattleView : Node2D
             if (action is { Attacker: ClassicBattleSide.Enemy, CovererPartyIndex: var coverer } && coverer == i
                 && EnemyPresentation is not null)
                 draws[i] = new(3, origins[action.TargetIndex] + new Vector2(-24, -12), 0, member.Hp);
+            else if (fleePresentation is { } fleeingMember && fleeingMember.PartyIndex == i)
+                draws[i] = new(fleeingMember.Frame, origins[i] + fleeingMember.Offset, 0, member.Hp);
             else
                 draws[i] = action is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i
                     && playerPresentation is { } acting
@@ -271,8 +284,11 @@ internal partial class PalStoryBattleView : Node2D
         }
     }
     public override void _ExitTree() { ReleaseTextures(); }
-    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; SettlementLine = null; }
+    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; SettlementLine = null; fleePresentation = null; }
 }
+
+/// <summary>fight.c 4153-4171: the failed escaper's stepped frame/offset for one pose.</summary>
+internal readonly record struct StoryPlayerFleeSnapshot(int PartyIndex, int Frame, Vector2 Offset);
 
 internal readonly record struct StoryBattleDrawSnapshot(int PlayerFrame, int EnemyFrame, Vector2 PlayerPosition, Vector2 EnemyPosition, int PlayerColorShift,
     int EnemyColorShift, int? EffectFrame, Vector2 EffectPosition, int DisplayedPlayerHp, int DisplayedEnemyHp,

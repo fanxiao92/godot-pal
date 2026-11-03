@@ -204,10 +204,20 @@ StartMessageId = 23
 EndMessageId = 23
 Entries = Array[ExtResource("1")]([SubResource("m23e")])
 
+[sub_resource type="Resource" id="m24e"]
+script = ExtResource("1")
+Text = "DEFEATED"
+
+[sub_resource type="Resource" id="m24_24r"]
+script = ExtResource("2")
+StartMessageId = 24
+EndMessageId = 24
+Entries = Array[ExtResource("1")]([SubResource("m24e")])
+
 [resource]
 script = ExtResource("3")
 Language = "en"
 SourceIdentity = "Original pixel art and bitmap lettering authored for godot-pal #46; no retail assets or extraction evidence."
-Messages = Array[ExtResource("2")]([SubResource("s1"), SubResource("s3"), SubResource("s5"), SubResource("m6_7r"), SubResource("m8_9r"), SubResource("m10_11r"), SubResource("m12_13r"), SubResource("m14_15r"), SubResource("m4_4r"), SubResource("m5_5r"), SubResource("m16_16r"), SubResource("m17_17r"), SubResource("m18_18r"), SubResource("m19_19r"), SubResource("m20_20r"), SubResource("m21_21r"), SubResource("m22_22r"), SubResource("m23_23r")])
+Messages = Array[ExtResource("2")]([SubResource("s1"), SubResource("s3"), SubResource("s5"), SubResource("m6_7r"), SubResource("m8_9r"), SubResource("m10_11r"), SubResource("m12_13r"), SubResource("m14_15r"), SubResource("m4_4r"), SubResource("m5_5r"), SubResource("m16_16r"), SubResource("m17_17r"), SubResource("m18_18r"), SubResource("m19_19r"), SubResource("m20_20r"), SubResource("m21_21r"), SubResource("m22_22r"), SubResource("m23_23r"), SubResource("m24_24r")])
 
-Words = Dictionary[int, String]({60000: "ATTACK", 60001: "TARGET", 60002: "MISS", 60003: "CRITICAL", 60004: "HP", 60005: "BOOST", 60006: "EXP", 60007: "CASH", 60008: "LEVEL UP", 60009: "LEARNED MAGIC"})
+Words = Dictionary[int, String]({60000: "ATTACK", 60001: "TARGET", 60002: "MISS", 60003: "CRITICAL", 60004: "HP", 60005: "BOOST", 60006: "EXP", 60007: "CASH", 60008: "LEVEL UP", 60009: "LEARNED MAGIC", 60010: "ESCAPE FAILED"})

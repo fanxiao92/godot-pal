@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "profile": "faithful",
+  "source": {
+    "archive": "SSS.MKF",
+    "chunk": 4,
+    "byteOrder": "little",
+    "instructionCount": 13,
+    "byteLength": 104,
+    "sha256": "b1670e038f72c39bf14bc7c1291028bf4e2d356a1a8c523f51872d15697c5ab0"
+  },
+  "files": [
+    "arena"
+  ]
+}
