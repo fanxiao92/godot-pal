@@ -24,6 +24,7 @@ internal partial class PalStoryBattleView : Node2D
     private ImageTexture background = null!;
     private ClassicBattleView combat = null!;
     private StoryBattlePresentation mode;
+    private int highlightedSlot;
     private StoryPlayerAttackSnapshot? playerPresentation;
     private int idleFrame;
     private int idleCounter;
@@ -90,9 +91,10 @@ internal partial class PalStoryBattleView : Node2D
     }
     internal void Present(ClassicBattleView combat, StoryBattlePresentation mode, int idleFrame, int idleCounter,
         StoryEnemyAttackSnapshot? enemyPresentation = null, StoryPlayerAttackSnapshot? playerPresentation = null,
-        IReadOnlyList<StoryNumberDigit>? numberDigits = null, int? feedbackWord = null)
+        IReadOnlyList<StoryNumberDigit>? numberDigits = null, int? feedbackWord = null, int highlightedEnemySlot = 0)
     {
         this.combat = combat; this.mode = mode; this.idleFrame = idleFrame; this.idleCounter = idleCounter;
+        highlightedSlot = highlightedEnemySlot;
         EnemyPresentation = enemyPresentation; this.playerPresentation = playerPresentation;
         NumberDigits = numberDigits ?? Array.Empty<StoryNumberDigit>();
         FeedbackWord = feedbackWord;
@@ -104,8 +106,13 @@ internal partial class PalStoryBattleView : Node2D
     internal StoryBattleDrawSnapshot DrawSnapshot { get; private set; }
     private void BuildDrawSnapshot()
     {
-        Vector2 player = visual.PlayerPosition, enemy = team.EnemyPosition, fxPosition = Vector2.Zero;
-        int pf = StoryEnemyAttackPresentation.RestFrame(combat.PlayerHp, story.BattleContent.Player.MaxHp), ef = idleFrame;
+        // Party battles draw every actor; the legacy scalar fields remain index-zero projections.
+        bool party = combat.Players.Count > 1;
+        var action = combat.LastAction;
+        var partyPlayers = party ? PlayerDraws(action) : Array.Empty<StoryActorDraw>();
+        var partyEnemies = party ? EnemyDraws(action) : Array.Empty<StoryActorDraw>();
+        Vector2 player = visual.PlayerPosition, enemy = team.EnemySlots[0].EnemyPosition, fxPosition = Vector2.Zero;
+        int pf = StoryEnemyAttackPresentation.RestFrame(combat.PlayerHp, story.BattleContent.Players[0].MaxHp), ef = idleFrame;
         int playerShift = 0, enemyShift = 0, php = combat.PlayerHp, ehp = combat.EnemyHp;
         int? fx = null;
         bool result = false;
@@ -121,8 +128,48 @@ internal partial class PalStoryBattleView : Node2D
             enemyShift = hit.EnemyColorShift; ehp = hit.DisplayedEnemyHp; result = hit.ResultVisible;
             fx = hit.EffectFrame; fxPosition = hit.EffectPosition;
         }
+        if (party)
+        {
+            php = partyPlayers[0].Hp; ehp = partyEnemies[0].Hp;
+            pf = partyPlayers[0].Frame; player = partyPlayers[0].Position; playerShift = partyPlayers[0].ColorShift;
+            ef = partyEnemies[0].Frame; enemy = partyEnemies[0].Position; enemyShift = partyEnemies[0].ColorShift;
+        }
         DrawSnapshot = new(pf, ef, player, enemy, playerShift, enemyShift, fx, fxPosition, php, ehp, result, idleCounter)
-            { NumberDigits = NumberDigits, FeedbackWord = FeedbackWord };
+        { NumberDigits = NumberDigits, FeedbackWord = FeedbackWord, PartyPlayers = partyPlayers, PartyEnemies = partyEnemies,
+            SelectingPlayer = party ? combat.SelectingPlayerIndex : null };
+    }
+
+    private StoryActorDraw[] PlayerDraws(ClassicBattleAction? action)
+    {
+        var origins = visual.PlayerOrigins(combat.Players.Count);
+        var draws = new StoryActorDraw[combat.Players.Count];
+        for (int i = 0; i < draws.Length; i++)
+        {
+            var member = combat.Players[i];
+            draws[i] = action is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i
+                && playerPresentation is { } acting
+                ? new(acting.PlayerFrame, acting.PlayerPosition, 0, member.Hp)
+                : new(StoryEnemyAttackPresentation.RestFrame(member.Hp, story.BattleContent.Players[i].MaxHp),
+                    origins[i], 0, member.Hp);
+        }
+        return draws;
+    }
+
+    private StoryActorDraw[] EnemyDraws(ClassicBattleAction? action)
+    {
+        var draws = new StoryActorDraw[combat.Enemies.Count];
+        for (int i = 0; i < draws.Length; i++)
+        {
+            var slot = combat.Enemies[i];
+            draws[i] = action is { Attacker: ClassicBattleSide.Player, TargetIndex: var targeted } && targeted == i
+                && playerPresentation is { } strike
+                ? new(idleFrame, strike.EnemyPosition, strike.EnemyColorShift, strike.DisplayedEnemyHp)
+                : action is { Attacker: ClassicBattleSide.Enemy, ActorIndex: var mover } && mover == i
+                    && EnemyPresentation is { } attacker
+                    ? new(attacker.EnemyFrame, attacker.EnemyPosition, 0, slot.Hp)
+                    : new(idleFrame, team.EnemySlots[i].EnemyPosition, 0, slot.Hp);
+        }
+        return draws;
     }
 
     public override void _Draw()
@@ -130,16 +177,44 @@ internal partial class PalStoryBattleView : Node2D
         if (combat is null) return;
         DrawTexture(background, Vector2.Zero);
         var shown = DrawSnapshot;
-        Sprite(false, shown.EnemyFrame, shown.EnemyPosition, shown.EnemyColorShift); Sprite(true, shown.PlayerFrame, shown.PlayerPosition, shown.PlayerColorShift);
+        if (shown.PartyEnemies.Count > 0)
+        {
+            foreach (var enemyDraw in shown.PartyEnemies) Sprite(false, enemyDraw.Frame, enemyDraw.Position, enemyDraw.ColorShift);
+            foreach (var memberDraw in shown.PartyPlayers) Sprite(true, memberDraw.Frame, memberDraw.Position, memberDraw.ColorShift);
+            // Demo selectors: palette caret under the selecting member and highlighted slot.
+            if (mode is StoryBattlePresentation.AttackMenu or StoryBattlePresentation.TargetMenu
+                && shown.SelectingPlayer is { } selecting)
+                DrawRect(new Rect2(shown.PartyPlayers[selecting].Position - new Vector2(6, 3), new Vector2(12, 2)), story.Palette[79]);
+            if (mode == StoryBattlePresentation.TargetMenu)
+            {
+                int highlighted = Math.Clamp(highlightedSlot, 0, shown.PartyEnemies.Count - 1);
+                DrawRect(new Rect2(shown.PartyEnemies[highlighted].Position - new Vector2(6, 3), new Vector2(12, 2)), story.Palette[79]);
+            }
+        }
+        else
+        {
+            Sprite(false, shown.EnemyFrame, shown.EnemyPosition, shown.EnemyColorShift); Sprite(true, shown.PlayerFrame, shown.PlayerPosition, shown.PlayerColorShift);
+        }
         if (shown.EffectFrame is { } effect)
         {
             var texture = effects[effect];
             DrawTexture(texture, shown.EffectPosition - new Vector2(texture.GetWidth() / 2, texture.GetHeight()));
         }
         DrawRect(new Rect2(0, 174, 320, 26), new Color(0, 0, 0, .9f));
-        Text(story.SelectedWords[HpWord] + ":" + DisplayedPlayerHp + "/" + DisplayedEnemyHp, new Vector2(4, 176));
-        string label = mode == StoryBattlePresentation.AttackMenu ? story.SelectedWords[AttackWord]
-            : mode == StoryBattlePresentation.TargetMenu ? story.SelectedWords[TargetWord] + ":" + team.TargetId
+        if (shown.PartyEnemies.Count > 0)
+        {
+            // Per-actor HP panel: members then enemy slots, slash-separated in slot order.
+            Text(story.SelectedWords[HpWord] + ":" + string.Join("/", shown.PartyPlayers.Select(p => p.Hp))
+                + "/" + string.Join("/", shown.PartyEnemies.Select(e => e.Hp)), new Vector2(4, 176));
+        }
+        else
+            Text(story.SelectedWords[HpWord] + ":" + DisplayedPlayerHp + "/" + DisplayedEnemyHp, new Vector2(4, 176));
+        string label = mode == StoryBattlePresentation.AttackMenu
+            ? shown.PartyEnemies.Count > 0 && shown.SelectingPlayer is { } member
+                ? story.SelectedWords[AttackWord] + ":" + (member + 1) : story.SelectedWords[AttackWord]
+            : mode == StoryBattlePresentation.TargetMenu
+                ? shown.PartyEnemies.Count > 0 ? story.SelectedWords[TargetWord] + ":" + (Math.Clamp(highlightedSlot, 0, shown.PartyEnemies.Count - 1) + 1)
+                    : story.SelectedWords[TargetWord] + ":" + team.TargetId
             : shown.FeedbackWord is { } word ? story.SelectedWords[word] : "";
         Text(label, new Vector2(155, 176));
         foreach (var digit in shown.NumberDigits) DrawTexture(numbers[(digit.Color, digit.Digit)], digit.Position);
@@ -170,4 +245,11 @@ internal readonly record struct StoryBattleDrawSnapshot(int PlayerFrame, int Ene
 {
     internal IReadOnlyList<StoryNumberDigit> NumberDigits { get; init; } = Array.Empty<StoryNumberDigit>();
     internal int? FeedbackWord { get; init; }
+    // Party per-actor truth in party/slot order; empty keeps the legacy single-pair projection.
+    internal IReadOnlyList<StoryActorDraw> PartyPlayers { get; init; } = Array.Empty<StoryActorDraw>();
+    internal IReadOnlyList<StoryActorDraw> PartyEnemies { get; init; } = Array.Empty<StoryActorDraw>();
+    internal int? SelectingPlayer { get; init; }
 }
+
+/// <summary>One drawn battle actor: frame, bottom-center position, palette shift and displayed HP.</summary>
+internal readonly record struct StoryActorDraw(int Frame, Vector2 Position, int ColorShift, int Hp);

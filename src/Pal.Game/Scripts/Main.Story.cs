@@ -12,10 +12,16 @@ public partial class Main
 {
     private CheckedStoryProfile? story;
     private CheckedBattleVisualProfile? storyVisual;
+    private CheckedBattleVisualTeam? storyTeam;
     private GodotBattleRandom? storyRandom;
     private PalStoryBattleView? storyView;
     private TriggerBattleRequest? storyRequest;
     private bool battleConfirm;
+    // Enemy-slot highlight while a member picks a target; reference selection has no
+    // previous-target memory (fixed initial -1, UI update disabled).
+    private int storyTargetSlot;
+    private int storyCycle;
+    private ClassicBattleAction? storyLastPresentedAction;
     private bool resumeStoryDisplay;
     private StoryBattlePoseClock poseClock;
     private uint presentationNow;
@@ -108,15 +114,17 @@ public partial class Main
             try { view.Initialize(story, storyVisual!, pending.TeamId); }
             catch { view.ReleaseTextures(); view.Free(); throw; }
             var team = storyVisual!.Teams[pending.TeamId];
+            storyTeam = team;
             enemyIdle = new(team.IdleFrames, team.IdleAnimSpeed);
             // battle.c1782 startup, then the immediately due first StartFrame (battle.c763–792).
             enemyIdle.Advance(); enemyIdle.Advance();
             outerClock = StoryBattlePoseClock.Start(now); outerDue = false;
             storyRequest = pending; storyView = view; battleConfirm = false;
+            storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
             StoryBattleMode = StoryBattlePresentation.AttackMenu;
             Display!.SetProcess(false);
             mapScene!.Visible = false; AddChild(view);
-            view.Present(pending.Lifecycle.Current.Combat, StoryBattleMode.Value, enemyIdle.Frame, enemyIdle.Counter);
+            view.Present(pending.Lifecycle.Current.Combat, StoryBattleMode.Value, enemyIdle.Frame, enemyIdle.Counter, highlightedEnemySlot: storyTargetSlot);
             return true;
         }
         var lifecycle = storyRequest.Lifecycle;
@@ -132,35 +140,79 @@ public partial class Main
         switch (StoryBattleMode)
         {
             case StoryBattlePresentation.AttackMenu:
-                if (confirm) StoryBattleMode = StoryBattlePresentation.TargetMenu;
-                break;
-            case StoryBattlePresentation.TargetMenu:
                 if (confirm)
                 {
-                    lifecycle.SelectAttack(storyVisual!.Teams[storyRequest.TeamId].TargetId);
-                    StoryBattleMode = StoryBattlePresentation.Resolving;
+                    var enemies = lifecycle.Current.Combat.Enemies;
+                    // No previous-target memory: each member starts from the first alive slot.
+                    storyTargetSlot = Enumerable.Range(0, enemies.Count).First(slot => enemies[slot].Hp > 0);
+                    StoryBattleMode = StoryBattlePresentation.TargetMenu;
+                }
+                break;
+            case StoryBattlePresentation.TargetMenu:
+                if (storyCycle != 0)
+                {
+                    var enemies = lifecycle.Current.Combat.Enemies;
+                    for (int step = 0; step < enemies.Count; step++)
+                    {
+                        storyTargetSlot = (storyTargetSlot + (storyCycle > 0 ? 1 : enemies.Count - 1)) % enemies.Count;
+                        if (enemies[storyTargetSlot].Hp > 0) break;
+                    }
+                    storyCycle = 0;
+                }
+                if (confirm)
+                {
+                    var selecting = lifecycle.Current.Combat.SelectingPlayerIndex
+                        ?? throw new InvalidOperationException("Target menu has no selecting party member.");
+                    lifecycle.SelectAttack(selecting, storyTargetSlot);
+                    StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Selecting
+                        ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
                 }
                 break;
             case StoryBattlePresentation.Resolving:
-                int beforeHp = lifecycle.Current.Combat.PlayerHp;
-                int beforeEnemyHp = lifecycle.Current.Combat.EnemyHp;
-                if (!lifecycle.ResolveNextAction()) throw new InvalidOperationException("Battle action owner did not resolve an action.");
-                var action = lifecycle.Current.Combat.LastAction!;
+            {
+                // Dead actors' queue entries pass without a new LastAction; queue advancement and
+                // action feedback are distinguished by reference so a pass never re-presents it.
+                ClassicBattleAction? presented = null;
+                int[] playersBefore = [], enemiesBefore = [];
+                while (lifecycle.Current.Combat.Phase == ClassicBattlePhase.Resolving)
+                {
+                    var before = lifecycle.Current.Combat;
+                    playersBefore = before.Players.Select(member => member.Hp).ToArray();
+                    enemiesBefore = before.Enemies.Select(slot => slot.Hp).ToArray();
+                    if (!lifecycle.ResolveNextAction())
+                        throw new InvalidOperationException("Battle action owner did not resolve an action.");
+                    var candidate = lifecycle.Current.Combat.LastAction;
+                    if (candidate is not null && !ReferenceEquals(candidate, storyLastPresentedAction))
+                    { presented = candidate; storyLastPresentedAction = candidate; break; }
+                }
+                if (presented is null)
+                {
+                    // The queue ended on passes; the next round selects without new feedback.
+                    StoryBattleMode = StoryBattlePresentation.AttackMenu;
+                    break;
+                }
+                var action = presented;
+                int beforeHp = playersBefore[action.Attacker == ClassicBattleSide.Enemy ? action.TargetIndex : 0];
+                int beforeEnemyHp = enemiesBefore[action.Attacker == ClassicBattleSide.Player ? action.TargetIndex : 0];
                 storyNumbers.BeginAction(); feedbackBorn = false;
                 feedbackBeforeHp = action.Attacker == ClassicBattleSide.Player ? beforeEnemyHp : beforeHp;
-                var actingTeam = storyVisual!.Teams[storyRequest.TeamId];
+                var combat = lifecycle.Current.Combat;
+                var playerOrigins = storyVisual!.PlayerOrigins(combat.Players.Count);
                 enemyPresentation = action.Attacker != ClassicBattleSide.Enemy ? null : new(
-                    actingTeam.IdleFrames, actingTeam.MagicFrames, actingTeam.AttackFrames, actingTeam.ActWaitFrames,
-                    storyVisual.PlayerPosition, actingTeam.EnemyPosition, beforeHp,
-                    lifecycle.Current.Combat.PlayerHp, story.BattleContent.Player.MaxHp, action, enemyIdle!.Frame);
+                    storyTeam!.IdleFrames, storyTeam.MagicFrames, storyTeam.AttackFrames, storyTeam.ActWaitFrames,
+                    playerOrigins[action.TargetIndex], storyTeam.EnemySlots[action.ActorIndex].EnemyPosition, beforeHp,
+                    combat.Players[action.TargetIndex].Hp, story.BattleContent.Players[action.TargetIndex].MaxHp,
+                    action, enemyIdle!.Frame);
                 playerPresentation = action.Attacker != ClassicBattleSide.Player ? null : new(
-                    storyVisual.PlayerPosition, actingTeam.EnemyPosition,
-                    beforeEnemyHp, lifecycle.Current.Combat.EnemyHp,
-                    StoryEnemyAttackPresentation.RestFrame(lifecycle.Current.Combat.PlayerHp, story.BattleContent.Player.MaxHp));
+                    playerOrigins[action.ActorIndex], storyTeam!.EnemySlots[action.TargetIndex].EnemyPosition,
+                    beforeEnemyHp, combat.Enemies[action.TargetIndex].Hp,
+                    StoryEnemyAttackPresentation.RestFrame(combat.Players[action.ActorIndex].Hp,
+                        story.BattleContent.Players[action.ActorIndex].MaxHp));
                 StoryBattleMode = StoryBattlePresentation.Feedback;
                 poseClock = StoryBattlePoseClock.Start(now);
                 AdvanceStoryGesture(0);
                 break;
+            }
             case StoryBattlePresentation.Feedback:
                 var nextPose = poseClock.Advance(now);
                 if (nextPose == poseClock) break;
@@ -202,7 +254,9 @@ public partial class Main
             bool enemyEnqueue = enemyPresentation is { } enemy && poseClock.Pose >= enemy.ImpactPose - 1;
             if (!feedbackBorn && (playerHit || enemyEnqueue))
             {
-                Vector2 target = playerHit ? storyVisual!.Teams[storyRequest.TeamId].EnemyPosition : storyVisual!.PlayerPosition;
+                var origins = storyVisual!.PlayerOrigins(lifecycle.Current.Combat.Players.Count);
+                Vector2 target = playerHit ? storyTeam!.EnemySlots[action.TargetIndex].EnemyPosition
+                    : origins[action.TargetIndex];
                 target.Y = Math.Max(10, target.Y - (playerHit ? 115 : 75));
                 storyNumbers.EnqueueAction(feedbackBeforeHp, action, target, now, pending: true);
                 feedbackBorn = true;
@@ -212,7 +266,7 @@ public partial class Main
         }
         storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, enemyIdle!.Frame, enemyIdle.Counter,
             shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null,
-            storyNumbers.At(now), storyNumbers.LabelAt(now));
+            storyNumbers.At(now), storyNumbers.LabelAt(now), storyTargetSlot);
         return true;
     }
     private void AdvanceStoryGesture(int pose)
@@ -222,7 +276,7 @@ public partial class Main
             // Four TRUE windup, three TRUE approach, three manual FX, three TRUE recoil,
             // UpdateFighters at13 followed by three TRUE tail frames.
             // ShowPlayerAttackAnim reads target height after windup, before its first TRUE approach delay.
-            if (pose == 4) effectEnemyHeight = storyVisual!.Teams[storyRequest!.TeamId].EnemySprite.Frames
+            if (pose == 4) effectEnemyHeight = storyTeam!.EnemySprite.Frames
                 .Single(f => f.Index == enemyIdle!.Frame).Height;
             if (pose == 13) enemyIdle!.Advance();
             enemyIdle!.Advance();
@@ -245,8 +299,9 @@ public partial class Main
         {
             storyView.GetParent()?.RemoveChild(storyView); storyView.ReleaseTextures(); storyView.Free();
         }
-        storyView = null; storyRequest = null; StoryBattleMode = null; battleConfirm = false; resumeStoryDisplay = false;
+        storyView = null; storyRequest = null; storyTeam = null; StoryBattleMode = null; battleConfirm = false; resumeStoryDisplay = false;
         enemyPresentation = null; playerPresentation = null; enemyIdle = null; outerDue = false;
+        storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
     }

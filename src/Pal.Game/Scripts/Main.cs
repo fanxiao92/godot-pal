@@ -175,6 +175,18 @@ public partial class Main : Node2D
             for (int i = 0; i < DirectionKeys.Length; i++)
             {
                 if (key.Keycode != DirectionKeys[i] || !key.IsAction(DirectionActions[i / 2])) continue;
+                if (storyRequest is not null)
+                {
+                    // The active story battle owns direction keys: horizontal input cycles the
+                    // enemy-slot target highlight only and never bleeds into exploration.
+                    if (key.Pressed && !key.Echo && StoryBattleMode == StoryBattlePresentation.TargetMenu
+                        && i / 2 is 1 or 3)
+                    {
+                        storyCycle = i / 2 == 3 ? 1 : -1;
+                        GetViewport().SetInputAsHandled();
+                    }
+                    return;
+                }
                 if (battle is { } firstBattle)
                 {
                     if (key.Pressed) firstBattle.Press((ExplorationKey)i, key.Echo);
