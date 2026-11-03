@@ -141,7 +141,7 @@ public sealed class RetailVerbsTests
         var fixture = new VerbsFixture();
         if (revive)
         {
-            var commands = fixture.File["commands"]!.AsArray();
+            var commands = fixture.EventFile["commands"]!.AsArray();
             var restore = (JsonObject)commands[9]!; // the changeHpMp row
             restore["amount"] = -9999; // drain first so revivePlayer has dead roles
             var stop = (JsonObject)commands[10]!; // the explicit end row becomes the revive step
