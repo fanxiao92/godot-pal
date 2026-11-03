@@ -159,7 +159,7 @@ public class NativeBattleVisualProfileTests
             case "identity": f.Profile.SourceIdentity = " "; expected = "SourceIdentity"; break;
             case "role": f.Profile.RoleId = 41; expected = "RoleId"; break;
             case "missing-team": f.Profile.Teams = []; expected = "exactly cover"; break;
-            case "extra-team": f.Profile.Teams = [f.Team, new PalBattleVisualTeam { TeamId = 19 }]; expected = "TeamId/TargetId"; break;
+            case "extra-team": f.Profile.Teams = [f.Team, new PalBattleVisualTeam { TeamId = 19 }]; expected = "does not match a story battle team"; break;
             case "duplicate-team": f.Profile.Teams = [f.Team, f.Team]; expected = "duplicate"; break;
             case "target-is-sprite": f.Team.TargetId = 97; expected = "TargetId"; break;
             case "target-is-team": f.Team.TargetId = 18; expected = "TargetId"; break;
