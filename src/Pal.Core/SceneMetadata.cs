@@ -49,6 +49,8 @@ public sealed record SceneObject(ushort Id, ushort X, ushort Y, short State, sho
     // Raw event-object WORDs. Non-positional additions preserve existing construction/deconstruction.
     public ushort TriggerMode { get; init; }
     public ushort TriggerEntry { get; init; }
+    // script.c wAutoScript: the object's auto-script entry (play.c PAL_GameUpdate writeback target).
+    public ushort AutoEntry { get; init; }
 }
 
 public sealed record SceneSearchMatch(ushort ObjectId, int SampleIndex);

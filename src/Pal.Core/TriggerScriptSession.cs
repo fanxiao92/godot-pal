@@ -1,6 +1,7 @@
 namespace Pal.Core;
 
-public enum TriggerScriptPhase { Ready, WaitingForDisplay, Completed, WaitingForBattle, WaitingForLostReload }
+public enum TriggerScriptPhase { Ready, WaitingForDisplay, Completed, WaitingForBattle, WaitingForLostReload,
+    WaitingForSceneWait, WaitingForMovement, WaitingForTransition }
 
 /// <summary>Which call frame a walked address belongs to: the outer event, a paused battle's role
 /// hook (fight.c 768-880) or an enemy post-victory script (battle.c 1334-1337).</summary>
@@ -15,6 +16,7 @@ public sealed class TriggerScriptSession
     private int _lastCaller;
     private readonly TriggerBattleContent? _battleContent;
     private readonly IBattleRandom? _battleRandom;
+    private readonly DynamicEventWorld? _world;
     private ClassicBattleRoleHook? _battleHook;
     private ClassicBattleEndScript? _battleEndScript;
     private int _parkedCaller;
@@ -24,7 +26,8 @@ public sealed class TriggerScriptSession
     public IReadOnlyList<TriggerEventEntry> Entries => _events.Entries;
     public TriggerScriptPhase Phase { get; private set; }
     public bool BlocksSceneUpdates => Phase is TriggerScriptPhase.WaitingForDisplay or TriggerScriptPhase.WaitingForBattle
-        or TriggerScriptPhase.WaitingForLostReload;
+        or TriggerScriptPhase.WaitingForLostReload or TriggerScriptPhase.WaitingForSceneWait
+        or TriggerScriptPhase.WaitingForMovement or TriggerScriptPhase.WaitingForTransition;
     public Guid CallId { get; private set; }
     /// <summary>The interaction request which actually started this call; null for legacy callers.</summary>
     public Guid? SourceRequestId { get; private set; }
@@ -37,6 +40,18 @@ public sealed class TriggerScriptSession
     /// <summary>The 0x004E save-reload request that parked this call (script.c returns 0 there);
     /// non-null only in the WaitingForLostReload phase, and never acknowledged.</summary>
     public TriggerLostReloadRequest? PendingLostReload { get; private set; }
+    /// <summary>The parked 0x0009 scene-updating wait (script.c advances the whole scene once per
+    /// frame); the world's update owner is the only advancing authority.</summary>
+    public TriggerSceneWaitRequest? PendingSceneWait { get; private set; }
+    /// <summary>The parked 0x0010 counted movement (update-driven, never a teleport); the world's
+    /// update owner advances one walk step per due update tick until arrival.</summary>
+    public TriggerMovementRequest? PendingMovement { get; private set; }
+    /// <summary>The parked presentation transition (0x0005 redraw delay or 0x0073 scene fade);
+    /// the world stays frozen until the host acknowledges its own presentation.</summary>
+    public TriggerTransitionRequest? PendingTransition { get; private set; }
+    /// <summary>script.c g_fScriptSuccess: true at each start; markFailed (0x0041) clears it and
+    /// the completion receipt carries the flag so callers observe the saved result.</summary>
+    public bool ScriptSuccess { get; private set; }
     /// <summary>The last setMusic transition (script.c 0x0043 wNumMusic); null before the first one.</summary>
     public TriggerMusicState? Music { get; private set; }
     /// <summary>True after the fadeToRed transition (script.c 0x004F game-over fade).</summary>
@@ -74,6 +89,16 @@ public sealed class TriggerScriptSession
         BattleRoles = battleContent.InitialRoles;
     }
 
+    /// <summary>Dynamic-scene construction (no battle support): world mutations apply directly to
+    /// the supplied world; startBattle stays an unsupported command in this session.</summary>
+    public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
+        DynamicEventWorld world, int inheritedColor = DialogueTextTokenizer.DefaultColor)
+        : this(events, language, inheritedColor)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        _world = world;
+    }
+
     /// <summary>Pure selected-entry capability check against the content's initial role. Does not start a call,
     /// create a battle or require randomness; later Start calls still validate their current settled role.</summary>
     public static TriggerEntryRequirements ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language,
@@ -108,6 +133,7 @@ public sealed class TriggerScriptSession
         CallId = Guid.NewGuid();
         StartedEntry = entry;
         SourceRequestId = sourceRequestId;
+        ScriptSuccess = true;
         Caller = caller == 65535 ? _lastCaller : caller;
         _lastCaller = Caller;
         ReturnEntry = _address = entry.SourceAddress;
@@ -136,6 +162,44 @@ public sealed class TriggerScriptSession
         if (completion!.Outcome == ClassicBattlePhase.Lost) _lostBattleContext = (request.TeamId, request.IsBoss);
         _address = completion!.Outcome == ClassicBattlePhase.Lost ? request.LossAddress ?? request.NextAddress : request.NextAddress;
         PendingBattle = null;
+        Continue();
+        return true;
+    }
+
+    /// <summary>Only the world's update owner may receipt a scene wait tick; premature, stale or
+    /// duplicate ticks are inert. The world tick itself runs before this receipt.</summary>
+    public bool AcknowledgeSceneWait(Guid requestId)
+    {
+        if (Phase != TriggerScriptPhase.WaitingForSceneWait || PendingSceneWait is not { } request || request.Id != requestId)
+            return false;
+        if (--request.FramesRemaining > 0) return false;
+        PendingSceneWait = null;
+        Continue();
+        return true;
+    }
+
+    /// <summary>Receipts one actually-advanced movement step; only arrival completes the request,
+    /// premature or duplicate receipts are inert.</summary>
+    public bool AcknowledgeMovement(Guid requestId, bool arrived)
+    {
+        if (Phase != TriggerScriptPhase.WaitingForMovement || PendingMovement is not { } request || request.Id != requestId)
+            return false;
+        // Premature receipts are rejected against the world itself: only an object actually at
+        // the target words completes the movement, never a claimed arrival.
+        if (!arrived || _world?.Find(request.ObjectId) is not { } obj || obj.X != request.TargetX || obj.Y != request.TargetY)
+            return false;
+        _address = request.NextAddress;
+        PendingMovement = null;
+        Continue();
+        return true;
+    }
+
+    /// <summary>Receipts the host's completed redraw/fade presentation exactly once.</summary>
+    public bool AcknowledgeTransition(Guid requestId)
+    {
+        if (Phase != TriggerScriptPhase.WaitingForTransition || PendingTransition is not { } request || request.Id != requestId)
+            return false;
+        PendingTransition = null;
         Continue();
         return true;
     }
@@ -228,6 +292,15 @@ public sealed class TriggerScriptSession
             }
             else if (command.Op == "setMusic" || command.Op == "fadeToRed")
             {
+                pending.Push((Next(command), item.Context));
+            }
+            else if (command.Op is "walkStep" or "face" or "setState" or "hide" or "setTriggerMode"
+                or "setSceneScripts" or "setObjectScript" or "setPartyPos" or "setPartyFacing"
+                or "waitUpdate" or "redraw" or "fadeScene" or "markFailed" or "walkTo")
+            {
+                // #52 dynamic-story verbs: they are never branch points; execution applies them
+                // through the dynamic world (or parks the call). No-world sessions reject them at
+                // execution, keeping the structural walk shared.
                 pending.Push((Next(command), item.Context));
             }
             else if (command.Op == "requestReload")
@@ -385,6 +458,79 @@ public sealed class TriggerScriptSession
                     CurrentPosition = _events.CommandAt(_address).Position;
                     Phase = TriggerScriptPhase.WaitingForDisplay;
                     return;
+                case "walkStep" when _world is not null:
+                    // script.c 0x000B-0x000E: caller direction + one speed-2 step (scene.c PAL_NPCWalkOneStep).
+                    _world.WalkOneStep(Caller, command.Direction, 2);
+                    _address = Next(command);
+                    break;
+                case "face" when _world is not null:
+                    // script.c 0x000F: caller direction/gesture; 0xFFFF keeps the current word.
+                    _world.SetFacing(Caller, command.Direction, command.Frame);
+                    _address = Next(command);
+                    break;
+                case "setState" when _world is not null:
+                    // script.c 0x0049: operand 0/0xFFFF selects the caller, otherwise that object ID.
+                    if (command.ObjectId != 0) _world.SetObjectState(command.ObjectId == 0xffff ? Caller : command.ObjectId, command.State, command.Position);
+                    _address = Next(command);
+                    break;
+                case "hide" when _world is not null:
+                    // script.c 0x0052: caller's state *= -1 and vanish time = frames (0 -> 800).
+                    _world.HideObject(Caller, command.Frames == 0 ? 800 : command.Frames);
+                    _address = Next(command);
+                    break;
+                case "setTriggerMode" when _world is not null:
+                    // script.c 0x0040: nonzero operand0 selects the target object.
+                    if (command.ObjectId != 0) _world.SetTriggerMode(command.ObjectId == 0xffff ? Caller : command.ObjectId, command.TriggerModeWord, command.Position);
+                    _address = Next(command);
+                    break;
+                case "setSceneScripts" when _world is not null:
+                    _world.SetSceneScripts(command.SceneId, command.OnEnter, command.OnTeleport);
+                    _address = Next(command);
+                    break;
+                case "setObjectScript" when _world is not null:
+                    _world.SetObjectScript(command.ObjectId, command.Value, command.SlotIndex);
+                    _address = Next(command);
+                    break;
+                case "setPartyPos" when _world is not null:
+                    _world.SetPartyPosition(command.TileX, command.TileY, command.Layer);
+                    _address = Next(command);
+                    break;
+                case "setPartyFacing" when _world is not null:
+                    _world.SetPartyFacing(command.Direction, command.Frame, command.MemberIndex);
+                    _address = Next(command);
+                    break;
+                case "markFailed":
+                    // script.c 0x0041: g_fScriptSuccess = FALSE; carried by the completion receipt.
+                    ScriptSuccess = false;
+                    _address = Next(command);
+                    break;
+                case "waitUpdate" when _world is not null:
+                    // script.c 0x0009: the real scene update advances once per due tick while the
+                    // call parks; the world's update owner is the single advancing authority.
+                    PendingSceneWait = new TriggerSceneWaitRequest(Guid.NewGuid(), command.Position,
+                        command.Frames == 0 ? 1 : command.Frames, command.RunTriggers != 0, command.UpdateGestures != 0);
+                    _address = Next(command); // resume after the wait when its frames complete
+                    Phase = TriggerScriptPhase.WaitingForSceneWait;
+                    return;
+                case "walkTo" when _world is not null:
+                    // script.c 0x0010: counted movement to the tile; update-driven, no teleport.
+                    PendingMovement = new TriggerMovementRequest(Guid.NewGuid(), command.Position, Caller,
+                        command.TileX * 32 + command.Layer * 16, command.TileY * 16 + command.Layer * 8, Next(command));
+                    Phase = TriggerScriptPhase.WaitingForMovement;
+                    return;
+                case "redraw" when _world is not null:
+                    // script.c 0x0005: redraw + delay 60ms units (0 -> 1); the world stays frozen.
+                    PendingTransition = new TriggerTransitionRequest(Guid.NewGuid(), command.Position, "redraw",
+                        (command.Frames == 0 ? 1 : command.Frames) * 60);
+                    _address = Next(command);
+                    Phase = TriggerScriptPhase.WaitingForTransition;
+                    return;
+                case "fadeScene" when _world is not null:
+                    // script.c 0x0073: backup screen, rebuild the scene, fade by mode word.
+                    PendingTransition = new TriggerTransitionRequest(Guid.NewGuid(), command.Position, "fadeScene", command.FadeMode);
+                    _address = Next(command);
+                    Phase = TriggerScriptPhase.WaitingForTransition;
+                    return;
                 default: throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
             }
         }
@@ -427,6 +573,21 @@ public sealed record TriggerMusicState(int MusicId, int Mode);
 /// <summary>The parked 0x004E reload boundary: where it was requested and which enemy team's
 /// battle actually lost; EnemyTeamId is null when no lost battle preceded the request.</summary>
 public sealed record TriggerLostReloadRequest(TriggerPosition Position, int? EnemyTeamId, bool IsBoss);
+/// <summary>The parked 0x0009 scene-updating wait: frames are real update ticks, each advancing
+/// the whole scene (vanish countdowns, autos, optional gestures/triggers) before the receipt.</summary>
+public sealed class TriggerSceneWaitRequest(Guid id, TriggerPosition position, int framesRemaining, bool runTriggers, bool updateGestures)
+{
+    public Guid Id { get; } = id;
+    public TriggerPosition Position { get; } = position;
+    public int FramesRemaining { get; internal set; } = framesRemaining;
+    public bool RunTriggers { get; } = runTriggers;
+    public bool UpdateGestures { get; } = updateGestures;
+}
+/// <summary>The parked 0x0010 counted movement: world tile target in PAL coordinates; the world's
+/// update owner advances one PAL_NPCWalkTo step per due tick until the object arrives.</summary>
+public sealed record TriggerMovementRequest(Guid Id, TriggerPosition Position, int ObjectId, int TargetX, int TargetY, int NextAddress);
+/// <summary>The parked 0x0005 redraw (delay in milliseconds) or 0x0073 scene fade (mode word).</summary>
+public sealed record TriggerTransitionRequest(Guid Id, TriggerPosition Position, string Kind, int Parameter);
 public sealed record TriggerMessageReference(TriggerPosition Position, int StartMessageId, int Span);
 public sealed record TriggerDialogueRequest(Guid Id, TriggerDialogueContext Context, IReadOnlyList<TriggerMessageReference> MessageReferences,
     DialogueMessageBlock Content, DialogueDisplaySession Display);

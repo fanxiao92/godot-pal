@@ -4,6 +4,7 @@ public sealed record ExplorationState(StaticLeader Leader, bool IsWalking, Stati
 
 public sealed class ExplorationSession
 {
+    internal StaticSceneRules Rules => rules;
     private StaticSceneRules rules;
     public IReadOnlyList<SceneObject> Objects => rules.Objects;
     private bool hasUpdated;
@@ -34,6 +35,15 @@ public sealed class ExplorationSession
 
     internal void SaveTriggerEntry(ushort objectId, ushort returnEntry) =>
         rules = rules.WithObjects(rules.Objects.Select(o => o.Id == objectId ? o with { TriggerEntry = returnEntry } : o));
+
+    // The dynamic event world (script.c object/PC changes) swaps the immutable rule set and
+    // optionally the leader; the retained plan is rebuilt from the current leader position.
+    internal void ReplaceRules(StaticSceneRules replaced, StaticLeader? leader = null)
+    {
+        rules = replaced;
+        var next = leader ?? Current.Leader;
+        Current = new(next, false, rules.BuildPlan(next));
+    }
 
     public bool Update(uint ticksMilliseconds, int? direction)
     {

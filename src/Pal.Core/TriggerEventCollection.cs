@@ -19,6 +19,10 @@ public sealed class TriggerEventCollection
     public TriggerEventEntry GetEntry(string fileId, string id) => _entries.TryGetValue((fileId, id), out var entry)
         ? entry : throw new InvalidDataException($"{fileId}.json: missing entry '{id}'.");
 
+    /// <summary>Resolves a command's control-flow reference (goto / end redirect) to its address.</summary>
+    internal int ResolveControlTarget(TriggerCommand command) =>
+        Resolve(command.TargetReference!, command.Position.FileId, command.Position.ToString());
+
     public static TriggerEventCollection Parse(string indexText, IReadOnlyDictionary<string, string> eventTexts)
     {
         ArgumentNullException.ThrowIfNull(eventTexts);
@@ -129,7 +133,7 @@ public sealed class TriggerEventCollection
     private static void ReadTarget(JsonElement node, TriggerCommand command)
     {
         command.TargetReference = EventJson.Reference(node, "to") ?? throw new InvalidDataException("Control-flow target must be a reference, including address zero.");
-        _ = EventJson.Word(node, "limit");
+        command.Limit = EventJson.Word(node, "limit");
     }
 
     private static TriggerCommand ParseCommand(JsonElement node, string fileId, int count)
@@ -170,6 +174,21 @@ public sealed class TriggerEventCollection
                 "setMusic" => ["musicId", "mode"],
                 "fadeToRed" => [],
                 "requestReload" => [],
+                // #52 dynamic-story verbs (script.c), shared by trigger and auto contexts.
+                "walkStep" => ["direction"],
+                "face" => ["direction", "frame"],
+                "walkTo" => ["x", "y", "h"],
+                "setState" => ["objectId", "state"],
+                "hide" => ["frames"],
+                "setTriggerMode" => ["objectId", "mode"],
+                "setSceneScripts" => ["sceneId", "onEnter", "onTeleport"],
+                "setObjectScript" => ["objectId", "value", "slotIndex"],
+                "setPartyPos" => ["x", "y", "h"],
+                "setPartyFacing" => ["direction", "gesture", "memberIndex"],
+                "waitUpdate" => ["frames", "runTriggers", "updateGestures"],
+                "redraw" => ["delayUnits"],
+                "fadeScene" => ["mode"],
+                "markFailed" => [],
                 _ => throw new InvalidDataException($"Unknown op '{op}'.")
             };
             EventJson.Keys(node, context, ["label", "op", "next", "source", ..fields]);
@@ -181,8 +200,13 @@ public sealed class TriggerEventCollection
                 case "raw":
                     // Registered opcodes must use their named mapping: end/setDialog/showDialog/startBattle
                     // since M3, the #49 role-hook verbs randomJump/changeHp/changeMp/boostStat, plus
-                    // the #51 failure-boundary verbs setMusic/fadeToRed/requestReload.
-                    if (opcode is 0 or 0x3c or 0xffff or 6 or 27 or 28 or 48 or 0x43 or 0x4e or 0x4f)
+                    // the #51 failure-boundary verbs setMusic/fadeToRed/requestReload, and the #52
+                    // dynamic-story verbs walkStep/face/walkTo/setState/hide/setTriggerMode/
+                    // setSceneScripts/setObjectScript/setPartyPos/setPartyFacing/waitUpdate/redraw/
+                    // fadeScene/markFailed.
+                    if (opcode is 0 or 0x3c or 0xffff or 6 or 27 or 28 or 48 or 0x43 or 0x4e or 0x4f
+                        or >= 0x0b and <= 0x10 or 0x15 or 0x40 or 0x46 or 0x49 or 0x52 or 0x6d or 0x73 or 0x90
+                        or 5 or 9 or 0x41)
                         throw new InvalidDataException("Registered opcode must use named mapping.");
                     break;
                 case "end":
@@ -261,6 +285,105 @@ public sealed class TriggerEventCollection
                     // script.c 0x004E: load the last saved game; the script stops here (return 0).
                     if (opcode != 0x4e) throw new InvalidDataException("Invalid requestReload mapping.");
                     break;
+                case "walkStep":
+                    // script.c 0x000B-0x000E: caller direction = opcode - 0x000B, then one step at speed 2.
+                    command.Direction = EventJson.Word(node, "direction");
+                    if (command.Direction is < 0 or > 3 || opcode != 0x000b + command.Direction)
+                        throw new InvalidDataException("Invalid walkStep direction/opcode mapping.");
+                    break;
+                case "face":
+                    // script.c 0x000F: caller object direction/gesture; 0xFFFF keeps the current value.
+                    if (opcode != 0x000f) throw new InvalidDataException("Invalid face mapping.");
+                    command.Direction = EventJson.Word(node, "direction");
+                    command.Frame = EventJson.Word(node, "frame");
+                    if (command.Direction is not (>= 0 and <= 3 or 0xffff) || command.Frame is not (>= 0 and <= 3 or 0xffff))
+                        throw new InvalidDataException("face direction/frame must be 0..3 or 0xFFFF (keep).");
+                    break;
+                case "walkTo":
+                    // script.c 0x0010: caller walks to map tile (x,y,h) at speed 3; the command
+                    // repeats until arrival (auto: entry stays; trigger: a movement request).
+                    if (opcode != 0x10) throw new InvalidDataException("Invalid walkTo mapping.");
+                    command.TileX = EventJson.Word(node, "x");
+                    command.TileY = EventJson.Word(node, "y");
+                    command.Layer = EventJson.Word(node, "h");
+                    if (command.Layer is < 0 or > 1) throw new InvalidDataException("walkTo.h must be 0 or 1.");
+                    break;
+                case "setState":
+                    // script.c 0x0049: operand0 selects pCurrent (0/0xFFFF = caller); state is a SHORT.
+                    if (opcode != 0x49) throw new InvalidDataException("Invalid setState mapping.");
+                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.State = EventJson.Number(node, "state");
+                    if (command.State is < short.MinValue or > short.MaxValue)
+                        throw new InvalidDataException("setState.state must be a signed SHORT.");
+                    break;
+                case "hide":
+                    // script.c 0x0052: caller's state *= -1 and vanish time = frames (0 -> 800).
+                    if (opcode != 0x52) throw new InvalidDataException("Invalid hide mapping.");
+                    command.Frames = EventJson.Word(node, "frames");
+                    break;
+                case "setTriggerMode":
+                    // script.c 0x0040: operand0 selects pCurrent (0/0xFFFF = caller).
+                    if (opcode != 0x40) throw new InvalidDataException("Invalid setTriggerMode mapping.");
+                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.TriggerModeWord = EventJson.Word(node, "mode");
+                    break;
+                case "setSceneScripts":
+                    // script.c 0x006D: per-field writes into the scene's enter/teleport script words.
+                    if (opcode != 0x6d) throw new InvalidDataException("Invalid setSceneScripts mapping.");
+                    command.SceneId = EventJson.Word(node, "sceneId");
+                    command.OnEnter = EventJson.Word(node, "onEnter");
+                    command.OnTeleport = EventJson.Word(node, "onTeleport");
+                    break;
+                case "setObjectScript":
+                    // script.c 0x0090: gpGlobals->g.rgObject[id].rgwData[2+slot] = value (cross-scene).
+                    if (opcode != 0x90) throw new InvalidDataException("Invalid setObjectScript mapping.");
+                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.Value = EventJson.Word(node, "value");
+                    command.SlotIndex = EventJson.Word(node, "slotIndex");
+                    if (command.SlotIndex > 5) throw new InvalidDataException("setObjectScript.slotIndex must be 0..5.");
+                    break;
+                case "setPartyPos":
+                    // script.c 0x0046: party/viewport placed at map tile (x,y,h); direction offsets
+                    // only affect trailing members, which the leader-only world does not model.
+                    if (opcode != 0x46) throw new InvalidDataException("Invalid setPartyPos mapping.");
+                    command.TileX = EventJson.Word(node, "x");
+                    command.TileY = EventJson.Word(node, "y");
+                    command.Layer = EventJson.Word(node, "h");
+                    if (command.Layer is < 0 or > 1) throw new InvalidDataException("setPartyPos.h must be 0 or 1.");
+                    break;
+                case "setPartyFacing":
+                    // script.c 0x0015: party direction + member gesture (frame = direction*3+gesture).
+                    if (opcode != 0x15) throw new InvalidDataException("Invalid setPartyFacing mapping.");
+                    command.Direction = EventJson.Word(node, "direction");
+                    command.Frame = EventJson.Word(node, "gesture");
+                    command.MemberIndex = EventJson.Word(node, "memberIndex");
+                    if (command.Direction is < 0 or > 3 || command.Frame is < 0 or > 2 || command.MemberIndex > 4)
+                        throw new InvalidDataException("setPartyFacing direction/gesture/memberIndex out of range.");
+                    break;
+                case "waitUpdate":
+                    // script.c 0x0009: wait frames while running the real scene update each frame
+                    // (triggers optional per operand1, party gestures optional per operand2).
+                    if (opcode != 9) throw new InvalidDataException("Invalid waitUpdate mapping.");
+                    command.Frames = EventJson.Word(node, "frames");
+                    command.RunTriggers = EventJson.Word(node, "runTriggers");
+                    command.UpdateGestures = EventJson.Word(node, "updateGestures");
+                    if (command.RunTriggers is not (0 or 1) || command.UpdateGestures is not (0 or 1))
+                        throw new InvalidDataException("waitUpdate.runTriggers/updateGestures must be 0 or 1.");
+                    break;
+                case "redraw":
+                    // script.c 0x0005: redraw the scene and delay 60ms units (0 -> 1).
+                    if (opcode != 5) throw new InvalidDataException("Invalid redraw mapping.");
+                    command.Frames = EventJson.Word(node, "delayUnits");
+                    break;
+                case "fadeScene":
+                    // script.c 0x0073: backup screen, rebuild the scene, VIDEO_FadeScreen(mode).
+                    if (opcode != 0x73) throw new InvalidDataException("Invalid fadeScene mapping.");
+                    command.FadeMode = EventJson.Word(node, "mode");
+                    break;
+                case "markFailed":
+                    // script.c 0x0041: g_fScriptSuccess = FALSE.
+                    if (opcode != 0x41) throw new InvalidDataException("Invalid markFailed mapping.");
+                    break;
             }
             return command;
         }
@@ -288,6 +411,7 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal string? NextReference { get; } = nextReference;
     internal int? NextAddress { get; set; }
     internal string? TargetReference { get; set; }
+    internal int Limit { get; set; }
     internal string? Mode { get; set; }
     internal string? Box { get; set; }
     internal int PortraitId { get; set; }
@@ -308,6 +432,25 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int RoleOperand { get; set; }
     internal int MusicId { get; set; }
     internal int MusicMode { get; set; }
+    // #52 dynamic-story fields (script.c operand words, retained as parsed).
+    internal int Direction { get; set; }
+    internal int Frame { get; set; }
+    internal int TileX { get; set; }
+    internal int TileY { get; set; }
+    internal int Layer { get; set; }
+    internal int ObjectId { get; set; }
+    internal int State { get; set; }
+    internal int Frames { get; set; }
+    internal int TriggerModeWord { get; set; }
+    internal int FadeMode { get; set; }
+    internal int SceneId { get; set; }
+    internal int OnEnter { get; set; }
+    internal int OnTeleport { get; set; }
+    internal int Value { get; set; }
+    internal int SlotIndex { get; set; }
+    internal int MemberIndex { get; set; }
+    internal int RunTriggers { get; set; }
+    internal int UpdateGestures { get; set; }
 }
 
 internal static class EventJson
