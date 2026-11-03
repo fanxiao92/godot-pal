@@ -72,7 +72,8 @@ public sealed class TriggerBattleContent
     {
         if (roles.Values.Any(x => x.MaxHp > 32767))
             throw new InvalidDataException("Trigger battle content requires maxHP <= 32767 for subsequent battles.");
-        ClassicBattleLifecycleSession.Validate(roles.Values.ToArray(), SettledPlayers(roles), Enemies(teamId), GrowthByRole);
+        ClassicBattleLifecycleSession.Validate(roles.Values.ToArray(), SettledPlayers(roles), Enemies(teamId), GrowthByRole,
+            BattleEquipmentState.Initialize(this));
     }
 
     internal static BattleRoleSnapshot Freeze(BattleRoleSnapshot role) => role with

@@ -382,13 +382,11 @@ public sealed class ModernBattleContentTests
     [Theory]
     [InlineData("roles.0.equipment.0")]
     [InlineData("roles.0.statuses.0")]
-    [InlineData("roles.0.coveredByRoleId")]
     [InlineData("players.0.equipment.0")]
     [InlineData("players.0.statuses.0")]
     [InlineData("players.0.poisons.0")]
     [InlineData("players.0.dyingScript")]
     [InlineData("players.0.friendDeathScript")]
-    [InlineData("players.0.coveredByRoleId")]
     [InlineData("teams.0.enemies.0.statuses.0")]
     [InlineData("teams.0.enemies.0.poisons.0")]
     [InlineData("teams.0.enemies.0.turnStartScript")]
@@ -432,6 +430,23 @@ public sealed class ModernBattleContentTests
         };
         Assert.Equal(1, preserved);
         AssertUnsupported(content);
+    }
+
+    [Fact]
+    public void Legal_cover_relationship_is_preserved_and_the_selected_entry_executes_it()
+    {
+        // #48 opens the rgwCoveredBy relationship for combat: an in-range role number no longer hits
+        // the old prebattle rejection, whether or not that role fights beside the covered player.
+        var data = Data();
+        data["roles"]![0]!["coveredByRoleId"] = 1;
+        data["players"]![0]!["coveredByRoleId"] = 1;
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        Assert.Equal(1, content.InitialRole.CoveredByRoleId);
+        Assert.Equal(1, content.Player.CoveredByRoleId);
+        var random = new BattleRandom();
+        var script = Script(content, random);
+        script.Start("shared", "npc", 28);
+        Assert.NotNull(script.PendingBattle);
     }
 
     [Fact]

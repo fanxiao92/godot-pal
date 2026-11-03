@@ -41,8 +41,18 @@ public sealed record ClassicBattleAction(int Round, ClassicBattleSide Attacker, 
 {
     public int ActorIndex { get; init; }
     public int TargetIndex { get; init; }
+    /// <summary>True on the second strike of a dual attack; one queue action still counts once (fight.c:3628).</summary>
+    public bool SecondStrike { get; init; }
+    /// <summary>Party index of the member that covered the enemy strike (fight.c:4959-4973); null when nobody covered.</summary>
+    public int? CovererPartyIndex { get; init; }
 }
-public sealed record ClassicBattlePlayerView(int PartyIndex, int RoleId, int Hp, ClassicBattleCounts Counts, int? SelectedEnemySlot);
+public sealed record ClassicBattlePlayerView(int PartyIndex, int RoleId, int Hp, ClassicBattleCounts Counts, int? SelectedEnemySlot)
+{
+    /// <summary>The effective panel the session consumes (equipment included); published per party member.</summary>
+    public int Attack { get; init; }
+    public int Defense { get; init; }
+    public int Dexterity { get; init; }
+}
 public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp);
 public sealed record ClassicBattleQueueEntry(ClassicBattleSide Side, int ActorIndex, ushort Dexterity);
 public sealed record ClassicBattleCounts(int Attack, int Health);

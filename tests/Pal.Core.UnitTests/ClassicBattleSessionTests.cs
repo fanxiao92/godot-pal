@@ -198,7 +198,7 @@ public sealed class ClassicBattleSessionTests
             d.Players[0] with { Equipment = [1, 0, 0, 0, 0, 0] }, d.Players[0] with { Equipment = [0] },
             d.Players[0] with { Statuses = [0, 0, 0, 0, 0, 0, 0, 0, 1000] }, d.Players[0] with { Poisons = [1] },
             d.Players[0] with { DyingScript = 1 }, d.Players[0] with { FriendDeathScript = 1 },
-            d.Players[0] with { CoveredByRoleId = 0 }, d.Players[0] with { AttackAll = true },
+            d.Players[0] with { CoveredByRoleId = 6 }, d.Players[0] with { AttackAll = true },
             d.Players[0] with { Hp = 0 }, d.Players[0] with { Hp = 201 }, d.Players[0] with { RoleId = 6 },
             d.Players[0] with { Attack = -1 }, d.Players[0] with { Defense = 65536 }, d.Players[0] with { Dexterity = -1 } })
             yield return [d with { Players = [player] }];

@@ -212,7 +212,8 @@ public sealed class TriggerScriptSession
                     break;
                 case "startBattle" when _battleContent is not null:
                     var lifecycle = new ClassicBattleLifecycleSession(BattleRoles!.Values.ToArray(), _battleContent.SettledPlayers(BattleRoles),
-                        _battleContent.Enemies(command.TeamId), _battleContent.GrowthByRole, _battleRandom!);
+                        _battleContent.Enemies(command.TeamId), _battleContent.GrowthByRole, _battleRandom!,
+                        BattleEquipmentState.Initialize(_battleContent));
                     PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.TeamId, command.IsBoss,
                         Next(command), command.LossAddress, command.FleeAddress, lifecycle);
                     Phase = TriggerScriptPhase.WaitingForBattle;

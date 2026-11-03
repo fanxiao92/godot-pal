@@ -28,6 +28,9 @@ public sealed class BattleEquipmentState
     private readonly int[,] statuses = new int[RoleCount, StatusCount];
 
     private BattleEquipmentState() { }
+    /// <summary>True only when the six-role grid was declared; an undeclared zero state keeps the old
+    /// zero-equipment domain instead of licensing the exact-grid agreement checks.</summary>
+    public bool Declared { get; private init; }
 
     /// <summary>Zero state when no role carries equipment; throws before any state when non-zero equipment lacks the six-role closure.</summary>
     public static BattleEquipmentState Initialize(TriggerBattleContent content)
@@ -49,7 +52,7 @@ public sealed class BattleEquipmentState
         ArgumentNullException.ThrowIfNull(roleEquipment);
         ArgumentNullException.ThrowIfNull(equipmentObjects);
         ValidateEquipmentClosure(roleEquipment, equipmentObjects.Values.ToList(), []);
-        var state = new BattleEquipmentState();
+        var state = new BattleEquipmentState() { Declared = true };
         for (int role = 0; role < RoleCount; role++)
             for (int slot = 0; slot < SlotCount; slot++)
             {
@@ -161,6 +164,16 @@ public sealed class BattleEquipmentState
         for (int slot = 0; slot < RegisterCount; slot++)
             if (battleSprite[roleId, slot] != 0) sprite = battleSprite[roleId, slot];
         return sprite;
+    }
+
+    /// <summary>True when any equipment battle-sprite register replaces the base sprite; the battle
+    /// chain has no authored replacement sprite, so combat rejects such closures before side effects.</summary>
+    public bool OverridesBattleSprite(int roleId)
+    {
+        Role(roleId);
+        for (int slot = 0; slot < RegisterCount; slot++)
+            if (battleSprite[roleId, slot] != 0) return true;
+        return false;
     }
 
     /// <summary>Persistent equipment status words (>999) produced by the equip scripts for one role.</summary>
