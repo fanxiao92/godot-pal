@@ -88,10 +88,7 @@ public static class NativeFirstMandatoryBattleProfile
         }
 
         var events = TriggerEventLoader.Load(native.EventsIndex);
-        using var index = System.Text.Json.JsonDocument.Parse(Godot.FileAccess.GetFileAsString(native.EventsIndex));
-        string directory = native.EventsIndex[..native.EventsIndex.LastIndexOf('/')];
-        var eventPaths = index.RootElement.GetProperty("files").EnumerateArray()
-            .Select(id => directory + "/" + id.GetString() + ".json").Prepend(native.EventsIndex).ToArray();
+        var eventPaths = TriggerEventLoader.DependencyUris(native.EventsIndex);
         foreach (string path in eventPaths) CheckFile(path, hashes);
         string dialogue = native.DialogueDirectory;
         string[] seeds = new[] { native.BattleContentUri, dialogue + "/Font.tres", dialogue + "/Language.zh-Hans.tres",
