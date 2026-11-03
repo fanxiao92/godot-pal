@@ -225,7 +225,7 @@ public class NativeBattleVisualProfileTests
         f.Player.FrameCount = 9;
         f.Enemy.FrameCount = 1;
         f.Team.MagicFrames = 0; f.Team.AttackFrames = 0;
-        f.Team.EnemyPosition = new(-32768, 32767); f.Profile.PlayerPosition = new(-2, -1);
+        f.Team.EnemyPosition = new(-32768, 32767);
         f.SaveLeaves(); f.RefreshHashes(); f.Save();
         var visual = f.Load();
         AssertThat(visual.PlayerSprite.Frames.Last().Index).IsEqual(65535);
@@ -233,6 +233,63 @@ public class NativeBattleVisualProfileTests
         AssertThat(visual.Teams[18].EnemyPosition).IsEqual(new Vector2I(-32768, 32767));
         f.Team.MagicFrames = 1; f.Team.AttackFrames = 1; f.Save();
         AssertThat(f.Load().Teams[18].AttackFrames).IsEqual(1);
+    }
+
+    [TestCase]
+    public void PartySlotsBindStoryEnemySlotsWithoutMergingDuplicateIds()
+    {
+        using var f = new NativeBattleVisualProfileFixture(party: true);
+        var visual = f.Load();
+        var team = visual.Teams[18];
+        AssertThat(team.EnemySlots.Count).IsEqual(2);
+        AssertThat(team.EnemySlots.Select(s => s.TargetId).SequenceEqual(new[] { 7, 7 })).IsTrue();
+        AssertThat(team.EnemySlots.Select(s => s.EnemyPosition).SequenceEqual(new[] { new Vector2I(100, 120), new Vector2I(128, 104) })).IsTrue();
+        AssertThat(visual.PlayerPosition).IsEqual(new Vector2I(200, 176));
+        AssertThat(((IList<CheckedBattleVisualEnemySlot>)team.EnemySlots).IsReadOnly).IsTrue();
+        // The legacy single-pair projection must not silently merge the two duplicate-id slots.
+        bool threw = false;
+        try { _ = team.TargetId; } catch (InvalidOperationException) { threw = true; }
+        AssertThat(threw).IsTrue();
+        threw = false;
+        try { _ = team.EnemyPosition; } catch (InvalidOperationException) { threw = true; }
+        AssertThat(threw).IsTrue();
+    }
+
+    [TestCase]
+    public void ExplicitSingleSlotRemainsStrictAndLegacyProjectionStillWorks()
+    {
+        using var f = new NativeBattleVisualProfileFixture();
+        // Explicit slots are authoritative when present; the legacy pair keeps its old meaning otherwise.
+        f.Team.EnemySlots = [new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) }];
+        f.Save();
+        var visual = f.Load();
+        AssertThat(visual.Teams[18].EnemySlots.Count).IsEqual(1);
+        AssertThat(visual.Teams[18].TargetId).IsEqual(7);
+        AssertThat(visual.Teams[18].EnemyPosition).IsEqual(new Vector2I(100, 120));
+        AssertThat(visual.Teams[18].EnemySlots[0].EnemyPosition).IsEqual(new Vector2I(100, 120));
+    }
+
+    [TestCase("legacy-pair")]
+    [TestCase("slot-count")]
+    [TestCase("slot-target")]
+    [TestCase("slot-position")]
+    [TestCase("player-origin")]
+    [TestCase("single-origin")]
+    public void PartyVisualSlotAndLayoutMetadataMustMatchSelectedStory(string fault)
+    {
+        using var f = new NativeBattleVisualProfileFixture(fault != "single-origin");
+        string expected;
+        switch (fault)
+        {
+            case "legacy-pair": f.Profile.Teams[0].EnemySlots = []; expected = "requires visual EnemySlots"; break;
+            case "slot-count": f.Profile.Teams[0].EnemySlots = [f.Profile.Teams[0].EnemySlots[0]]; expected = "one-to-one"; break;
+            case "slot-target": f.Profile.Teams[0].EnemySlots[1].TargetId = 8; expected = "EnemySlots TargetId"; break;
+            case "slot-position": f.Profile.Teams[0].EnemySlots[0].EnemyPosition = new(0, -32769); expected = "SHORT"; break;
+            case "player-origin": f.Profile.PlayerPosition = new(240, 170); expected = "g_rgPlayerPos"; break;
+            default: f.Profile.PlayerPosition = new(200, 176); expected = "g_rgPlayerPos"; break;
+        }
+        f.Save();
+        AssertThat(Failure(() => f.Load()).Contains(expected)).IsTrue();
     }
 
     [TestCase("missing-hash")]

@@ -9,9 +9,14 @@ using static Pal.Game.Profiles.NativeContentDependencies;
 
 namespace Pal.Game.Profiles;
 
-/// <summary>Authored single-player/single-target visual binding; no battle or animation is advanced.</summary>
+/// <summary>Authored story visual binding addressed per story enemy slot (duplicate enemy
+/// definition IDs stay separate slots); no battle or animation is advanced.</summary>
 public static class NativeBattleVisualProfile
 {
+    // Reference SDLPal battle.c:27-31 g_rgPlayerPos bottom-center origins. This chain
+    // supports parties of one or two; index is party size minus one, column zero is the head.
+    private static readonly Vector2I[] PlayerOrigins = [new(240, 170), new(200, 176)];
+
     public static CheckedBattleVisualProfile Load(string uri, CheckedStoryProfile story)
     {
         try
@@ -23,16 +28,42 @@ public static class NativeBattleVisualProfile
             var native = LoadResource<PalBattleVisualProfile>(uri);
             Require(native.FormatVersion == 1, "visual FormatVersion must be 1");
             Require(!string.IsNullOrWhiteSpace(native.SourceIdentity), "visual SourceIdentity is required (declaration only)");
-            Require(native.RoleId == story!.BattleContent.Player.RoleId, "visual RoleId must match story player role");
+            Require(native.RoleId == story!.BattleContent.Players[0].RoleId, "visual RoleId must match story player role");
             Position(native.PlayerPosition);
+            Require(native.PlayerPosition == PlayerOrigins[story.BattleContent.Players.Count - 1],
+                "player position must equal the reference party layout origin g_rgPlayerPos[party-1][0] (battle.c:27-31)");
             Require(native.Teams is not null && native.Teams.All(x => x is not null), "visual Teams contains null");
             var teams = new Dictionary<int, PalBattleVisualTeam>();
+            var teamSlots = new Dictionary<int, CheckedBattleVisualEnemySlot[]>();
             foreach (var team in native.Teams!)
             {
                 Require(teams.TryAdd(team.TeamId, team), "duplicate visual TeamId");
-                Require(story.BattleContent.Teams.TryGetValue(team.TeamId, out var enemy) && team.TargetId == enemy.Id,
-                    "visual TeamId/TargetId does not match story battle target (not sprite ID)");
-                Position(team.EnemyPosition);
+                Require(story.BattleContent.EnemyTeams.TryGetValue(team.TeamId, out var enemies)
+                    && enemies.All(x => x is not null), "visual TeamId does not match a story battle team");
+                if (team.EnemySlots is { Length: > 0 } slots)
+                {
+                    Require(slots.All(x => x is not null), "visual EnemySlots contains null");
+                    Require(slots.Length == enemies!.Count,
+                        "visual EnemySlots must match the story team's enemy slots one-to-one (slot order preserved)");
+                    var checkedSlots = new CheckedBattleVisualEnemySlot[slots.Length];
+                    for (int slot = 0; slot < slots.Length; slot++)
+                    {
+                        Require(slots[slot].TargetId == enemies[slot].Id,
+                            "visual EnemySlots TargetId must match the story enemy slot Id (not sprite ID)");
+                        Position(slots[slot].EnemyPosition);
+                        checkedSlots[slot] = new(slots[slot].TargetId, slots[slot].EnemyPosition);
+                    }
+                    teamSlots.Add(team.TeamId, checkedSlots);
+                }
+                else
+                {
+                    // Legacy single pair. A multi-enemy story team must not collapse into it:
+                    // slot identities would be merged or silently dropped.
+                    Require(enemies!.Count == 1, "a multi-enemy story team requires visual EnemySlots, not the legacy single pair");
+                    Require(team.TargetId == enemies[0].Id, "visual TeamId/TargetId does not match story battle target (not sprite ID)");
+                    Position(team.EnemyPosition);
+                    teamSlots.Add(team.TeamId, [new(team.TargetId, team.EnemyPosition)]);
+                }
                 Require(team.IdleFrames is > 0 and <= ushort.MaxValue && Word(team.MagicFrames) && Word(team.AttackFrames)
                     && Word(team.ActWaitFrames) && (team.IdleAnimSpeed == -1 || Word(team.IdleAnimSpeed)), "invalid enemy frame metadata WORDs");
             }
@@ -82,7 +113,7 @@ public static class NativeBattleVisualProfile
                 var sprite = LoadSprite(team.EnemySpriteUri);
                 Require(Enumerable.Range(0, team.IdleFrames + team.MagicFrames + team.AttackFrames)
                     .All(sprite.Frames.Select(x => x.Index).ToHashSet().Contains), "enemy frame metadata references unaddressable frames");
-                checkedTeams.Add(team.TeamId, new(team, background, sprite));
+                checkedTeams.Add(team.TeamId, new(team, teamSlots[team.TeamId], background, sprite));
             }
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
             return new(native, player, palette, effect, numbers, checkedTeams, hashes);
@@ -168,8 +199,10 @@ public sealed class CheckedBattleVisualProfile
 public sealed class CheckedBattleVisualTeam
 {
     public int TeamId { get; }
-    public int TargetId { get; }
-    public Vector2I EnemyPosition { get; }
+    /// <summary>Story-slot-ordered bindings; duplicate target IDs stay separate slots.</summary>
+    public IReadOnlyList<CheckedBattleVisualEnemySlot> EnemySlots { get; }
+    public int TargetId => SingleSlot().TargetId;
+    public Vector2I EnemyPosition => SingleSlot().EnemyPosition;
     public int IdleFrames { get; }
     public int IdleAnimSpeed { get; }
     public int MagicFrames { get; }
@@ -177,11 +210,16 @@ public sealed class CheckedBattleVisualTeam
     public int ActWaitFrames { get; }
     public PalDialogueIndexedImage Background { get; }
     public PalSprite EnemySprite { get; }
-    internal CheckedBattleVisualTeam(PalBattleVisualTeam native, PalDialogueIndexedImage background, PalSprite enemy)
+    private CheckedBattleVisualEnemySlot SingleSlot() => EnemySlots.Count == 1 ? EnemySlots[0]
+        : throw new InvalidOperationException("Single-slot projection cannot address multi-enemy visual slots; use EnemySlots.");
+    internal CheckedBattleVisualTeam(PalBattleVisualTeam native, CheckedBattleVisualEnemySlot[] slots,
+        PalDialogueIndexedImage background, PalSprite enemy)
     {
-        TeamId = native.TeamId; TargetId = native.TargetId; EnemyPosition = native.EnemyPosition;
+        TeamId = native.TeamId; EnemySlots = Array.AsReadOnly(slots);
         IdleAnimSpeed = native.IdleAnimSpeed;
         IdleFrames = native.IdleFrames; MagicFrames = native.MagicFrames; AttackFrames = native.AttackFrames; ActWaitFrames = native.ActWaitFrames;
         Background = background; EnemySprite = enemy;
     }
 }
+
+public sealed record CheckedBattleVisualEnemySlot(int TargetId, Vector2I EnemyPosition);

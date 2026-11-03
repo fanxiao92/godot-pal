@@ -253,11 +253,33 @@ public partial class PrepareStoryPackage : Node
         Require(v.GetProperty("teams").ValueKind == JsonValueKind.Array, "teams must be an array");
         visual.Teams = v.GetProperty("teams").EnumerateArray().Select(t =>
         {
-            PropertiesWithOptional(t, new[] { "idleAnimSpeed" }, "teamId", "targetId", "backgroundUri", "enemySpriteUri", "enemyPosition", "idleFrames", "magicFrames", "attackFrames", "actWaitFrames");
-            return new PalBattleVisualTeam { TeamId = Int(t, "teamId"), TargetId = Int(t, "targetId"), BackgroundUri = Text(t, "backgroundUri"),
-                EnemySpriteUri = Text(t, "enemySpriteUri"), EnemyPosition = Position(t, "enemyPosition"), IdleFrames = Int(t, "idleFrames"),
+            PropertiesWithOptional(t, new[] { "idleAnimSpeed", "enemies", "targetId", "enemyPosition" },
+                "teamId", "backgroundUri", "enemySpriteUri", "idleFrames", "magicFrames", "attackFrames", "actWaitFrames");
+            bool slots = t.TryGetProperty("enemies", out var enemies);
+            bool legacyTarget = t.TryGetProperty("targetId", out _);
+            bool legacyPosition = t.TryGetProperty("enemyPosition", out _);
+            Require(slots ? !(legacyTarget || legacyPosition) : legacyTarget && legacyPosition,
+                "a team declares either enemies slots or the legacy targetId/enemyPosition pair, never both or neither");
+            var team = new PalBattleVisualTeam { TeamId = Int(t, "teamId"), BackgroundUri = Text(t, "backgroundUri"),
+                EnemySpriteUri = Text(t, "enemySpriteUri"), IdleFrames = Int(t, "idleFrames"),
                 IdleAnimSpeed = t.TryGetProperty("idleAnimSpeed", out _) ? Int(t, "idleAnimSpeed") : -1,
                 MagicFrames = Int(t, "magicFrames"), AttackFrames = Int(t, "attackFrames"), ActWaitFrames = Int(t, "actWaitFrames") };
+            if (slots)
+            {
+                Require(enemies.ValueKind == JsonValueKind.Array && enemies.GetArrayLength() is >= 1 and <= 2,
+                    "enemies requires one or two enemy slots");
+                team.EnemySlots = enemies.EnumerateArray().Select(enemy =>
+                {
+                    Properties(enemy, "targetId", "enemyPosition");
+                    return new PalBattleVisualEnemySlot { TargetId = Int(enemy, "targetId"), EnemyPosition = Position(enemy, "enemyPosition") };
+                }).ToArray();
+            }
+            else
+            {
+                team.TargetId = Int(t, "targetId");
+                team.EnemyPosition = Position(t, "enemyPosition");
+            }
+            return team;
         }).ToArray();
         foreach (var t in v.GetProperty("teams").EnumerateArray())
             if (t.TryGetProperty("idleAnimSpeed", out _)) Require(Int(t, "idleAnimSpeed") is >= 0 and <= ushort.MaxValue, "idleAnimSpeed requires WORD");

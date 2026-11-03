@@ -52,7 +52,77 @@ public class PrepareStoryPackageTests
                 AssertThat(story.BattleContent.EnemyTeams[18].Count).IsEqual(2);
                 AssertThat(story.BattleContent.EnemyTeams[18].Select(x => x.Id).SequenceEqual(new[] { 7, 7 })).IsTrue();
                 AssertThat(visual.PlayerPosition).IsEqual(new Vector2I(200, 176));
+                AssertThat(visual.Teams[18].EnemySlots.Select(s => s.TargetId).SequenceEqual(new[] { 7, 7 })).IsTrue();
+                AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemyPosition)
+                    .SequenceEqual(new[] { new Vector2I(100, 120), new Vector2I(128, 104) })).IsTrue();
             }
+    }
+
+    [TestCase]
+    public void PublicPreparePublishesExplicitEnemySlotsForASingleSlotTeam()
+    {
+        using var source = new Preparation();
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
+        var team = (JsonObject)metadata["visual"]!["teams"]![0]!;
+        team.Remove("targetId");
+        team.Remove("enemyPosition");
+        team["enemies"] = new JsonArray(new JsonObject { ["targetId"] = 7, ["enemyPosition"] = new JsonArray(100, 120) });
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        string[] before = source.Snapshot();
+        var result = PrepareStoryPackage.Prepare(source.Input, source.Output);
+        var visual = NativeBattleVisualProfile.Load(result.VisualUri, NativeStoryProfile.Load(result.StoryUri));
+        AssertThat(visual.Teams[18].EnemySlots.Count).IsEqual(1);
+        AssertThat(visual.Teams[18].TargetId).IsEqual(7);
+        AssertThat(visual.Teams[18].EnemyPosition).IsEqual(new Vector2I(100, 120));
+        AssertThat(source.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase("unknown-item-field")]
+    [TestCase("mix-legacy")]
+    [TestCase("legacy-missing-position")]
+    [TestCase("zero-slots")]
+    [TestCase("three-slots")]
+    [TestCase("slot-position")]
+    public void AuthorEnemiesSlotsAreStrictAndNeverMixWithTheLegacyPair(string fault)
+    {
+        using var source = new Preparation();
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
+        var team = (JsonObject)metadata["visual"]!["teams"]![0]!;
+        switch (fault)
+        {
+            case "unknown-item-field":
+                team["enemies"] = new JsonArray(new JsonObject { ["targetId"] = 7,
+                    ["enemyPosition"] = new JsonArray(100, 120), ["unknown"] = 0 });
+                break;
+            case "mix-legacy":
+                team["enemies"] = new JsonArray(new JsonObject { ["targetId"] = 7, ["enemyPosition"] = new JsonArray(100, 120) });
+                break;
+            case "legacy-missing-position": team.Remove("enemyPosition"); break;
+            case "zero-slots":
+                team.Remove("targetId"); team.Remove("enemyPosition"); team["enemies"] = new JsonArray(); break;
+            case "three-slots":
+                team.Remove("targetId"); team.Remove("enemyPosition");
+                team["enemies"] = new JsonArray(
+                    new JsonObject { ["targetId"] = 7, ["enemyPosition"] = new JsonArray(100, 120) },
+                    new JsonObject { ["targetId"] = 7, ["enemyPosition"] = new JsonArray(128, 104) },
+                    new JsonObject { ["targetId"] = 7, ["enemyPosition"] = new JsonArray(1, 1) });
+                break;
+            default:
+                team.Remove("targetId"); team.Remove("enemyPosition");
+                team["enemies"] = new JsonArray(new JsonObject { ["targetId"] = 7, ["enemyPosition"] = new JsonArray(32768, 120) });
+                break;
+        }
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        string[] before = source.Snapshot();
+        Reject(source.Input, source.Output, fault switch
+        {
+            "unknown-item-field" => "unknown fields",
+            "mix-legacy" or "legacy-missing-position" => "never both or neither",
+            "zero-slots" or "three-slots" => "one or two enemy slots",
+            _ => "SHORT",
+        });
+        AssertThat(source.Snapshot()).IsEqual(before);
+        AssertThat(Directory.Exists(source.Output)).IsFalse();
     }
 
     [TestCase("version")]
