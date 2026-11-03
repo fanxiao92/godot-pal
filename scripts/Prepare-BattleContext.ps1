@@ -73,7 +73,8 @@ try {
         if(Test-Inside $bindingPath $inputRoot){throw 'BattleResources must not be inside the authored input directory.'}
         $resourceArgs=@('--battle-resources',$bindingPath)
     }
-    Invoke-Checked $godot @('--headless','--path',$project,'res://Editor/PrepareBattleContext.tscn','--','--battle-input',$inputRoot,'--battle-output',$outputRoot,'--static-resources',$options['-StaticResources'],'--static-profile',$options['-StaticProfile'])+$resourceArgs 'PAL_PREPARE_BATTLE_CONTEXT:first-mandatory-battle-pre-trigger-v1'
+    $editorArgs = @('--headless','--path',$project,'res://Editor/PrepareBattleContext.tscn','--','--battle-input',$inputRoot,'--battle-output',$outputRoot,'--static-resources',$options['-StaticResources'],'--static-profile',$options['-StaticProfile']) + $resourceArgs
+    Invoke-Checked $godot $editorArgs 'PAL_PREPARE_BATTLE_CONTEXT:first-mandatory-battle-pre-trigger-v1'
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot; Assert-TreeNoLink $outputRoot
     $null=Resolve-StaticAssetUri $options['-StaticResources'] 'StaticResources' $true; $null=Resolve-StaticAssetUri $options['-StaticProfile'] 'StaticProfile' $false; Assert-NoLink $staticScene; Assert-TreeNoLink $staticRoot
     Write-Host 'Prepared native Godot battle context: Battle/Profile.tres'; exit 0
