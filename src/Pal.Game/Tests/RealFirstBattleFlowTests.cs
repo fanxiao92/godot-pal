@@ -40,7 +40,7 @@ public class RealFirstBattleFlowTests
             scene.Press(Key.Enter); // search owner28 -> @09C3 opens through the verified closure
 
             int pages = 0; int frames = 0;
-            ulong deadline = Time.GetTicksMsec() + 200000; // the parked waits/movements advance
+            ulong deadline = Time.GetTicksMsec() + (System.Environment.GetEnvironmentVariable("REAL_TRACE_SHORT") is null ? 200000u : 30000u); // the parked waits/movements advance
             while (main.StoryBattle is null && main.Dialogue?.Session?.PendingLostReload is null
                 && Time.GetTicksMsec() < deadline)
             {
@@ -61,7 +61,7 @@ public class RealFirstBattleFlowTests
                 }
                 frames++;
                 if ((frames & 511) == 0)
-                    System.Console.WriteLine($"REAL_TRACE:frame={frames} phase={display?.Display.Current.Phase} text={display?.Display.Current.VisibleText?.Length} pos={main.Dialogue?.Session?.CurrentPosition}");
+                    System.Console.WriteLine($"REAL_TRACE:frame={frames} phase={display?.Display.Current.Phase} text={display?.Display.Current.VisibleText?.Length} pos={main.Dialogue?.Session?.CurrentPosition} inTree={main.Display?.IsInsideTree()} canProc={main.Display?.CanProcess()} procIn={main.Display?.IsProcessingInput()} child={main.Display?.GetParent() is not null} vis={main.Display?.Visible}");
                 await scene.RunnerIdle();
             }
             System.Console.WriteLine($"REAL_PARK:phase={main.Dialogue?.Session?.Phase} pos={main.Dialogue?.Session?.CurrentPosition} " +
