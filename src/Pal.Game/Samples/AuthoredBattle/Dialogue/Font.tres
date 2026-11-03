@@ -643,7 +643,86 @@ Height = 15
 RowBytes = 1
 Bitmap = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
+[sub_resource type="Resource" id="s81"]
+script = ExtResource("1")
+Codepoint = 32463
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,48,8,40,8,16,28,16,20,40,20,68,56,124,40,40,112,68,80,68,224,56,160,1,192,2,128,7,0,0,0)
+
+[sub_resource type="Resource" id="s82"]
+script = ExtResource("1")
+Codepoint = 39564
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,120,12,132,8,132,28,72,54,72,72,48,72,72,144,132,144,132,144,120,144,0,144,1,32,2,64,7,192,0,0)
+
+[sub_resource type="Resource" id="s83"]
+script = ExtResource("1")
+Codepoint = 29616
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,15,192,16,32,32,16,79,16,144,144,22,144,20,160,20,192,4,64,12,64,16,64,32,64,127,128,0,0,0,0)
+
+[sub_resource type="Resource" id="s84"]
+script = ExtResource("1")
+Codepoint = 37329
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,1,128,2,64,4,32,31,248,2,64,4,32,4,32,63,252,8,16,8,16,16,8,16,8,32,4,127,248,0,0)
+
+[sub_resource type="Resource" id="s85"]
+script = ExtResource("1")
+Codepoint = 32423
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,56,0,64,0,64,0,120,0,64,0,79,24,120,208,65,8,66,8,2,8,4,8,8,8,16,8,63,240,0,0)
+
+[sub_resource type="Resource" id="s86"]
+script = ExtResource("1")
+Codepoint = 20064
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,62,0,32,0,32,0,62,0,32,0,32,198,60,132,33,4,33,4,1,4,2,4,4,8,8,16,31,224,0,0)
+
+[sub_resource type="Resource" id="s87"]
+script = ExtResource("1")
+Codepoint = 24471
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,48,0,72,240,132,136,133,32,73,32,49,240,73,32,133,32,133,32,73,224,48,16,0,16,3,240,0,0,0,0)
+
+[sub_resource type="Resource" id="s88"]
+script = ExtResource("1")
+Codepoint = 27861
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,15,192,16,32,35,16,68,144,4,128,11,64,16,32,39,160,72,96,8,32,16,32,32,32,127,224,0,0,0,0)
+
+[sub_resource type="Resource" id="s89"]
+script = ExtResource("1")
+Codepoint = 26415
+Width = 16
+Height = 16
+RowBytes = 2
+Bitmap = PackedByteArray(0,0,7,224,8,16,17,136,34,72,2,64,5,160,8,16,31,224,32,16,67,8,4,128,8,64,16,32,63,224,0,0)
+
+[sub_resource type="Resource" id="s90"]
+script = ExtResource("1")
+Codepoint = 88
+Width = 8
+Height = 15
+RowBytes = 1
+Bitmap = PackedByteArray(129,66,36,24,24,36,66,129,129,66,36,24,24,36,66)
 [resource]
 script = ExtResource("2")
-SourceIdentity = "Original pixel art and bitmap lettering authored for godot-pal #46; no retail assets or extraction evidence."
-Glyphs = Array[ExtResource("1")]([SubResource("s0"), SubResource("s1"), SubResource("s2"), SubResource("s3"), SubResource("s4"), SubResource("s5"), SubResource("s6"), SubResource("s7"), SubResource("s8"), SubResource("s9"), SubResource("s10"), SubResource("s11"), SubResource("s12"), SubResource("s13"), SubResource("ui65"), SubResource("ui67"), SubResource("ui75"), SubResource("ui77"), SubResource("ui80"), SubResource("ui82"), SubResource("ui48"), SubResource("ui49"), SubResource("ui50"), SubResource("ui51"), SubResource("ui52"), SubResource("ui53"), SubResource("ui54"), SubResource("ui55"), SubResource("ui56"), SubResource("ui57"), SubResource("ui58"), SubResource("ui47"), SubResource("ui25915"), SubResource("ui20987"), SubResource("ui30446"), SubResource("ui26631"), SubResource("ui38378"), SubResource("ui36991"), SubResource("ui26292"), SubResource("ui29983"), SubResource("ui21629"), SubResource("ui25105"), SubResource("ui33021"), SubResource("ui21035"), SubResource("ui31649"), SubResource("ui24555"), SubResource("ui23567"), SubResource("ui24515"), SubResource("ui20102"), SubResource("ui25253"), SubResource("ui20167"), SubResource("ui21741"), SubResource("ui25252"), SubResource("ui22823"), SubResource("ui23478"), SubResource("ui35874"), SubResource("ui24517"), SubResource("ui38598"), SubResource("ui20013"), SubResource("ui24908"), SubResource("ui20804"), SubResource("ui24351"), SubResource("ui23433"), SubResource("ui24687"), SubResource("ui20250"), SubResource("ui24754"), SubResource("ui20026"), SubResource("ui21147"), SubResource("ui20498"), SubResource("ui31449"), SubResource("ui36215"), SubResource("ui22238"), SubResource("ui25552"), SubResource("ui21319"), SubResource("ui66"), SubResource("ui85"), SubResource("ui86"), SubResource("ui68"), SubResource("ui39"), SubResource("ui32")])
+SourceIdentity = "Original pixel art and bitmap lettering authored for godot-pal #46/#50; no retail assets or extraction evidence."
+Glyphs = Array[ExtResource("1")]([SubResource("s0"), SubResource("s1"), SubResource("s2"), SubResource("s3"), SubResource("s4"), SubResource("s5"), SubResource("s6"), SubResource("s7"), SubResource("s8"), SubResource("s9"), SubResource("s10"), SubResource("s11"), SubResource("s12"), SubResource("s13"), SubResource("ui65"), SubResource("ui67"), SubResource("ui75"), SubResource("ui77"), SubResource("ui80"), SubResource("ui82"), SubResource("ui48"), SubResource("ui49"), SubResource("ui50"), SubResource("ui51"), SubResource("ui52"), SubResource("ui53"), SubResource("ui54"), SubResource("ui55"), SubResource("ui56"), SubResource("ui57"), SubResource("ui58"), SubResource("ui47"), SubResource("ui25915"), SubResource("ui20987"), SubResource("ui30446"), SubResource("ui26631"), SubResource("ui38378"), SubResource("ui36991"), SubResource("ui26292"), SubResource("ui29983"), SubResource("ui21629"), SubResource("ui25105"), SubResource("ui33021"), SubResource("ui21035"), SubResource("ui31649"), SubResource("ui24555"), SubResource("ui23567"), SubResource("ui24515"), SubResource("ui20102"), SubResource("ui25253"), SubResource("ui20167"), SubResource("ui21741"), SubResource("ui25252"), SubResource("ui22823"), SubResource("ui23478"), SubResource("ui35874"), SubResource("ui24517"), SubResource("ui38598"), SubResource("ui20013"), SubResource("ui24908"), SubResource("ui20804"), SubResource("ui24351"), SubResource("ui23433"), SubResource("ui24687"), SubResource("ui20250"), SubResource("ui24754"), SubResource("ui20026"), SubResource("ui21147"), SubResource("ui20498"), SubResource("ui31449"), SubResource("ui36215"), SubResource("ui22238"), SubResource("ui25552"), SubResource("ui21319"), SubResource("ui66"), SubResource("ui85"), SubResource("ui86"), SubResource("ui68"), SubResource("ui39"), SubResource("ui32"), SubResource("s81"), SubResource("s82"), SubResource("s83"), SubResource("s84"), SubResource("s85"), SubResource("s86"), SubResource("s87"), SubResource("s88"), SubResource("s89"), SubResource("s90")])

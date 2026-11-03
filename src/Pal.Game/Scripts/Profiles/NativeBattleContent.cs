@@ -45,7 +45,8 @@ public static class NativeBattleContent
             foreach (var team in Items(native.Teams, "Teams"))
                 if (!teams.TryAdd(team.TeamId, Items(team.Enemies, "Team.Enemies").Select(ReadEnemy).ToArray()))
                     throw new InvalidDataException("duplicate TeamId");
-            var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments));
+            var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
+                Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray());
             ModernBattleContent.Validate(content);
             return content;
         }
@@ -59,7 +60,8 @@ public static class NativeBattleContent
         return new()
         {
             FormatVersion = 1,
-            Roles = content.InitialRoles.Values.Select(NativeBattleRoleAdapter.Write).ToArray(),
+            Roles = content.InitialRoles.Values.Select(role => { PalBattleRole native = NativeBattleRoleAdapter.Write(role);
+                native.PanelDeclared = content.PanelDeclaredRoles.Contains(role.RoleId); return native; }).ToArray(),
             Players = content.Players.Select(WritePlayer).ToArray(),
             Growth = content.GrowthByRole.Select(x => new PalBattleGrowth { RoleId = x.Key, LevelUpExperience = x.Value.LevelUpExperience.ToArray(),
                 LevelUpMagics = x.Value.LevelUpMagics.Select(row => new PalBattleLearnableMagic { Level = row.Level, MagicId = row.MagicId }).ToArray() }).ToArray(),

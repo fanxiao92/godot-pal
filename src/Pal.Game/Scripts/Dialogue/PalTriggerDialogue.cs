@@ -87,6 +87,15 @@ public partial class PalTriggerDialogue : Node
         BindPendingDisplay();
     }
 
+    /// <summary>Runs the finished battle's enemy post-victory script on the real display
+    /// (battle.c 1334-1337); the parked outer call stays on its startBattle command.</summary>
+    public void StartBattleEndScript()
+    {
+        if (Session is null) throw new InvalidOperationException("Initialize trigger dialogue before starting a battle-end script.");
+        Session.StartBattleEndScript();
+        BindPendingDisplay();
+    }
+
     public void Start(string fileId, string entryId, int caller) => StartCall(fileId, entryId, caller, null);
 
     public void Start(string fileId, string entryId, int caller, Guid sourceRequestId)
