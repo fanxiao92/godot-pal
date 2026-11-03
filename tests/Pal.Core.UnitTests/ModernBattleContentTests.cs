@@ -396,8 +396,6 @@ public sealed class ModernBattleContentTests
     [InlineData("teams.0.enemies.0.dualMove")]
     [InlineData("teams.0.enemies.0.attackEquivItem")]
     [InlineData("teams.0.enemies.0.attackEquivItemRate")]
-    [InlineData("teams.0.enemies.0.experience")]
-    [InlineData("teams.0.enemies.0.cash")]
     public void Legal_nonzero_effects_are_preserved_and_selected_entry_rejects_before_RNG(string path)
     {
         var data = Data();
@@ -424,8 +422,6 @@ public sealed class ModernBattleContentTests
             "teams.0.enemies.0.dualMove" => enemy.DualMove,
             "teams.0.enemies.0.attackEquivItem" => enemy.AttackEquivItem,
             "teams.0.enemies.0.attackEquivItemRate" => enemy.AttackEquivItemRate,
-            "teams.0.enemies.0.experience" => enemy.Experience,
-            "teams.0.enemies.0.cash" => enemy.Cash,
             _ => throw new ArgumentOutOfRangeException(nameof(path))
         };
         Assert.Equal(1, preserved);
@@ -461,17 +457,30 @@ public sealed class ModernBattleContentTests
 
     [Theory]
     [InlineData("growth.0.levelUpExperience.2", 0)]
-    [InlineData("roles.0.primaryExperience.value", 100)]
-    [InlineData("roles.0.hiddenExperience.attack.value", 100)]
     [InlineData("roles.0.level", 100)]
-    [InlineData("growth.0.levelUpMagics.1.level", 2)]
-    public void Structurally_legal_growth_is_not_mistaken_for_zero_growth_capability(string path, int value)
+    public void Structurally_illegal_growth_is_rejected_before_rng_or_request_state(string path, int value)
     {
         var data = Data();
         Set(data, path, JsonValue.Create(value));
         var content = ModernBattleContent.Parse(data.ToJsonString());
         if (value == 0) Assert.Equal(0, content.Growth.LevelUpExperience[2]);
         AssertUnsupported(content);
+    }
+
+    [Theory]
+    [InlineData("teams.0.enemies.0.experience")]
+    [InlineData("teams.0.enemies.0.cash")]
+    [InlineData("roles.0.primaryExperience.value", 100)]
+    [InlineData("roles.0.hiddenExperience.attack.value", 100)]
+    [InlineData("growth.0.levelUpMagics.1.level", 2)]
+    public void Reward_and_growth_capabilities_start_the_selected_entry_without_rejection(string path, int value = 1)
+    {
+        var data = Data();
+        Set(data, path, JsonValue.Create(value));
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        var script = Script(content, new BattleRandom());
+        script.Start("shared", "npc", 28);
+        Assert.NotNull(script.PendingBattle);
     }
 
     [Fact]

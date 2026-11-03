@@ -22,6 +22,11 @@ public sealed class ClassicBattleSession
     // script.c 0x0030 writes the kBodyPartExtra register; these are that register's combat fields.
     private readonly int[] boostAttack, boostMagicPower, boostDefense, boostDexterity, boostFlee;
     private readonly ClassicBattlePlayer[] basePlayers;
+    // battle.c 753-754: each KO accumulates its enemy's WORD reward once, granted by the
+    // lifecycle only when the battle actually ends Won (PAL_BattleWon battle.c 1054/1098).
+    private int experienceGained, cashGained;
+    public int ExperienceGained => experienceGained;
+    public int CashGained => cashGained;
     public ClassicBattleView Current { get; private set; }
     public CompletionReceipt? Completion { get; private set; }
 
@@ -294,7 +299,15 @@ public sealed class ClassicBattleSession
         }
         damage = unchecked((short)(damage * random.NextInclusive(1f, 1.125f)));
         if (damage <= 0) damage = 1;
+        int previousHp = enemyHp[slot];
         enemyHp[slot] = Math.Max(0, enemyHp[slot] - damage);
+        // PAL_BattlePostActionCheck zeroed the slot's object after its single accumulation, so a
+        // corpse strike (the dual loop's kept slot) can never count the same KO twice.
+        if (previousHp > 0 && enemyHp[slot] == 0)
+        {
+            experienceGained += enemy.Experience;
+            cashGained += enemy.Cash;
+        }
         Current = Current with { LastAction = new(Current.Round, ClassicBattleSide.Player, enemy.Id, damage, critical, false)
             { ActorIndex = partyIndex, TargetIndex = slot, SecondStrike = secondStrike } };
     }
@@ -441,9 +454,8 @@ public sealed class ClassicBattleSession
             || !SignedWord(e.Attack) || !SignedWord(e.Defense) || !SignedWord(e.Dexterity) || !Word(e.PhysicalResistance))
             throw new InvalidDataException("Classic combat has invalid or unsupported numeric data (current HP must be 1..32767).");
         if (!Zero(e.Statuses, 9) || !Zero(e.Poisons) || e.TurnStartScript != 0 || e.ReadyScript != 0 || e.BattleEndScript != 0
-            || e.MagicId != 0 || e.DualMove != 0 || e.AttackEquivItem != 0 || e.AttackEquivItemRate != 0
-            || e.Experience != 0 || e.Cash != 0)
-            throw new InvalidDataException("Classic combat does not yet support equipment, statuses, poisons, hooks, cover, attack-all, magic, dual moves, equivalent items or rewards.");
+            || e.MagicId != 0 || e.DualMove != 0 || e.AttackEquivItem != 0 || e.AttackEquivItemRate != 0)
+            throw new InvalidDataException("Classic combat does not yet support equipment, statuses, poisons, hooks, cover, attack-all, magic, dual moves or equivalent items.");
     }
 
     private static bool Word(int value) => value is >= 0 and <= 65535;

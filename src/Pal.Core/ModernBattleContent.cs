@@ -114,8 +114,12 @@ public static partial class ModernBattleContent
 
     private static void ValidateRole(JsonElement role, string path)
     {
-        EventJson.Keys(role, path, "roleId", "level", "hp", "maxHp", "mp", "maxMp", "primaryExperience",
-            "hiddenExperience", "equipment", "magics", "statuses", "coveredByRoleId");
+        // The base panel words are optional like the player's magicPower/fleeRate: absent words
+        // carry zero; present ones are strictly ranged.
+        EventJson.Keys(role, path,
+            ["roleId", "level", "hp", "maxHp", "mp", "maxMp", "primaryExperience",
+             "hiddenExperience", "equipment", "magics", "statuses", "coveredByRoleId"],
+            ["attack", "magicPower", "defense", "dexterity", "fleeRate"]);
         Number(role, "roleId", path, 0, 5);
         Number(role, "level", path);
         int hp = Number(role, "hp", path), maxHp = Number(role, "maxHp", path, 1);
@@ -128,6 +132,9 @@ public static partial class ModernBattleContent
         EventJson.Keys(hidden, path + ".hiddenExperience", names);
         foreach (string name in names)
             Experience(Property(hidden, name, path + ".hiddenExperience"), path + ".hiddenExperience." + name);
+        foreach (string panel in new[] { "attack", "magicPower", "defense", "dexterity", "fleeRate" })
+            if (role.TryGetProperty(panel, out JsonElement word) && (word.ValueKind != JsonValueKind.Number || !word.TryGetInt32(out int value) || value < 0 || value > 65535))
+                throw Error(path + "." + panel, "expected integer in 0..65535");
         Words(role, "equipment", path, 6);
         Words(role, "magics", path, 32);
         Words(role, "statuses", path, 9);

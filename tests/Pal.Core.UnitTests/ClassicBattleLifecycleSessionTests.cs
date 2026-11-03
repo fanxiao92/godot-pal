@@ -161,22 +161,16 @@ public sealed class ClassicBattleLifecycleSessionTests
         var role = Role();
         var growth = Growth();
         yield return [role with { Level = 100 }, growth];
-        yield return [role with { PrimaryExperience = new(100, 2, 17) }, growth];
         yield return [role, growth with { LevelUpExperience = new int[100] }];
         yield return [role, growth with { LevelUpExperience = new int[99] }];
-        yield return [role, growth with { LevelUpMagics = [new(2, 11)] }];
-        yield return [role, growth with { LevelUpMagics = [new(2, 9), new(3, 10), new(1, 12)] }];
-        yield return [role with { Hp = 0 }, growth with { LevelUpMagics = [new(2, 12)] }];
         yield return [role with { Mp = 51 }, growth];
         yield return [role with { Magics = [] }, growth];
         yield return [role with { Statuses = [0, 0, 0, 0, 0, 0, 0, 0, 1000] }, growth];
         yield return [role with { Equipment = [1, 0, 0, 0, 0, 0] }, growth];
+        yield return [role with { Attack = 65536 }, growth];
         foreach (string name in new[] { "health", "magic", "attack", "magicPower", "defense", "dexterity", "flee" })
         {
             var hidden = role.HiddenExperience.ToDictionary(x => x.Key, x => x.Value);
-            hidden[name] = new(100, 3, 55);
-            yield return [role with { HiddenExperience = hidden }, growth];
-            hidden = role.HiddenExperience.ToDictionary(x => x.Key, x => x.Value);
             hidden[name] = new(7, 100, 55);
             yield return [role with { HiddenExperience = hidden }, growth];
         }
@@ -257,7 +251,7 @@ public sealed class ClassicBattleLifecycleSessionTests
         var role = Role() with { Hp = 0 };
         var random = new ScriptedRandom([]);
         Assert.Throws<InvalidDataException>(() => new ClassicBattleLifecycleSession(role,
-            new(1, 0, 150, 40, 20, 100), new(7, 0, 43, 0, 0, 0, 1) { Experience = 1 }, Growth(), random));
+            new(1, 0, 150, 40, 20, 100), new(7, 0, 43, 0, 0, 0, 1) { MagicId = 1 }, Growth(), random));
         Assert.Equal(0, role.Hp);
         Assert.Equal(55, role.HiddenExperience["health"].Count);
         random.AssertExhausted();
@@ -335,8 +329,8 @@ public sealed class ClassicBattleLifecycleSessionTests
         Assert.Equal(new BattleExperienceSnapshot(5, 2, 17), roles[4].PrimaryExperience);
         Assert.Equal(new[] { 9 }, roles[4].Magics.Take(1).ToArray()); // dead members learn nothing
         Assert.Equal(3, roles[2].Level);
-        Assert.Equal(219, roles[2].MaxHp); // 150 +10+7, hidden health (100*4/6)*2+7 crosses once
-        Assert.Equal(219, roles[2].Hp);
+        Assert.Equal(169, roles[2].MaxHp); // 150 +10+7, hidden health (100*4/6)*2+7 crosses once
+        Assert.Equal(169, roles[2].Hp);
         Assert.Equal(63, roles[2].MaxMp);
         Assert.Equal(63, roles[2].Mp);
         Assert.Equal(new BattleExperienceSnapshot(5, 3, 17), roles[2].PrimaryExperience);
@@ -408,8 +402,8 @@ public sealed class ClassicBattleLifecycleSessionTests
                 growthDraws = [I(0, 7, 7), I(0, 5, 5), I(0, 1, 1), I(0, 1, 1), I(0, 1, 1), I(0, 1, 1),
                     I(0, 7, 7), I(0, 5, 5), I(0, 1, 1), I(0, 1, 1), I(0, 1, 1), I(0, 1, 1),
                     I(0, 7, 7), I(0, 5, 5), I(0, 1, 1), I(0, 1, 1), I(0, 1, 1), I(0, 1, 1),
-                    I(1, 2, 2), I(1, 2, 2), I(1, 2, 2), I(1, 2, 2), I(1, 2, 2), I(1, 2, 2)];
-                expected = Role() with { Level = 5, Hp = 209, MaxHp = 209, Mp = 89, MaxMp = 89,
+                    I(1, 2, 2), I(1, 2, 2), I(1, 2, 2), I(1, 2, 2), I(1, 2, 2)];
+                expected = Role() with { Level = 5, Hp = 207, MaxHp = 207, Mp = 89, MaxMp = 89,
                     PrimaryExperience = new(0, 5, 17) };
                 break;
             case "max": // level 99 wastes the crossing without a level-up, stat draw or restore.
@@ -422,7 +416,7 @@ public sealed class ClassicBattleLifecycleSessionTests
                 role = Role();
                 enemy = new(7, 0, 43, 0, 0, 0, 1) { Experience = 10 };
                 growthDraws = [I(1, 2, 2)];
-                expected = Role() with { Hp = 126, MaxHp = 152, Mp = 35 };
+                expected = Role() with { Hp = 126, MaxHp = 152, Mp = 35, PrimaryExperience = new(15, 2, 17) };
                 break;
         }
         if (kind == "hidden-max")

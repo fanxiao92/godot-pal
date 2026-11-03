@@ -42,10 +42,27 @@ public sealed class ClassicBattleSessionTests
     }
 
     [Fact]
-    public void Unsupported_reward_is_rejected_before_random_or_input_mutation()
+    public void Ko_accumulates_word_rewards_once_without_random_or_input_mutation()
     {
         var data = Definition();
-        data = data with { Enemies = [data.Enemies[0] with { Experience = 1 }] };
+        data = data with { Enemies = [data.Enemies[0] with { Hp = 43, Experience = 120, Cash = 250 }] };
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(1, 2, 1), I(0, 5, 1), F(1, 1.125f, 1), I(2, 3, 2)]);
+        var session = new ClassicBattleSession(data, random);
+        Assert.Equal(0, session.ExperienceGained);
+        Assert.Equal(0, session.CashGained);
+        session.SelectAttack(7);
+        Assert.True(session.ResolveNextAction());
+        // battle.c 753-754: the single KO accumulates both reward words exactly once.
+        Assert.Equal(120, session.ExperienceGained);
+        Assert.Equal(250, session.CashGained);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Unsupported_enemy_magic_is_rejected_before_random_or_input_mutation()
+    {
+        var data = Definition();
+        data = data with { Enemies = [data.Enemies[0] with { MagicId = 1 }] };
         var random = new ScriptedRandom([]);
         Assert.Throws<InvalidDataException>(() => new ClassicBattleSession(data, random));
         Assert.Equal(100, data.Enemies[0].Hp);
@@ -207,7 +224,7 @@ public sealed class ClassicBattleSessionTests
             d.Enemies[0] with { TurnStartScript = 1 }, d.Enemies[0] with { ReadyScript = 1 },
             d.Enemies[0] with { BattleEndScript = 1 }, d.Enemies[0] with { MagicId = 1 },
             d.Enemies[0] with { DualMove = 1 }, d.Enemies[0] with { AttackEquivItem = 1 },
-            d.Enemies[0] with { AttackEquivItemRate = 1 }, d.Enemies[0] with { Experience = 1 }, d.Enemies[0] with { Cash = 1 },
+            d.Enemies[0] with { AttackEquivItemRate = 1 },
             d.Enemies[0] with { Hp = 0 }, d.Enemies[0] with { Hp = 32768 }, d.Enemies[0] with { PhysicalResistance = -1 },
             d.Enemies[0] with { Attack = -32769 }, d.Enemies[0] with { Level = -1 } })
             yield return [d with { Enemies = [enemy] }];
