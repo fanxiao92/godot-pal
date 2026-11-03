@@ -162,6 +162,20 @@ public partial class Main : Node2D
                 };
                 Dialogue.PaletteFromScene = Palette(map.Data);
                 Dialogue.Initialize(Display, real.Resources, language, new GodotBattleRandom(selected.BattleSeed));
+                // The verified closure reuses the production story-battle machinery: the facade
+                // carries the same checked exploration, scene, palette and settlement words, so
+                // team18's real battle, hooks and settlement run through the identical host.
+                var res = real.Resources;
+                var triggerEntry = Dialogue.Session!.Entries.Single(e =>
+                    e is { OwnerType: "eventObject", OwnerId: 28, Slot: "wTriggerScript", Kind: "trigger" } && e.SourceAddress == real.Closure.TriggerEntryAddress);
+                story = new CheckedStoryProfile(real.StaticResources, real.StaticProfile, map.Data.BundleSha256,
+                    "first-mandatory-battle verified closure", triggerEntry, res.Events,
+                    language == "zh-Hans" ? res.Chinese : res.English, res.BattleContent, real.Closure.VerifiedRequirements,
+                    checkedProfile, res.Font, res.Prompts.ToArray(),
+                    res.Portraits.ToDictionary(x => x.Key, x => x.Value), Palette(map.Data),
+                    res.ResourceSha256.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal),
+                    mapScenePackedScene(real.StaticResources), language == "zh-Hans" ? res.ChineseWords : res.EnglishWords);
+                storyVisual = real.Visual;
                 Display.UpdateCompleted += CompleteFirstBattleTrigger;
                 RenderingServer.FramePostDraw += StartFirstBattleAfterSceneDraw;
                 firstBattleRendererSubscribed = true;
@@ -343,6 +357,9 @@ public partial class Main : Node2D
         }
         catch (Exception e) { Fail($"First battle trigger failed: {e.Message}"); }
     }
+
+    private static PackedScene mapScenePackedScene(string staticResources) =>
+        (PackedScene)ResourceLoader.Load(staticResources + "/Scenes/Scene.tscn", cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
 
     private void CompleteFirstBattleTrigger()
     {

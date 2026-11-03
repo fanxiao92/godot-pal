@@ -108,6 +108,18 @@ public static class NativeFirstMandatoryBattleProfile
             Require(resource.Language == id && !string.IsNullOrWhiteSpace(resource.SourceIdentity),
                 string.Format("{0}/Language.{1}.tres", dialogue, id) + ": language identity mismatch")).ToCorePackage();
         DialogueLanguagePackage chinese = Package("zh-Hans"), english = Package("en");
+        System.Collections.Generic.Dictionary<int, string> ChineseWords()
+        {
+            var words = LoadTyped<PalDialogueLanguage>(string.Format("{0}/Language.zh-Hans.tres", dialogue), resource =>
+                Require(resource.Language == "zh-Hans", "zh-Hans language identity mismatch")).CopyWords();
+            return words.ToDictionary(x => x.Key, x => x.Value);
+        }
+        System.Collections.Generic.Dictionary<int, string> EnglishWords()
+        {
+            var words = LoadTyped<PalDialogueLanguage>(string.Format("{0}/Language.en.tres", dialogue), resource =>
+                Require(resource.Language == "en", "en language identity mismatch")).CopyWords();
+            return words.ToDictionary(x => x.Key, x => x.Value);
+        }
         var closure = FirstMandatoryBattleClosure.Verify(profile, events, chinese, english, content,
             new(native.ImageEnemyId, native.ImageEnemyArchiveEntry, native.ImageRoleSpriteIds,
                 native.ImageBattlefieldId, native.ImageBattlefieldArchiveEntry, native.ImageIncludesLayoutAndEffectFrames));
@@ -137,7 +149,7 @@ public static class NativeFirstMandatoryBattleProfile
         foreach (string path in hashes.Keys) CheckFile(path, hashes);
         var portraits = (native.Portraits ?? new Godot.Collections.Dictionary<int, string>()).ToDictionary(x => x.Key, x => LoadImage(x.Value));
         return (closure, visual, new FirstBattleRealResources(events, chinese, english, content, font, prompts, portraits,
-            TriggerEventLoader.DependencyUris(native.EventsIndex).ToArray(), hashes));
+            TriggerEventLoader.DependencyUris(native.EventsIndex).ToArray(), hashes, ChineseWords(), EnglishWords()));
     }
 
     private static T LoadTyped<T>(string uri, Action<T> validate) where T : Resource
@@ -227,13 +239,19 @@ public sealed class FirstBattleRealResources
     public System.Collections.Generic.IReadOnlyDictionary<int, PalDialogueIndexedImage> Portraits => portraitMap;
     public System.Collections.Generic.IReadOnlyList<string> EventFileUris => eventUris;
     public System.Collections.Generic.IReadOnlyDictionary<string, string> ResourceSha256 => hashMap;
+    public System.Collections.Generic.IReadOnlyDictionary<int, string> ChineseWords => chineseWords;
+    public System.Collections.Generic.IReadOnlyDictionary<int, string> EnglishWords => englishWords;
+    private readonly System.Collections.Generic.Dictionary<int, string> chineseWords;
+    private readonly System.Collections.Generic.Dictionary<int, string> englishWords;
 
     internal FirstBattleRealResources(TriggerEventCollection events, DialogueLanguagePackage chinese, DialogueLanguagePackage english,
         TriggerBattleContent battleContent, PalDialogueFont font, PalDialogueIndexedImage[] prompts,
-        System.Collections.Generic.Dictionary<int, PalDialogueIndexedImage> portraits, string[] eventFileUris, System.Collections.Generic.Dictionary<string, string> hashes)
+        System.Collections.Generic.Dictionary<int, PalDialogueIndexedImage> portraits, string[] eventFileUris, System.Collections.Generic.Dictionary<string, string> hashes,
+        System.Collections.Generic.Dictionary<int, string> chineseWords, System.Collections.Generic.Dictionary<int, string> englishWords)
     {
         Events = events; Chinese = chinese; English = english; BattleContent = battleContent; Font = font;
         Prompts = Array.AsReadOnly(prompts);
         portraitMap = portraits; eventUris = eventFileUris; hashMap = hashes;
+        chineseWords = chineseWords; englishWords = englishWords;
     }
 }
