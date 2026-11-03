@@ -11,6 +11,10 @@ public sealed class TriggerBattleContent
     public IReadOnlyList<ClassicBattlePlayer> Players { get; }
     public IReadOnlyDictionary<int, ClassicBattleGrowthData> GrowthByRole { get; }
     public IReadOnlyDictionary<int, IReadOnlyList<ClassicBattleEnemy>> EnemyTeams { get; }
+    /// <summary>Declared six-role equipment grid (empty = not declared); rows must match party role snapshots.</summary>
+    public IReadOnlyList<IReadOnlyList<int>> RoleEquipment { get; }
+    /// <summary>Declared equip-script closure objects (empty = none declared).</summary>
+    public IReadOnlyDictionary<int, BattleEquipmentObject> EquipmentObjects { get; }
 
     [JsonIgnore] public BattleRoleSnapshot InitialRole => Single(InitialRoles.Values);
     [JsonIgnore] public ClassicBattlePlayer Player => Single(Players);
@@ -25,7 +29,9 @@ public sealed class TriggerBattleContent
 
     public TriggerBattleContent(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
         IReadOnlyDictionary<int, ClassicBattleGrowthData> growth,
-        IReadOnlyDictionary<int, IReadOnlyList<ClassicBattleEnemy>> teams)
+        IReadOnlyDictionary<int, IReadOnlyList<ClassicBattleEnemy>> teams,
+        IReadOnlyList<IReadOnlyList<int>>? roleEquipment = null,
+        IReadOnlyList<BattleEquipmentObject>? equipmentObjects = null)
     {
         ArgumentNullException.ThrowIfNull(roles); ArgumentNullException.ThrowIfNull(players);
         ArgumentNullException.ThrowIfNull(growth); ArgumentNullException.ThrowIfNull(teams);
@@ -49,6 +55,11 @@ public sealed class TriggerBattleContent
                 throw new InvalidDataException("Each team requires one or two nonnull enemy slots.");
             return (IReadOnlyList<ClassicBattleEnemy>)Array.AsReadOnly(x.Value.Select(e => e with { Statuses = Copy(e.Statuses), Poisons = Copy(e.Poisons) }).ToArray());
         }));
+        BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);
+        RoleEquipment = roleEquipment is null || roleEquipment.Count == 0 ? Array.Empty<IReadOnlyList<int>>()
+            : Array.AsReadOnly(roleEquipment.Select(row => (IReadOnlyList<int>)Array.AsReadOnly(row.ToArray())).ToArray());
+        EquipmentObjects = new ReadOnlyDictionary<int, BattleEquipmentObject>((equipmentObjects ?? []).ToDictionary(
+            x => x.ObjectId, x => x with { Effects = Array.AsReadOnly(x.Effects.Select(e => e with { Statuses = Copy(e.Statuses) }).ToArray()) }));
     }
 
     internal IReadOnlyList<ClassicBattleEnemy> Enemies(int teamId) => EnemyTeams.TryGetValue(teamId, out var enemies) ? enemies

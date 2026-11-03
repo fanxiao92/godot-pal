@@ -11,7 +11,13 @@ public static partial class ModernBattleContent
     {
         using var document = EventJson.Parse(json, Root);
         var root = document.RootElement;
-        EventJson.Keys(root, Root, "formatVersion", "roles", "players", "growth", "teams");
+        if (root.ValueKind != JsonValueKind.Object) throw Error(Root, "expected an object");
+        bool gridDeclared = root.TryGetProperty("roleEquipment", out JsonElement gridElement);
+        bool objectsDeclared = root.TryGetProperty("equipments", out JsonElement objectsElement);
+        var rootKeys = new List<string> { "formatVersion", "roles", "players", "growth", "teams" };
+        if (gridDeclared) rootKeys.Add("roleEquipment");
+        if (objectsDeclared) rootKeys.Add("equipments");
+        EventJson.Keys(root, Root, [.. rootKeys]);
         if (Number(root, "formatVersion", Root) != 1)
             throw Error(Root, "unsupported formatVersion");
         var roles = new List<BattleRoleSnapshot>();
@@ -49,11 +55,61 @@ public static partial class ModernBattleContent
             if (!teams.TryAdd(id, enemy)) throw Error(path + ".teamId", $"duplicate team ID {id}");
         }
         if (teams.Count == 0) throw Error(Root + ".teams", "expected at least one team");
+        var roleEquipment = gridDeclared ? RoleEquipment(gridElement) : null;
+        var equipmentObjects = objectsDeclared ? EquipmentObjects(objectsElement) : null;
+        BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);
         TriggerBattleContent content;
-        try { content = new TriggerBattleContent(roles, players, growthByRole, teams); }
+        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects); }
         catch (InvalidDataException error) { throw Error(Root, error.Message); }
         Validate(content);
         return content;
+    }
+
+    private static IReadOnlyList<IReadOnlyList<int>> RoleEquipment(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".roleEquipment", "expected an array");
+        var rows = element.EnumerateArray().Select((row, i) => WordArray(row, Root + $".roleEquipment[{i}]", BattleEquipmentState.SlotCount)).ToArray();
+        if (rows.Length != BattleEquipmentState.RoleCount)
+            throw Error(Root + ".roleEquipment", $"expected exactly {BattleEquipmentState.RoleCount} rows");
+        return System.Array.AsReadOnly(rows);
+    }
+
+    private static IReadOnlyList<BattleEquipmentObject> EquipmentObjects(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".equipments", "expected an array");
+        var objects = new List<BattleEquipmentObject>();
+        var identifiers = new HashSet<int>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".equipments[{index++}]";
+            EventJson.Keys(item, path, "objectId", "effects");
+            int id = Number(item, "objectId", path, 1);
+            if (!identifiers.Add(id)) throw Error(path + ".objectId", $"duplicate equipment object ID {id}");
+            var rows = Array(item, "effects", path).ToArray();
+            if (rows.Length != BattleEquipmentState.RoleCount)
+                throw Error(path + ".effects", $"expected exactly {BattleEquipmentState.RoleCount} items");
+            var effects = new List<BattleEquipmentEffect>();
+            int rowIndex = 0;
+            foreach (JsonElement row in rows)
+            {
+                string effectPath = path + $".effects[{rowIndex++}]";
+                EventJson.Keys(row, effectPath, "attack", "defense", "dexterity", "battleSprite", "statuses");
+                var statuses = Words(row, "statuses", effectPath, BattleEquipmentState.StatusCount);
+                for (int status = 0; status < statuses.Count; status++)
+                {
+                    if (statuses[status] == 0) continue;
+                    if (status < BattleEquipmentState.GoodStatusFirstIndex)
+                        throw Error(effectPath + $".statuses[{status}]", "equipment statuses support only bravery, protect, haste and dualAttack slots");
+                    if (statuses[status] is < BattleEquipmentState.PersistentStatusFloor or > 65535)
+                        throw Error(effectPath + $".statuses[{status}]", $"persistent equipment status must be {BattleEquipmentState.PersistentStatusFloor}..65535");
+                }
+                effects.Add(new(Number(row, "attack", effectPath), Number(row, "defense", effectPath),
+                    Number(row, "dexterity", effectPath), Number(row, "battleSprite", effectPath), statuses));
+            }
+            objects.Add(new(id, effects));
+        }
+        return objects;
     }
 
     private static void ValidateRole(JsonElement role, string path)
@@ -150,6 +206,14 @@ public static partial class ModernBattleContent
         var items = Array(value, key, path).ToArray();
         if (count is not null && items.Length != count) throw Error(path + "." + key, $"expected exactly {count} items");
         return System.Array.AsReadOnly(items.Select((item, i) => Integer(item, path + $".{key}[{i}]", 0, 65535)).ToArray());
+    }
+
+    private static IReadOnlyList<int> WordArray(JsonElement value, string path, int count)
+    {
+        if (value.ValueKind != JsonValueKind.Array) throw Error(path, "expected an array");
+        var items = value.EnumerateArray().ToArray();
+        if (items.Length != count) throw Error(path, $"expected exactly {count} items");
+        return System.Array.AsReadOnly(items.Select((item, i) => Integer(item, path + $"[{i}]", 0, 65535)).ToArray());
     }
 
     private static InvalidDataException Error(string path, string message) => new($"{path}: {message}.");
