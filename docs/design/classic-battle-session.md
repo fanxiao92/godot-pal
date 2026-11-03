@@ -20,9 +20,13 @@
 - `kStatusDualAttack`（fight.c:3628）：一个攻击动作两次打击，`ResolveNextAction` 每次推进一击，两次都发布独立 `LastAction`（`SecondStrike` 标记第二击）；第二击保持已验证目标槽（首击击杀后不再换目标，HP 也不低于0再扣），胜负与回合只在整动作后结算，attack/health 计数每动作一次（fight.c:3753）。
 - `kStatusBravery` 恒走会心分支但保留掷骰（fight.c:3633）；`kStatusProtect` 在 HP 截断前将敌方伤害减半（fight.c:5086）；`kStatusHaste` 按 CLASSIC 将队列身法×3 后再取999上限（fight.c:336）。
 - cover（fight.c:4943–4973）：目标濒死/失控且防御掷成功时，由 `CoveredByRoleId` 对应的在场且可响应（自身不濒死、无 confused/paralyzed/sleep）队友掩护；掩护动作 Damage 0、Evaded false、`CovererPartyIndex` 指向掩护者，友亡对白与本回调无关。`ValidatePlayer`/`ValidateNoGrowth` 打开非零装备与 0..5 cover 的拒绝面；装备 battleSprite override 因视觉链仅绑定一个 authored 基础精灵而仍按"缺少/未支持装备依赖"在副作用前拒绝（`OverridesBattleSprite`）。
+- 战中角色钩子（fight.c 768–880，`PAL_BattlePostActionCheck` 仅在敌方攻击动作后带 `fCheckPlayers=TRUE`）：先友亡后濒死按队列顺序扫描，每次动作至多一个脚本。友亡=成员 HP 降至 0 时由**掩护者**的 `FriendDeathScript` 以掩护者角色为 caller 运行（掩护者须在场、存活、可响应）；濒死=成员 HP 下降且 >0、新 HP 低于 `min(100, maxHP/5)`、且**原 HP ≥ maxHP/5**（原始整除，不用 min）时由本人 `DyingScript` 以本人角色为 caller 运行，掩护者不可响应或不在场则跳过；濒死条件命中后即使无脚本也终止扫描（fight.c 880）。命中后 combat 进入 `RoleHook` 阶段并发布 `PendingRoleHook`（kind/partyIndex/roleId/scriptAddress），拒绝推进直至 `AcknowledgeRoleHook` 回到保存的队列位置，Won/Lost/回合结算在钩子之后才评估（g_Battle.BattleResult pause）。
+- 钩子副作用按脚本 opcode 落到活体战斗状态：`changeHp/changeMp`（script.c 0x001B/0x001C，仅 caller 域、PAL_IncreaseHPMP 只改活人并按 [0,max] 封顶）、`boostStat`（0x0030，`kBodyPartExtra` 寄存器写 `基面板×percent/100` WORD 截断覆盖写；攻击/灵力/防御/身法/逃跑五字段，非零 `roleOperand`/`scope` 及其他字段在副作用前拒绝）。临时加成只在本场 combat 会话内（战后随会话释放，battle.c 1829 同域清理），装备持续双击不受影响；有效面板/队列身法/敌伤防御实时包含 extra 寄存器，并在玩家 view 以 `Boost*` 五字段公开。`TriggerScriptSession.StartBattleHook` 预检钩子完整随机闭包（两个分支全覆盖，含 startBattle 嵌套拒绝）后才消耗正式随机并执行；挂起的外层调用保留自身 caller/ReturnEntry。角色钩子非零 `DyingScript/FriendDeathScript` 的旧拒绝面已打开为正式执行；入口预检（`ValidateEntry`）同样遍历 hook 脚本全部分支与显示/画像需求。
 - 生命周期把闭包好状态覆盖进角色状态（`ApplyStatuses` 取大），战后基础清理（<=999 清零）因此保留 >999 持续装备状态；再次初始化/新会话按 max 不叠加。普通有期限状态与 extra 临时效果仍为零域；每回合状态递减（fight.c:1636）未建模，属后续边界。
 
 Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 frame3 站到目标侧前（fight.c:5012–5022），目标不再取闪避/受击帧。`samples/authored-battle/PartyEquip` 提供 role1 五对象闭包（有效 46/52/119，对象170持续双击）+ 濒死 coveredBy 与双快敌槽的人工场景；SceneRunner 增两例（两击表现/删除双击反例），scene 批次 109→111、库存 604→606、game 601→603、Core 831→847。
+
+#49 unit 1（Core 链）：`MidbattleRoleHookTests` 以原钓 authored 钩子流（四随机带、零售结构同构）覆盖检测/暂停/恢复、全部随机分支、逐字副作用与继续位置，Core 批次 847→872；Extract CLI 批次 57→58（角色钩子动词双向往返与严格校验）。不包含资源/Main/SceneRunner（unit 2）。
 
 参考：fight.c:336–349（haste×3）、3628–3673（双击循环/目标保持）、3753–3755（计数一次）、4943–4973/5008–5028（掩护条件与表现）、5086–5090（protect 减半）；global.c:2255/2304（好状态取大/清理保留 >999）。
 

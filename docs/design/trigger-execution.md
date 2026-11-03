@@ -14,7 +14,7 @@ CLI 的 `EventArchive` 混合了文件 I/O、编解码与严格离线校验，�
 
 ## 支持闭包与执行状态
 
-`TriggerScriptSession(events, language, inheritedColor=0x4F)` 绑定一个已校验集合和一个已选语言包；不支持中途换语言。`Start(fileId,entryId,caller)` 在任何 caller/对话状态变更前，检查选定 trigger 的完整可执行闭包和所需全部语言范围，并以独立的真实显示会话预检所有文字控制。未支持动作、raw（包括 008E）、auto、非 upper box 或非零 rngWord 都先拒绝，错误包含文件、标签、原始地址。未选定 raw 或停止之后的命令不会因此执行。支持集合是有限的顺序路径，遇到未支持分支/调用直接拒绝整个调用，而不是只检查其当前条件选中的路径；没有 VM、自动脚本、更新场景型等待或任意 yield。
+`TriggerScriptSession(events, language, inheritedColor=0x4F)` 绑定一个已校验集合和一个已选语言包；不支持中途换语言。`Start(fileId,entryId,caller)` 在任何 caller/对话状态变更前，检查选定 trigger 的完整可执行闭包和所需全部语言范围，并以独立的真实显示会话预检所有文字控制。未支持动作、raw（包括 008E）、auto、center box 或非零 rngWord 都先拒绝，错误包含文件、标签、原始地址。#49 打开 lower/centerWindow 对话语境与角色钩子动词（`randomJump`/`changeHp`/`changeMp`/`boostStat`；后者仅在战中角色钩子内可执行）；未选定 raw 或停止之后的命令不会因此执行。支持集合是有限的顺序路径，遇到未支持分支/调用直接拒绝整个调用，而不是只检查其当前条件选中的路径；没有 VM、自动脚本、更新场景型等待或任意 yield。入口预检自 `startBattle` 遍历双方队员的 `FriendDeathScript`/`DyingScript` 全随机闭包（两个分支都覆盖，不消耗随机）；`StartBattleHook` 在副作用前同样预检暂停钩子的完整闭包。
 
 实际执行仅支持：
 
