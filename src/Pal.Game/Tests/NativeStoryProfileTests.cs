@@ -169,7 +169,7 @@ public class NativeStoryProfileTests
             case "role":
                 fixture.Numeric.Roles[0].RoleId = fixture.Numeric.Players[0].RoleId = fixture.Numeric.Growth[0].RoleId = 1;
                 fixture.Save(fixture.Numeric.Roles[0], "Role.tres"); fixture.Save(fixture.Numeric, "Numeric.tres"); expected = "static leader role0"; break;
-            case "unsupported-battle": fixture.Numeric.Teams[0].Enemies[0].Cash = 1; fixture.Save(fixture.Numeric, "Numeric.tres"); expected = "shared.json#L0003"; break;
+            case "unsupported-battle": fixture.Numeric.Teams[0].Enemies[0].MagicId = 1; fixture.Save(fixture.Numeric, "Numeric.tres"); expected = "shared.json#L0003"; break;
             case "auto-entry": fixture.Edit("shared.json", "\"slot\":\"wTriggerScript\",\"kind\":\"trigger\"", "\"slot\":\"wAutoScript\",\"kind\":\"auto\""); expected = "owner-trigger-entry"; break;
             case "disabled-entry": fixture.Edit("shared.json", "\"target\":\"L0001\",\"sourceAddress\":1", "\"target\":null,\"sourceAddress\":0"); fixture.Profile.EntryAddress = 0; expected = "disabled entry"; break;
             case "complete-events": fixture.Edit("shared.json", "\"opcode\":134", "\"opcode\":0"); expected = "Registered opcode"; break;
