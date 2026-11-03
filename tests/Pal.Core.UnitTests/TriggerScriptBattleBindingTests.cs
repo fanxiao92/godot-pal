@@ -419,7 +419,7 @@ public sealed class TriggerScriptBattleBindingTests
         var teams = new Dictionary<int, ClassicBattleEnemy> { [18] = new(7, 0, 43, 0, 0, 0, 1) };
         if (fault == "enemy") teams[19] = new(8, 0, 43, 0, 0, 0, 1) { MagicId = 1 };
         var content = new TriggerBattleContent(Role(), new(1, 100, 150, 40, 20, 100), Growth(), teams);
-        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(62, 62, [DialogueMessagePart.FromText("~01A")])]);
+        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(62, 62, [DialogueMessagePart.FromText("$7A")])]);
         var random = new BindingRandom();
         var events = fixture.Load();
         var preflightError = Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(events, language, content, "shared", "npc"));

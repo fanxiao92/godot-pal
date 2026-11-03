@@ -172,6 +172,18 @@ public sealed class TriggerEventCollection
                 "showDialog" => ["messageId", "descriptionLineWord"],
                 "startBattle" => ["teamId", "lossTarget", "isBoss", "fleeTarget"],
                 "setMusic" => ["musicId", "mode"],
+                // #53 retail verbs (script.c), all non-branching word writes/transitions.
+                "setObjectPosition" => ["objectId", "x", "y"],
+                "setObjectGesture" => ["frame"],
+                "changeHpMp" => ["scope", "amount"],
+                "revivePlayer" => ["scope", "healthTenths"],
+                "setAutoEntry" => ["objectId", "entry"],
+                "setTriggerEntry" => ["objectId", "entry"],
+                "setBattlefield" => ["battlefieldId"],
+                "fadeOut" => ["frames"],
+                "setParty" => ["roleId0", "roleId1", "roleId2"],
+                "noop" => [],
+                "setStateRange" => ["fromObjectId", "toObjectId", "state"],
                 "fadeToRed" => [],
                 "requestReload" => [],
                 // #52 dynamic-story verbs (script.c), shared by trigger and auto contexts.
@@ -206,7 +218,8 @@ public sealed class TriggerEventCollection
                     // fadeScene/markFailed.
                     if (opcode is 0 or 0x3c or 0xffff or 6 or 27 or 28 or 48 or 0x43 or 0x4e or 0x4f
                         or >= 0x0b and <= 0x10 or 0x15 or 0x40 or 0x46 or 0x49 or 0x52 or 0x6d or 0x73 or 0x90
-                        or 5 or 9 or 0x41)
+                        or 5 or 9 or 0x41 or 0x13 or 0x14 or 0x1d or 0x22 or 0x24 or 0x25 or 0x4a or 0x50
+                        or 0x75 or 0x78 or 0x9a)
                         throw new InvalidDataException("Registered opcode must use named mapping.");
                     break;
                 case "end":
@@ -276,6 +289,75 @@ public sealed class TriggerEventCollection
                     if (opcode != 0x43) throw new InvalidDataException("Invalid setMusic mapping.");
                     command.MusicId = EventJson.Word(node, "musicId");
                     command.MusicMode = EventJson.Word(node, "mode");
+                    break;
+                case "setObjectPosition":
+                    // script.c 0x0013: pCurrent x/y words; operand 0/0xFFFF selects the caller.
+                    if (opcode != 0x13) throw new InvalidDataException("Invalid setObjectPosition mapping.");
+                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.TileX = EventJson.Word(node, "x");
+                    command.TileY = EventJson.Word(node, "y");
+                    break;
+                case "setObjectGesture":
+                    // script.c 0x0014: caller's current frame word and direction = south.
+                    if (opcode != 0x14) throw new InvalidDataException("Invalid setObjectGesture mapping.");
+                    command.Frame = EventJson.Word(node, "frame");
+                    break;
+                case "changeHpMp":
+                    // script.c 0x001D: the same signed amount changes HP and MP; scope 0 = the
+                    // caller role, nonzero = the whole party. Retail @0A25 uses scope 1, +9999.
+                    if (opcode != 0x1d) throw new InvalidDataException("Invalid changeHpMp mapping.");
+                    command.Scope = EventJson.Word(node, "scope");
+                    if (EventJson.Number(node, "amount") is < short.MinValue or > short.MaxValue)
+                        throw new InvalidDataException("changeHpMp.amount must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "amount");
+                    break;
+                case "revivePlayer":
+                    // script.c 0x0022: HP = maxHP * operand1 / 10 for dead roles; scope as 0x001D.
+                    if (opcode != 0x22) throw new InvalidDataException("Invalid revivePlayer mapping.");
+                    command.Scope = EventJson.Word(node, "scope");
+                    command.Amount = EventJson.Word(node, "healthTenths");
+                    break;
+                case "setAutoEntry":
+                    // script.c 0x0024: pCurrent wAutoScript = operand1 when operand0 selects one.
+                    if (opcode != 0x24) throw new InvalidDataException("Invalid setAutoEntry mapping.");
+                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.Value = EventJson.Word(node, "entry");
+                    break;
+                case "setTriggerEntry":
+                    // script.c 0x0025: pCurrent wTriggerScript = operand1 when operand0 selects one.
+                    if (opcode != 0x25) throw new InvalidDataException("Invalid setTriggerEntry mapping.");
+                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.Value = EventJson.Word(node, "entry");
+                    break;
+                case "setBattlefield":
+                    // script.c 0x004A: wNumBattleField = operand0. Retail @09FD sets 24.
+                    if (opcode != 0x4a) throw new InvalidDataException("Invalid setBattlefield mapping.");
+                    command.Frames = EventJson.Word(node, "battlefieldId");
+                    break;
+                case "fadeOut":
+                    // script.c 0x0050: PAL_FadeOut(frames or 1) and the next scene fades back in.
+                    if (opcode != 0x50) throw new InvalidDataException("Invalid fadeOut mapping.");
+                    command.Frames = EventJson.Word(node, "frames");
+                    break;
+                case "setParty":
+                    // script.c 0x0075: party = operand+1 role words, 0 = empty; empty keeps role0.
+                    if (opcode != 0x75) throw new InvalidDataException("Invalid setParty mapping.");
+                    command.Role0 = EventJson.Word(node, "roleId0");
+                    command.Role1 = EventJson.Word(node, "roleId1");
+                    command.Role2 = EventJson.Word(node, "roleId2");
+                    break;
+                case "noop":
+                    // script.c 0x0078: the reference implementation does nothing for this opcode.
+                    if (opcode != 0x78) throw new InvalidDataException("Invalid noop mapping.");
+                    break;
+                case "setStateRange":
+                    // script.c 0x009A: sState = operand2 for object IDs operand0..operand1.
+                    if (opcode != 0x9a) throw new InvalidDataException("Invalid setStateRange mapping.");
+                    command.ObjectId = EventJson.Word(node, "fromObjectId");
+                    command.MemberIndex = EventJson.Word(node, "toObjectId");
+                    command.State = EventJson.Number(node, "state");
+                    if (command.State is < short.MinValue or > short.MaxValue)
+                        throw new InvalidDataException("setStateRange.state must be a signed WORD.");
                     break;
                 case "fadeToRed":
                     // script.c 0x004F: fade the whole screen to red (game over); no operands.
@@ -449,6 +531,10 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int Value { get; set; }
     internal int SlotIndex { get; set; }
     internal int MemberIndex { get; set; }
+    // #53 setParty role words (script.c 0x0075).
+    internal int Role0 { get; set; }
+    internal int Role1 { get; set; }
+    internal int Role2 { get; set; }
     internal int RunTriggers { get; set; }
     internal int UpdateGestures { get; set; }
 }

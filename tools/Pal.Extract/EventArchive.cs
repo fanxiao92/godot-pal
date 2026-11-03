@@ -215,6 +215,18 @@ internal static class EventArchive
         else if (opcode == 0x90) { result["op"] = "setObjectScript"; result["objectId"] = a; result["value"] = b; result["slotIndex"] = c; }
         else if (opcode == 9) { result["op"] = "waitUpdate"; result["frames"] = a; result["runTriggers"] = b; result["updateGestures"] = c; }
         else if (opcode == 5) { result["op"] = "redraw"; result["delayUnits"] = a; }
+        // #53 retail verbs (script.c).
+        else if (opcode == 0x13) { result["op"] = "setObjectPosition"; result["objectId"] = a; result["x"] = b; result["y"] = c; }
+        else if (opcode == 0x14) { result["op"] = "setObjectGesture"; result["frame"] = a; }
+        else if (opcode == 0x1d) { result["op"] = "changeHpMp"; result["scope"] = a; result["amount"] = (short)b; }
+        else if (opcode == 0x22) { result["op"] = "revivePlayer"; result["scope"] = a; result["healthTenths"] = b; }
+        else if (opcode == 0x24) { result["op"] = "setAutoEntry"; result["objectId"] = a; result["entry"] = b; }
+        else if (opcode == 0x25) { result["op"] = "setTriggerEntry"; result["objectId"] = a; result["entry"] = b; }
+        else if (opcode == 0x4a) { result["op"] = "setBattlefield"; result["battlefieldId"] = a; }
+        else if (opcode == 0x50) { result["op"] = "fadeOut"; result["frames"] = a; }
+        else if (opcode == 0x75) { result["op"] = "setParty"; result["roleId0"] = a; result["roleId1"] = b; result["roleId2"] = c; }
+        else if (opcode == 0x78) { result["op"] = "noop"; }
+        else if (opcode == 0x9a) { result["op"] = "setStateRange"; result["fromObjectId"] = a; result["toObjectId"] = b; result["state"] = (short)c; }
         else result["op"] = "raw";
         result["next"] = (index + 1 < count || count == 65536) ? LabelAt((index + 1) & 0xffff) : null;
         result["source"] = new JsonObject
@@ -364,6 +376,43 @@ internal static class EventArchive
         {
             a = checked((ushort)Int(command, "delayUnits"));
         }
+        else if (opcode == 0x13 && op == "setObjectPosition")
+        {
+            a = checked((ushort)Int(command, "objectId")); b = checked((ushort)Int(command, "x")); c = checked((ushort)Int(command, "y"));
+        }
+        else if (opcode == 0x14 && op == "setObjectGesture")
+        {
+            a = checked((ushort)Int(command, "frame"));
+        }
+        else if (opcode == 0x1d && op == "changeHpMp")
+        {
+            a = checked((ushort)Int(command, "scope")); b = unchecked((ushort)CheckedSigned(command, "amount"));
+        }
+        else if (opcode == 0x22 && op == "revivePlayer")
+        {
+            a = checked((ushort)Int(command, "scope")); b = checked((ushort)Int(command, "healthTenths"));
+        }
+        else if ((opcode == 0x24 && op == "setAutoEntry") || (opcode == 0x25 && op == "setTriggerEntry"))
+        {
+            a = checked((ushort)Int(command, "objectId")); b = checked((ushort)Int(command, "entry"));
+        }
+        else if (opcode == 0x4a && op == "setBattlefield")
+        {
+            a = checked((ushort)Int(command, "battlefieldId"));
+        }
+        else if (opcode == 0x50 && op == "fadeOut")
+        {
+            a = checked((ushort)Int(command, "frames"));
+        }
+        else if (opcode == 0x75 && op == "setParty")
+        {
+            a = checked((ushort)Int(command, "roleId0")); b = checked((ushort)Int(command, "roleId1")); c = checked((ushort)Int(command, "roleId2"));
+        }
+        else if (opcode == 0x78 && op == "noop") { }
+        else if (opcode == 0x9a && op == "setStateRange")
+        {
+            a = checked((ushort)Int(command, "fromObjectId")); b = checked((ushort)Int(command, "toObjectId")); c = unchecked((ushort)CheckedSigned(command, "state"));
+        }
         else throw new InvalidDataException($"{String(command, "label")}: op does not match registered source opcode.");
         Write(destination, opcode); Write(destination[2..], a); Write(destination[4..], b); Write(destination[6..], c);
     }
@@ -412,7 +461,8 @@ internal static class EventArchive
         if (op is not ("raw" or "end" or "setDialog" or "showDialog" or "startBattle" or "randomJump" or "changeHp" or "changeMp" or "boostStat"
             or "setMusic" or "fadeToRed" or "requestReload" or "markFailed" or "walkStep" or "face" or "walkTo" or "setPartyFacing"
             or "setTriggerMode" or "setPartyPos" or "setState" or "hide" or "setSceneScripts" or "fadeScene" or "setObjectScript"
-            or "waitUpdate" or "redraw")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
+            or "waitUpdate" or "redraw" or "setObjectPosition" or "setObjectGesture" or "changeHpMp" or "revivePlayer"
+            or "setAutoEntry" or "setTriggerEntry" or "setBattlefield" or "fadeOut" or "setParty" or "noop" or "setStateRange")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
         string? next = NullableString(command, "next");
         if (next is not null) ValidateReferenceSyntax(next, $"{label}.next");
         var source = Required(command, "source");
@@ -451,6 +501,16 @@ internal static class EventArchive
             "setObjectScript" => new[] { "label", "op", "objectId", "value", "slotIndex", "next", "source" },
             "waitUpdate" => new[] { "label", "op", "frames", "runTriggers", "updateGestures", "next", "source" },
             "redraw" => new[] { "label", "op", "delayUnits", "next", "source" },
+            "setObjectPosition" => new[] { "label", "op", "objectId", "x", "y", "next", "source" },
+            "setObjectGesture" => new[] { "label", "op", "frame", "next", "source" },
+            "changeHpMp" => new[] { "label", "op", "scope", "amount", "next", "source" },
+            "revivePlayer" => new[] { "label", "op", "scope", "healthTenths", "next", "source" },
+            "setAutoEntry" or "setTriggerEntry" => new[] { "label", "op", "objectId", "entry", "next", "source" },
+            "setBattlefield" => new[] { "label", "op", "battlefieldId", "next", "source" },
+            "fadeOut" => new[] { "label", "op", "frames", "next", "source" },
+            "setParty" => new[] { "label", "op", "roleId0", "roleId1", "roleId2", "next", "source" },
+            "noop" => new[] { "label", "op", "next", "source" },
+            "setStateRange" => new[] { "label", "op", "fromObjectId", "toObjectId", "state", "next", "source" },
             _ => new[] { "label", "op", "messageId", "descriptionLineWord", "next", "source" }
         };
         ValidateKeys(command, label, allowed);
@@ -479,7 +539,8 @@ internal static class EventArchive
         if (op is "changeHp" or "changeMp" && opcodeValue != (op == "changeHp" ? 27 : 28)) throw new InvalidDataException($"{label}: invalid {op} mapping.");
         if (op == "boostStat" && opcodeValue != 48) throw new InvalidDataException($"{label}: invalid boostStat mapping.");
         if (op == "raw" && opcodeValue is 0 or 0x003b or 0x003c or 0x003d or 0x003e or 0xffff or 6 or 27 or 28 or 48
-            or 0x43 or 0x4e or 0x4f or 0x41 or (>= 0x0b and <= 0x10) or 0x15 or 0x40 or 0x46 or 0x49 or 0x52 or 0x6d or 0x73 or 0x90 or 9 or 5) throw new InvalidDataException($"{label}: registered opcode must use its named mapping.");
+            or 0x43 or 0x4e or 0x4f or 0x41 or (>= 0x0b and <= 0x10) or 0x15 or 0x40 or 0x46 or 0x49 or 0x52 or 0x6d or 0x73 or 0x90 or 9 or 5
+            or 0x13 or 0x14 or 0x1d or 0x22 or 0x24 or 0x25 or 0x4a or 0x50 or 0x75 or 0x78 or 0x9a) throw new InvalidDataException($"{label}: registered opcode must use its named mapping.");
         if (op == "raw" && (command.ContainsKey("mode") || command.ContainsKey("text"))) throw new InvalidDataException($"{label}: raw command cannot carry semantic fields.");
     }
 

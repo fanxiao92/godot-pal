@@ -323,13 +323,13 @@ public class TriggerScriptSessionTests
     public void Unsupported_later_text_control_fails_preflight_with_event_location_not_after_partial_display()
     {
         var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 62, [
-            DialogueMessagePart.FromText("A"), DialogueMessagePart.FromText("~01B")])]);
+            DialogueMessagePart.FromText("A"), DialogueMessagePart.FromText("$7B")])]);
         var script = new TriggerScriptSession(new EventFixture().Load(), language);
         var error = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 60));
         Assert.Contains("shared.json", error.Message);
         Assert.Contains("L0002", error.Message);
         Assert.Contains("0002", error.Message);
-        Assert.Contains("~", error.Message);
+        Assert.Contains("$", error.Message);
         Assert.Null(script.PendingDisplay);
         Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
     }

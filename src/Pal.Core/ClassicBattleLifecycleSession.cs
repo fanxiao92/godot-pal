@@ -369,7 +369,9 @@ public sealed class ClassicBattleLifecycleSession
         // The settlement consumes any primary/hidden value against the shared threshold table
         // (battle.c 1098/1252); a zero threshold would loop forever and stays unsupported, as do
         // hidden levels above MAX_LEVELS. Primary uses the role's current level, not the record's.
-        if (growth.LevelUpExperience is not { Count: 100 } || growth.LevelUpExperience.Any(x => x is < 1 or > 65535)
+        // Retail's shared threshold table keeps an unreachable zero at index 0 (levels are
+        // 1-based; the settlement reads rgwLevelUpExp[level]); reachable indices stay positive.
+        if (growth.LevelUpExperience is not { Count: 100 } || growth.LevelUpExperience.Where((_, i) => i > 0).Any(x => x is < 1 or > 65535) || growth.LevelUpExperience[0] is < 0 or > 65535
             || !ValidExperience(role.PrimaryExperience) || role.HiddenExperience is not { Count: 7 }
             || role.HiddenExperience.Keys.Any(name => !HiddenNames.Contains(name, StringComparer.Ordinal))
             || HiddenNames.Any(name => !role.HiddenExperience.TryGetValue(name, out var xp) || !ValidExperience(xp)

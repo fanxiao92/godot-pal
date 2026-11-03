@@ -296,7 +296,10 @@ public sealed class TriggerScriptSession
             }
             else if (command.Op is "walkStep" or "face" or "setState" or "hide" or "setTriggerMode"
                 or "setSceneScripts" or "setObjectScript" or "setPartyPos" or "setPartyFacing"
-                or "waitUpdate" or "redraw" or "fadeScene" or "markFailed" or "walkTo")
+                or "waitUpdate" or "redraw" or "fadeScene" or "markFailed" or "walkTo"
+                or "setObjectPosition" or "setObjectGesture" or "changeHpMp" or "revivePlayer"
+                or "setAutoEntry" or "setTriggerEntry" or "setBattlefield" or "fadeOut" or "setParty"
+                or "noop" or "setStateRange")
             {
                 // #52 dynamic-story verbs: they are never branch points; execution applies them
                 // through the dynamic world (or parks the call). No-world sessions reject them at
@@ -497,6 +500,66 @@ public sealed class TriggerScriptSession
                     break;
                 case "setPartyFacing" when _world is not null:
                     _world.SetPartyFacing(command.Direction, command.Frame, command.MemberIndex);
+                    _address = Next(command);
+                    break;
+                case "setObjectPosition" when _world is not null:
+                    // script.c 0x0013: operand 0/0xFFFF selects the caller, otherwise that object.
+                    _world.SetObjectPosition(command.ObjectId is 0 or 0xffff ? Caller : command.ObjectId,
+                        command.TileX, command.TileY, command.Position);
+                    _address = Next(command);
+                    break;
+                case "setObjectGesture" when _world is not null:
+                    // script.c 0x0014: the caller's frame word, direction forced south.
+                    _world.SetGesture(Caller, command.Frame);
+                    _address = Next(command);
+                    break;
+                case "setTriggerEntry" when _world is not null:
+                    // script.c 0x0025: skip when operand0 selects nothing.
+                    if (command.ObjectId != 0)
+                        _world.SetObjectEntry(command.ObjectId == 0xffff ? Caller : command.ObjectId, command.Value, true, command.Position);
+                    _address = Next(command);
+                    break;
+                case "setAutoEntry" when _world is not null:
+                    // script.c 0x0024: same selection rule as the trigger entry write.
+                    if (command.ObjectId != 0)
+                        _world.SetObjectEntry(command.ObjectId == 0xffff ? Caller : command.ObjectId, command.Value, false, command.Position);
+                    _address = Next(command);
+                    break;
+                case "setBattlefield" when _world is not null:
+                    // script.c 0x004A: wNumBattleField word.
+                    _world.SetBattlefield(command.Frames);
+                    _address = Next(command);
+                    break;
+                case "fadeOut" when _world is not null:
+                    // script.c 0x0050: fade out (0 -> 1 frame unit); the host fades back in after.
+                    PendingTransition = new TriggerTransitionRequest(Guid.NewGuid(), command.Position, "fadeOut",
+                        command.Frames == 0 ? 1 : command.Frames);
+                    _address = Next(command);
+                    Phase = TriggerScriptPhase.WaitingForTransition;
+                    return;
+                case "setParty" when _world is not null:
+                    // script.c 0x0075: operand+1 role words; the world keeps role0 when all empty.
+                    _world.SetParty(command.Role0, command.Role1, command.Role2);
+                    _address = Next(command);
+                    break;
+                case "setStateRange" when _world is not null:
+                    // script.c 0x009A: the same signed state for a contiguous object-ID range.
+                    _world.SetStateRange(command.ObjectId, command.MemberIndex, command.State, command.Position);
+                    _address = Next(command);
+                    break;
+                case "changeHpMp" when _world is not null:
+                    // script.c 0x001D: HP and MP move by the same signed amount, clamped at the
+                    // words' bounds; scope 0 is the caller role, nonzero the whole party.
+                    _world.ChangeHpMp(command.Scope, Caller, command.Amount, command.Position);
+                    _address = Next(command);
+                    break;
+                case "revivePlayer" when _world is not null:
+                    // script.c 0x0022: dead roles return with maxHP * tenths / 10.
+                    _world.RevivePlayer(command.Scope, Caller, command.Amount, command.Position);
+                    _address = Next(command);
+                    break;
+                case "noop":
+                    // script.c 0x0078: the reference executes nothing for this opcode.
                     _address = Next(command);
                     break;
                 case "markFailed":

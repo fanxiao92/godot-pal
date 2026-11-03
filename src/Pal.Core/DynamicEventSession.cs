@@ -36,6 +36,12 @@ public sealed class DynamicEventWorld
     public StaticLeader Leader { get; internal set; }
     /// <summary>script.c 0x0075 party roles (role+1 words); retained after the event.</summary>
     public IReadOnlyList<int> PartyRoles { get; internal set; } = [0];
+    /// <summary>script.c 0x004A wNumBattleField word; 0 until a verb writes it.</summary>
+    public int Battlefield { get; internal set; }
+    /// <summary>Party role HP/MP words changed by script.c 0x001D/0x0022. Entries exist only
+    /// for roles the host initialized from its own pre-battle profile.</summary>
+    public IReadOnlyDictionary<int, DynamicRoleVitals> PartyVitals => partyVitals;
+    private readonly Dictionary<int, DynamicRoleVitals> partyVitals = new();
     public IReadOnlyDictionary<int, System.Tuple<int, int>> SceneScripts => sceneScripts;
     public IReadOnlyDictionary<(int ObjectId, int SlotIndex), int> ObjectScripts => objectScripts;
 
@@ -155,6 +161,94 @@ public sealed class DynamicEventWorld
     {
         var roles = new[] { role0, role1, role2 }.Where(r => r != 0).Select(r => r - 1).ToArray();
         PartyRoles = roles.Length > 0 ? roles : [0];
+    }
+
+    /// <summary>script.c 0x0013: pCurrent x/y words.</summary>
+    internal void SetObjectPosition(int objectId, int x, int y, TriggerPosition position)
+    {
+        var obj = Require(objectId, position);
+        obj.X = x; obj.Y = y;
+        WorldChanged?.Invoke();
+    }
+
+    /// <summary>script.c 0x0014: the caller's current-frame word, direction = south.</summary>
+    internal void SetGesture(int objectId, int frame)
+    {
+        var obj = Require(objectId, null);
+        obj.CurrentFrame = frame;
+        obj.Direction = 0;
+        WorldChanged?.Invoke();
+    }
+
+    /// <summary>script.c 0x0024/0x0025: pCurrent auto/trigger entry words.</summary>
+    internal void SetObjectEntry(int objectId, int entry, bool trigger, TriggerPosition position)
+    {
+        var obj = Require(objectId, position);
+        if (trigger) obj.TriggerEntry = entry; else obj.AutoEntry = entry;
+        WorldChanged?.Invoke();
+    }
+
+    /// <summary>script.c 0x009A: one signed state word for a contiguous object-ID range.</summary>
+    internal void SetStateRange(int fromObjectId, int toObjectId, int state, TriggerPosition position)
+    {
+        if (fromObjectId == 0 || toObjectId < fromObjectId)
+            throw new InvalidDataException($"{position}: setStateRange requires a nonempty object-ID range.");
+        for (int id = fromObjectId; id <= toObjectId; id++) Require(id, position).State = state;
+        WorldChanged?.Invoke();
+    }
+
+    /// <summary>script.c 0x004A: the current battlefield word.</summary>
+    internal void SetBattlefield(int battlefieldId) => Battlefield = battlefieldId;
+
+    /// <summary>Host hook: publish one role's current words before 0x001D/0x0022 can run.</summary>
+    internal void InitializeVitals(int roleId, int hp, int maxHp, int mp, int maxMp)
+    {
+        if (roleId is < 0 or > 5 || maxHp is < 0 or > 65535 || maxMp is < 0 or > 65535
+            || hp is < 0 or > 65535 || mp is < 0 or > 65535 || hp > maxHp || mp > maxMp)
+            throw new InvalidDataException($"party vitals for role {roleId} are outside the WORD domain.");
+        partyVitals[roleId] = new DynamicRoleVitals(hp, maxHp, mp, maxMp);
+    }
+
+    /// <summary>script.c 0x001D (PAL_IncreaseHPMP): the same signed amount moves HP and MP,
+    /// clamped to 0..max; scope 0 is the caller role, nonzero the whole party.</summary>
+    internal void ChangeHpMp(int scope, int callerRole, int amount, TriggerPosition position)
+    {
+        foreach (int role in VitalTargets(scope, callerRole, position))
+        {
+            var vitals = partyVitals[role];
+            vitals.Hp = Math.Clamp(vitals.Hp + amount, 0, vitals.MaxHp);
+            vitals.Mp = Math.Clamp(vitals.Mp + amount, 0, vitals.MaxMp);
+        }
+    }
+
+    /// <summary>script.c 0x0022: dead roles return with maxHP * tenths / 10; the reference also
+    /// cures poison and statuses, which this world does not model (documented boundary).</summary>
+    internal void RevivePlayer(int scope, int callerRole, int healthTenths, TriggerPosition position)
+    {
+        foreach (int role in VitalTargets(scope, callerRole, position))
+        {
+            var vitals = partyVitals[role];
+            if (vitals.Hp == 0) vitals.Hp = vitals.MaxHp * healthTenths / 10;
+        }
+    }
+
+    private IEnumerable<int> VitalTargets(int scope, int callerRole, TriggerPosition position)
+    {
+        if (scope == 0)
+        {
+            if (!partyVitals.ContainsKey(callerRole))
+                throw new InvalidDataException($"{position}: party vitals for role {callerRole} are not initialized; the host must supply the pre-battle profile.");
+            yield return callerRole;
+        }
+        else
+        {
+            foreach (int role in PartyRoles)
+            {
+                if (!partyVitals.ContainsKey(role))
+                    throw new InvalidDataException($"{position}: party vitals for role {role} are not initialized; the host must supply the pre-battle profile.");
+                yield return role;
+            }
+        }
     }
 
     /// <summary>play.c PAL_GameUpdate: every object with a nonzero vanish word counts it one step
@@ -459,4 +553,13 @@ public sealed class DynamicEventSession
     };
 
     private void ApplyWorld() => exploration.ReplaceRules(BuildRules(), world.Leader);
+}
+
+/// <summary>Mutable party HP/MP words for one role (script.c 0x001D/0x0022 writes).</summary>
+public sealed class DynamicRoleVitals(int hp, int maxHp, int mp, int maxMp)
+{
+    public int Hp { get; internal set; } = hp;
+    public int MaxHp { get; } = maxHp;
+    public int Mp { get; internal set; } = mp;
+    public int MaxMp { get; } = maxMp;
 }
