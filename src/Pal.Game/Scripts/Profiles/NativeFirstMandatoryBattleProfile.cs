@@ -201,7 +201,7 @@ public sealed class CheckedFirstMandatoryBattleProfile
         FirstBattleRealResources? resources = null)
         => (Profile,StaticResources,StaticProfile,Closure,Visual,Resources)=(profile,staticResources,staticProfile,closure,visual,resources);
 
-    public FirstMandatoryBattleSession CreateSession(int sceneId, CheckedExplorationProfile scene) => new(Profile, sceneId, scene.Rules, scene.Leader);
+    public FirstMandatoryBattleSession CreateSession(int sceneId, CheckedExplorationProfile scene) => new(Profile, sceneId, scene.Rules, scene.Leader, Closure);
 
     public void ValidateStatic(PalSceneData data, CheckedExplorationProfile scene)
     {
