@@ -54,3 +54,8 @@ Four additional Core regressions (inventory786) cover completed-call replay, old
 ### #46 enemy reference presentation D1
 
 Two new Story scene-dialogue cases cover delayed displayed enemy-impact HP/result and independent physical-action tables (magic0/1/3, attack0/2, wait0/2, hit/evade, inclusive indices, recoil/return, dying threshold and indexed shift). Existing real Main observers additionally check production impact/release ticks and cleanup. Inventory527 =524 positives +3 controls, serial81/98/345; metadata remains16 groups. No Core/native schema/Prepare/author inputs changed. D1 does not close player effects, enemy idle-speed/counter binding, floating-number fidelity, GPU/manual/CI/full gate or #46/M4; see the [bounded contract](../../../docs/design/main-story-roundtrip.md#reference-presentation-checkpoint-d1-enemy-active-physical-action).
+
+
+### #46 D2-A resource binding
+
+Fourteen NativeVisual cases and seven public Story Prepare cases add optional effect/speed format-vs-capability, no-wrap int triples, zero idle speed, exact effect hash closure, retained checked planes, strict author schema and old-input compatibility. The two authored B cases additionally require the capability and literal original effect pixels. Inventory548 =545 positives+3 controls; serial81/98/366, metadata16 groups. NativeVisual63 and direct Story Prepare38 are the matching ranges; complete Prepare remains89. These are resource/preparation checks, not Main playback, an idle counter, floating feedback, GPU/manual/CI/fullgate or #46/M4 completion. Core/Main/clock are unchanged.

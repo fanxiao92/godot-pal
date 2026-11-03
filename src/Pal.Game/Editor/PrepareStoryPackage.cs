@@ -81,6 +81,7 @@ public partial class PrepareStoryPackage : Node
                 story.DialogueDirectory + "/Font.tres", story.DialogueDirectory + "/Language.zh-Hans.tres", story.DialogueDirectory + "/Language.en.tres",
                 story.DialogueDirectory + "/Prompt-00.tres", story.DialogueDirectory + "/Prompt-01.tres", story.DialogueDirectory + "/Prompt-02.tres" }.Concat(story.Portraits.Values).ToArray();
             string[] visualSeeds = new[] { visual.PlayerSpriteUri, visual.PaletteUri }
+                .Concat(visual.AttackEffectSpriteUri != "" ? new[] { visual.AttackEffectSpriteUri } : Array.Empty<string>())
                 .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri, t.EnemySpriteUri })).ToArray();
             foreach (string root in new[] { story.StaticResources, story.DialogueDirectory })
             {
@@ -241,25 +242,33 @@ public partial class PrepareStoryPackage : Node
             story.Portraits.Add(id, Text(portrait, "uri"));
         }
         var v = root.GetProperty("visual");
-        Properties(v, "roleId", "playerSpriteUri", "playerPosition", "paletteUri", "teams");
+        PropertiesWithOptional(v, new[] { "attackEffectSpriteUri", "attackEffectIndex" }, "roleId", "playerSpriteUri", "playerPosition", "paletteUri", "teams");
         var visual = new PalBattleVisualProfile { FormatVersion = 1, SourceIdentity = story.SourceIdentity, RoleId = Int(v, "roleId"),
             PlayerSpriteUri = Text(v, "playerSpriteUri"), PlayerPosition = Position(v, "playerPosition"), PaletteUri = Text(v, "paletteUri") };
+        if (v.TryGetProperty("attackEffectSpriteUri", out _)) visual.AttackEffectSpriteUri = Text(v, "attackEffectSpriteUri");
+        if (v.TryGetProperty("attackEffectIndex", out _)) visual.AttackEffectIndex = Int(v, "attackEffectIndex");
+        Require((visual.AttackEffectSpriteUri != "") == v.TryGetProperty("attackEffectIndex", out _), "attack effect fields must be paired");
         Require(v.GetProperty("teams").ValueKind == JsonValueKind.Array, "teams must be an array");
         visual.Teams = v.GetProperty("teams").EnumerateArray().Select(t =>
         {
-            Properties(t, "teamId", "targetId", "backgroundUri", "enemySpriteUri", "enemyPosition", "idleFrames", "magicFrames", "attackFrames", "actWaitFrames");
+            PropertiesWithOptional(t, new[] { "idleAnimSpeed" }, "teamId", "targetId", "backgroundUri", "enemySpriteUri", "enemyPosition", "idleFrames", "magicFrames", "attackFrames", "actWaitFrames");
             return new PalBattleVisualTeam { TeamId = Int(t, "teamId"), TargetId = Int(t, "targetId"), BackgroundUri = Text(t, "backgroundUri"),
                 EnemySpriteUri = Text(t, "enemySpriteUri"), EnemyPosition = Position(t, "enemyPosition"), IdleFrames = Int(t, "idleFrames"),
+                IdleAnimSpeed = t.TryGetProperty("idleAnimSpeed", out _) ? Int(t, "idleAnimSpeed") : -1,
                 MagicFrames = Int(t, "magicFrames"), AttackFrames = Int(t, "attackFrames"), ActWaitFrames = Int(t, "actWaitFrames") };
         }).ToArray();
+        foreach (var t in v.GetProperty("teams").EnumerateArray())
+            if (t.TryGetProperty("idleAnimSpeed", out _)) Require(Int(t, "idleAnimSpeed") is >= 0 and <= ushort.MaxValue, "idleAnimSpeed requires WORD");
+        if (v.TryGetProperty("attackEffectIndex", out _)) Require(visual.AttackEffectIndex is >= 0 and <= ushort.MaxValue, "attackEffectIndex requires WORD");
         return (story, visual);
     }
-    private static void Properties(JsonElement value, params string[] expected)
+    private static void Properties(JsonElement value, params string[] expected) => PropertiesWithOptional(value, Array.Empty<string>(), expected);
+    private static void PropertiesWithOptional(JsonElement value, string[] optional, params string[] expected)
     {
         Require(value.ValueKind == JsonValueKind.Object, "metadata must contain objects");
         var actual = value.EnumerateObject().Select(p => p.Name).ToArray();
-        Require(actual.Length == expected.Length && actual.Distinct(StringComparer.Ordinal).Count() == actual.Length
-            && actual.ToHashSet(StringComparer.Ordinal).SetEquals(expected), "metadata has missing, duplicate or unknown fields; expected " + string.Join(",", expected));
+        Require(actual.Distinct(StringComparer.Ordinal).Count() == actual.Length
+            && expected.All(actual.Contains) && actual.All(name => expected.Contains(name) || optional.Contains(name)), "metadata has missing, duplicate or unknown fields; expected " + string.Join(",", expected));
     }
     private static string Text(JsonElement value, string key)
     {

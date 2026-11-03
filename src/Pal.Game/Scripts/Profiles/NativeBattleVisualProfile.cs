@@ -34,13 +34,17 @@ public static class NativeBattleVisualProfile
                     "visual TeamId/TargetId does not match story battle target (not sprite ID)");
                 Position(team.EnemyPosition);
                 Require(team.IdleFrames is > 0 and <= ushort.MaxValue && Word(team.MagicFrames) && Word(team.AttackFrames)
-                    && Word(team.ActWaitFrames), "invalid enemy frame metadata WORDs");
+                    && Word(team.ActWaitFrames) && (team.IdleAnimSpeed == -1 || Word(team.IdleAnimSpeed)), "invalid enemy frame metadata WORDs");
             }
             Require(story.Requirements.BattleTeamIds.ToHashSet().SetEquals(teams.Keys), "visual Teams must exactly cover selected battle teams");
             Require(native.ResourceSha256 is not null, "visual ResourceSha256 is required");
             var hashes = native.ResourceSha256!.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
+            bool hasEffect = native.AttackEffectSpriteUri != "" || native.AttackEffectIndex != -1;
+            Require(!hasEffect || (!string.IsNullOrWhiteSpace(native.AttackEffectSpriteUri) && Word(native.AttackEffectIndex)),
+                "attack effect requires paired SpriteUri and WORD AttackEffectIndex");
             var seeds = new[] { native.PlayerSpriteUri, native.PaletteUri }
+                .Concat(hasEffect ? new[] { native.AttackEffectSpriteUri } : Array.Empty<string>())
                 .Concat(teams.Values.SelectMany(x => new[] { x.BackgroundUri, x.EnemySpriteUri }))
                 .Concat(Dependencies(uri)).ToArray();
             Require(!hashes.ContainsKey(uri), "visual root cannot hash itself");
@@ -56,6 +60,10 @@ public static class NativeBattleVisualProfile
             var player = LoadSprite(native.PlayerSpriteUri);
             Require(Enumerable.Range(0, 10).All(player.Frames.Select(x => x.Index).ToHashSet().Contains),
                 "player requires addressable frames 0..9");
+            PalSprite? effect = hasEffect ? LoadSprite(native.AttackEffectSpriteUri) : null;
+            if (effect is not null)
+                Require(Enumerable.Range(native.AttackEffectIndex * 3, 3).All(effect.Frames.Select(x => x.Index).ToHashSet().Contains),
+                    "attack effect references unaddressable frames");
             var checkedTeams = new Dictionary<int, CheckedBattleVisualTeam>();
             foreach (var team in teams.Values)
             {
@@ -69,7 +77,7 @@ public static class NativeBattleVisualProfile
                 checkedTeams.Add(team.TeamId, new(team, background, sprite));
             }
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
-            return new(native, player, palette, checkedTeams, hashes);
+            return new(native, player, palette, effect, checkedTeams, hashes);
         }
         catch (InvalidDataException error) { throw new InvalidDataException(uri + ": " + error.Message, error); }
         catch (Exception error) when (error is ArgumentException or NullReferenceException or InvalidCastException or InvalidOperationException)
@@ -111,13 +119,25 @@ public sealed class CheckedBattleVisualProfile
     public Vector2I PlayerPosition { get; }
     public PalSprite PlayerSprite { get; }
     public PalPalette Palette { get; }
+    public int AttackEffectIndex { get; }
+    public PalSprite? AttackEffectSprite { get; }
+    public IReadOnlyList<PalFrame> AttackEffectFrames { get; }
+
+    public void RequireReferencePresentation()
+    {
+        if (AttackEffectSprite is null) throw new InvalidDataException("reference presentation requires attack effect metadata");
+        if (Teams.Values.Any(t => t.IdleAnimSpeed < 0)) throw new InvalidDataException("reference presentation requires selected enemy IdleAnimSpeed");
+    }
     public IReadOnlyDictionary<int, CheckedBattleVisualTeam> Teams { get; }
     public IReadOnlyDictionary<string, string> ResourceSha256 { get; }
-    internal CheckedBattleVisualProfile(PalBattleVisualProfile native, PalSprite player, PalPalette palette,
+    internal CheckedBattleVisualProfile(PalBattleVisualProfile native, PalSprite player, PalPalette palette, PalSprite? effect,
         Dictionary<int, CheckedBattleVisualTeam> teams, Dictionary<string, string> hashes)
     {
         SourceIdentity = native.SourceIdentity; RoleId = native.RoleId; PlayerPosition = native.PlayerPosition;
         PlayerSprite = player; Palette = palette;
+        AttackEffectIndex = native.AttackEffectIndex; AttackEffectSprite = effect;
+        AttackEffectFrames = Array.AsReadOnly(effect is null ? Array.Empty<PalFrame>() : Enumerable.Range(AttackEffectIndex * 3, 3)
+            .Select(index => effect.Frames.Single(frame => frame.Index == index)).ToArray());
         Teams = new ReadOnlyDictionary<int, CheckedBattleVisualTeam>(new Dictionary<int, CheckedBattleVisualTeam>(teams));
         ResourceSha256 = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(hashes, StringComparer.Ordinal));
     }
@@ -129,6 +149,7 @@ public sealed class CheckedBattleVisualTeam
     public int TargetId { get; }
     public Vector2I EnemyPosition { get; }
     public int IdleFrames { get; }
+    public int IdleAnimSpeed { get; }
     public int MagicFrames { get; }
     public int AttackFrames { get; }
     public int ActWaitFrames { get; }
@@ -137,6 +158,7 @@ public sealed class CheckedBattleVisualTeam
     internal CheckedBattleVisualTeam(PalBattleVisualTeam native, PalDialogueIndexedImage background, PalSprite enemy)
     {
         TeamId = native.TeamId; TargetId = native.TargetId; EnemyPosition = native.EnemyPosition;
+        IdleAnimSpeed = native.IdleAnimSpeed;
         IdleFrames = native.IdleFrames; MagicFrames = native.MagicFrames; AttackFrames = native.AttackFrames; ActWaitFrames = native.ActWaitFrames;
         Background = background; EnemySprite = enemy;
     }

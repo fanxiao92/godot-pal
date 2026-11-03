@@ -96,3 +96,10 @@ wrapper 必需且仅一次 `-InputPath/-OutputPath`，可选 `-GodotPath/-Timeou
 ## #46 checkpoint B: original authored sample
 
 完整可提交人工作者 native 静态/双语非空bitmap字形/索引视觉资源及 Win/Loss 现代输入已提供，见 [正常准备命令、来源、搜索和数值设计](../../samples/authored-battle/README.md)。正常 numeric/story wrappers 分别准备两种场景；两个精确 Game 数据用例核双语 strict Load、真实搜索/可见平面和公开 Core Won/Lost 续接。本文上文 checkpoint A 的历史范围不改写；本B仍不接 Main/HUD/input/动作/effect，不签 SceneRunner/GPU/人工/CI、#46或M4完成。
+
+
+## D2-A optional visual author fields
+
+Within the same formatVersion1 metadata, `visual.attackEffectSpriteUri` and `visual.attackEffectIndex` may be supplied **together** (nonempty native PalSprite URI and WORD group, including0). Each team may supply `idleAnimSpeed` (WORD including0). Omission preserves old C's absent sentinels; explicit −1 in author JSON is not a default and is rejected. Duplicate/unknown fields remain errors. Native writer stays1/root default−1; no separate converter or Resource→JSON round-trip exists.
+
+The normal public Prepare includes effect seeds in the existing `HashSet<string>` native dependency closure and `Dictionary<string,string>` SHA-256 manifest, with the same stable-read lease/path/no-overwrite/owned cleanup checks. Strict native loading validates any supplied data even without selecting the reference-presentation capability; consumers select that capability with `checkedVisual.RequireReferencePresentation()` without reloading resources. See [the full native contract](native-battle-visuals.md#46-d2-a-optional-reference-presentation-data-not-playback). This checkpoint prepares/binds data, not animation playback. Changed source bytes require **fresh** Story outputs; old outputs are not repaired or declared hash-consistent.

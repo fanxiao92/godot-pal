@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using GdUnit4;
 using Godot;
 using Pal.Game.Editor;
@@ -203,6 +204,49 @@ public class PrepareStoryPackageTests
             if (kind == "events") Directory.Move(target, Path.Combine(source.Input, "events"));
         }
         AssertThat(Directory.Exists(source.Output)).IsFalse();
+    }
+
+    [TestCase]
+    public void PublicPrepareBindsOptionalReferenceDataAndExactEffectClosure()
+    {
+        using var source = new Preparation();
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
+        metadata["visual"]!["attackEffectSpriteUri"] = source.Native.Team.EnemySpriteUri;
+        metadata["visual"]!["attackEffectIndex"] = 0;
+        metadata["visual"]!["teams"]![0]!["idleAnimSpeed"] = 0;
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        string[] before = source.Snapshot();
+        var result = PrepareStoryPackage.Prepare(source.Input, source.Output);
+        var visual = NativeBattleVisualProfile.Load(result.VisualUri, NativeStoryProfile.Load(result.StoryUri));
+        visual.RequireReferencePresentation();
+        AssertThat(visual.AttackEffectFrames.Select(x => x.Index).SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
+        AssertThat(visual.ResourceSha256.ContainsKey(source.Native.Team.EnemySpriteUri)).IsTrue();
+        AssertThat(visual.Teams[18].IdleAnimSpeed).IsEqual(0);
+        AssertThat(source.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase("partial")]
+    [TestCase("negative-group")]
+    [TestCase("idle-sentinel")]
+    [TestCase("idle-overflow")]
+    [TestCase("unknown")]
+    [TestCase("duplicate")]
+    public void OptionalPresentationAuthorFieldsAreNotDefaultsOrSchemaEscapes(string fault)
+    {
+        using var source = new Preparation();
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
+        var visual = metadata["visual"]!;
+        visual["attackEffectSpriteUri"] = source.Native.Team.EnemySpriteUri;
+        if (fault != "partial") visual["attackEffectIndex"] = fault == "negative-group" ? -1 : 0;
+        visual["teams"]![0]!["idleAnimSpeed"] = fault == "idle-sentinel" ? -1 : fault == "idle-overflow" ? 65536 : 0;
+        if (fault == "unknown") visual["unknown"] = 0;
+        string json = metadata.ToJsonString();
+        if (fault == "duplicate") json = json.Replace("\"attackEffectIndex\":0", "\"attackEffectIndex\":0,\"attackEffectIndex\":0");
+        File.WriteAllText(source.Metadata, json); Directory.CreateDirectory(source.Output);
+        string[] before = source.Snapshot();
+        Reject(source.Input, source.Output, fault == "partial" ? "paired" : fault is "unknown" or "duplicate" ? "fields" : "WORD");
+        AssertThat(Directory.GetFileSystemEntries(source.Output).Length).IsEqual(0);
+        AssertThat(source.Snapshot()).IsEqual(before);
     }
 
     private static void Reject(string input, string output, string? diagnostic = null)

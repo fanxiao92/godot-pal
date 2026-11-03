@@ -32,8 +32,11 @@
         "idleFrames": 1,
         "magicFrames": 1,
         "attackFrames": 1,
-        "actWaitFrames": 0
+        "actWaitFrames": 0,
+        "idleAnimSpeed": 2
       }
-    ]
+    ],
+    "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
+    "attackEffectIndex": 0
   }
 }

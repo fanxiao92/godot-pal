@@ -45,6 +45,17 @@ public class AuthoredBattlePackageTests
             {
                 var story = NativeStoryProfile.Load(prepared.StoryUri, language);
                 var visual = NativeBattleVisualProfile.Load(prepared.VisualUri, story);
+                visual.RequireReferencePresentation();
+                AssertThat(visual.AttackEffectIndex).IsEqual(0);
+                AssertThat(visual.Teams[18].IdleAnimSpeed).IsEqual(2);
+                AssertThat(visual.AttackEffectFrames.Select(x => x.Index).SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
+                AssertThat(visual.AttackEffectFrames[0].Indices[4 * 16 + 6]).IsEqual((byte)5);
+                AssertThat(visual.AttackEffectFrames[1].Indices[6 * 16 + 8]).IsEqual((byte)79);
+                AssertThat(visual.AttackEffectFrames[2].Indices[8 * 16 + 10]).IsEqual((byte)5);
+                AssertThat(visual.AttackEffectFrames[0].Alpha[0]).IsEqual((byte)0);
+                AssertThat(visual.AttackEffectFrames[1].Alpha[6 * 16 + 8]).IsEqual((byte)255);
+                AssertThat(visual.AttackEffectFrames[0].Indices.SequenceEqual(visual.AttackEffectFrames[1].Indices)).IsFalse();
+                AssertThat(visual.ResourceSha256.ContainsKey("res://Samples/AuthoredBattle/Visual/AttackEffect.tres")).IsTrue();
                 AssertThat(story.Events.InstructionCount).IsEqual(10);
                 var bytes = new byte[80];
                 for (int i = 0; i < 10; i++)
