@@ -68,14 +68,44 @@ function Get-GameBatchPlan([string]$Repository) {
     $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
     $definitions = @(
         @{ name = 'process'; count = 84; classes = @('StoryMainProcessTests', 'MainProcessTests', 'ExplorationProcessTests') }
-        @{ name = 'scene-dialogue'; count = 120; classes = @('StoryRoundtripSceneTests', 'ExplorationSceneTests', 'MainSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
+        @{ name = 'scene-dialogue'; count = 74; classes = @('ExplorationSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
+        @{ name = 'scene-battle-heavy-a'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.ActiveBattleExit', 'Pal.Game.Tests.StoryRoundtripSceneTests.DeadMember',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.DyingRoleHook', 'Pal.Game.Tests.StoryRoundtripSceneTests.EquipmentDualAttack') }
+        @{ name = 'scene-battle-heavy-b'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.EquipmentStatus', 'Pal.Game.Tests.StoryRoundtripSceneTests.FriendDeathHook',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.HookRandomBands', 'Pal.Game.Tests.StoryRoundtripSceneTests.HooklessCounterpart',
+            'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:0') }
+        @{ name = 'scene-battle-heavy-c'; count = 3; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:1',
+            'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:2',
+            'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:3') }
+        @{ name = 'scene-battle-heavy-d'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.PartyLoss', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwo',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.RemovingTheDual', 'Pal.Game.Tests.StoryRoundtripSceneTests.VictorySettlement') }
+        @{ name = 'scene-battle-light'; count = 28; classes = @('StoryRoundtripSceneTests', 'MainSceneTests'); matches = @(
+            'Pal.Game.Tests.MainSceneTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.BaseFormat', 'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyFeedback',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyIdleWord', 'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyPhysicalReference',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.FailedStoryPreload', 'Pal.Game.Tests.StoryRoundtripSceneTests.FloatingNumber',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.InclusiveGodotRandom', 'Pal.Game.Tests.StoryRoundtripSceneTests.NativeWordsRemain',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.NonterminalActions', 'Pal.Game.Tests.StoryRoundtripSceneTests.NormalStoryArguments',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.PlayerPhysical', 'Pal.Game.Tests.StoryRoundtripSceneTests.StoryBattlePoseClock',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects') }
         @{ name = 'native-map'; count = 408; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
     )
     $batches = foreach ($definition in $definitions) {
-        $names = @($inventory | Where-Object class -CIn $definition.classes | ForEach-Object name)
+        # Name-level partitions (matches) select their members by the same FullyQualifiedName
+        # substring the runtime filter uses; class-only batches keep the class membership rule.
+        # The Game partition assertion below still enforces exact, disjoint coverage.
+        $filter = if ($definition.matches) { ($definition.matches | ForEach-Object { "FullyQualifiedName~$_" }) -join '|' }
+            else { ($definition.classes | ForEach-Object { "FullyQualifiedName~Pal.Game.Tests.$_." }) -join '|' }
+        $names = if ($definition.matches) {
+            @($inventory | Where-Object { $name = $_.name; $definition.matches | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)
+        } else {
+            @($inventory | Where-Object class -CIn $definition.classes | ForEach-Object name)
+        }
         if ($names.Count -ne $definition.count) { throw "Batch $($definition.name) source count differs: $($names.Count)/$($definition.count)." }
-        [pscustomobject]@{ name = $definition.name; count = $definition.count; classes = $definition.classes; expected = $names
-            filter = ($definition.classes | ForEach-Object { "FullyQualifiedName~Pal.Game.Tests.$_." }) -join '|' }
+        [pscustomobject]@{ name = $definition.name; count = $definition.count; classes = $definition.classes; expected = $names; filter = $filter }
     }
     $controls = @($inventory | Where-Object class -CEQ 'FailureControlTests')
     $expectedControls = @('Pal.Game.Tests.FailureControlTests.IntentionalAssertionMismatchPropagates',
