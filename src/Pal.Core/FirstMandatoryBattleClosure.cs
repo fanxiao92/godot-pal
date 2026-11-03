@@ -16,12 +16,16 @@ public sealed class FirstMandatoryBattleClosureReceipt
     public string ContextSha256 { get; }
     public int TriggerEntryAddress { get; }
     public IReadOnlyList<int> VerifiedBattleTeamIds { get; }
+    /// <summary>Nonzero portrait WORD ids the verified entry requires in both languages.</summary>
+    public IReadOnlyList<int> VerifiedPortraitIds { get; }
 
-    internal FirstMandatoryBattleClosureReceipt(string contextSha256, int triggerEntryAddress, IEnumerable<int> teamIds)
+    internal FirstMandatoryBattleClosureReceipt(string contextSha256, int triggerEntryAddress,
+        IEnumerable<int> teamIds, IEnumerable<int> portraitIds)
     {
         ContextSha256 = contextSha256;
         TriggerEntryAddress = triggerEntryAddress;
         VerifiedBattleTeamIds = Array.AsReadOnly(teamIds.Order().ToArray());
+        VerifiedPortraitIds = Array.AsReadOnly(portraitIds.Order().ToArray());
     }
 }
 
@@ -121,7 +125,7 @@ public static class FirstMandatoryBattleClosure
             || images.IncludesLayoutAndEffectFrames != imageIdentity.IncludesLayoutAndEffectFrames)
             throw new InvalidDataException("real battle-images: the prepared image set does not match the frozen enemy97/ABC97/F0/F1/24/FBP24 identity.");
 
-        return new(profile.ContextSha256, entry28.SourceAddress, chineseRequirements.BattleTeamIds);
+        return new(profile.ContextSha256, entry28.SourceAddress, chineseRequirements.BattleTeamIds, chineseRequirements.PortraitIds);
     }
 
     private static T Identity<T>(FirstMandatoryBattleProfile profile, string id) where T : BattleClosureIdentity =>

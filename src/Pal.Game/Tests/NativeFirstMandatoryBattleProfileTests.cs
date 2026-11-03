@@ -74,6 +74,50 @@ public class NativeFirstMandatoryBattleProfileTests
     }
 
     [TestCase]
+    public void ResourceBindingWithoutRealResourcesRejectsBeforeAnySideEffect()
+    {
+        // #53 unit 2 designated RED starting point: a binding that names real modern resources
+        // which do not exist must reject with a precise diagnostic; the @09C3 gate stays closed.
+        using var fixture = new NativeBattleProfileFixture();
+        fixture.Native.EventsIndex = "res://Tests/FirstBattle/Events/index.json";
+        fixture.Native.BattleContentUri = "res://Tests/FirstBattle/BattleContent.tres";
+        fixture.Native.DialogueDirectory = "res://Tests/FirstBattle/Dialogue";
+        fixture.Native.VisualUri = "res://Tests/FirstBattle/Visual.tres";
+        fixture.Native.ImageEnemyId = 97;
+        fixture.Native.ImageEnemyArchiveEntry = "ABC97";
+        fixture.Native.ImageRoleSpriteIds = ["F0", "F1"];
+        fixture.Native.ImagePlayerSpriteUris = ["res://Tests/FirstBattle/F0.tres", "res://Tests/FirstBattle/F1.tres"];
+        fixture.Native.ImageBattlefieldId = 24;
+        fixture.Native.ImageBattlefieldArchiveEntry = "FBP24";
+        fixture.Save();
+        InvalidDataException? error = null;
+        try { NativeFirstMandatoryBattleProfile.Load(fixture.Uri); }
+        catch (InvalidDataException caught) { error = caught; }
+        AssertThat(error is not null).IsTrue();
+        AssertThat(error!.Message.Contains("res://Tests/FirstBattle", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [TestCase("events-only")]
+    [TestCase("images-only")]
+    public void PartialResourceBindingIsRejected(string shape)
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        if (shape == "events-only") fixture.Native.EventsIndex = "res://Tests/FirstBattle/Events/index.json";
+        else fixture.Native.ImageEnemyId = 97;
+        fixture.Save();
+        AssertThrown(() => NativeFirstMandatoryBattleProfile.Load(fixture.Uri));
+    }
+
+    [TestCase]
+    public void LegacyProfileWithoutBindingLoadsAndKeepsTheTriggerGateClosed()
+    {
+        using var fixture = new NativeBattleProfileFixture();
+        CheckedFirstMandatoryBattleProfile loaded = NativeFirstMandatoryBattleProfile.Load(fixture.Uri);
+        AssertThat(loaded.Closure is null).IsTrue();
+        AssertThat(loaded.Visual is null).IsTrue();
+    }
+
+    [TestCase]
     public void NativeBoundaryApiCannotCarryJsonOrForgeCheckedWrapper()
     {
         string[] propertyNames = typeof(PalFirstMandatoryBattleProfile).GetProperties().Select(x => x.Name).ToArray();

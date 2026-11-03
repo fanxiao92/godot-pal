@@ -3,9 +3,9 @@ $ErrorActionPreference = 'Stop'
 $options = @{}
 for ($i = 0; $i -lt $args.Count; $i += 2) {
     $key = [string]$args[$i]
-    if ($key -notin @('-InputPath','-OutputPath','-StaticResources','-StaticProfile','-GodotPath','-TimeoutSeconds') -or
+    if ($key -notin @('-InputPath','-OutputPath','-StaticResources','-StaticProfile','-BattleResources','-GodotPath','-TimeoutSeconds') -or
         $options.ContainsKey($key) -or $i + 1 -ge $args.Count -or [string]::IsNullOrWhiteSpace([string]$args[$i + 1]) -or ([string]$args[$i + 1]).StartsWith('-')) {
-        [Console]::Error.WriteLine('Prepare-BattleContext argument error: expected unique -InputPath/-OutputPath/-StaticResources/-StaticProfile and optional -GodotPath/-TimeoutSeconds, each with a value.')
+        [Console]::Error.WriteLine('Prepare-BattleContext argument error: expected unique -InputPath/-OutputPath/-StaticResources/-StaticProfile and optional -BattleResources/-GodotPath/-TimeoutSeconds, each with a value.')
         exit 2
     }
     $options[$key] = [string]$args[$i + 1]
@@ -65,7 +65,15 @@ try {
     Invoke-Checked 'dotnet' @('build',(Join-Path $project 'Pal.Game.csproj'),'--nologo','--verbosity','quiet') ''
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot
     $null=Resolve-StaticAssetUri $options['-StaticResources'] 'StaticResources' $true; $null=Resolve-StaticAssetUri $options['-StaticProfile'] 'StaticProfile' $false; Assert-NoLink $staticScene; Assert-TreeNoLink $staticRoot
-    Invoke-Checked $godot @('--headless','--path',$project,'res://Editor/PrepareBattleContext.tscn','--','--battle-input',$inputRoot,'--battle-output',$outputRoot,'--static-resources',$options['-StaticResources'],'--static-profile',$options['-StaticProfile']) 'PAL_PREPARE_BATTLE_CONTEXT:first-mandatory-battle-pre-trigger-v1'
+    $resourceArgs=@()
+    if($options.ContainsKey('-BattleResources')){
+        $bindingPath=[IO.Path]::GetFullPath($options['-BattleResources']); Assert-NoLink $bindingPath
+        if(-not [IO.File]::Exists($bindingPath)){throw 'BattleResources must select an existing binding file.'}
+        if((Test-Inside $bindingPath $project)){throw 'BattleResources must be outside src/Pal.Game.'}
+        if((Test-Inside $bindingPath $inputRoot)-or(Test-Inside $inputRoot ([IO.Path]::GetDirectoryName($bindingPath)))){throw 'BattleResources must not overlap the authored input directory.'}
+        $resourceArgs=@('--battle-resources',$bindingPath)
+    }
+    Invoke-Checked $godot @('--headless','--path',$project,'res://Editor/PrepareBattleContext.tscn','--','--battle-input',$inputRoot,'--battle-output',$outputRoot,'--static-resources',$options['-StaticResources'],'--static-profile',$options['-StaticProfile'])+$resourceArgs 'PAL_PREPARE_BATTLE_CONTEXT:first-mandatory-battle-pre-trigger-v1'
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot; Assert-TreeNoLink $outputRoot
     $null=Resolve-StaticAssetUri $options['-StaticResources'] 'StaticResources' $true; $null=Resolve-StaticAssetUri $options['-StaticProfile'] 'StaticProfile' $false; Assert-NoLink $staticScene; Assert-TreeNoLink $staticRoot
     Write-Host 'Prepared native Godot battle context: Battle/Profile.tres'; exit 0

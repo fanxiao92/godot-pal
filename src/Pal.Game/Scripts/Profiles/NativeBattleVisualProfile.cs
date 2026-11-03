@@ -21,18 +21,28 @@ public static class NativeBattleVisualProfile
 
     public static CheckedBattleVisualProfile Load(string uri, CheckedStoryProfile story)
     {
+        ArgumentNullException.ThrowIfNull(story);
+        return Load(uri, story.BattleContent.Players[0].RoleId, story.BattleContent.Players.Count,
+            story.BattleContent.EnemyTeams, story.Requirements.BattleTeamIds, story.Palette);
+    }
+
+    /// <summary>Same strict binding for non-story hosts (the #53 first battle): validates against
+    /// the party/enemies/teams the caller's verified battle content actually selected.</summary>
+    public static CheckedBattleVisualProfile Load(string uri, int headRoleId, int partyCount,
+        IReadOnlyDictionary<int, IReadOnlyList<Pal.Core.ClassicBattleEnemy>> enemyTeams,
+        IReadOnlyList<int> requirementTeamIds, IReadOnlyList<Color> palette)
+    {
         try
         {
             NativeExplorationProfile.ValidateUri(uri);
-            Require(story is not null, "checked story is required");
             // URI strings defer heavy leaf loading; preflight also protects external metadata references.
             ContentDependencies(new[] { uri });
             var native = LoadResource<PalBattleVisualProfile>(uri);
             Require(native.FormatVersion == 1, "visual FormatVersion must be 1");
             Require(!string.IsNullOrWhiteSpace(native.SourceIdentity), "visual SourceIdentity is required (declaration only)");
-            Require(native.RoleId == story!.BattleContent.Players[0].RoleId, "visual RoleId must match story player role");
+            Require(native.RoleId == headRoleId, "visual RoleId must match the battle head player role");
             Position(native.PlayerPosition);
-            Require(native.PlayerPosition == PlayerOrigins[story.BattleContent.Players.Count - 1],
+            Require(native.PlayerPosition == PlayerOrigins[partyCount - 1],
                 "player position must equal the reference party layout origin g_rgPlayerPos[party-1][0] (battle.c:27-31)");
             Require(native.Teams is not null && native.Teams.All(x => x is not null), "visual Teams contains null");
             var teams = new Dictionary<int, PalBattleVisualTeam>();
@@ -40,7 +50,7 @@ public static class NativeBattleVisualProfile
             foreach (var team in native.Teams!)
             {
                 Require(teams.TryAdd(team.TeamId, team), "duplicate visual TeamId");
-                Require(story.BattleContent.EnemyTeams.TryGetValue(team.TeamId, out var enemies)
+                Require(enemyTeams.TryGetValue(team.TeamId, out var enemies)
                     && enemies.All(x => x is not null), "visual TeamId does not match a story battle team");
                 if (team.EnemySlots is { Length: > 0 } slots)
                 {
@@ -69,7 +79,7 @@ public static class NativeBattleVisualProfile
                 Require(team.IdleFrames is > 0 and <= ushort.MaxValue && Word(team.MagicFrames) && Word(team.AttackFrames)
                     && Word(team.ActWaitFrames) && (team.IdleAnimSpeed == -1 || Word(team.IdleAnimSpeed)), "invalid enemy frame metadata WORDs");
             }
-            Require(story.Requirements.BattleTeamIds.ToHashSet().SetEquals(teams.Keys), "visual Teams must exactly cover selected battle teams");
+            Require(requirementTeamIds.ToHashSet().SetEquals(teams.Keys), "visual Teams must exactly cover selected battle teams");
             Require(native.ResourceSha256 is not null, "visual ResourceSha256 is required");
             var hashes = native.ResourceSha256!.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
@@ -84,12 +94,12 @@ public static class NativeBattleVisualProfile
             Require(!hashes.ContainsKey(uri), "visual root cannot hash itself");
             var dependencies = ContentDependencies(seeds, hashes);
             Require(dependencies.SetEquals(hashes.Keys), "visual ResourceSha256 must cover exactly native content dependencies");
-            var palette = LoadResource<PalPalette>(native.PaletteUri);
-            Require(palette.Rgb is { Length: 768 }, "visual palette requires RGB768");
+            var paletteResource = LoadResource<PalPalette>(native.PaletteUri);
+            Require(paletteResource.Rgb is { Length: 768 }, "visual palette requires RGB768");
             for (int i = 0; i < 256; i++)
             {
-                var expected = new Color(palette.Rgb[i * 3] / 255f, palette.Rgb[i * 3 + 1] / 255f, palette.Rgb[i * 3 + 2] / 255f);
-                Require(expected == story.Palette[i], "visual palette must match active story palette");
+                var expected = new Color(paletteResource.Rgb[i * 3] / 255f, paletteResource.Rgb[i * 3 + 1] / 255f, paletteResource.Rgb[i * 3 + 2] / 255f);
+                Require(expected == palette[i], "visual palette must match the active scene palette");
             }
             var player = LoadSprite(native.PlayerSpriteUri);
             Require(Enumerable.Range(0, 10).All(player.Frames.Select(x => x.Index).ToHashSet().Contains),
@@ -118,7 +128,7 @@ public static class NativeBattleVisualProfile
                 checkedTeams.Add(team.TeamId, new(team, teamSlots[team.TeamId], background, sprite));
             }
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
-            return new(native, player, palette, effect, numbers, checkedTeams, hashes);
+            return new(native, player, paletteResource, effect, numbers, checkedTeams, hashes);
         }
         catch (InvalidDataException error) { throw new InvalidDataException(uri + ": " + error.Message, error); }
         catch (Exception error) when (error is ArgumentException or NullReferenceException or InvalidCastException or InvalidOperationException)

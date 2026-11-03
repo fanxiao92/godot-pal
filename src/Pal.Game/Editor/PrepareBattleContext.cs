@@ -18,9 +18,10 @@ public partial class PrepareBattleContext : Node
         try
         {
             string[] args = OS.GetCmdlineUserArgs();
-            Require(args.Length == 8 && args[0] == "--battle-input" && args[2] == "--battle-output"
-                && args[4] == "--static-resources" && args[6] == "--static-profile", "invalid battle-context prepare arguments");
-            _ = Prepare(args[1], args[3], args[5], args[7]);
+            Require(args.Length is 8 or 10 && args[0] == "--battle-input" && args[2] == "--battle-output"
+                && args[4] == "--static-resources" && args[6] == "--static-profile"
+                && (args.Length == 8 || args[8] == "--battle-resources"), "invalid battle-context prepare arguments");
+            _ = Prepare(args[1], args[3], args[5], args[7], args.Length == 10 ? args[9] : null);
             GD.Print("PAL_PREPARE_BATTLE_CONTEXT:" + FirstMandatoryBattleProfile.ProfileIdValue);
             GetTree().Quit(0);
         }
@@ -32,12 +33,14 @@ public partial class PrepareBattleContext : Node
     }
 
     // Explicit offline preparation shared by the editor entry and in-host callers, never runtime startup.
-    public static string Prepare(string inputDirectory, string outputDirectory, string staticResources, string staticProfile)
+    public static string Prepare(string inputDirectory, string outputDirectory, string staticResources, string staticProfile,
+        string? resourceBindingPath = null)
     {
         string? temporary = null;
         var createdDirectories = new List<string>();
         try
         {
+            RealClosureBinding? binding = resourceBindingPath is null ? null : RealClosureBinding.Parse(resourceBindingPath);
             string input = Path.TrimEndingDirectorySeparator(Path.GetFullPath(inputDirectory));
             string outputPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDirectory));
             string output = ProjectSettings.LocalizePath(outputPath).TrimEnd('/');
@@ -71,6 +74,7 @@ public partial class PrepareBattleContext : Node
                 StaticSceneSha256 = sceneHash, StaticProfileSha256 = staticProfileHash
             };
             NativeBattleEnvelopeAdapter.Write(native, profile.ToTypedEnvelope());
+            if (binding is not null) BindRealClosure(native, binding);
 
             RecheckSources(input, outputPath, indexPath, contextPath, indexBytes, contextBytes,
                 staticResources, staticRootPath, staticScene, staticScenePath, staticProfile, staticProfilePath,
@@ -110,6 +114,90 @@ public partial class PrepareBattleContext : Node
             for (int i = createdDirectories.Count - 1; i >= 0; i--)
                 try { Directory.Delete(createdDirectories[i], false); } catch { }
             throw;
+        }
+    }
+
+    // Fills the #53 real resource closure binding and its exact hash graph. The author JSON never
+    // carries hashes; this production function computes them from the actual native graph.
+    private static void BindRealClosure(PalFirstMandatoryBattleProfile native, RealClosureBinding binding)
+    {
+        native.EventsIndex = binding.EventsIndex;
+        native.BattleContentUri = binding.BattleContentUri;
+        native.DialogueDirectory = binding.DialogueDirectory;
+        native.VisualUri = binding.VisualUri;
+        native.ImagePlayerSpriteUris = binding.PlayerSpriteUris.ToArray();
+        native.ImageEnemyId = binding.EnemySpriteId;
+        native.ImageEnemyArchiveEntry = binding.EnemyArchiveEntry;
+        native.ImageRoleSpriteIds = binding.RoleSpriteIds.ToArray();
+        native.ImageBattlefieldId = binding.BattlefieldId;
+        native.ImageBattlefieldArchiveEntry = binding.BattlefieldArchiveEntry;
+        native.ImageIncludesLayoutAndEffectFrames = binding.IncludesLayoutAndEffectFrames;
+        foreach ((int id, string uri) in binding.Portraits) native.Portraits.Add(id, uri);
+        string dialogue = binding.DialogueDirectory;
+        string[] seeds = new[] { binding.BattleContentUri, binding.EventsIndex, dialogue + "/Font.tres",
+            dialogue + "/Language.zh-Hans.tres", dialogue + "/Language.en.tres",
+            dialogue + "/Prompt-00.tres", dialogue + "/Prompt-01.tres", dialogue + "/Prompt-02.tres" }
+            .Concat(binding.Portraits.Select(pair => pair.Uri)).Concat(binding.PlayerSpriteUris).ToArray();
+        foreach (string seed in seeds) _ = PreparationPathSafety.AssetResourcePath(seed, directory: seed.EndsWith(".tres") || seed.EndsWith(".json"));
+        var graph = NativeContentDependencies.ContentDependencies(seeds);
+        string indexPath = ProjectSettings.GlobalizePath(binding.EventsIndex);
+        using var indexDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(indexPath));
+        string directory = binding.EventsIndex[..binding.EventsIndex.LastIndexOf('/')];
+        foreach (var file in indexDocument.RootElement.GetProperty("files").EnumerateArray())
+        {
+            string uri = directory + "/" + file.GetString() + ".json";
+            graph.Add(uri);
+        }
+        foreach (string uri in graph)
+        {
+            string path = ProjectSettings.GlobalizePath(PreparationPathSafety.AssetResourcePath(uri, directory: false));
+            using FileStream stream = PreparationPathSafety.OpenStableRead(path);
+            native.ResourceSha256.Add(uri, PreparationPathSafety.Sha256(stream));
+        }
+    }
+
+    private sealed record RealClosureBinding(string EventsIndex, string BattleContentUri, string DialogueDirectory, string VisualUri,
+        IReadOnlyList<(int Id, string Uri)> Portraits, IReadOnlyList<string> PlayerSpriteUris,
+        int EnemySpriteId, string EnemyArchiveEntry, IReadOnlyList<string> RoleSpriteIds,
+        int BattlefieldId, string BattlefieldArchiveEntry, bool IncludesLayoutAndEffectFrames)
+    {
+        public static RealClosureBinding Parse(string path)
+        {
+            string physical = Path.GetFullPath(path);
+            PreparationPathSafety.CheckNoReparse(physical, allowMissing: false);
+            Require(!IsInside(physical, ProjectSettings.GlobalizePath("res://")), "battle resource binding must be outside src/Pal.Game");
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(physical));
+            var root = document.RootElement;
+            Require(root.ValueKind == System.Text.Json.JsonValueKind.Object, "battle resource binding must be an object");
+            foreach (var property in root.EnumerateObject())
+                Require(property.Name is "formatVersion" or "eventsIndex" or "battleContentUri" or "dialogueDirectory" or "visualUri"
+                    or "portraits" or "playerSpriteUris" or "enemySpriteId" or "enemyArchiveEntry" or "roleSpriteIds"
+                    or "battlefieldId" or "battlefieldArchiveEntry" or "includesLayoutAndEffectFrames",
+                    "battle resource binding: unknown field '" + property.Name + "'");
+            Require(root.TryGetProperty("formatVersion", out var version) && version.ValueKind == System.Text.Json.JsonValueKind.Number && version.GetInt32() == 1,
+                "battle resource binding: formatVersion must be 1");
+            string Text(string name) => root.GetProperty(name).ValueKind == System.Text.Json.JsonValueKind.String
+                ? root.GetProperty(name).GetString()! : throw new InvalidDataException("battle resource binding: " + name + " must be a string");
+            int Number(string name) => root.GetProperty(name).ValueKind == System.Text.Json.JsonValueKind.Number && root.GetProperty(name).TryGetInt32(out int value)
+                ? value : throw new InvalidDataException("battle resource binding: " + name + " must be an integer");
+            string[] List(string name) => root.GetProperty(name).EnumerateArray().Select(item => item.ValueKind == System.Text.Json.JsonValueKind.String
+                ? item.GetString()! : throw new InvalidDataException("battle resource binding: " + name + " entries must be strings")).ToArray();
+            var portraits = new List<(int Id, string Uri)>();
+            foreach (var item in root.GetProperty("portraits").EnumerateArray())
+            {
+                int portraitId = 0;
+                string portraitUri = "";
+                bool valid = item.TryGetProperty("id", out var id) && id.ValueKind == System.Text.Json.JsonValueKind.Number && id.TryGetInt32(out portraitId)
+                    && item.TryGetProperty("uri", out var uriElement) && uriElement.ValueKind == System.Text.Json.JsonValueKind.String
+                    && (portraitUri = uriElement.GetString()!) is not null;
+                Require(valid, "battle resource binding: portraits entries require integer id and string uri");
+                portraits.Add((portraitId, portraitUri));
+            }
+            return new(Text("eventsIndex"), Text("battleContentUri"), Text("dialogueDirectory"), Text("visualUri"),
+                portraits, List("playerSpriteUris"), Number("enemySpriteId"), Text("enemyArchiveEntry"), List("roleSpriteIds"),
+                Number("battlefieldId"), Text("battlefieldArchiveEntry"),
+                root.GetProperty("includesLayoutAndEffectFrames").ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+                    && root.GetProperty("includesLayoutAndEffectFrames").GetBoolean());
         }
     }
 
