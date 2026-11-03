@@ -44,7 +44,7 @@ public partial class Main : Node2D
         configuration = selection;
     }
 
-    public ExplorationState? Exploration => Battle?.Current ?? Interaction?.Current ?? input?.Current;
+    public ExplorationState? Exploration => Battle?.Current ?? Interaction?.Current ?? dynamicSession?.Current ?? input?.Current;
     public NpcInteractionSession? Interaction { get; private set; }
     public FirstMandatoryBattleSession? Battle => battle;
     public string? SelectedLanguage { get; private set; }
@@ -61,7 +61,8 @@ public partial class Main : Node2D
         try
         {
             var selected = configuration ?? throw new InvalidOperationException("Configure the scene before entering the tree.");
-            selectedProfilePath = selected.StoryProfile;
+            selectedProfilePath = selected.DynamicProfile ?? selected.StoryProfile;
+            if (selected.DynamicProfile is not null) { InitializeDynamic(selected); return; }
             if (selected.StoryProfile is not null) { InitializeStory(selected); return; }
             string root = selected.Root, profile = selected.Profile, language = selected.Language;
             selectedProfilePath = selected.BattleProfile ?? selected.DialogueProfile ?? selected.Profile;
@@ -192,7 +193,12 @@ public partial class Main : Node2D
                     }
                     return;
                 }
-                if (battle is { } firstBattle)
+                if (dynamicSession is { } dynamic)
+                {
+                    if (key.Pressed) dynamic.Press((ExplorationKey)i, key.Echo);
+                    else dynamic.Release((ExplorationKey)i);
+                }
+                else if (battle is { } firstBattle)
                 {
                     if (key.Pressed) firstBattle.Press((ExplorationKey)i, key.Echo);
                     else firstBattle.Release((ExplorationKey)i);
@@ -216,6 +222,7 @@ public partial class Main : Node2D
                     // confirm must not queue behind the script (fight.c 768-880 pause).
                     if (StoryBattleMode != StoryBattlePresentation.HookDialogue) battleConfirm = true;
                 }
+                else if (dynamicSession is { Phase: DynamicEventPhase.Exploring } dynamic) dynamic.PressSearch();
                 else if (battle is not null) battle.PressSearch();
                 else if (Interaction is { Phase: not NpcInteractionPhase.Trigger } npc) npc.PressSearch();
                 else return;
@@ -249,6 +256,7 @@ public partial class Main : Node2D
                 return;
             }
             if (ProcessStoryBattle()) { UpdateCompleted?.Invoke(); return; }
+            if (dynamicSession is not null) { ProcessDynamicScene(); UpdateCompleted?.Invoke(); return; }
             // The headless dummy renderer has no presented frame. Preserve the command/redraw
             // submission boundary across actual callbacks; graphical runs wait for FramePostDraw.
             if (awaitingSceneDraw && DisplayServer.GetName() == "headless") StartAfterSceneDraw();
@@ -327,6 +335,7 @@ public partial class Main : Node2D
         SetProcessInput(false);
         DisconnectRuntime();
         ReleaseStory();
+        ReleaseDynamic();
         Failed?.Invoke(message);
     }
 
@@ -349,6 +358,7 @@ public partial class Main : Node2D
         exited = true;
         DisconnectRuntime();
         ReleaseStory();
+        ReleaseDynamic();
         activeTrigger = null; Interaction = null; input = null; battle = null; mapScene = null;
         Display = null; Dialogue = null; SelectedLanguage = null;
     }

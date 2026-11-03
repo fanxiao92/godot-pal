@@ -23,7 +23,13 @@ internal sealed class AuthoredStoryFixture : IDisposable
         Directory.CreateDirectory(Path.Combine(output, "Static/Scenes"));
         try
         {
-            File.Copy(ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
+            // A scenario may own its static arena (new/empty targets only); shared scenarios keep
+            // the common authored arena and its profile.
+            string scenarioStatic = Path.Combine(repository, "samples/authored-battle", scenario, "Static");
+            bool ownedStatic = Directory.Exists(scenarioStatic);
+            File.Copy(ownedStatic ? Path.Combine(scenarioStatic, "Scenes/Scene.tscn")
+                : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
+            if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
             if (enemyHp is { } hp || playerHp is { } || removeDualAttack)
             {
@@ -68,6 +74,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (enemyHp is { } hp2)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + $" Test-owned numeric copy: team18/enemy7 hp={hp2} only; not retail data.";            metadata["staticResources"] = Root + "/Static";
+            if (ownedStatic) metadata["staticProfile"] = Root + "/Static/Exploration.tres";
             metadata["battleContentUri"] = numeric;
             File.WriteAllText(Path.Combine(input, "story-package.json"), metadata.ToJsonString());
             var prepared = PrepareStoryPackage.Prepare(input, Path.Combine(output, "Story"));

@@ -19,6 +19,9 @@ public sealed class GameSceneConfiguration
 
     internal string? StoryProfile { get; private init; }
     internal string? VisualProfile { get; private init; }
+    /// <summary>The #52 no-combat dynamic-scene selection: a checked story profile run through
+    /// DynamicEventSession instead of the battle story flow.</summary>
+    internal string? DynamicProfile { get; private init; }
     internal ulong? BattleSeed { get; private init; }
     internal string Root { get; }
     internal string Profile { get; }
@@ -29,6 +32,25 @@ public sealed class GameSceneConfiguration
 
     public static GameSceneConfiguration FromArguments(params string[] arguments)
     {
+        if (arguments.Any(a => a.StartsWith("--dynamic-", StringComparison.Ordinal)))
+        {
+            string? dynamicProfile = null, language = null;
+            for (int i = 0; i < arguments.Length; i += 2)
+            {
+                if (i + 1 == arguments.Length || arguments[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    throw new InvalidDataException("Dynamic scene: missing value for " + arguments[i]);
+                switch (arguments[i])
+                {
+                    case "--dynamic-profile" when dynamicProfile is null: dynamicProfile = arguments[i + 1]; break;
+                    case "--story-language" when language is null: language = arguments[i + 1]; break;
+                    default: throw new InvalidDataException("Dynamic scene: duplicate, mixed, or unknown " + arguments[i]);
+                }
+            }
+            if (dynamicProfile is null) throw new InvalidDataException("Dynamic scene requires --dynamic-profile");
+            NativeExplorationProfile.ValidateUri(dynamicProfile);
+            if (language is not (null or "zh-Hans" or "en")) throw new InvalidDataException("Story language must be zh-Hans or en");
+            return new("", "", false, null, null, language ?? "zh-Hans") { DynamicProfile = dynamicProfile };
+        }
         if (arguments.Any(a => a.StartsWith("--story-", StringComparison.Ordinal) || a.StartsWith("--battle-", StringComparison.Ordinal)))
         {
             string? story = null, visual = null, language = null, seedText = null;

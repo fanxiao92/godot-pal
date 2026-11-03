@@ -1,0 +1,15 @@
+{
+ "formatVersion": 1,
+ "profile": "faithful",
+ "source": {
+  "archive": "SSS.MKF",
+  "chunk": 4,
+  "byteOrder": "little",
+  "instructionCount": 22,
+  "byteLength": 176,
+  "sha256": "167a2749e9da97d08a09af5b1c825d4c5aa534811ff55280266379b96a201162"
+ },
+ "files": [
+  "scene"
+ ]
+}

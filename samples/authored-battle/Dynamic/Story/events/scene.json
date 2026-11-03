@@ -1,0 +1,386 @@
+{
+ "formatVersion": 1,
+ "profile": "faithful",
+ "fileId": "scene",
+ "entries": [
+  {
+   "id": "npc",
+   "owner": {
+    "type": "eventObject",
+    "id": 1
+   },
+   "slot": "wTriggerScript",
+   "kind": "trigger",
+   "target": "L0001",
+   "sourceAddress": 1
+  },
+  {
+   "id": "walker",
+   "owner": {
+    "type": "eventObject",
+    "id": 2
+   },
+   "slot": "wAutoScript",
+   "kind": "auto",
+   "target": "L0018",
+   "sourceAddress": 18
+  }
+ ],
+ "commands": [
+  {
+   "label": "L0000",
+   "op": "raw",
+   "next": "L0001",
+   "source": {
+    "index": 0,
+    "opcode": 134,
+    "operands": [
+     0,
+     65535,
+     8
+    ]
+   }
+  },
+  {
+   "label": "L0001",
+   "op": "setDialog",
+   "next": "L0002",
+   "source": {
+    "index": 1,
+    "opcode": 60,
+    "operands": [
+     0,
+     0,
+     0
+    ]
+   },
+   "box": "upper",
+   "portraitId": 0,
+   "color": 0,
+   "rngWord": 0
+  },
+  {
+   "label": "L0002",
+   "op": "showDialog",
+   "next": "L0003",
+   "source": {
+    "index": 2,
+    "opcode": 65535,
+    "operands": [
+     1,
+     0,
+     0
+    ]
+   },
+   "messageId": 1,
+   "descriptionLineWord": 0
+  },
+  {
+   "label": "L0003",
+   "op": "setState",
+   "next": "L0004",
+   "source": {
+    "index": 3,
+    "opcode": 73,
+    "operands": [
+     2,
+     1,
+     0
+    ]
+   },
+   "objectId": 2,
+   "state": 1
+  },
+  {
+   "label": "L0004",
+   "op": "waitUpdate",
+   "next": "L0005",
+   "source": {
+    "index": 4,
+    "opcode": 9,
+    "operands": [
+     12,
+     0,
+     1
+    ]
+   },
+   "frames": 12,
+   "runTriggers": 0,
+   "updateGestures": 1
+  },
+  {
+   "label": "L0005",
+   "op": "setDialog",
+   "next": "L0006",
+   "source": {
+    "index": 5,
+    "opcode": 60,
+    "operands": [
+     0,
+     0,
+     0
+    ]
+   },
+   "box": "upper",
+   "portraitId": 0,
+   "color": 0,
+   "rngWord": 0
+  },
+  {
+   "label": "L0006",
+   "op": "showDialog",
+   "next": "L0007",
+   "source": {
+    "index": 6,
+    "opcode": 65535,
+    "operands": [
+     2,
+     0,
+     0
+    ]
+   },
+   "messageId": 2,
+   "descriptionLineWord": 0
+  },
+  {
+   "label": "L0007",
+   "op": "walkTo",
+   "next": "L0008",
+   "source": {
+    "index": 7,
+    "opcode": 16,
+    "operands": [
+     9,
+     21,
+     0
+    ]
+   },
+   "x": 9,
+   "y": 21,
+   "h": 0
+  },
+  {
+   "label": "L0008",
+   "op": "face",
+   "next": "L0009",
+   "source": {
+    "index": 8,
+    "opcode": 15,
+    "operands": [
+     0,
+     0,
+     0
+    ]
+   },
+   "direction": 0,
+   "frame": 0
+  },
+  {
+   "label": "L0009",
+   "op": "setTriggerMode",
+   "next": "L0010",
+   "source": {
+    "index": 9,
+    "opcode": 64,
+    "operands": [
+     1,
+     0,
+     0
+    ]
+   },
+   "objectId": 1,
+   "mode": 0
+  },
+  {
+   "label": "L0010",
+   "op": "setPartyFacing",
+   "next": "L0011",
+   "source": {
+    "index": 10,
+    "opcode": 21,
+    "operands": [
+     3,
+     0,
+     0
+    ]
+   },
+   "direction": 3,
+   "gesture": 0,
+   "memberIndex": 0
+  },
+  {
+   "label": "L0011",
+   "op": "setPartyPos",
+   "next": "L0012",
+   "source": {
+    "index": 11,
+    "opcode": 70,
+    "operands": [
+     10,
+     20,
+     0
+    ]
+   },
+   "x": 10,
+   "y": 20,
+   "h": 0
+  },
+  {
+   "label": "L0012",
+   "op": "setSceneScripts",
+   "next": "L0013",
+   "source": {
+    "index": 12,
+    "opcode": 109,
+    "operands": [
+     1,
+     0,
+     18
+    ]
+   },
+   "sceneId": 1,
+   "onEnter": 0,
+   "onTeleport": 18
+  },
+  {
+   "label": "L0013",
+   "op": "setObjectScript",
+   "next": "L0014",
+   "source": {
+    "index": 13,
+    "opcode": 144,
+    "operands": [
+     777,
+     18,
+     4
+    ]
+   },
+   "objectId": 777,
+   "value": 18,
+   "slotIndex": 4
+  },
+  {
+   "label": "L0014",
+   "op": "redraw",
+   "next": "L0015",
+   "source": {
+    "index": 14,
+    "opcode": 5,
+    "operands": [
+     1,
+     0,
+     0
+    ]
+   },
+   "delayUnits": 1
+  },
+  {
+   "label": "L0015",
+   "op": "showDialog",
+   "next": "L0016",
+   "source": {
+    "index": 15,
+    "opcode": 65535,
+    "operands": [
+     3,
+     0,
+     0
+    ]
+   },
+   "messageId": 3,
+   "descriptionLineWord": 0
+  },
+  {
+   "label": "L0016",
+   "op": "end",
+   "next": "L0017",
+   "source": {
+    "index": 16,
+    "opcode": 0,
+    "operands": [
+     0,
+     0,
+     0
+    ]
+   },
+   "mode": "keep"
+  },
+  {
+   "label": "L0017",
+   "op": "raw",
+   "next": "L0018",
+   "source": {
+    "index": 17,
+    "opcode": 135,
+    "operands": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "label": "L0018",
+   "op": "face",
+   "next": "L0019",
+   "source": {
+    "index": 18,
+    "opcode": 15,
+    "operands": [
+     1,
+     0,
+     0
+    ]
+   },
+   "direction": 1,
+   "frame": 0
+  },
+  {
+   "label": "L0019",
+   "op": "walkTo",
+   "next": "L0020",
+   "source": {
+    "index": 19,
+    "opcode": 16,
+    "operands": [
+     9,
+     18,
+     0
+    ]
+   },
+   "x": 9,
+   "y": 18,
+   "h": 0
+  },
+  {
+   "label": "L0020",
+   "op": "hide",
+   "next": "L0021",
+   "source": {
+    "index": 20,
+    "opcode": 82,
+    "operands": [
+     0,
+     0,
+     0
+    ]
+   },
+   "frames": 0
+  },
+  {
+   "label": "L0021",
+   "op": "end",
+   "next": null,
+   "source": {
+    "index": 21,
+    "opcode": 0,
+    "operands": [
+     0,
+     0,
+     0
+    ]
+   },
+   "mode": "keep"
+  }
+ ]
+}
