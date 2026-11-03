@@ -96,7 +96,8 @@ public sealed class ModernBattleContentTests
             int downstream = branch == "next" ? 2 : 4;
             events.Commands[downstream] = JsonNode.Parse($$"""
               {"label":"L{{downstream:X4}}","op":"startBattle","teamId":19,"lossTarget":null,"isBoss":true,"fleeTarget":null,
-               "next":"L{{downstream + 1:X4}}","source":{"index":{{downstream}},"opcode":7,"operands":[19,0,0]}}
+               "next":"L{{downstream + 1:X4}}","source":{"index":{{downstream}},"opcode":7,"operands":[19,0,0]}
+              }
               """);
             if (downstream == 4)
             {
@@ -743,7 +744,7 @@ public sealed class ModernBattleContentTests
         return data;
     }
 
-    private static TriggerScriptSession Script(TriggerBattleContent content, BattleRandom random)
+    private static TriggerScriptSession Script(TriggerBattleContent content, IBattleRandom random)
     {
         var events = new EventFixture();
         events.Commands[1] = JsonNode.Parse("""
