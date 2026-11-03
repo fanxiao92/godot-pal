@@ -37,7 +37,7 @@ Lost 进入原失败剧情至 `0x004E` 重载请求，输出一次可定位诊�
 | [#48](https://github.com/fanxiao92/godot-pal/issues/48) | 六角色装备初始化、有效属性、双击、掩护 | #47 | 已本地整票验收 `8c409fa`（unit1 59cab8f+unit2）；远端收尾随最终交付 |
 | [#49](https://github.com/fanxiao92/godot-pal/issues/49) | 战中濒死/友亡剧情并返回战斗 | #48 | 已本地整票验收 `677f888`；远端收尾随最终交付 |
 | [#49](https://github.com/fanxiao92/godot-pal/issues/49) | 濒死/友亡剧情全随机闭包及返回原战斗位置 | #48 |
-| [#50](https://github.com/fanxiao92/godot-pal/issues/50) | 胜利成长、奖励、法术列表及清理/恢复顺序 | #48 |
+| [#50](https://github.com/fanxiao92/godot-pal/issues/50) | 胜利成长、奖励、法术列表及清理/恢复顺序 | #48 | 已本地整票验收 `780a587`（批拆分至8批）；远端收尾随最终交付 |
 | [#51](https://github.com/fanxiao92/godot-pal/issues/51) | boss 逃跑失败、Lost 分支及重载 TODO 终态 | #46 |
 | [#52](https://github.com/fanxiao92/godot-pal/issues/52) | 局部动态剧情、等待、入口回写和真实 auto 移动 | #45 |
 | [#53](https://github.com/fanxiao92/godot-pal/issues/53) | 真实完整事件、战斗/图像/双语资源与全部已支持闭包组合 | #49、#50、#51、#52 |
