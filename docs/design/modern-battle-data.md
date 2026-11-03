@@ -34,7 +34,7 @@
 | 字段 | 类型/约束 |
 |---|---|
 | `roleId`, `hp`, `maxHp` | 与role相同且三者必须一致 |
-| `attack`, `defense`, `dexterity` | WORD，有效面板（当前能力仅支持零装备效果） |
+| `attack`, `defense`, `dexterity` | WORD，基表面板；声明装备闭包时有效面板由 `BattleEquipmentState` 按正式规则另行投影（本切片不接入会话执行） |
 | `equipment`, `statuses` | 分别恰好6、9项WORD，显式能力输入，不从role悄悄推断 |
 | `poisons` | 显式WORD数组；既有typed模型未定义固定毒槽宽，本格式不臆造宽度 |
 | `dyingScript`, `friendDeathScript` | WORD |
@@ -90,6 +90,26 @@ Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
 数值资源没有 profile/source/人工开关、来源认证或 storyprofile hash。本 codec 不能证明源数据完整性、图像/语言/事件闭包或资源来源。显式离线数值生产准备入口现已追加，契约见下节；Main 从不自动 prepare，也没有新增 CLI 作者命令。
 
 本检查点的 headless native-map 用例真实执行：内存现代 JSON Parse → 正式 Write → ResourceSaver 保存 → ResourceLoader/严格 Load → 正式 trigger/lifecycle 的真实 Won/Lost 与一次性自有 receipt ack。独立字面预期 Won HP125/MP35、Lost HP0/MP20，attack1/health2；并核所有非零字段、signed/WORD 边界、0 阈值/重复成长行、未引用非零队保留、nested 隔离、URI/版本/类型/null/shape/ID/范围及选中不支持内容无 RNG/请求副作用。本次修补精确运行新 native class 43 例（含真实保存文件删除显式版本后的拒绝，以及保留 CreateCore 输出再变更 Resource 的 nested 隔离/只读核对）；旧 frozen profile class 33 例沿用未改源码的既有精确运行证据，不冒称完整 Game/Prepare/Main、GPU、人工或 CI 验收。
+
+
+## 六角色装备闭包与有效面板投影（#48 unit 1）
+
+状态：数据/typed/Prepare 链已交付；战斗执行语义（DualAttack/cover 执行、两击表现、SceneRunner）属后续 unit，未接入。指定 RED 于 `6cfce2a` 真实失败（现有公开 Parse 拒绝 `roleEquipment` 未知字段），Core 15 例新增后完整 Core **831**，NativeBattleContentTests **55**（44+11，含装备 roundtrip 与 10 个 typed 边界）、公开 PrepareBattleDataTests **35**（33+2）；native-map 批次 408、库存 604、game 601，同步于 GameTestBatches/GameBatches 回归。
+
+根对象新增两个可选 section（旧零装备文件不变合法）。
+
+`roleEquipment`：恰 6 行 × 6 槽 WORD，即参考 `rgwEquipment[6][6]`（global.h）的六角色网格；非 party 角色行同样必须声明（参考 `PAL_UpdateEquipments` 遍历全部 `MAX_PLAYER_ROLES`）。每个 party 角色行必须与 `roles[].equipment` 逐字相等，不匹配即拒。
+
+`equipments`：数组，每项恰 `objectId`（非零 WORD，全数组唯一）与 `effects`（恰 6 行，按 role 索引）——即该对象装备脚本（0x0017/0x001A/0x002D）对每个 role 的真实效应行。每行恰 `attack`/`defense`/`dexterity`/`battleSprite`（WORD，寄存器 SET 语义）与 `statuses`（恰 9 WORD）。非零 status 仅允许 bravery/protect/haste/dualAttack（index 5..8）且值 1000..65535：>999 是参考 `PAL_RemovePlayerStatus` 判定“装备持续状态，不随普通清理清除”的边界，普通 1..999 回合值不属于装备闭包。网格非零项必须在 `equipments` 声明（缺失即拒）；已声明但未被穿戴的对象合法保留（同未引用队）。仅声明其中一个 section 亦合法（零网格+对象、或未带网格的旧内容）；无 section 时非零 `roles[].equipment` 保持格式合法但 `BattleEquipmentState.Initialize` 在任何状态前拒绝（“补闭实际装备脚本”的缺省拒绝面）。
+
+Core 正式规则（`Pal.Core.BattleEquipmentState`，纯数据）：
+
+- 初始化按 `PAL_UpdateEquipments`（global.c:1352）：清零全部寄存器后，按 role 外层、slot 内层逐个套用已穿戴对象效应行；寄存器 SET 不叠加，重复 Initialize 幂等，新会话从零起步不叠加旧效果。
+- `AttackBonus/DefenseBonus/DexterityBonus/Effective*` 按 `PAL_GetPlayerAttackStrength/Defense/Dexterity`（global.c:1736/1800/1832，含 extra 槽位 0..6 求和；本切片 extra 恒零，留待临时效果）WORD 回绕；`EffectivePlayer` 输出战斗可消费的 `ClassicBattlePlayer` 投影（本 unit 不接入 session）。
+- `BattleSprite(roleId, base)` 按 `PAL_GetPlayerBattleSprite`（global.c:1978-2008）：最后一个非零装备精灵寄存器胜出；基础精灵仍由视觉链提供，本层只暴露 override 数据。
+- `StatusOverlay/ApplyStatuses` 按 `PAL_SetPlayerStatus` 好状态分支（global.c:2255）：仅取更大值、不叠加；既有 lifecycle 基础清理（<=999 清零）自然保留持续装备状态。
+
+typed 同步：`PalBattleContent` 新增 `Equipments: PalBattleEquipment[]` 与展平 `RoleEquipment: int[]`（空=未声明，否则恰 36 WORD；Godot 导出不支持嵌套数组）；`PalBattleEquipment`/`PalBattleEquipmentEffect` 逐字段导出效应行。`Write/CreateCore` 与 JSON 同一套严格校验（形状、WORD、重复、闭包、party 行一致、status 域）；`PrepareBattleData` 无需改动即携带装备闭包，Prepare 新增两例真实走 fixture→Prepare→Load→Initialize 手算断言。选中入口对非零装备仍拒绝（本 unit 边界）：装备影响真实战斗循环留待 unit 2。
 
 
 ## 显式离线数值准备（#46 有界 Prepare 检查点）
