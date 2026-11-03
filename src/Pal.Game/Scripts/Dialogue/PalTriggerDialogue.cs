@@ -58,6 +58,8 @@ public partial class PalTriggerDialogue : Node
     }
 
     private CheckedStoryProfile? _story;
+    private TriggerBattleContent? _previewContent;
+    private IBattleRandom? _previewRandom;
 
     /// <summary>The active 256-color scene palette, set by the host before the first-battle
     /// initialization (the #53 host owns the scene, not a story profile).</summary>
@@ -83,6 +85,7 @@ public partial class PalTriggerDialogue : Node
         _prompts = resources.Prompts.ToArray();
         _palette = PaletteFromScene ?? throw new InvalidOperationException("The first-battle host must supply the active scene palette first.");
         foreach (var pair in resources.Portraits) _portraits.Add(pair.Key, pair.Value);
+        _previewContent = resources.BattleContent; _previewRandom = random;
         Session = FirstBattleWorld is { } world
             ? new TriggerScriptSession(resources.Events, _language, resources.BattleContent, random, world)
             : new TriggerScriptSession(resources.Events, _language, resources.BattleContent, random);
@@ -154,7 +157,9 @@ public partial class PalTriggerDialogue : Node
         ValidateOwner(entry);
         // Preflight every selected display and native resource before modifying the real call.
         // This separate executor uses the same public rules; it never advances request.Display.
-        var preview = new TriggerScriptSession(_events, _language, Session.Context.Color);
+        var preview = _previewContent is { } content && _previewRandom is { } previewRandom
+            ? new TriggerScriptSession(_events, _language, content, previewRandom, Session.Context.Color)
+            : new TriggerScriptSession(_events, _language, Session.Context.Color);
         preview.Start(fileId, entryId, caller);
         while (preview.PendingDisplay is { } request)
         {
