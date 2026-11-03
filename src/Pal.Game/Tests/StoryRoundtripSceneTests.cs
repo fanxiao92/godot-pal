@@ -292,7 +292,7 @@ public class StoryRoundtripSceneTests
             short leaderX = old.Exploration!.Leader.X, leaderY = old.Exploration!.Leader.Y;
             AssertThat(battle.Current.Combat.Players.Count).IsEqual(2);
             AssertThat(battle.Current.Combat.Enemies.Count).IsEqual(2);
-            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(0);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex is 0).IsTrue();
             // Member 0 confirms attack, then target slot 0; one physical Enter each.
             await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
             await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
@@ -327,14 +327,50 @@ public class StoryRoundtripSceneTests
             }
             AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
             AssertThat(script.CallId).IsEqual(call);
-            // Exactly two distinct presented actions (the two member kills); dead-enemy queue
-            // entries passed without re-presenting the previous action.
-            AssertThat(host.Actions.Count).IsEqual(2);
-            AssertThat(host.Actions.All(a => a.Attacker == ClassicBattleSide.Player)).IsTrue();
-            AssertThat(ReferenceEquals(host.Actions[0], host.Actions[1])).IsFalse();
-            AssertThat(host.Actions[0].Damage > 42).IsTrue();
-            AssertThat(host.Actions[1].Damage > 42).IsTrue();
-            AssertThat(battle.Current.Combat.Players.Select(p => p.Hp).SequenceEqual(new[] { 100, 95 })).IsTrue();
+            // Distinct presented actions only; dead-enemy queue entries passed without
+            // re-presenting the previous action. Seed-1 dice: member 1 acts first (33..38 on slot 1,
+            // survives), member 0's 43+ hit kills slot 0, slot 1's enemy answers, and member 1
+            // finishes slot 1 in round 2 (slot 0's dead enemy passed without any presentation).
+            AssertThat(host.Actions.Count).IsEqual(4);
+            AssertThat(host.Actions.Select(a => a.Attacker).SequenceEqual(new[]
+                { ClassicBattleSide.Player, ClassicBattleSide.Player, ClassicBattleSide.Enemy, ClassicBattleSide.Player })).IsTrue();
+            for (int i = 0; i < host.Actions.Count; i++)
+                for (int j = i + 1; j < host.Actions.Count; j++)
+                    AssertThat(ReferenceEquals(host.Actions[i], host.Actions[j])).IsFalse();
+            GD.Print("PAL_PARTY_WIN_ACTIONS:" + string.Join(';', host.Actions.Select(a =>
+                $"{a.Attacker}{a.ActorIndex}->{a.TargetIndex}={a.Damage}{(a.Evaded ? "E" : "")}"))
+                + ";hp=" + string.Join('/', battle.Current.Combat.Players.Select(p => p.Hp)));
+            foreach (var presented in host.Actions)
+            {
+                if (presented.Attacker == ClassicBattleSide.Player)
+                {
+                    // fight.c157-170 bounds: atk40 vs defense24 gives base42+1..2 (>=43),
+                    // atk35 vs defense24 gives base32+1..2 (33..38); critical*3, role0 bonus*2,
+                    // float*1..1.125 keeps one member hit in 33..297.
+                    AssertThat(presented.Damage >= 33 && presented.Damage <= 297).IsTrue();
+                }
+                else
+                {
+                    // Enemy atk0/level0: strength 36..38 vs defense20 -> 20..23, vs defense18 -> 21..24,
+                    // or a fully evaded action with damage 0.
+                    AssertThat(presented.Evaded ? presented.Damage == 0 : presented.Damage is >= 20 and <= 24).IsTrue();
+                }
+            }
+            AssertThat(host.Actions[0].Attacker == ClassicBattleSide.Player && host.Actions[0].ActorIndex == 1
+                && host.Actions[0].TargetIndex == 1 && host.Actions[0].Damage is >= 33 and <= 38).IsTrue();
+            AssertThat(host.Actions[1].Attacker == ClassicBattleSide.Player && host.Actions[1].ActorIndex == 0
+                && host.Actions[1].TargetIndex == 0 && host.Actions[1].Damage > 42).IsTrue();
+            AssertThat(host.Actions[2].Attacker == ClassicBattleSide.Enemy && host.Actions[2].ActorIndex == 1
+                && host.Actions[2].TargetIndex is 0 or 1).IsTrue();
+            AssertThat(host.Actions[3].Attacker == ClassicBattleSide.Player && host.Actions[3].ActorIndex == 1
+                && host.Actions[3].TargetIndex == 1 && host.Actions[3].Damage is >= 33 and <= 38).IsTrue();
+            // Members only lost HP to that one enemy action (0 or 20..24).
+            int[] startHp = [100, 95];
+            for (int i = 0; i < 2; i++)
+            {
+                int hp = battle.Current.Combat.Players[i].Hp;
+                AssertThat(hp == startHp[i] || hp >= startHp[i] - 24 && hp < startHp[i]).IsTrue();
+            }
             AssertThat(battle.Current.Combat.Enemies.Select(e => e.Hp).SequenceEqual(new[] { 0, 0 })).IsTrue();
             AssertThat(old.StoryBattleMode).IsNull();
             AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
@@ -392,11 +428,11 @@ public class StoryRoundtripSceneTests
                 if (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
                 {
                     var selecting = battle.Current.Combat.SelectingPlayerIndex;
-                    AssertThat(selecting).IsNotNull();
+                    AssertThat(selecting.HasValue).IsTrue();
                     // Once a member died, only the living member selects and no dead member acts again.
                     if (deadMember >= 0)
                     {
-                        AssertThat(selecting).IsNotEqual(deadMember);
+                        AssertThat(selecting!.Value != deadMember).IsTrue();
                         AssertThat(battle.Current.Combat.Players[deadMember].Hp).IsEqual(0);
                     }
                     while (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
@@ -818,12 +854,12 @@ public class StoryRoundtripSceneTests
                             if (!targeted && !moving) AssertThat(slots[slot].Position == partyEnemies[slot]).IsTrue();
                         }
                         if (Main.StoryBattleMode is StoryBattlePresentation.AttackMenu or StoryBattlePresentation.TargetMenu)
-                            AssertThat(partyDraw.SelectingPlayer).IsEqual(combat!.SelectingPlayerIndex);
+                            AssertThat(partyDraw.SelectingPlayer == combat!.SelectingPlayerIndex).IsTrue();
                         // Index-zero compat projections follow party actor zero, not a merged total.
                         AssertThat(partyDraw.DisplayedPlayerHp).IsEqual(members[0].Hp);
                         AssertThat(partyDraw.DisplayedEnemyHp).IsEqual(slots[0].Hp);
-                        AssertThat(Main.StoryDisplayedPlayerHp).IsEqual(members[0].Hp);
-                        AssertThat(Main.StoryDisplayedEnemyHp).IsEqual(slots[0].Hp);
+                        AssertThat(Main.StoryDisplayedPlayerHp == members[0].Hp).IsTrue();
+                        AssertThat(Main.StoryDisplayedEnemyHp == slots[0].Hp).IsTrue();
                     }
                     if (pose is { } partyPose && draw is { } numberDraw && combat?.LastAction is { } partyAction
                         && numberDraw.PartyEnemies.Count == 2)
