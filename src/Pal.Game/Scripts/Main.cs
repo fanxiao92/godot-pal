@@ -173,7 +173,7 @@ public partial class Main : Node2D
                 }
                 Dialogue.FirstBattleWorld = world;
                 firstBattleWorld = world;
-                Dialogue.Initialize(Display, real.Resources, language, new GodotBattleRandom(selected.BattleSeed));
+                Dialogue.Initialize(Display, real.Resources, language, new GodotBattleRandom(selected.BattleSeed), map.Data);
                 // The verified closure reuses the production story-battle machinery: the facade
                 // carries the same checked exploration, scene, palette and settlement words, so
                 // team18's real battle, hooks and settlement run through the identical host.

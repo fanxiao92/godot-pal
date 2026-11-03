@@ -69,9 +69,11 @@ public partial class PalTriggerDialogue : Node
     /// keeps the plain session whose dynamic verbs reject precisely at execution.</summary>
     public Pal.Core.DynamicEventWorld? FirstBattleWorld { internal get; set; }
 
-    public void Initialize(PalDialogueDisplay display, FirstBattleRealResources resources, string language, IBattleRandom random)
+    public void Initialize(PalDialogueDisplay display, FirstBattleRealResources resources, string language, IBattleRandom random,
+        PalSceneData? scene = null)
     {
         ArgumentNullException.ThrowIfNull(display); ArgumentNullException.ThrowIfNull(resources); ArgumentNullException.ThrowIfNull(random);
+        _scene = scene;
         if (language is not ("zh-Hans" or "en")) throw new InvalidDataException($"Unsupported dialogue language: {language}");
         if (_display is not null || display.Session is { Current.Phase: not DialogueDisplayPhase.Completed })
             throw new InvalidOperationException("Trigger dialogue or display is already in use.");
