@@ -236,7 +236,8 @@ public partial class Main : Node2D
         awaitingSceneDraw = false;
         try
         {
-            Dialogue!.Start(request.FileId, request.EntryId, request.Caller);
+            if (story is not null) Dialogue!.Start(request.FileId, request.EntryId, request.Caller, request.Id);
+            else Dialogue!.Start(request.FileId, request.EntryId, request.Caller);
             if (story is not null && !Interaction!.BindTrigger(request.Id, Dialogue.Session!))
                 throw new InvalidOperationException("Selected trigger call could not bind its search request.");
             CompleteTrigger(); // Also handles synchronous, no-wait completion.

@@ -58,7 +58,8 @@ public sealed class NpcInteractionSession
     {
         ArgumentNullException.ThrowIfNull(trigger);
         if (!selectedMode || boundTrigger is not null || PendingTrigger is not { } request || request.Id != requestId
-            || trigger.CallId == Guid.Empty || trigger.Caller != request.Caller || trigger.StartedEntry != entry) return false;
+            || trigger.SourceRequestId != request.Id || trigger.CallId == Guid.Empty
+            || trigger.Caller != request.Caller || trigger.StartedEntry != entry) return false;
         boundTrigger = trigger;
         boundCall = trigger.CallId;
         return true;
@@ -70,7 +71,8 @@ public sealed class NpcInteractionSession
         if (PendingTrigger is not { } request || request.Id != requestId ||
             trigger.Phase != TriggerScriptPhase.Completed || trigger.Caller != request.Caller ||
             trigger.ReturnEntry != request.SourceAddress
-            || selectedMode && (!ReferenceEquals(trigger, boundTrigger) || trigger.CallId != boundCall)) return false;
+            || selectedMode && (trigger.SourceRequestId != request.Id || trigger.StartedEntry != entry
+                || !ReferenceEquals(trigger, boundTrigger) || trigger.CallId != boundCall)) return false;
         exploration.SaveTriggerEntry((ushort)request.Caller, (ushort)trigger.ReturnEntry);
         PendingTrigger = null;
         boundTrigger = null;

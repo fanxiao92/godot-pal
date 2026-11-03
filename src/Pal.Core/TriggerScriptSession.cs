@@ -17,6 +17,8 @@ public sealed class TriggerScriptSession
     public TriggerScriptPhase Phase { get; private set; }
     public bool BlocksSceneUpdates => Phase is TriggerScriptPhase.WaitingForDisplay or TriggerScriptPhase.WaitingForBattle;
     public Guid CallId { get; private set; }
+    /// <summary>The interaction request which actually started this call; null for legacy callers.</summary>
+    public Guid? SourceRequestId { get; private set; }
     public TriggerEventEntry? StartedEntry { get; private set; }
     public int Caller { get; private set; }
     public int ReturnEntry { get; private set; }
@@ -63,7 +65,15 @@ public sealed class TriggerScriptSession
         return new(requirements.Displays, requirements.Portraits, requirements.Teams);
     }
 
-    public void Start(string fileId, string entryId, int caller)
+    public void Start(string fileId, string entryId, int caller) => StartCall(fileId, entryId, caller, null);
+
+    public void Start(string fileId, string entryId, int caller, Guid sourceRequestId)
+    {
+        if (sourceRequestId == Guid.Empty) throw new ArgumentException("A source request ID must be nonempty.", nameof(sourceRequestId));
+        StartCall(fileId, entryId, caller, sourceRequestId);
+    }
+
+    private void StartCall(string fileId, string entryId, int caller, Guid? sourceRequestId)
     {
         if (BlocksSceneUpdates) throw new InvalidOperationException("A trigger call is already active.");
         if (caller is < 0 or > 65535) throw new ArgumentOutOfRangeException(nameof(caller));
@@ -72,6 +82,7 @@ public sealed class TriggerScriptSession
         ValidateCapabilityClosure(entry.SourceAddress);
         CallId = Guid.NewGuid();
         StartedEntry = entry;
+        SourceRequestId = sourceRequestId;
         Caller = caller == 65535 ? _lastCaller : caller;
         _lastCaller = Caller;
         ReturnEntry = _address = entry.SourceAddress;

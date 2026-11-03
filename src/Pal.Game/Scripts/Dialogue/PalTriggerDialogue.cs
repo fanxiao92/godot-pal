@@ -78,7 +78,15 @@ public partial class PalTriggerDialogue : Node
         return true;
     }
 
-    public void Start(string fileId, string entryId, int caller)
+    public void Start(string fileId, string entryId, int caller) => StartCall(fileId, entryId, caller, null);
+
+    public void Start(string fileId, string entryId, int caller, Guid sourceRequestId)
+    {
+        if (sourceRequestId == Guid.Empty) throw new ArgumentException("A source request ID must be nonempty.", nameof(sourceRequestId));
+        StartCall(fileId, entryId, caller, sourceRequestId);
+    }
+
+    private void StartCall(string fileId, string entryId, int caller, Guid? sourceRequestId)
     {
         if (Session is null || _events is null || _language is null || _display is null)
             throw new InvalidOperationException("Initialize trigger dialogue before starting an entry.");
@@ -89,7 +97,9 @@ public partial class PalTriggerDialogue : Node
         if (_story is not null)
         {
             if (entry != _story.Entry) throw new InvalidDataException("Story adapter only supports its checked selected entry.");
-            Session.Start(fileId, entryId, caller);
+            if (sourceRequestId is not { } requestId)
+                throw new InvalidOperationException("A story trigger requires its source interaction request.");
+            Session.Start(fileId, entryId, caller, requestId);
             BindPendingDisplay();
             return;
         }

@@ -38,10 +38,18 @@ public class StoryRoundtripSceneTests
             AssertThat(old.Failure).IsNull();
             AssertThat(old.Exploration!.Leader.X).IsEqual((short)320);
             AssertThat(old.StoryBattleMode).IsNull();
+            bool unassociatedRejected = false;
+            var selected = old.Dialogue!.Session!.Entries.Single();
+            try { old.Dialogue.Start(selected.FileId, selected.Id, 1); }
+            catch (InvalidOperationException) { unassociatedRejected = true; }
+            AssertThat(unassociatedRejected).IsTrue();
+            AssertThat(old.Dialogue.Session!.CallId).IsEqual(Guid.Empty);
             host.Tap(Key.Enter);
             await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
             var script = old.Dialogue!.Session!;
             Guid call = script.CallId;
+            Guid origin = old.Interaction!.PendingTrigger!.Id;
+            AssertThat(script.SourceRequestId).IsEqual((Guid?)origin);
             AssertThat(script.Caller).IsEqual(1);
             AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual(language == "en" ? "FIGHT" : "战");
             await host.FinishDisplay();
@@ -76,6 +84,12 @@ public class StoryRoundtripSceneTests
             AssertThat(script.ReturnEntry).IsEqual(1);
             AssertThat(script.AcknowledgeBattle(request.Id, request.Lifecycle.Completion)).IsFalse();
             AssertThat(host.Actions.Count > 0).IsTrue();
+            AssertThat(host.PoseChanges > 0).IsTrue();
+            host.Tap(Key.Enter);
+            await host.Wait(() => script.PendingDisplay is not null);
+            AssertThat(script.CallId == call).IsFalse();
+            AssertThat(script.SourceRequestId == origin).IsFalse();
+            AssertThat(script.SourceRequestId).IsEqual((Guid?)old.Interaction!.PendingTrigger!.Id);
             AssertThat(old.Failure).IsNull();
         }
         AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
@@ -153,12 +167,90 @@ public class StoryRoundtripSceneTests
         AssertThat(rejected).IsTrue();
     }
 
+    [TestCase]
+    public void StoryBattlePoseClockEnforcesFortyMillisecondsLateDeliveryWrapAndRestart()
+    {
+        foreach (uint start in new[] { 100u, uint.MaxValue - 19 })
+        {
+            var clock = StoryBattlePoseClock.Start(start);
+            AssertThat(clock.Pose).IsEqual(0);
+            AssertThat(clock.Advance(unchecked(start + 39)) == clock).IsTrue();
+            var due = clock.Advance(unchecked(start + 40));
+            AssertThat(due.Pose).IsEqual(1);
+            AssertThat(due.PoseStartedAt).IsEqual(unchecked(start + 40));
+            var late = clock.Advance(unchecked(start + 900));
+            AssertThat(late.Pose).IsEqual(1);
+            AssertThat(late.PoseStartedAt).IsEqual(unchecked(start + 900));
+            AssertThat(late.Advance(unchecked(start + 939)) == late).IsTrue();
+            AssertThat(late.Advance(unchecked(start + 940)).Pose).IsEqual(2);
+            var restarted = StoryBattlePoseClock.Start(unchecked(start + 910));
+            AssertThat(restarted.Pose).IsEqual(0);
+            AssertThat(restarted.Advance(unchecked(start + 949)) == restarted).IsTrue();
+            AssertThat(restarted.Advance(unchecked(start + 950)).Pose).IsEqual(1);
+        }
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task ActiveBattleExitReleasesOverlayAndBindingsBeforeOwnedNodesAreFreed()
+    {
+        using var fixture = new AuthoredStoryFixture("Win");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
+        using (var host = new StoryHost(selection))
+        {
+            host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.Feedback);
+            var overlay = host.Main.GetChildren().OfType<PalStoryBattleView>().Single();
+            var adapter = host.Main.Dialogue!; var display = host.Main.Display!;
+            var script = adapter.Session!;
+            var battle = host.Main.StoryBattle!;
+            var pending = script.PendingBattle!;
+            var completion = battle.Completion;
+            AssertThat(pending).IsNotNull();
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+            AssertThat(GodotObject.IsInstanceValid(overlay)).IsTrue();
+            host.Main.GetParent().RemoveChild(host.Main); // Actual active exit, not a completed roundtrip Dispose.
+            AssertThat(GodotObject.IsInstanceValid(host.Main)).IsTrue();
+            AssertThat(GodotObject.IsInstanceValid(overlay)).IsFalse();
+            AssertThat(GodotObject.IsInstanceValid(display)).IsTrue(); // Still owned by detached Main.
+            AssertThat(adapter.Session).IsNull();
+            AssertThat(host.Main.StoryBattle).IsNull();
+            AssertThat(host.Main.StoryBattleMode).IsNull();
+            AssertThat(host.Main.StoryBattlePose).IsNull();
+            AssertThat(host.Main.Interaction).IsNull();
+            AssertThat(host.Main.Dialogue).IsNull();
+            AssertThat(host.Main.Display).IsNull();
+            AssertThat(host.Main.Exploration).IsNull();
+            AssertThat(host.Main.SelectedLanguage).IsNull();
+            AssertThat(host.Main.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(ReferenceEquals(script.PendingBattle, pending)).IsTrue();
+            AssertThat(ReferenceEquals(script.PendingBattle!.Lifecycle, battle)).IsTrue();
+            AssertThat(ReferenceEquals(battle.Completion, completion)).IsTrue();
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+            AssertThat(script.PendingDisplay).IsNull(); // Exit did not fabricate or acknowledge a receipt.
+            using var fresh = new StoryHost(selection);
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            AssertThat(fresh.Main.Failure).IsNull();
+            AssertThat(adapter.Session).IsNull();
+            AssertThat(host.Main.Failure).IsNull();
+        }
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+    }
+
     private sealed class StoryHost : IDisposable
     {
         internal Main Main { get; } = new();
         private readonly ISceneRunner runner;
         private readonly Control? focus = ((SceneTree)Engine.GetMainLoop()).Root.GuiGetFocusOwner();
         internal List<ClassicBattleAction> Actions { get; } = [];
+        internal int PoseChanges { get; private set; }
+        private StoryBattlePoseSnapshot? previousPose;
         private ClassicBattleAction? last;
         private int updates;
         private Exception? observationFailure;
@@ -169,7 +261,10 @@ public class StoryRoundtripSceneTests
         internal StoryHost(GameSceneConfiguration selection)
         {
             Main.Configure(selection); Main.UpdateCompleted += Updated;
-            runner = ISceneRunner.Load(Main, autoFree: true);
+            // Runner owns the container, so an actual Main removal can be inspected before final Free.
+            var container = new Node();
+            container.AddChild(Main);
+            runner = ISceneRunner.Load(container, autoFree: true);
             display = Main.Display;
             if (display is not null) display.UpdateCompleted += DisplayUpdated;
         }
@@ -179,6 +274,28 @@ public class StoryRoundtripSceneTests
             try
             {
                 var combat = Main.StoryBattle?.Current.Combat;
+                var pose = Main.StoryBattlePose;
+                if (previousPose is { } beforePose)
+                {
+                    if (pose is { } currentPose && currentPose.Pose != beforePose.Pose)
+                    {
+                        AssertThat(currentPose.Pose).IsEqual(beforePose.Pose + 1);
+                        AssertThat(unchecked(currentPose.Now - beforePose.PoseStartedAt) >= 40).IsTrue();
+                        AssertThat(currentPose.PoseStartedAt).IsEqual(currentPose.Now);
+                        PoseChanges++;
+                    }
+                    if (pose is null)
+                    {
+                        // Even the final pose must finish before feedback releases its action/overlay.
+                        AssertThat(unchecked(Main.StoryPresentationTicks - beforePose.PoseStartedAt) >= 40).IsTrue();
+                    }
+                }
+                if (pose is { } firstPose && previousPose is null)
+                {
+                    AssertThat(firstPose.Pose).IsEqual(0);
+                    AssertThat(firstPose.PoseStartedAt).IsEqual(firstPose.Now);
+                }
+                previousPose = pose;
                 if (Main.StoryBattleMode == StoryBattlePresentation.Feedback && previousMode == StoryBattlePresentation.Feedback)
                     AssertThat(ReferenceEquals(combat, previousCombat)).IsTrue();
                 if (combat?.LastAction is { } action && !ReferenceEquals(action, last))

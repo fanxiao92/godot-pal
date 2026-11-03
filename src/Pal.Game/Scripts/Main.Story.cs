@@ -17,8 +17,11 @@ public partial class Main
     private TriggerBattleRequest? storyRequest;
     private bool battleConfirm;
     private bool resumeStoryDisplay;
-    private uint poseDeadline;
-    private int actionPose;
+    private StoryBattlePoseClock poseClock;
+    private uint presentationNow;
+    internal uint StoryPresentationTicks => presentationNow;
+    internal StoryBattlePoseSnapshot? StoryBattlePose => StoryBattleMode == StoryBattlePresentation.Feedback
+        ? new(presentationNow, poseClock.PoseStartedAt, poseClock.Pose) : null;
     public StoryBattlePresentation? StoryBattleMode { get; private set; }
     public ClassicBattleLifecycleSession? StoryBattle => storyRequest?.Lifecycle;
 
@@ -81,7 +84,7 @@ public partial class Main
     private bool ProcessStoryBattle()
     {
         if (story is null) return false;
-        uint now = unchecked((uint)Time.GetTicksMsec());
+        uint now = presentationNow = unchecked((uint)Time.GetTicksMsec());
         if (storyRequest is null)
         {
             if (Dialogue?.Session?.PendingBattle is not { } pending) return false;
@@ -112,15 +115,16 @@ public partial class Main
             case StoryBattlePresentation.Resolving:
                 if (!lifecycle.ResolveNextAction()) throw new InvalidOperationException("Battle action owner did not resolve an action.");
                 StoryBattleMode = StoryBattlePresentation.Feedback;
-                actionPose = 0; poseDeadline = unchecked(now + 40);
+                poseClock = StoryBattlePoseClock.Start(now);
                 break;
             case StoryBattlePresentation.Feedback:
-                if (unchecked((int)(poseDeadline - now)) > 0) break;
-                actionPose++; poseDeadline = unchecked(now + 40); // late delivery does not skip poses
+                var nextPose = poseClock.Advance(now);
+                if (nextPose == poseClock) break;
+                poseClock = nextPose;
                 var team = storyVisual!.Teams[storyRequest.TeamId];
                 int poses = lifecycle.Current.Combat.LastAction!.Attacker == ClassicBattleSide.Player ? 8
                     : Math.Max(8, team.MagicFrames * 2 + Math.Max(1, team.AttackFrames) * Math.Max(1, team.ActWaitFrames));
-                if (actionPose < poses) break;
+                if (poseClock.Pose < poses) break;
                 if (lifecycle.Completion is { } completion)
                 {
                     var request = storyRequest;
@@ -139,7 +143,7 @@ public partial class Main
                     ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
                 break;
         }
-        storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, actionPose);
+        storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, poseClock.Pose);
         return true;
     }
     private void ReleaseStory()
