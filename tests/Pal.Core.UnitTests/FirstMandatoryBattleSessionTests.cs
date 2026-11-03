@@ -26,7 +26,7 @@ public sealed class FirstMandatoryBattleSessionTests
         session.PressSearch();
         InvalidOperationException error = Assert.Throws<InvalidOperationException>(() => session.Update(0));
 
-        Assert.Equal("First mandatory battle trigger @09C3 is unavailable: closure tickets #46-#53 are not implemented; no side effects were applied.", error.Message);
+        Assert.Equal("First mandatory battle trigger @09C3 is unavailable: the real resource closure was not verified; no side effects were applied.", error.Message);
         Assert.Same(before, session.State);
         Assert.Same(explorationBefore, session.Current);
         Assert.Equal(0x09c3, session.State.World.EventObjects.Single(item => item.OwnerId == 28).TriggerEntry);

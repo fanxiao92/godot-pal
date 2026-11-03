@@ -49,6 +49,24 @@ public sealed class FirstMandatoryBattleProfileTests
     }
 
     [Fact]
+    public void Load_accepts_uniform_prepared_closure_statuses_and_rejects_mixed_or_unknown_statuses()
+    {
+        var fixture = BattleContextTestFixture.Valid();
+        JsonObject prepared = fixture.Document.DeepClone().AsObject();
+        foreach (var node in prepared["closure"]!["entries"]!.AsArray()) node!["status"] = "prepared";
+        FirstMandatoryBattleProfile rebound = LoadContextForTest(Encoding.UTF8.GetBytes(prepared.ToJsonString()));
+        Assert.All(rebound.Closure.Entries, entry => Assert.Equal("prepared", entry.Status));
+
+        JsonObject mixed = fixture.Document.DeepClone().AsObject();
+        mixed["closure"]!["entries"]![0]!["status"] = "prepared";
+        Assert.Throws<InvalidDataException>(() => LoadContextForTest(Encoding.UTF8.GetBytes(mixed.ToJsonString())));
+
+        JsonObject unknown = fixture.Document.DeepClone().AsObject();
+        foreach (var node in unknown["closure"]!["entries"]!.AsArray()) node!["status"] = "delivered";
+        Assert.Throws<InvalidDataException>(() => LoadContextForTest(Encoding.UTF8.GetBytes(unknown.ToJsonString())));
+    }
+
+    [Fact]
     public void Load_hashes_the_exact_context_bytes_and_requires_the_exact_file_set()
     {
         var fixture = BattleContextTestFixture.Valid();

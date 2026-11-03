@@ -142,10 +142,12 @@ public sealed class FirstMandatoryBattleProfile
         foreach (BattleClosureEntry entry in e.Closure.Entries)
         {
             ClosureSpec spec = ClosureSpecs[entry.Id];
-            Expect(entry.Category == spec.Category && entry.Status == "contract-only" && ClosureIdentityEquals(entry.Identity, spec.Identity)
+            Expect(entry.Category == spec.Category && IsClosureStatus(entry.Status) && ClosureIdentityEquals(entry.Identity, spec.Identity)
                 && entry.OwnerTickets.Count == entry.OwnerTickets.Distinct().Count() && entry.OwnerTickets.ToHashSet().SetEquals(spec.OwnerTickets)
                 && entry.ResourceIds.SequenceEqual(spec.ResourceIds), $"closure entry '{entry.Id}' is invalid.");
         }
+        Expect(e.Closure.Entries.Select(x => x.Status).Distinct().Count() == 1,
+            "closure entry statuses must be uniform: all contract-only before #53 binds real resources, or all prepared after it.");
         Expect(e.Resources.Count == ResourceSpecs.Count && e.Resources.Select(x => x.Id).ToHashSet(StringComparer.Ordinal).SetEquals(ResourceSpecs.Keys), "Battle resources are invalid.");
         foreach (BattleResourceReference resource in e.Resources)
         {
@@ -483,6 +485,7 @@ public sealed class FirstMandatoryBattleProfile
         Expect(Text(closure, "entry") == "@09C3", "closure entry must be @09C3, not the internal @09FE battle instruction.");
         JsonElement entries = Array(closure, "entries");
         var ids = new HashSet<string>(StringComparer.Ordinal);
+        var statuses = new HashSet<string>(StringComparer.Ordinal);
         foreach (JsonElement entry in entries.EnumerateArray())
         {
             Keys(entry, "closure entry", "id", "category", "identity", "ownerTickets", "status", "resourceIds");
@@ -493,13 +496,16 @@ public sealed class FirstMandatoryBattleProfile
             JsonElement identity = Object(entry, "identity");
             Expect(ClosureIdentityEquals(BattleModels.ClosureIdentity(identity), spec.Identity), $"closure entry '{id}' identity is not the frozen structured identity.");
             Expect(ExactWordSet(Array(entry, "ownerTickets"), spec.OwnerTickets, $"closure entry '{id}' ownerTickets"), $"closure entry '{id}' ownerTickets do not match the exact owner set.");
-            Expect(Text(entry, "status") == "contract-only", $"closure entry '{id}' must remain contract-only until downstream evidence is delivered.");
+            string status = Text(entry, "status");
+            Expect(IsClosureStatus(status), $"closure entry '{id}' status must be contract-only or prepared.");
+            statuses.Add(status);
             string[] links = Array(entry, "resourceIds").EnumerateArray().Select(value => value.ValueKind == JsonValueKind.String ? value.GetString()! : throw new InvalidDataException($"closure entry '{id}' resourceIds must be strings.")).ToArray();
             Expect(links.SequenceEqual(spec.ResourceIds), $"closure entry '{id}' resource links do not match the frozen matrix.");
             Expect(links.All(resourceIds.Contains), $"closure entry '{id}' links a missing resource.");
         }
         string? missing = ClosureSpecs.Keys.FirstOrDefault(id => !ids.Contains(id));
         Expect(missing is null && ids.Count == ClosureSpecs.Count, $"closure is missing required entry '{missing}'.");
+        Expect(statuses.Count == 1, "closure entry statuses must be uniform: all contract-only or all prepared.");
     }
 
     private static HashSet<string> ValidateResources(JsonElement resources)
@@ -541,6 +547,8 @@ public sealed class FirstMandatoryBattleProfile
         }
         return true;
     }
+
+    private static bool IsClosureStatus(string status) => status is "contract-only" or "prepared";
 
     private static bool ClosureIdentityEquals(BattleClosureIdentity actual, BattleClosureIdentity expected) => (actual, expected) switch
     {

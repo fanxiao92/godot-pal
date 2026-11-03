@@ -4,21 +4,29 @@ namespace Pal.Core;
 public sealed class FirstMandatoryBattleSession
 {
     public const string UnsupportedTriggerDiagnostic =
-        "First mandatory battle trigger @09C3 is unavailable: closure tickets #46-#53 are not implemented; no side effects were applied.";
+        "First mandatory battle trigger @09C3 is unavailable: the real resource closure was not verified; no side effects were applied.";
 
     private readonly ExplorationSession exploration;
     private readonly ExplorationInput input;
+    private readonly FirstMandatoryBattleClosureReceipt? closure;
     private bool searchPressed;
 
     public FirstMandatoryBattleSessionState State { get; }
+    /// <summary>The @09C3 entry opened by a verified real closure at the committed search update.
+    /// While set, the opened trigger owns further advancement; the host consumes it.</summary>
+    public FirstMandatoryBattleTriggerRequest? PendingTrigger { get; private set; }
     public ExplorationState Current => exploration.Current;
     public IReadOnlyList<SceneObject> Objects => exploration.Objects;
 
-    public FirstMandatoryBattleSession(FirstMandatoryBattleProfile profile, int sceneId, StaticSceneRules staticRules, StaticLeader staticLeader)
+    public FirstMandatoryBattleSession(FirstMandatoryBattleProfile profile, int sceneId, StaticSceneRules staticRules, StaticLeader staticLeader,
+        FirstMandatoryBattleClosureReceipt? closureReceipt = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(staticRules);
         ArgumentNullException.ThrowIfNull(staticLeader);
+        if (closureReceipt is not null && !StringComparer.Ordinal.Equals(closureReceipt.ContextSha256, profile.ContextSha256))
+            throw new InvalidDataException("First mandatory battle closure receipt belongs to a different battle context.");
+        closure = closureReceipt;
         State = profile.CreateSessionState();
         if (sceneId != 2 || State.World is not { SceneId: 2, MapId: 12 } || staticRules.MapId != 12
             || staticRules.Objects.All(item => item.Id != 28))
@@ -55,12 +63,19 @@ public sealed class FirstMandatoryBattleSession
 
     public bool Update(uint ticksMilliseconds)
     {
+        if (PendingTrigger is not null) return false;
         if (!input.IsUpdateDue(ticksMilliseconds)) return false;
         if (searchPressed)
         {
             searchPressed = false;
             if (exploration.FindSearchTarget() is { ObjectId: 28 })
-                throw new InvalidOperationException(UnsupportedTriggerDiagnostic);
+            {
+                if (closure is null) throw new InvalidOperationException(UnsupportedTriggerDiagnostic);
+                // The real entry is open: hand @09C3 to the host before any side effect. The
+                // unit 2 host executes it; exploration stays parked at this boundary.
+                PendingTrigger = new FirstMandatoryBattleTriggerRequest(0x09c3, 28);
+                return true;
+            }
         }
         bool updated = input.Update(ticksMilliseconds);
         if (updated)
