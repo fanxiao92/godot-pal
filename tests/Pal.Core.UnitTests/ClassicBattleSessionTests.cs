@@ -239,6 +239,79 @@ public sealed class ClassicBattleSessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Boss_flee_consumes_the_reference_draw_fails_and_stays_in_battle()
+    {
+        // fight.c 4119-4152: defense = living enemy dex + (level+6)*4 = 0 + 24; RandomLong(0, 24)
+        // is consumed even though a boss (battle.c 1544 fIsBoss) can never escape.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 24, 24),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1)]);
+        var session = new ClassicBattleSession(Definition(), random, isBossBattle: true);
+        session.SelectFlee(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        // fight.c 1546: the committed flee halves the member's queue dexterity (100 -> 50).
+        Assert.Equal(50, session.Current.ActionQueue.Single(e => e.Side == ClassicBattleSide.Player).Dexterity);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 0, 24, 24, false), session.Current.LastFleeAttempt);
+        Assert.Equal(2, session.Current.Counts.Flee);
+        Assert.Equal(0, session.Current.Counts.Attack);
+        Assert.Equal(0, session.ExperienceGained);
+        Assert.Equal(0, session.CashGained);
+        session.ResolveNextAction(); // enemy strike lands; the failed flee spent only its own action
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Null(session.Completion);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Boss_flee_attempt_reports_the_effective_flee_panel_and_escaped_false()
+    {
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 24, 0)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0] with { FleeRate = 900 }] };
+        var session = new ClassicBattleSession(data, random, isBossBattle: true);
+        session.SelectFlee(0);
+        session.ResolveNextAction();
+        // Even str 900 >= draw 0 stays a failure: escape requires !fIsBoss (fight.c 4144).
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 900, 24, 0, false), session.Current.LastFleeAttempt);
+        Assert.Equal(2, session.Current.Counts.Flee);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Non_boss_flee_is_an_unsupported_domain_and_consumes_nothing()
+    {
+        var random = new ScriptedRandom([]);
+        var session = new ClassicBattleSession(Definition(), random);
+        ClassicBattleView before = session.Current;
+        Assert.Throws<InvalidOperationException>(() => session.SelectFlee(0));
+        Assert.Same(before, session.Current);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Classic_flee_commit_covers_every_later_living_member()
+    {
+        // fight.c 1965-1978 + 1797-1799: one committed flee feeds kKeyFlee to the later menus,
+        // so both members attempt and the round resolves without further selection.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 24, 24), I(0, 24, 23), I(0, 1, 0), I(0, 16, 10)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0], data.Players[0] with { RoleId = 2, Dexterity = 90 }] };
+        var session = new ClassicBattleSession(data, random, isBossBattle: true);
+        session.SelectFlee(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 0, 24, 24, false), session.Current.LastFleeAttempt);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 1, 2, 0, 24, 23, false), session.Current.LastFleeAttempt);
+        session.ResolveNextAction(); // the enemy strike (evaded here) ends the round
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Equal(2, session.Current.Players[0].Counts.Flee);
+        Assert.Equal(2, session.Current.Players[1].Counts.Flee);
+        random.AssertExhausted();
+    }
+
     private static ClassicBattleDefinition Definition(int enemyHp = 100) => new(
         [new(1, 200, 200, 40, 20, 100)], [new(7, 0, enemyHp, 0, 0, 0, 1)]);
     private sealed record Draw(bool Floating, float From, float To, float Value);

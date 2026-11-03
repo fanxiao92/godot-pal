@@ -30,7 +30,7 @@ public sealed class ClassicBattleLifecycleSession
 
     public ClassicBattleLifecycleSession(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
         IReadOnlyList<ClassicBattleEnemy> enemies, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth, IBattleRandom random,
-        BattleEquipmentState? equipment = null, bool runEnemyBattleEndScripts = false)
+        BattleEquipmentState? equipment = null, bool runEnemyBattleEndScripts = false, bool isBossBattle = false)
     {
         ArgumentNullException.ThrowIfNull(random);
         Validate(roles, players, enemies, growth, equipment);
@@ -41,7 +41,7 @@ public sealed class ClassicBattleLifecycleSession
         if (battleEndScripts.Length > 0 && !runEnemyBattleEndScripts)
             throw new InvalidDataException("Classic combat requires the capable script executor to run a declared enemy battle-end script.");
         var byId = roles.ToDictionary(x => x.RoleId);
-        var combat = new ClassicBattleSession(new(players.Select(x => x with { Hp = Math.Max(1, byId[x.RoleId].Hp) }).ToArray(), enemies), random, equipment);
+        var combat = new ClassicBattleSession(new(players.Select(x => x with { Hp = Math.Max(1, byId[x.RoleId].Hp) }).ToArray(), enemies), random, equipment, isBossBattle);
         this.roles = byId.ToDictionary(x => x.Key, x => new BattleRoleState(x.Value));
         this.growth = growth.ToDictionary(x => x.Key, x => new ClassicBattleGrowthData(
             Array.AsReadOnly(x.Value.LevelUpExperience.ToArray()), Array.AsReadOnly(x.Value.LevelUpMagics.ToArray())));
@@ -77,6 +77,14 @@ public sealed class ClassicBattleLifecycleSession
         Current = View(activeCombat.Current);
     }
 
+    /// <summary>The whole-party boss flee attempt (fight.c 4119-4173); only a boss battle supports it.</summary>
+    public void SelectFlee(int partyIndex)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.SelectFlee(partyIndex);
+        Current = View(activeCombat.Current);
+    }
+
     public bool ResolveNextAction()
     {
         if (activeCombat is null || !activeCombat.ResolveNextAction()) return false;
@@ -103,6 +111,7 @@ public sealed class ClassicBattleLifecycleSession
             role.Hp = player.Hp;
             role.HiddenExperience["attack"].Count = player.Counts.Attack;
             role.HiddenExperience["health"].Count = player.Counts.Health;
+            role.HiddenExperience["flee"].Count = player.Counts.Flee;
         }
     }
 

@@ -22,6 +22,10 @@ public sealed class ClassicBattleSession
     // script.c 0x0030 writes the kBodyPartExtra register; these are that register's combat fields.
     private readonly int[] boostAttack, boostMagicPower, boostDefense, boostDexterity, boostFlee;
     private readonly ClassicBattlePlayer[] basePlayers;
+    // fight.c 1965-1978 (CLASSIC): a committed flee feeds kKeyFlee to every later member's menu.
+    private readonly bool[] fleeing;
+    // PAL_StartBattle's fIsBoss (battle.c 1754): boss battles never allow a successful escape.
+    private readonly bool isBossBattle;
     // battle.c 753-754: each KO accumulates its enemy's WORD reward once, granted by the
     // lifecycle only when the battle actually ends Won (PAL_BattleWon battle.c 1054/1098).
     private int experienceGained, cashGained;
@@ -30,12 +34,14 @@ public sealed class ClassicBattleSession
     public ClassicBattleView Current { get; private set; }
     public CompletionReceipt? Completion { get; private set; }
 
-    public ClassicBattleSession(ClassicBattleDefinition definition, IBattleRandom random, BattleEquipmentState? equipment = null)
+    public ClassicBattleSession(ClassicBattleDefinition definition, IBattleRandom random, BattleEquipmentState? equipment = null,
+        bool isBossBattle = false)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(random);
         Validate(definition, equipment);
         this.random = random;
+        this.isBossBattle = isBossBattle;
         players = definition.Players.ToArray();
         basePlayers = definition.Players.ToArray();
         enemies = definition.Enemies.ToArray();
@@ -63,6 +69,7 @@ public sealed class ClassicBattleSession
         boostDefense = new int[players.Length];
         boostDexterity = new int[players.Length];
         boostFlee = new int[players.Length];
+        fleeing = new bool[players.Length];
         counts = players.Select(_ => new ClassicBattleCounts(0, 0)).ToArray();
         targets = new int?[players.Length];
         Current = new(ClassicBattlePhase.Selecting, 0, playerHp[0], enemyHp[0], counts[0], null);
@@ -94,6 +101,24 @@ public sealed class ClassicBattleSession
         Publish();
     }
 
+    /// <summary>fight.c 4119-4173: the committer and every later living member flee together
+    /// (CLASSIC fFlee re-feed); a boss attempt always fails but still consumes its draw.</summary>
+    public void SelectFlee(int partyIndex)
+    {
+        if (Current.Phase != ClassicBattlePhase.Selecting) throw new InvalidOperationException("This battle is not selecting an action.");
+        if (!isBossBattle)
+            throw new InvalidOperationException("Classic combat does not yet support a non-boss flee; the successful-escape domain is unimplemented.");
+        if (partyIndex != Current.SelectingPlayerIndex) throw new ArgumentOutOfRangeException(nameof(partyIndex));
+        for (int i = partyIndex; i < players.Length; i++)
+            if (playerHp[i] > 0 && targets[i] is null) fleeing[i] = true;
+        if (!Enumerable.Range(0, players.Length).Any(i => playerHp[i] > 0 && targets[i] is null && !fleeing[i]))
+        {
+            BuildQueue();
+            Current = Current with { Phase = ClassicBattlePhase.Resolving, Round = Current.Round + 1 };
+        }
+        Publish();
+    }
+
     private void BuildQueue()
     {
         var entries = new List<ClassicBattleQueueEntry>();
@@ -112,6 +137,8 @@ public sealed class ClassicBattleSession
             // fight.c:336-349: haste triples the actual dexterity (CLASSIC) before the 999 cap.
             if (playerStatuses[i][StatusHaste] > 0) speed = unchecked((ushort)(speed * 3));
             speed = Math.Min(speed, 999);
+            // fight.c 1546: a committed flee action halves the member's queue dexterity.
+            if (fleeing[i]) speed /= 2;
             if (playerHp[i] < Math.Min(100, player.MaxHp / 5)) speed /= 2;
             entries.Add(new(ClassicBattleSide.Player, i, playerHp[i] == 0 ? (ushort)0
                 : unchecked((ushort)(speed * random.NextInclusive(.9f, 1.1f)))));
@@ -142,8 +169,13 @@ public sealed class ClassicBattleSession
         {
             if (playerHp[entry.ActorIndex] > 0)
             {
+                if (fleeing[entry.ActorIndex])
+                {
+                    AttemptFlee(entry.ActorIndex);
+                    actionIndex++;
+                }
                 // fight.c:3628: kStatusDualAttack doubles the strike loop of one attack action.
-                if (pendingSecondStrike)
+                else if (pendingSecondStrike)
                 {
                     pendingSecondStrike = false;
                     AttackEnemy(entry.ActorIndex, secondStrike: true);
@@ -163,8 +195,7 @@ public sealed class ClassicBattleSession
                 }
             }
             else actionIndex++;
-        }
-        else
+        }        else
         {
             if (enemyHp[entry.ActorIndex] > 0)
             {
@@ -196,6 +227,7 @@ public sealed class ClassicBattleSession
         else if (actionIndex == queue.Length)
         {
             Array.Clear(targets);
+            Array.Clear(fleeing);
             queue = [];
             Current = Current with { Phase = ClassicBattlePhase.Selecting };
         }
@@ -268,7 +300,7 @@ public sealed class ClassicBattleSession
             Enemies = Array.AsReadOnly(enemies.Select((e, i) => new ClassicBattleEnemyView(i, e.Id, enemyHp[i])).ToArray()),
             ActionQueue = Array.AsReadOnly(queue.ToArray()),
             SelectingPlayerIndex = Current.Phase == ClassicBattlePhase.Selecting
-                ? Enumerable.Range(0, players.Length).Where(i => playerHp[i] > 0 && targets[i] is null).Select(i => (int?)i).FirstOrDefault() : null
+                ? Enumerable.Range(0, players.Length).Where(i => playerHp[i] > 0 && targets[i] is null && !fleeing[i]).Select(i => (int?)i).FirstOrDefault() : null
         };
     }
 
@@ -310,6 +342,24 @@ public sealed class ClassicBattleSession
         }
         Current = Current with { LastAction = new(Current.Round, ClassicBattleSide.Player, enemy.Id, damage, critical, false)
             { ActorIndex = partyIndex, TargetIndex = slot, SecondStrike = secondStrike } };
+    }
+
+    /// <summary>fight.c 4119-4173: str = effective flee rate versus every living enemy's
+    /// dex + (level+6)*4; the RandomLong(0, defense) draw is consumed even in a boss battle,
+    /// which never escapes. A failed attempt spends the action and adds 2 to the flee track.</summary>
+    private void AttemptFlee(int partyIndex)
+    {
+        int defense = 0;
+        for (int i = 0; i < enemies.Length; i++)
+            if (enemyHp[i] > 0) defense += enemies[i].Dexterity + (enemies[i].Level + 6) * 4;
+        if ((short)defense < 0) defense = 0;
+        int fleeRate = EffectivePanel(players[partyIndex].FleeRate, boostFlee[partyIndex]);
+        int draw = random.NextInclusive(0, defense);
+        bool escaped = fleeRate >= draw && !isBossBattle;
+        if (!escaped)
+            counts[partyIndex] = counts[partyIndex] with { Flee = unchecked((ushort)(counts[partyIndex].Flee + 2)) };
+        Current = Current with { LastFleeAttempt = new(Current.Round, partyIndex, players[partyIndex].RoleId,
+            fleeRate, defense, draw, escaped) };
     }
 
     /// <summary>fight.c:3753-3755: the attack and health counts grow once per attack action, not per strike.</summary>

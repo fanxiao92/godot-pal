@@ -85,7 +85,16 @@ public sealed record ClassicBattleRoleGrowth(int RoleId, int LevelBefore, int Le
 /// scripts and the automatic recovery run: the granted totals (gpGlobals dwCash/iExpGained at
 /// battle.c 1050-1054) and every party role's growth.</summary>
 public sealed record ClassicBattleVictorySettlement(int ExperienceGranted, int CashGranted, IReadOnlyList<ClassicBattleRoleGrowth> Growth);
-public sealed record ClassicBattleCounts(int Attack, int Health);
+public sealed record ClassicBattleCounts(int Attack, int Health)
+{
+    /// <summary>Failed escape attempts this battle (fight.c 4171: rgFleeExp.wCount += 2 per attempt);
+    /// the attack/health counters grow only on real attack actions.</summary>
+    public int Flee { get; init; }
+}
+/// <summary>One resolved flee attempt (fight.c 4119-4173): the reference always consumes the
+/// RandomLong(0, defense) draw, and a boss battle fails the escape regardless of the draw.</summary>
+public sealed record ClassicBattleFleeAttempt(int Round, int PartyIndex, int RoleId, int FleeRate,
+    int EnemyFleeDefense, int Draw, bool Escaped);
 public sealed record ClassicBattleView(ClassicBattlePhase Phase, int Round, int PlayerHp, int EnemyHp,
     ClassicBattleCounts Counts, ClassicBattleAction? LastAction)
 {
@@ -96,4 +105,6 @@ public sealed record ClassicBattleView(ClassicBattlePhase Phase, int Round, int 
     public int? SelectingPlayerIndex { get; init; }
     /// <summary>The role script paused on the post-action check; non-null only in the RoleHook phase.</summary>
     public ClassicBattleRoleHook? PendingRoleHook { get; init; }
+    /// <summary>The newest resolved flee attempt; published once per failed boss escape, replacing any prior attempt.</summary>
+    public ClassicBattleFleeAttempt? LastFleeAttempt { get; init; }
 }

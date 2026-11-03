@@ -167,6 +167,9 @@ public sealed class TriggerEventCollection
                 },
                 "showDialog" => ["messageId", "descriptionLineWord"],
                 "startBattle" => ["teamId", "lossTarget", "isBoss", "fleeTarget"],
+                "setMusic" => ["musicId", "mode"],
+                "fadeToRed" => [],
+                "requestReload" => [],
                 _ => throw new InvalidDataException($"Unknown op '{op}'.")
             };
             EventJson.Keys(node, context, ["label", "op", "next", "source", ..fields]);
@@ -177,8 +180,10 @@ public sealed class TriggerEventCollection
             {
                 case "raw":
                     // Registered opcodes must use their named mapping: end/setDialog/showDialog/startBattle
-                    // since M3, plus the #49 role-hook verbs randomJump/changeHp/changeMp/boostStat.
-                    if (opcode is 0 or 0x3c or 0xffff or 6 or 27 or 28 or 48) throw new InvalidDataException("Registered opcode must use named mapping.");
+                    // since M3, the #49 role-hook verbs randomJump/changeHp/changeMp/boostStat, plus
+                    // the #51 failure-boundary verbs setMusic/fadeToRed/requestReload.
+                    if (opcode is 0 or 0x3c or 0xffff or 6 or 27 or 28 or 48 or 0x43 or 0x4e or 0x4f)
+                        throw new InvalidDataException("Registered opcode must use named mapping.");
                     break;
                 case "end":
                     command.Mode = EventJson.Text(node, "mode");
@@ -242,6 +247,20 @@ public sealed class TriggerEventCollection
                     _ = EventJson.Word(node, "descriptionLineWord");
                     if (opcode != 0xffff) throw new InvalidDataException("Invalid showDialog mapping.");
                     break;
+                case "setMusic":
+                    // script.c 0x0043: wNumMusic = operand0 and the operand1 play mode (0 loop, 1 once, 3 fade).
+                    if (opcode != 0x43) throw new InvalidDataException("Invalid setMusic mapping.");
+                    command.MusicId = EventJson.Word(node, "musicId");
+                    command.MusicMode = EventJson.Word(node, "mode");
+                    break;
+                case "fadeToRed":
+                    // script.c 0x004F: fade the whole screen to red (game over); no operands.
+                    if (opcode != 0x4f) throw new InvalidDataException("Invalid fadeToRed mapping.");
+                    break;
+                case "requestReload":
+                    // script.c 0x004E: load the last saved game; the script stops here (return 0).
+                    if (opcode != 0x4e) throw new InvalidDataException("Invalid requestReload mapping.");
+                    break;
             }
             return command;
         }
@@ -287,6 +306,8 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int Amount { get; set; }
     internal int StatField { get; set; }
     internal int RoleOperand { get; set; }
+    internal int MusicId { get; set; }
+    internal int MusicMode { get; set; }
 }
 
 internal static class EventJson

@@ -1,6 +1,6 @@
 namespace Pal.Core;
 
-public enum TriggerScriptPhase { Ready, WaitingForDisplay, Completed, WaitingForBattle }
+public enum TriggerScriptPhase { Ready, WaitingForDisplay, Completed, WaitingForBattle, WaitingForLostReload }
 
 /// <summary>Which call frame a walked address belongs to: the outer event, a paused battle's role
 /// hook (fight.c 768-880) or an enemy post-victory script (battle.c 1334-1337).</summary>
@@ -18,11 +18,13 @@ public sealed class TriggerScriptSession
     private ClassicBattleRoleHook? _battleHook;
     private ClassicBattleEndScript? _battleEndScript;
     private int _parkedCaller;
+    private (int TeamId, bool IsBoss)? _lostBattleContext;
 
     // Metadata discovery for the host's selected interaction; does not start or preview a call.
     public IReadOnlyList<TriggerEventEntry> Entries => _events.Entries;
     public TriggerScriptPhase Phase { get; private set; }
-    public bool BlocksSceneUpdates => Phase is TriggerScriptPhase.WaitingForDisplay or TriggerScriptPhase.WaitingForBattle;
+    public bool BlocksSceneUpdates => Phase is TriggerScriptPhase.WaitingForDisplay or TriggerScriptPhase.WaitingForBattle
+        or TriggerScriptPhase.WaitingForLostReload;
     public Guid CallId { get; private set; }
     /// <summary>The interaction request which actually started this call; null for legacy callers.</summary>
     public Guid? SourceRequestId { get; private set; }
@@ -32,6 +34,13 @@ public sealed class TriggerScriptSession
     public TriggerPosition? CurrentPosition { get; private set; }
     public TriggerDialogueRequest? PendingDisplay { get; private set; }
     public TriggerBattleRequest? PendingBattle { get; private set; }
+    /// <summary>The 0x004E save-reload request that parked this call (script.c returns 0 there);
+    /// non-null only in the WaitingForLostReload phase, and never acknowledged.</summary>
+    public TriggerLostReloadRequest? PendingLostReload { get; private set; }
+    /// <summary>The last setMusic transition (script.c 0x0043 wNumMusic); null before the first one.</summary>
+    public TriggerMusicState? Music { get; private set; }
+    /// <summary>True after the fadeToRed transition (script.c 0x004F game-over fade).</summary>
+    public bool FadedToRed { get; private set; }
     /// <summary>The battle's paused role hook (fight.c 768-880) awaiting StartBattleHook; the paused combat
     /// is the only source of this state, never a host-written input.</summary>
     public ClassicBattleRoleHook? PendingBattleHook => PendingBattle?.Lifecycle.Current.Combat.PendingRoleHook;
@@ -123,6 +132,8 @@ public sealed class TriggerScriptSession
         if (Phase != TriggerScriptPhase.WaitingForBattle || PendingBattle is not { } request || request.Id != requestId
             || !request.Lifecycle.OwnsCompletion(completion)) return false;
         BattleRoles = request.Lifecycle.Current.Roles;
+        // The reload diagnostic carries the enemy team/context of the battle that actually lost.
+        if (completion!.Outcome == ClassicBattlePhase.Lost) _lostBattleContext = (request.TeamId, request.IsBoss);
         _address = completion!.Outcome == ClassicBattlePhase.Lost ? request.LossAddress ?? request.NextAddress : request.NextAddress;
         PendingBattle = null;
         Continue();
@@ -214,6 +225,15 @@ public sealed class TriggerScriptSession
                 // script.c 3301: both the rate-miss successor and the jump target are real branches.
                 pending.Push((Next(command), item.Context));
                 pending.Push((command.TargetAddress!.Value, item.Context));
+            }
+            else if (command.Op == "setMusic" || command.Op == "fadeToRed")
+            {
+                pending.Push((Next(command), item.Context));
+            }
+            else if (command.Op == "requestReload")
+            {
+                // script.c 0x004E stops the whole script (return 0); nothing after it runs,
+                // so the walk does not continue past the reload boundary.
             }
             else if (command.Op is "changeHp" or "changeMp" or "boostStat")
             {
@@ -333,10 +353,25 @@ public sealed class TriggerScriptSession
                 case "startBattle" when _battleContent is not null:
                     var lifecycle = new ClassicBattleLifecycleSession(BattleRoles!.Values.ToArray(), _battleContent.SettledPlayers(BattleRoles),
                         _battleContent.Enemies(command.TeamId), _battleContent.GrowthByRole, _battleRandom!,
-                        BattleEquipmentState.Initialize(_battleContent), runEnemyBattleEndScripts: true);
+                        BattleEquipmentState.Initialize(_battleContent), runEnemyBattleEndScripts: true, isBossBattle: command.IsBoss);
                     PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.TeamId, command.IsBoss,
                         Next(command), command.LossAddress, command.FleeAddress, lifecycle);
                     Phase = TriggerScriptPhase.WaitingForBattle;
+                    return;
+                case "setMusic":
+                    Music = new(command.MusicId, command.MusicMode);
+                    _address = Next(command);
+                    break;
+                case "fadeToRed":
+                    FadedToRed = true;
+                    _address = Next(command);
+                    break;
+                case "requestReload":
+                    // TODO(#51): implement the real 0x004E save-slot reload (PAL_FadeOut(1) then
+                    // PAL_ReloadInNextTick); without a save system the call parks in this terminal
+                    // phase and the host prints its one lost-reload diagnostic.
+                    PendingLostReload = new(command.Position, _lostBattleContext?.TeamId, _lostBattleContext?.IsBoss ?? false);
+                    Phase = TriggerScriptPhase.WaitingForLostReload;
                     return;
                 case "showDialog":
                     var content = ReadDisplay(ref _address);
@@ -387,6 +422,11 @@ public sealed class TriggerScriptSession
 }
 
 public sealed record TriggerDialogueContext(string Box, int PortraitId, int Color, bool PlayingRng, int DelayMilliseconds);
+/// <summary>The formal music-state transition (script.c 0x0043): the world WORD and its play mode.</summary>
+public sealed record TriggerMusicState(int MusicId, int Mode);
+/// <summary>The parked 0x004E reload boundary: where it was requested and which enemy team's
+/// battle actually lost; EnemyTeamId is null when no lost battle preceded the request.</summary>
+public sealed record TriggerLostReloadRequest(TriggerPosition Position, int? EnemyTeamId, bool IsBoss);
 public sealed record TriggerMessageReference(TriggerPosition Position, int StartMessageId, int Span);
 public sealed record TriggerDialogueRequest(Guid Id, TriggerDialogueContext Context, IReadOnlyList<TriggerMessageReference> MessageReferences,
     DialogueMessageBlock Content, DialogueDisplaySession Display);
