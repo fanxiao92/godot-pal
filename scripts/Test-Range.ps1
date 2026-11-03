@@ -122,7 +122,7 @@ try {
     if ($Filter -and ($Scope.Count -ne 1 -or $Scope[0] -ceq 'prepare')) { Fail 'filter-scope' 'Filter requires one CLI integration or Game scope; Prepare does not accept filters.' }
     $filterValue = if ($Filter) { $Filter.Substring($Filter.IndexOfAny([char[]]'=~') + 1) } else { '' }
     $batches = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($b in $GameBatch) { if ($b -cnotin @('process','scene-dialogue','native-map') -or -not $batches.Add($b)) { Fail 'selection' "Unknown/empty/duplicate GameBatch '$b'." } }
+    foreach ($b in $GameBatch) { if ($b -cnotin @('process','scene-dialogue','native-map','scene-realfull') -or -not $batches.Add($b)) { Fail 'selection' "Unknown/empty/duplicate GameBatch '$b'." } }
     if (('game' -cin $Scope) -ne ($GameBatch.Count -gt 0)) { Fail 'batch-scope' 'Game requires explicit positive GameBatch selection; other scopes do not accept batches.' }
     if (-not $RepositoryRoot -or -not [IO.Directory]::Exists($RepositoryRoot)) { Fail 'project-missing' 'RepositoryRoot must exist.' }
     $root = [IO.Path]::GetFullPath($RepositoryRoot); $report.repositoryRoot = $root
@@ -226,7 +226,13 @@ try {
         }
         [IO.File]::WriteAllText((Join-Path $out "$s.discovery.json"), ($snapshot | ConvertTo-Json -Depth 40), $utf8)
         $args = @('test', $project, '--configuration', 'Debug', '--no-build', '--no-restore', '--logger', 'trx;LogFileName=results.trx', '--results-directory', (Join-Path $out $s))
-        if ($s -ceq 'game') { $args += @('--settings', (Join-Path $root 'tests/Pal.Game.Tests/game.runsettings')) }
+        if ($s -ceq 'game') {
+            $args += @('--settings', (Join-Path $root 'tests/Pal.Game.Tests/game.runsettings'))
+            # Selected batches may pin a longer session timeout than the shared 120s default;
+            # the override goes through the CLI runsettings argument, never a settings file.
+            $sessionTimeout = [int](@($plan.batches | Where-Object { $batches.Contains($_.name) } | ForEach-Object { [int]$_.sessionTimeoutMs }) | Measure-Object -Maximum).Maximum
+            if ($sessionTimeout -gt 120000) { $args += @('--', "RunConfiguration.TestSessionTimeout=$sessionTimeout") }
+        }
         if ($actualFilter) { $args += @('--filter', $actualFilter) }
         $runnerAdded = $false
         if ($s -ceq 'game') {
