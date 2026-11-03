@@ -892,31 +892,34 @@ public class StoryRoundtripSceneTests
             await host.FinishDisplay();
             await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
             var battle = old.StoryBattle!;
-            var hookKinds = new System.Collections.Generic.List<Pal.Core.ClassicBattleHookKind>();
-            var hookFirstTexts = new System.Collections.Generic.List<string>();
-            var secondStrikeAfterHook = -1;
-            int hookCount = 0;
-            while (script.PendingBattle is not null)
+            // Hooks pause and resume inside one drive; observe them on the real Main callback.
+            var hookEvents = new System.Collections.Generic.List<(Pal.Core.ClassicBattleHookKind Kind, int RoleId, string? First)>();
+            Pal.Core.ClassicBattleHookKind? recordedKind = null;
+            void CaptureHook()
             {
-                var hook = script.PendingBattleHook;
-                if (hook is not null)
+                if (script.PendingBattleHook is not { } hook) { recordedKind = null; return; }
+                if (recordedKind != hook.Kind)
                 {
-                    hookKinds.Add(hook.Kind);
-                    hookCount++;
-                    await host.Wait(() => script.PendingDisplay is not null);
-                    var first = script.PendingDisplay!;
-                    AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.HookDialogue);
-                    AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(1); // battle stays visible behind the dialogue
-                    AssertThat(firstDisplays.Contains(first.Content.Parts[0].Text!) ||
-                        FriendDeathHookFirstDisplaysSet(zh).Contains(first.Content.Parts[0].Text!)).IsTrue();
-                    hookFirstTexts.Add(first.Content.Parts[0].Text!);
-                    GD.Print($"PAL_HOOK_{hookCount}:kind={hook.Kind};role={hook.RoleId};first={first.Content.Parts[0].Text}");
+                    recordedKind = hook.Kind;
+                    hookEvents.Add((hook.Kind, hook.RoleId, null));
                 }
-                await DriveMidbattleMenus(host, old);
-                if (hook is not null && secondStrikeAfterHook < 0
-                    && host.Actions.Any(a => a.SecondStrike)) secondStrikeAfterHook = host.Actions.Count(a => a.SecondStrike);
+                if (hookEvents.Count > 0 && hookEvents[^1].First is null && script.PendingDisplay is { } display)
+                {
+                    // The paused battle shows its script dialogue while the battle stays visible.
+                    AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.HookDialogue);
+                    AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(1);
+                    var text = display.Content.Parts[0].Text!;
+                    AssertThat(hook.Kind == Pal.Core.ClassicBattleHookKind.Dying
+                        ? firstDisplays.Contains(text) : FriendDeathHookFirstDisplaysSet(zh).Contains(text)).IsTrue();
+                    hookEvents[^1] = (hook.Kind, hook.RoleId, text);
+                    GD.Print($"PAL_HOOK:{hook.Kind};role={hook.RoleId};first={text}");
+                }
             }
-            AssertThat(hookKinds.Contains(Pal.Core.ClassicBattleHookKind.Dying)).IsTrue();
+            old.UpdateCompleted += CaptureHook;
+            while (script.PendingBattle is not null) await DriveMidbattleMenus(host, old);
+            old.UpdateCompleted -= CaptureHook;
+            AssertThat(hookEvents.Any(h => h.Kind == Pal.Core.ClassicBattleHookKind.Dying)).IsTrue();
+            AssertThat(hookEvents.All(h => h.First is not null)).IsTrue();
             AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
             // The dying member really acted after the pause (its dual strikes are real queue actions).
             AssertThat(host.Actions.Any(a => a.Attacker == Pal.Core.ClassicBattleSide.Player && a.ActorIndex == 1)).IsTrue();
@@ -927,9 +930,8 @@ public class StoryRoundtripSceneTests
             await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
             AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
             AssertThat(old.Failure).IsNull();
-            GD.Print("PAL_MIDBATTLE_WIN:hooks=" + string.Join(",", hookKinds) + ";first=" + string.Join("|", hookFirstTexts)
-                + ";secondStrike=" + secondStrikeAfterHook + ";hp=" + string.Join('/',
-                    battle.Current.Combat.Players.Select(p => p.Hp)) + ";enemies=" + string.Join('/',
+            GD.Print("PAL_MIDBATTLE_WIN:hooks=" + string.Join(",", hookEvents.Select(h => $"{h.Kind}/{h.RoleId}/{h.First}"))
+                + ";hp=" + string.Join('/', battle.Current.Combat.Players.Select(p => p.Hp)) + ";enemies=" + string.Join('/',
                     battle.Current.Combat.Enemies.Select(e => e.Hp)) + ";actions=" + host.Actions.Count);
         }
         AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
@@ -970,14 +972,7 @@ public class StoryRoundtripSceneTests
             int hpBeforeHook = 0, mpBeforeHook = 0, attackBeforeHook = 0;
             bool friendDeathSeen = false;
             var observedBoosts = new System.Collections.Generic.List<IReadOnlyList<int>>();
-            void CaptureBoosts()
-            {
-                var panel = old.StoryBattleBoosts;
-                if (panel.Count > 0 && (observedBoosts.Count == 0 || !observedBoosts[^1].SequenceEqual(panel)))
-                    observedBoosts.Add(panel.ToArray());
-            }
-            old.UpdateCompleted += CaptureBoosts;
-            while (script.PendingBattle is not null)
+            void CaptureFriendDeath()
             {
                 if (script.PendingBattleHook is { Kind: Pal.Core.ClassicBattleHookKind.FriendDeath } hook && !friendDeathSeen)
                 {
@@ -987,14 +982,23 @@ public class StoryRoundtripSceneTests
                     attackBeforeHook = player.Attack;
                     AssertThat(hook.RoleId).IsEqual(0); // the coverer is the friend-death caller
                     AssertThat(battle.Current.Combat.Players[1].Hp).IsEqual(0); // the covered member died
-                    await host.Wait(() => script.PendingDisplay is not null);
-                    AssertThat(FriendDeathHookFirstDisplays.Contains(script.PendingDisplay!.Content.Parts[0].Text!)).IsTrue();
-                    GD.Print($"PAL_FRIEND_DEATH:before hp={hpBeforeHook} mp={mpBeforeHook} atk={attackBeforeHook} first={script.PendingDisplay!.Content.Parts[0].Text}");
+                    GD.Print($"PAL_FRIEND_DEATH:before hp={hpBeforeHook} mp={mpBeforeHook} atk={attackBeforeHook}");
                 }
-                await DriveMidbattleMenus(host, old);
+                if (friendDeathSeen && script.PendingBattleHook is { Kind: Pal.Core.ClassicBattleHookKind.FriendDeath }
+                    && script.PendingDisplay is { } friendDisplay)
+                {
+                    // The paused battle shows the coverer's script over the visible battle.
+                    AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.HookDialogue);
+                    AssertThat(FriendDeathHookFirstDisplays.Contains(friendDisplay.Content.Parts[0].Text!)).IsTrue();
+                }
+                var panel = old.StoryBattleBoosts;
+                if (panel.Count > 0 && (observedBoosts.Count == 0 || !observedBoosts[^1].SequenceEqual(panel)))
+                    observedBoosts.Add(panel.ToArray());
             }
+            old.UpdateCompleted += CaptureFriendDeath;
+            while (script.PendingBattle is not null) await DriveMidbattleMenus(host, old);
+            old.UpdateCompleted -= CaptureFriendDeath;
             AssertThat(friendDeathSeen).IsTrue();
-            old.UpdateCompleted -= CaptureBoosts;
             var healed = battle.Current.Roles[0];
             // The hook's changeHp +9999 healed the coverer full (capped at maxHp 150) before the
             // Won half recovery, and the boost panel exposed the applied boost registers.

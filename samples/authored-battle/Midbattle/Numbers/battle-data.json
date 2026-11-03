@@ -216,7 +216,7 @@
       "hp": 150,
       "maxHp": 150,
       "attack": 40,
-      "defense": 100,
+      "defense": 999,
       "dexterity": 100,
       "equipment": [
         0,
@@ -505,8 +505,8 @@
         {
           "id": 7,
           "level": 0,
-          "hp": 120,
-          "attack": 44,
+          "hp": 160,
+          "attack": 82,
           "defense": 0,
           "dexterity": 500,
           "physicalResistance": 1,
@@ -537,8 +537,8 @@
         {
           "id": 7,
           "level": 0,
-          "hp": 120,
-          "attack": 44,
+          "hp": 160,
+          "attack": 82,
           "defense": 0,
           "dexterity": 501,
           "physicalResistance": 1,
