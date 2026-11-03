@@ -12,6 +12,8 @@ public sealed class FirstMandatoryBattleSession
     private bool searchPressed;
 
     public FirstMandatoryBattleSessionState State { get; }
+    /// <summary>The static rules this session was bound to (host world wiring reuses them).</summary>
+    public StaticSceneRules Rules { get; }
     /// <summary>The @09C3 entry opened by a verified real closure at the committed search update.
     /// While set, the opened trigger owns further advancement; the host consumes it.</summary>
     public FirstMandatoryBattleTriggerRequest? PendingTrigger { get; private set; }
@@ -53,6 +55,7 @@ public sealed class FirstMandatoryBattleSession
         SceneSearchMatch? hit = rules.FindSearchTarget(leader);
         if (hit is null || hit.ObjectId != 28 || hit.SampleIndex != State.World.SearchProof.SampleIndex || rules.IsBlocked(leader.X, leader.Y))
             throw new InvalidDataException("First mandatory battle start/search identity does not match owner28 collision proof.");
+        Rules = rules;
         exploration = new ExplorationSession(rules, leader);
         input = new ExplorationInput(exploration);
     }

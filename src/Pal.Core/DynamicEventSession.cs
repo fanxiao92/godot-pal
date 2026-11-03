@@ -47,6 +47,14 @@ public sealed class DynamicEventWorld
 
     internal event Action? WorldChanged;
 
+    /// <summary>Host factory for a first-battle world bound to the same static rules the
+    /// exploration session uses; object words start from the static records.</summary>
+    public static DynamicEventWorld ForHost(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport)
+        => new(rules, leader, sceneId, onEnter, onTeleport);
+
+    /// <summary>Host hook over the internal initializer: publish one role's HP/MP words.</summary>
+    public void InitializePartyVitals(int roleId, int hp, int maxHp, int mp, int maxMp) => InitializeVitals(roleId, hp, maxHp, mp, maxMp);
+
     internal DynamicEventWorld(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport)
     {
         objects = rules.Objects.Select(o => new DynamicEventObject(o)).ToArray().AsReadOnly();

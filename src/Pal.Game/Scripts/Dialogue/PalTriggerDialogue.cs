@@ -65,6 +65,10 @@ public partial class PalTriggerDialogue : Node
 
     /// <summary>#53 first-battle host: the same production dialogue/battle executor over the
     /// strict-loaded resources the verified closure bound.</summary>
+    /// <summary>The dynamic world the first-battle host bound (script verbs mutate it); null
+    /// keeps the plain session whose dynamic verbs reject precisely at execution.</summary>
+    public Pal.Core.DynamicEventWorld? FirstBattleWorld { internal get; set; }
+
     public void Initialize(PalDialogueDisplay display, FirstBattleRealResources resources, string language, IBattleRandom random)
     {
         ArgumentNullException.ThrowIfNull(display); ArgumentNullException.ThrowIfNull(resources); ArgumentNullException.ThrowIfNull(random);
@@ -77,7 +81,9 @@ public partial class PalTriggerDialogue : Node
         _prompts = resources.Prompts.ToArray();
         _palette = PaletteFromScene ?? throw new InvalidOperationException("The first-battle host must supply the active scene palette first.");
         foreach (var pair in resources.Portraits) _portraits.Add(pair.Key, pair.Value);
-        Session = new TriggerScriptSession(resources.Events, _language, resources.BattleContent, random);
+        Session = FirstBattleWorld is { } world
+            ? new TriggerScriptSession(resources.Events, _language, resources.BattleContent, random, world)
+            : new TriggerScriptSession(resources.Events, _language, resources.BattleContent, random);
         _display = display; display.UpdateCompleted += OnDisplayUpdated;
     }
 

@@ -89,6 +89,18 @@ public sealed class TriggerScriptSession
         BattleRoles = battleContent.InitialRoles;
     }
 
+    /// <summary>#53 first-battle construction: the real @09C3 call both executes battles
+    /// (startBattle over the verified content) and mutates the supplied world with the dynamic
+    /// verbs; both halves use the same executor and the same random source.</summary>
+    public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
+        TriggerBattleContent battleContent, IBattleRandom battleRandom, DynamicEventWorld world,
+        int inheritedColor = DialogueTextTokenizer.DefaultColor)
+        : this(events, language, battleContent, battleRandom, inheritedColor)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        _world = world;
+    }
+
     /// <summary>Dynamic-scene construction (no battle support): world mutations apply directly to
     /// the supplied world; startBattle stays an unsupported command in this session.</summary>
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,

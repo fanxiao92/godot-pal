@@ -25,6 +25,7 @@ public partial class Main : Node2D
     private bool awaitingFirstBattleDraw;
     private bool firstBattleRendererSubscribed;
     private GodotBattleRandom? firstBattleRandom;
+    private DynamicEventWorld? firstBattleWorld;
     private bool awaitingSceneDraw;
     private bool rendererSubscribed;
     private GameSceneConfiguration? configuration;
@@ -161,6 +162,17 @@ public partial class Main : Node2D
                     if (Failure is null && !exited) map.UpdateScene(Exploration!.Plan);
                 };
                 Dialogue.PaletteFromScene = Palette(map.Data);
+                // The real call mutates one shared dynamic world (script verbs) while the battle
+                // half runs the same verified content; the world is bound before initialization.
+                var world = DynamicEventWorld.ForHost(Battle!.Rules, checkedProfile.Leader,
+                    map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport);
+                for (int role = 0; role < real.Profile.Roles.Count; role++)
+                {
+                    var snapshot = real.Profile.Roles[role];
+                    world.InitializePartyVitals(role, snapshot.Hp, snapshot.MaxHp, snapshot.Mp, snapshot.MaxMp);
+                }
+                Dialogue.FirstBattleWorld = world;
+                firstBattleWorld = world;
                 Dialogue.Initialize(Display, real.Resources, language, new GodotBattleRandom(selected.BattleSeed));
                 // The verified closure reuses the production story-battle machinery: the facade
                 // carries the same checked exploration, scene, palette and settlement words, so
@@ -369,7 +381,18 @@ public partial class Main : Node2D
         // back to the changed exploration. PendingBattle states are an error here because the
         // battle request path is driven by the story-battle host wiring delivered with it.
         firstBattleActiveTrigger = null;
-        _ = request; _ = session;
+        // The completed call's world mutations become the changed exploration state: entry
+        // rewrites/states/positions flow back into the session's observable object words.
+        if (firstBattleWorld is { } changed)
+            foreach (var source in changed.Objects)
+            {
+                var target = Battle!.State.World.EventObjects.SingleOrDefault(item => item.OwnerId == source.Id);
+                if (target is null) continue;
+                target.X = source.X; target.Y = source.Y; target.Direction = source.Direction;
+                target.State = source.State; target.VanishTime = source.VanishTime;
+                target.TriggerMode = source.TriggerMode; target.TriggerEntry = source.TriggerEntry;
+                target.AutoEntry = source.AutoEntry; target.CurrentFrame = source.CurrentFrame;
+            }
         mapScene!.UpdateScene(Exploration!.Plan);
     }
 
