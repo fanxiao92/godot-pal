@@ -39,7 +39,7 @@ public class RealFirstBattleFlowTests
             await scene.WaitFor(() => scene.Updates.Count > 0, "first update");
             scene.Press(Key.Enter); // search owner28 -> @09C3 opens through the verified closure
 
-            int pages = 0;
+            int pages = 0; int frames = 0;
             ulong deadline = Time.GetTicksMsec() + 200000; // the parked waits/movements advance
             while (main.StoryBattle is null && main.Dialogue?.Session?.PendingLostReload is null
                 && Time.GetTicksMsec() < deadline)
@@ -52,6 +52,8 @@ public class RealFirstBattleFlowTests
                     scene.Press(Key.Enter);
                     pages++;
                 }
+                else if ((frames++ & 511) == 0)
+                    System.Console.WriteLine($"REAL_TRACE:frame={frames} phase={display?.Display.Current.Phase} text={display?.Display.Current.VisibleText?.Length} pos={main.Dialogue?.Session?.CurrentPosition}");
                 await scene.RunnerIdle();
             }
             System.Console.WriteLine($"REAL_PARK:phase={main.Dialogue?.Session?.Phase} pos={main.Dialogue?.Session?.CurrentPosition} " +
