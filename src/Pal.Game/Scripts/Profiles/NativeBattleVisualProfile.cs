@@ -16,6 +16,8 @@ public static class NativeBattleVisualProfile
     // Reference SDLPal battle.c:27-31 g_rgPlayerPos bottom-center origins. This chain
     // supports parties of one or two; index is party size minus one, column zero is the head.
     private static readonly Vector2I[] PlayerOrigins = [new(240, 170), new(200, 176)];
+    // g_rgPlayerPos[1][1]: the second party member's reference column (battle.c:27-31).
+    internal static readonly Vector2I TwoPlayerSecondOrigin = new(256, 152);
 
     public static CheckedBattleVisualProfile Load(string uri, CheckedStoryProfile story)
     {
@@ -179,6 +181,16 @@ public sealed class CheckedBattleVisualProfile
     }
     public IReadOnlyDictionary<int, CheckedBattleVisualTeam> Teams { get; }
     public IReadOnlyDictionary<string, string> ResourceSha256 { get; }
+
+    /// <summary>Reference bottom-center player origins for the actual party size
+    /// (battle.c:27-31 g_rgPlayerPos). Column zero is the authored PlayerPosition;
+    /// later columns are reference constants, not authored per-member data.</summary>
+    public IReadOnlyList<Vector2I> PlayerOrigins(int partyCount) => partyCount switch
+    {
+        1 => [PlayerPosition],
+        2 => [PlayerPosition, NativeBattleVisualProfile.TwoPlayerSecondOrigin],
+        _ => throw new InvalidOperationException("Unsupported party size " + partyCount + ".")
+    };
     internal CheckedBattleVisualProfile(PalBattleVisualProfile native, PalSprite player, PalPalette palette, PalSprite? effect, PalSprite? numbers,
         Dictionary<int, CheckedBattleVisualTeam> teams, Dictionary<string, string> hashes)
     {
