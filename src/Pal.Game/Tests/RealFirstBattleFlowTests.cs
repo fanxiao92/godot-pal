@@ -40,17 +40,18 @@ public class RealFirstBattleFlowTests
             scene.Press(Key.Enter); // search owner28 -> @09C3 opens through the verified closure
 
             int pages = 0;
-            while (main.StoryBattle is null && main.Dialogue?.Session?.PendingLostReload is null && pages++ < 200)
+            ulong deadline = Time.GetTicksMsec() + 200000; // the parked waits/movements advance
+            while (main.StoryBattle is null && main.Dialogue?.Session?.PendingLostReload is null
+                && Time.GetTicksMsec() < deadline)
             {
-                // Advance only when the current display reached its advance boundary; typing
-                // phases consume their own real frames first (the fast-fail fix).
-                await scene.WaitFor(() =>
-                    main.Dialogue?.Session?.PendingDisplay is not { } display
-                    || display.Display.Current.Phase is Pal.Core.DialogueDisplayPhase.WaitingForAdvance
-                        or Pal.Core.DialogueDisplayPhase.Completed
-                    || main.StoryBattle is not null || main.Dialogue?.Session?.PendingLostReload is not null,
-                    "page ready", 8000);
-                scene.Press(Key.Enter);
+                // Press only when a display reached its advance boundary; parked waits and
+                // counted movements advance on their own committed update ticks.
+                var display = main.Dialogue?.Session?.PendingDisplay;
+                if (display is not null && display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance)
+                {
+                    scene.Press(Key.Enter);
+                    pages++;
+                }
                 await scene.RunnerIdle();
             }
             AssertThat(main.StoryBattle is not null).IsTrue(); // @09FE engaged through the facade
