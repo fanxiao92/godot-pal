@@ -146,11 +146,17 @@ internal partial class PalStoryBattleView : Node2D
         for (int i = 0; i < draws.Length; i++)
         {
             var member = combat.Players[i];
-            draws[i] = action is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i
-                && playerPresentation is { } acting
-                ? new(acting.PlayerFrame, acting.PlayerPosition, 0, member.Hp)
-                : new(StoryEnemyAttackPresentation.RestFrame(member.Hp, story.BattleContent.Players[i].MaxHp),
-                    origins[i], 0, member.Hp);
+            // fight.c:5012-5022: while a member covers, it steps next to the target with the
+            // defend frame 3 instead of the target reacting.
+            if (action is { Attacker: ClassicBattleSide.Enemy, CovererPartyIndex: var coverer } && coverer == i
+                && EnemyPresentation is not null)
+                draws[i] = new(3, origins[action.TargetIndex] + new Vector2(-24, -12), 0, member.Hp);
+            else
+                draws[i] = action is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i
+                    && playerPresentation is { } acting
+                    ? new(acting.PlayerFrame, acting.PlayerPosition, 0, member.Hp)
+                    : new(StoryEnemyAttackPresentation.RestFrame(member.Hp, story.BattleContent.Players[i].MaxHp),
+                        origins[i], 0, member.Hp);
         }
         return draws;
     }

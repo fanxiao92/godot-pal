@@ -36,6 +36,9 @@ internal sealed class StoryEnemyAttackPresentation
         for (int i = 0; i < 3 - magic; i++) { ep -= new Vector2(2, 1); Hold(1); }
         Hold(1);
         ep = player + new Vector2(-44, -16);
+        // fight.c:5008-5028: a covered target keeps its rest frame (the coverer steps in);
+        // a plain defend roll shows the evade frame 3, an uncovered hit frame 4 + shift 6.
+        bool covered = action.CovererPartyIndex is not null;
         if (action.Evaded) pf = 3;
         if (attack == 0) { ef = idle - 1; Hold(2); }
         else
@@ -43,7 +46,7 @@ internal sealed class StoryEnemyAttackPresentation
             for (int i = 0; i <= attack; i++) { ef = idle + magic + i - 1; Hold(wait); }
         ImpactPose = Duration;
         impact = true;
-        if (!action.Evaded) { pf = 4; shift = 6; }
+        if (!action.Evaded && !covered) { pf = 4; shift = 6; }
         Hold(1);
         shift = 0; pp += new Vector2(8, 4); Hold(1);
         pp += new Vector2(2, 1); Hold(3);

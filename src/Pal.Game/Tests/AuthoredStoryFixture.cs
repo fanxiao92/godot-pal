@@ -13,7 +13,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
     internal string StoryUri { get; }
     internal string VisualUri { get; }
     private string? numericInput;
-    internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null)
+    internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null,
+        bool removeDualAttack = false)
     {
         string repository = Path.GetFullPath(Path.Combine(ProjectSettings.GlobalizePath("res://"), "../.."));
         string source = Path.Combine(repository, "samples/authored-battle", scenario);
@@ -38,6 +39,21 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
                 numbers = numericInput;
             }
+            if (removeDualAttack)
+            {
+                // Targeted counterexample input: object 170 is unworn everywhere; the declared
+                // object itself stays (declared-but-unworn is legal), only the grid rows change.
+                numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(numericInput);
+                foreach (string path in Directory.GetFiles(numbers)) File.Copy(path, Path.Combine(numericInput, Path.GetFileName(path)));
+                string dataPath = Path.Combine(numericInput, "battle-data.json");
+                var data = JsonNode.Parse(File.ReadAllText(dataPath, System.Text.Encoding.UTF8))!;
+                foreach (string section in new[] { "roles", "players" })
+                    data[section]![1]!["equipment"]![3] = 0;
+                data["roleEquipment"]![1]![3] = 0;
+                File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
+                numbers = numericInput;
+            }
             string numeric = PrepareBattleData.Prepare(numbers, Path.Combine(output, "Numbers"));
             Directory.CreateDirectory(Path.Combine(input, "events"));
             foreach (string path in Directory.GetFiles(Path.Combine(source, "Story/events"))) File.Copy(path, Path.Combine(input, "events", Path.GetFileName(path)));
@@ -49,9 +65,9 @@ internal sealed class AuthoredStoryFixture : IDisposable
             }
             if (missingPresentation == "number") metadata["visual"]!.AsObject().Remove("numberSpriteUri");
             if (missingPresentation == "idle") metadata["visual"]!["teams"]![0]!.AsObject().Remove("idleAnimSpeed");
-            if (enemyHp is { } authoredHp)
+            if (enemyHp is { } hp2)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
-                    + $" Test-owned numeric copy: team18/enemy7 hp={authoredHp} only; not retail data.";
+                    + $" Test-owned numeric copy: team18/enemy7 hp={hp2} only; not retail data.";
             metadata["staticResources"] = Root + "/Static";
             metadata["battleContentUri"] = numeric;
             File.WriteAllText(Path.Combine(input, "story-package.json"), metadata.ToJsonString());

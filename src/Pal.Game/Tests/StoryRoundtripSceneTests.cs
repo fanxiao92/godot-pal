@@ -486,6 +486,152 @@ public class StoryRoundtripSceneTests
         }
     }
 
+    [TestCase(Timeout = 120000)]
+    public async Task EquipmentDualAttackPresentsTwoStrikesWithOncePerActionCounts()
+    {
+        // PartyEquip: role1 wears the authored five-object closure (effective 46/52/119, object
+        // 170's persistent dual attack) and starts dying at hp25 covered by role0; the two fast
+        // enemy slots strike first, so a real cover may interpose before both members win.
+        using var fixture = new AuthoredStoryFixture("PartyEquip");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            AssertThat(battle.Current.Combat.Players.Count).IsEqual(2);
+            while (script.PendingBattle is not null)
+            {
+                if (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                {
+                    await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                    await host.ConfirmMemberTarget(battle);
+                }
+                else
+                {
+                    await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback
+                        || old.StoryBattleMode == StoryBattlePresentation.AttackMenu || script.PendingBattle is null);
+                    if (script.PendingBattle is null) break;
+                    if (old.StoryBattleMode == StoryBattlePresentation.Feedback)
+                        await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+                }
+            }
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(battle.Current.Combat.Enemies.Select(e => e.Hp).SequenceEqual(new[] { 0, 0 })).IsTrue();
+            var memberActions = host.Actions.Where(a => a.Attacker == Pal.Core.ClassicBattleSide.Player).ToArray();
+            // Role1's dual attack presents as two distinct action records in one queue action:
+            // same target, first/second strike flags, each with its own feedback presentation.
+            var strikes = memberActions.Where(a => a.ActorIndex == 1).ToArray();
+            AssertThat(strikes.Length).IsEqual(2);
+            AssertThat(strikes[0].SecondStrike).IsFalse();
+            AssertThat(strikes[1].SecondStrike).IsTrue();
+            AssertThat(strikes[0].TargetIndex).IsEqual(strikes[1].TargetIndex);
+            AssertThat(ReferenceEquals(strikes[0], strikes[1])).IsFalse();
+            // fight.c157-170 bounds with the effective panel: atk46 vs defense24 gives base
+            // 54+1..2 (55..56, x3 critical 165..189), so either strike kills a 43hp slot.
+            foreach (var strike in strikes)
+                AssertThat(strike.Damage >= 55 && strike.Damage <= 189).IsTrue();
+            // The clean member still kills its slot alone (atk40: 43..49 or critical 129..148).
+            var clean = memberActions.Single(a => a.ActorIndex == 0);
+            AssertThat(clean.Damage is >= 43 and <= 148).IsTrue();
+            AssertThat(host.Actions.Select(a => a.Attacker).Count(a => a == Pal.Core.ClassicBattleSide.Enemy)).IsEqual(2);
+            foreach (var enemy in host.Actions.Where(a => a.Attacker == Pal.Core.ClassicBattleSide.Enemy))
+            {
+                // Enemy strength 36..38 vs defense52 gives 2..4 on member1, vs defense20 20..23
+                // on member0; a covered strike deals zero damage without the evade flag (fight.c:4959).
+                if (enemy.CovererPartyIndex is not null)
+                {
+                    AssertThat(enemy.Damage).IsEqual(0);
+                    AssertThat(enemy.Evaded).IsFalse();
+                    AssertThat(enemy.CovererPartyIndex).IsEqual(0);
+                    AssertThat(enemy.TargetIndex).IsEqual(1);
+                }
+                else if (enemy.Evaded) AssertThat(enemy.Damage).IsEqual(0);
+                else AssertThat(enemy.TargetIndex == 0 ? enemy.Damage is >= 20 and <= 23 : enemy.Damage is >= 2 and <= 4).IsTrue();
+            }
+            // One dual action counts once; the health weight is the only remaining random 2..3.
+            AssertThat(battle.Current.Combat.Players[1].Counts.Attack).IsEqual(1);
+            AssertThat(battle.Current.Combat.Players[1].Counts.Health is 2 or 3).IsTrue();
+            AssertThat(battle.Current.Combat.Players[0].Counts.Attack).IsEqual(1);
+            // Both strikes were presented as their own feedback cycles at distinct updates.
+            var strikeStarts = host.ActionStarts.Where(c => c.Action is { Attacker: Pal.Core.ClassicBattleSide.Player, ActorIndex: 1 }).ToArray();
+            AssertThat(strikeStarts.Length).IsEqual(2);
+            AssertThat(strikeStarts[0].Update != strikeStarts[1].Update).IsTrue();
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        // Same-URI fresh Main: the prepared equipment resources are reused read-only with no
+        // session state leaking into a new story battle (no stacked dual or status pollution).
+        using (var fresh = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            AssertThat(fresh.Main.Failure).IsNull();
+            AssertThat(fresh.Main.StoryBattle).IsNull();
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            await fresh.FinishDisplay();
+            await fresh.Wait(() => fresh.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var again = fresh.Main.StoryBattle!;
+            AssertThat(again.Current.Roles[1].Statuses[8]).IsEqual(60000);
+            AssertThat(again.Current.Combat.Players[1].Dexterity).IsEqual(119);
+        }
+    }
+
+    [TestCase(Timeout = 120000)]
+    public async Task RemovingTheDualAttackEquipmentPresentsExactlyOneStrikePerAction()
+    {
+        // Targeted counterexample: the same authored scenario with object 170 unworn must not
+        // produce a second strike; only the dual-attack status drives the two-strike loop.
+        using var fixture = new AuthoredStoryFixture("PartyEquip", removeDualAttack: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        using var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]);
+        AssertThat(host.Main.Failure).IsNull();
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        var script = host.Main.Dialogue!.Session!;
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+        var battle = host.Main.StoryBattle!;
+        while (script.PendingBattle is not null)
+        {
+            if (host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+            {
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMemberTarget(battle);
+            }
+            else
+            {
+                await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.Feedback
+                    || host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu || script.PendingBattle is null);
+                if (script.PendingBattle is null) break;
+                if (host.Main.StoryBattleMode == StoryBattlePresentation.Feedback)
+                    await host.Wait(() => host.Main.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+            }
+        }
+        AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+        AssertThat(host.Actions.Any(a => a.SecondStrike)).IsFalse();
+        AssertThat(host.Actions.Count(a => a.Attacker == Pal.Core.ClassicBattleSide.Player && a.ActorIndex == 1)).IsEqual(1);
+        // The panel projection still consumes the remaining worn objects (dex 100+14=114).
+        AssertThat(battle.Current.Combat.Players[1].Dexterity).IsEqual(114);
+        AssertThat(battle.Current.Roles[1].Statuses[8]).IsEqual(0);
+    }
+
     [TestCase]
     public void EnemyPhysicalReferenceTablesCoverZeroWaitInclusiveFramesAndReturn()
     {
@@ -845,7 +991,13 @@ public class StoryRoundtripSceneTests
                         for (int i = 0; i < 2; i++)
                         {
                             bool animating = feedback && currentAction is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i;
-                            if (!animating) AssertThat(members[i].Position == partyPlayers[i]).IsTrue();
+                            // fight.c:5012-5022: a covering member stands at the target's side with frame 3.
+                            if (feedback && currentAction is { Attacker: ClassicBattleSide.Enemy, CovererPartyIndex: var coverer } && coverer == i)
+                            {
+                                AssertThat(members[i].Position == partyPlayers[currentAction.TargetIndex] + new Vector2(-24, -12)).IsTrue();
+                                AssertThat(members[i].Frame).IsEqual(3);
+                            }
+                            else if (!animating) AssertThat(members[i].Position == partyPlayers[i]).IsTrue();
                         }
                         for (int slot = 0; slot < 2; slot++)
                         {
