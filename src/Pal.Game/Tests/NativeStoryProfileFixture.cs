@@ -21,8 +21,10 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     public PalDialogueLanguage English { get; }
     public string[] ExpectedPaths { get; }
 
-    public NativeStoryProfileFixture()
+    public bool Party { get; }
+    public NativeStoryProfileFixture(bool party = false)
     {
+        Party = party;
         Directory.CreateDirectory(ProjectSettings.GlobalizePath(Root));
         var owner = Static.AddObject();
         owner.WTriggerScript = 1; owner.WTriggerMode = 1;
@@ -34,9 +36,9 @@ internal sealed class NativeStoryProfileFixture : IDisposable
         Write("index.json", Index);
         Write("shared.json", Shared);
         Write("outcomes.json", Outcomes);
-        Numeric = Numbers();
+        Numeric = Numbers(party);
         Save(Numeric.Roles[0], "Role.tres");
-        Numeric.Roles = [ResourceLoader.Load<PalBattleRole>(Root + "/Role.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep)];
+        Numeric.Roles = [ResourceLoader.Load<PalBattleRole>(Root + "/Role.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep), .. Numeric.Roles[1..]];
         Save(Numeric, "Numeric.tres");
         Font = new PalDialogueFont { SourceIdentity = "synthetic-story-font" };
         foreach (int codepoint in new[] { 65, 66, 67, 68, 0x7532, 0x4e59, 0x4e19, 0x4e01 })
@@ -93,18 +95,30 @@ internal sealed class NativeStoryProfileFixture : IDisposable
         });
         return language;
     }
-    private static PalBattleContent Numbers() => new()
+    private static PalBattleContent Numbers(bool party) => new()
     {
         FormatVersion = 1,
-        Roles = [new PalBattleRole { RoleId = 0, Level = 2, Hp = 100, MaxHp = 150, Mp = 20, MaxMp = 50,
-            PrimaryExperience = Experience(), HiddenExperience = new PalBattleHiddenExperience
-            { Health = Experience(), Magic = Experience(), Attack = Experience(), MagicPower = Experience(), Defense = Experience(), Dexterity = Experience(), Flee = Experience() },
-            Equipment = new int[6], Magics = new int[32], Statuses = new int[9] }],
-        Players = [new PalBattlePlayer { RoleId = 0, Hp = 100, MaxHp = 150, Attack = 40, Defense = 20, Dexterity = 100,
-            Equipment = new int[6], Statuses = new int[9], Poisons = [0] }],
-        Growth = [new PalBattleGrowth { RoleId = 0, LevelUpExperience = Enumerable.Repeat(100, 100).ToArray(), LevelUpMagics = [] }],
-        Teams = [new PalBattleTeam { TeamId = 18, Enemies = [new PalBattleEnemy { Id = 7, Hp = 43, PhysicalResistance = 1, Statuses = new int[9], Poisons = [0] }] }]
+        Roles = party
+            ? [Role(0, 100), Role(1, 95)]
+            : [Role(0, 100)],
+        Players = party
+            ? [Player(0, hp: 100, attack: 40, defense: 20), Player(1, hp: 95, attack: 35, defense: 18)]
+            : [Player(0, hp: 100, attack: 40, defense: 20)],
+        Growth = party
+            ? [Growth(0), Growth(1)]
+            : [Growth(0)],
+        Teams = [new PalBattleTeam { TeamId = 18, Enemies = party
+            ? [Enemy(), Enemy()]
+            : [Enemy()] }]
     };
+    private static PalBattleRole Role(int roleId, int hp) => new() { RoleId = roleId, Level = 2, Hp = hp, MaxHp = 150, Mp = 20, MaxMp = 50,
+        PrimaryExperience = Experience(), HiddenExperience = new PalBattleHiddenExperience
+        { Health = Experience(), Magic = Experience(), Attack = Experience(), MagicPower = Experience(), Defense = Experience(), Dexterity = Experience(), Flee = Experience() },
+        Equipment = new int[6], Magics = new int[32], Statuses = new int[9] };
+    private static PalBattlePlayer Player(int roleId, int hp, int attack, int defense) => new() { RoleId = roleId, Hp = hp, MaxHp = 150,
+        Attack = attack, Defense = defense, Dexterity = 100, Equipment = new int[6], Statuses = new int[9], Poisons = [0] };
+    private static PalBattleGrowth Growth(int roleId) => new() { RoleId = roleId, LevelUpExperience = Enumerable.Repeat(100, 100).ToArray(), LevelUpMagics = [] };
+    private static PalBattleEnemy Enemy() => new() { Id = 7, Hp = 43, PhysicalResistance = 1, Statuses = new int[9], Poisons = [0] };
     private static PalBattleExperience Experience() => new() { Value = 7, Level = 3, Count = 55 };
 
     public void Dispose()

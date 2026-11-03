@@ -36,6 +36,25 @@ public class PrepareStoryPackageTests
         AssertThat(source.Snapshot()).IsEqual(before);
     }
 
+    [TestCase]
+    public void AuthoredPartyPackagesPrepareAndLoadInBothLanguages()
+    {
+        // Committed #47 two-player authored inputs through the unchanged public prepare chain;
+        // outputs are fresh GUID-owned directories, so the old AuthoredBattle* outputs stay untouched.
+        using var win = new AuthoredStoryFixture("PartyWin");
+        using var loss = new AuthoredStoryFixture("PartyLoss");
+        foreach (var fixture in new[] { win, loss })
+            foreach (string language in new[] { "zh-Hans", "en" })
+            {
+                var story = NativeStoryProfile.Load(fixture.StoryUri, language);
+                var visual = NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+                AssertThat(story.BattleContent.Players.Count).IsEqual(2);
+                AssertThat(story.BattleContent.EnemyTeams[18].Count).IsEqual(2);
+                AssertThat(story.BattleContent.EnemyTeams[18].Select(x => x.Id).SequenceEqual(new[] { 7, 7 })).IsTrue();
+                AssertThat(visual.PlayerPosition).IsEqual(new Vector2I(200, 176));
+            }
+    }
+
     [TestCase("version")]
     [TestCase("missing")]
     [TestCase("unknown")]

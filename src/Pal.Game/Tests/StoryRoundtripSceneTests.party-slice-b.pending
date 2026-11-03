@@ -1,0 +1,171 @@
+// Slice-B pending content from the timed-out #47 worker, preserved byte-for-byte
+// (source: 47/party-main/20261103-party-main/timeout-preserved, sha256 234f6da2...).
+// These two StoryRoundtripSceneTests cases need the slice-B StoryHost party
+// constructor, Main party loop and PalStoryBattleView slot drawing. Slice B must
+// re-insert this block into StoryRoundtripSceneTests.cs verbatim (the file kept its
+// pre-party bytes in slice A; GameTestBatches source inventory ignores non-.cs files).
+    [TestCase(Timeout = 90000)]
+    public async Task PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin()
+    {
+        // PartyWin: two authored roles (dex100) always act before two id7 slots (dex0, speed 16..19).
+        // fight.c157-170 bounds: one player hit deals 43..297, so each 43hp slot dies to its first hit;
+        // the second member retargets when both picked the same slot, and the dead enemies' own
+        // queue entries pass without producing a new LastAction.
+        using var fixture = new AuthoredStoryFixture("PartyWin");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            var request = script.PendingBattle!;
+            AssertThat(ReferenceEquals(old.StoryBattle, request.Lifecycle)).IsTrue();
+            AssertThat(battle.Current.Combat.Players.Count).IsEqual(2);
+            AssertThat(battle.Current.Combat.Enemies.Count).IsEqual(2);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(0);
+            // Member 0 confirms attack, then target slot 0; one physical Enter each.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            // The member-switch Enter selected member 0's target only; member 1 starts unselected.
+            AssertThat(battle.Current.Combat.Phase).IsEqual(ClassicBattlePhase.Selecting);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(0);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsNull();
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(1);
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            // Cycle the highlighted target to slot 1, then confirm member 1's attack.
+            host.Tap(Key.Right);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Resolving);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(1);
+            AssertThat(battle.Current.Combat.Phase).IsEqual(ClassicBattlePhase.Resolving);
+            AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(4);
+            while (script.PendingBattle is not null)
+            {
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback || script.PendingBattle is null);
+                if (script.PendingBattle is null) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+            }
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(script.CallId).IsEqual(call);
+            // Exactly two distinct presented actions (the two member kills); dead-enemy queue
+            // entries passed without re-presenting the previous action.
+            AssertThat(host.Actions.Count).IsEqual(2);
+            AssertThat(host.Actions.All(a => a.Attacker == ClassicBattleSide.Player)).IsTrue();
+            AssertThat(ReferenceEquals(host.Actions[0], host.Actions[1])).IsFalse();
+            AssertThat(host.Actions[0].Damage > 42).IsTrue();
+            AssertThat(host.Actions[1].Damage > 42).IsTrue();
+            AssertThat(battle.Current.Combat.Players.Select(p => p.Hp).SequenceEqual(new[] { 100, 95 })).IsTrue();
+            AssertThat(battle.Current.Combat.Enemies.Select(e => e.Hp).SequenceEqual(new[] { 0, 0 })).IsTrue();
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(old.GetChildren().OfType<Pal.Game.Resources.PalMapScene>().Single().Visible).IsTrue();
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Right)).IsFalse();
+        // Same-URI fresh Main: prepared resources are reused read-only, no session state leaks.
+        using (var fresh = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            AssertThat(fresh.Main.Failure).IsNull();
+            AssertThat(fresh.Main.Dialogue!.Session!.CallId).IsEqual(Guid.Empty);
+            AssertThat(fresh.Main.StoryBattle).IsNull();
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            AssertThat(fresh.Main.Dialogue!.Session!.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
+        }
+    }
+
+    [TestCase(Timeout = 120000)]
+    public async Task PartyLossCoversEnemyActionsMemberDeathPassAndLostClosure()
+    {
+        // PartyLoss: enemy slots (dex500) act before both members; every landed hit kills a
+        // 20hp member in one action, and member attacks (atk1 vs defense 1023) can never clear
+        // a 43hp slot, so the battle continues through rounds with a dead member passing until Lost.
+        using var fixture = new AuthoredStoryFixture("PartyLoss");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            var deadMember = -1;
+            while (script.PendingBattle is not null)
+            {
+                if (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                {
+                    var selecting = battle.Current.Combat.SelectingPlayerIndex;
+                    AssertThat(selecting).IsNotNull();
+                    // Once a member died, only the living member selects and no dead member acts again.
+                    if (deadMember >= 0)
+                    {
+                        AssertThat(selecting).IsNotEqual(deadMember);
+                        AssertThat(battle.Current.Combat.Players[deadMember].Hp).IsEqual(0);
+                    }
+                    await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                    await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+                }
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback
+                    || old.StoryBattleMode == StoryBattlePresentation.AttackMenu || script.PendingBattle is null);
+                for (int i = 0; i < 2; i++)
+                    if (battle.Current.Combat.Players[i].Hp == 0 && deadMember < 0) deadMember = i;
+                if (script.PendingBattle is null) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+            }
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Lost);
+            AssertThat(deadMember >= 0).IsTrue();
+            AssertThat(battle.Current.Combat.Players.All(p => p.Hp == 0)).IsTrue();
+            // Enemy actions really targeted members, and the dead member never presented
+            // an action after the killing enemy action (round-1 deaths may precede any member action).
+            AssertThat(host.Actions.Any(a => a.Attacker == ClassicBattleSide.Enemy && a.TargetIndex is 0 or 1 && !a.Evaded)).IsTrue();
+            var killIndex = -1;
+            for (int i = host.Actions.Count - 1; i >= 0; i--)
+                if (host.Actions[i].Attacker == ClassicBattleSide.Enemy && !host.Actions[i].Evaded && host.Actions[i].TargetIndex == deadMember) { killIndex = i; break; }
+            AssertThat(killIndex >= 0).IsTrue();
+            AssertThat(host.Actions.Select((a, i) => (a, i))
+                .Where(x => x.a.Attacker == ClassicBattleSide.Player && x.a.ActorIndex == deadMember)
+                .All(x => x.i < killIndex)).IsTrue();
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("败");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+        // A key pressed after the result reconnection must not leak into the next interaction.
+        using (var fresh = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            AssertThat(fresh.Main.Failure).IsNull();
+            AssertThat(fresh.Main.Interaction!.Phase).IsEqual(NpcInteractionPhase.Exploring);
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            AssertThat(fresh.Main.Dialogue!.Session!.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
+        }
+    }

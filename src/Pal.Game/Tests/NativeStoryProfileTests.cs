@@ -58,6 +58,19 @@ public class NativeStoryProfileTests
         AssertThat(profile.Events.GetSource(1).Operands[0]).IsEqual(99);
     }
 
+    [TestCase]
+    public void SelectedPartyClosureBindsTwoPlayersAndEnemySlots()
+    {
+        using var fixture = new NativeStoryProfileFixture(party: true);
+        var profile = NativeStoryProfile.Load(fixture.Uri, "en");
+        AssertThat(profile.BattleContent.Players.Count).IsEqual(2);
+        AssertThat(profile.BattleContent.Players.Select(x => x.RoleId).SequenceEqual(new[] { 0, 1 })).IsTrue();
+        AssertThat(profile.BattleContent.InitialRoles.Keys.Order().SequenceEqual(new[] { 0, 1 })).IsTrue();
+        AssertThat(profile.BattleContent.EnemyTeams[18].Count).IsEqual(2);
+        AssertThat(profile.BattleContent.EnemyTeams[18].Select(x => x.Id).SequenceEqual(new[] { 7, 7 })).IsTrue();
+        AssertThat(profile.Requirements.BattleTeamIds.SequenceEqual(new[] { 18 })).IsTrue();
+    }
+
     [TestCase("version")]
     [TestCase("identity")]
     [TestCase("bundle")]
