@@ -10,4 +10,6 @@ public partial class PalBattleContent : Resource
     [Export] public PalBattlePlayer[] Players { get; set; } = [];
     [Export] public PalBattleGrowth[] Growth { get; set; } = [];
     [Export] public PalBattleTeam[] Teams { get; set; } = [];
+    [Export] public int[] RoleEquipment { get; set; } = [];
+    [Export] public PalBattleEquipment[] Equipments { get; set; } = [];
 }

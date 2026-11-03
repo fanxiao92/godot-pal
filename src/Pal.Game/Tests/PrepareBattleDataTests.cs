@@ -89,6 +89,43 @@ public class PrepareBattleDataTests
         AssertThat(content.Growth.LevelUpMagics[2]).IsEqual(new BattleLevelUpMagic(2, 9));
     }
 
+    [TestCase]
+    public void EquipmentClosurePreparesStrictlyAndInitializesSixRoleState()
+    {
+        using var fixture = new Preparation();
+        File.WriteAllText(fixture.Source, EquipmentJson(fixture.Source).ToJsonString(), new System.Text.UTF8Encoding(false));
+        byte[] before = File.ReadAllBytes(fixture.Source);
+        var content = NativeBattleContent.Load(PrepareBattleData.Prepare(fixture.Input, fixture.Output));
+        AssertThat(content.RoleEquipment.Count).IsEqual(6);
+        AssertThat(content.EquipmentObjects[170].Effects[1].Statuses[8]).IsEqual(60000);
+        var state = BattleEquipmentState.Initialize(content);
+        // Hand-computed from the reference getters: 35+3+4, 20+1+6, 100+8, last non-zero battle sprite 450/600.
+        AssertThat(state.EffectivePlayer(content.Player).Attack).IsEqual(42);
+        AssertThat(state.EffectiveDefense(1, 20)).IsEqual(27);
+        AssertThat(state.EffectiveDexterity(1, 100)).IsEqual(108);
+        AssertThat(state.BattleSprite(1, 3)).IsEqual(450);
+        AssertThat(state.BattleSprite(0, 3)).IsEqual(600);
+        AssertThat(state.ApplyStatuses(1, new int[9]).ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0, 0, 0, 0, 60000 });
+        AssertThat(File.ReadAllBytes(fixture.Source)).IsEqual(before);
+        AssertThat(Directory.GetFileSystemEntries(fixture.Output).Length).IsEqual(1);
+    }
+
+    [TestCase]
+    public void InvalidEquipmentClosureIsRejectedWithoutPublishingOrTouchingInput()
+    {
+        using var fixture = new Preparation();
+        var json = EquipmentJson(fixture.Source);
+        json["equipments"]!.AsArray().Add(json["equipments"]![0]!.DeepClone());
+        File.WriteAllText(fixture.Source, json.ToJsonString(), new System.Text.UTF8Encoding(false));
+        byte[] before = File.ReadAllBytes(fixture.Source);
+        InvalidDataException? error = null;
+        try { PrepareBattleData.Prepare(fixture.Input, fixture.Output); }
+        catch (InvalidDataException caught) { error = caught; }
+        AssertThat(error is not null && error.Message.Contains("duplicate equipment object ID", StringComparison.Ordinal)).IsTrue();
+        AssertThat(Directory.Exists(fixture.Output)).IsFalse();
+        AssertThat(File.ReadAllBytes(fixture.Source)).IsEqual(before);
+    }
+
     [TestCase("missing", "exactly battle-data.json")]
     [TestCase("extra-file", "exactly battle-data.json")]
     [TestCase("extra-directory", "exactly battle-data.json")]
@@ -256,6 +293,40 @@ public class PrepareBattleDataTests
     private static string[] Snapshot(string root) => Directory.GetFileSystemEntries(root, "*", SearchOption.AllDirectories)
         .Order(StringComparer.Ordinal).Select(path => Path.GetRelativePath(root, path) + ":" +
             (File.Exists(path) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))) : "directory")).ToArray();
+
+    private static JsonNode EquipmentJson(string source)
+    {
+        var data = JsonNode.Parse(File.ReadAllText(source))!;
+        JsonNode Row(int attack, int defense, int dexterity, int battleSprite, int dualAttack) => new JsonObject
+        {
+            ["attack"] = attack, ["defense"] = defense, ["dexterity"] = dexterity, ["battleSprite"] = battleSprite,
+            ["statuses"] = new JsonArray(0, 0, 0, 0, 0, 0, 0, 0, dualAttack)
+        };
+        JsonNode Object(int id, params JsonNode[] rows) => new JsonObject
+        { ["objectId"] = id, ["effects"] = new JsonArray(
+            rows.Concat(Enumerable.Range(0, 6 - rows.Length).Select(_ => Row(0, 0, 0, 0, 0))).ToArray()) };
+        var zero = Row(0, 0, 0, 0, 0);
+        data["roles"]![0]!["equipment"] = new JsonArray(197, 0, 210, 170, 237, 248);
+        data["players"]![0]!["equipment"] = new JsonArray(197, 0, 210, 170, 237, 248);
+        data["players"]![0]!["attack"] = 35;
+        data["roleEquipment"] = new JsonArray(
+            new JsonArray(196, 225, 208, 166, 235, 249), new JsonArray(197, 0, 210, 170, 237, 248),
+            new JsonArray(0, 0, 0, 0, 0, 0), new JsonArray(0, 0, 0, 0, 0, 0),
+            new JsonArray(0, 0, 0, 0, 0, 0), new JsonArray(0, 0, 0, 0, 0, 0));
+        data["equipments"] = new JsonArray(
+            Object(197, Row(0, 0, 0, 0, 0), Row(3, 1, 0, 0, 0)),
+            Object(210, zero, Row(4, 0, 0, 400, 0)),
+            Object(170, zero, Row(0, 0, 0, 0, 60000)),
+            Object(237, zero, Row(0, 6, 0, 0, 0)),
+            Object(248, zero, Row(0, 0, 8, 450, 0)),
+            Object(196, Row(5, 2, 0, 0, 0)),
+            Object(225, Row(0, 4, 0, 0, 0)),
+            Object(208, Row(0, 0, 0, 500, 0)),
+            Object(166, Row(10, 0, 0, 0, 0)),
+            Object(235, Row(0, 0, 6, 0, 0)),
+            Object(249, Row(0, 0, 0, 600, 0)));
+        return data;
+    }
 
     private sealed class Preparation : IDisposable
     {

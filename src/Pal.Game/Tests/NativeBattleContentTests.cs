@@ -174,6 +174,43 @@ public class NativeBattleContentTests
         finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
     }
 
+    [TestCase]
+    public void EquipmentClosureRoundtripsTypedResourcesAndStaysPureData()
+    {
+        var content = ModernBattleContent.Parse(EquipmentData().ToJsonString());
+        var before = BattleEquipmentState.Initialize(content);
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/Equipment.tres";
+            AssertThat(ResourceSaver.Save(NativeBattleContent.Write(content), uri)).IsEqual(Error.Ok);
+            var loaded = NativeBattleContent.Load(uri);
+            AssertThat(loaded.RoleEquipment.Count).IsEqual(6);
+            AssertThat(string.Join(",", loaded.RoleEquipment[1])).IsEqual("197,0,210,170,237,248");
+            AssertThat(loaded.EquipmentObjects[170].Effects[1].Statuses[8]).IsEqual(60000);
+            var after = BattleEquipmentState.Initialize(loaded);
+            // Hand-computed from the reference getters: attack 35+3+4, defense 20+1+6, dexterity 100+8,
+            // battle sprite 450 is the last non-zero register, and role0 (not in this party) still initializes to 600.
+            AssertThat(after.EffectiveAttack(1, 35)).IsEqual(42);
+            AssertThat(after.EffectiveDefense(1, 20)).IsEqual(27);
+            AssertThat(after.EffectiveDexterity(1, 100)).IsEqual(108);
+            AssertThat(after.BattleSprite(1, 3)).IsEqual(450);
+            AssertThat(after.BattleSprite(0, 3)).IsEqual(600);
+            AssertThat(after.AttackBonus(1)).IsEqual(before.AttackBonus(1));
+            AssertThat(after.StatusOverlay(1).ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0, 0, 0, 0, 60000 });
+            AssertThat(after.EffectivePlayer(loaded.Player).Attack).IsEqual(42);
+            // Pure data slice: the selected entry still refuses non-zero equipment before any draw.
+            var random = new BattleRandom();
+            InvalidDataException? rejection = null;
+            try { Script(loaded, random).Start("shared", "npc", 28); }
+            catch (InvalidDataException caught) { rejection = caught; }
+            AssertThat(rejection is not null).IsTrue();
+            AssertThat(random.Draws).IsEqual(0);
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
     [TestCase("version")]
     [TestCase("roles-null")]
     [TestCase("roles-empty")]
@@ -207,6 +244,16 @@ public class NativeBattleContentTests
     [TestCase("enemy-statuses-null")]
     [TestCase("enemy-attack")]
     [TestCase("enemy-hp")]
+    [TestCase("grid-row-count")]
+    [TestCase("grid-row-null")]
+    [TestCase("grid-slot-count")]
+    [TestCase("grid-undeclared")]
+    [TestCase("grid-role-mismatch")]
+    [TestCase("equipments-null")]
+    [TestCase("equipment-object-null")]
+    [TestCase("equipment-effects-count")]
+    [TestCase("equipment-statuses-null")]
+    [TestCase("equipment-status-rounds")]
     public void TypedNativeBoundaryRejectsMalformedFieldsBeforeLosingShapeOrIdentity(string defect)
     {
         var native = NativeBattleContent.Write(Data());
@@ -245,6 +292,19 @@ public class NativeBattleContentTests
             case "enemy-statuses-null": native.Teams[0].Enemies[0].Statuses = null!; break;
             case "enemy-attack": native.Teams[0].Enemies[0].Attack = 32768; break;
             case "enemy-hp": native.Teams[0].Enemies[0].Hp = 0; break;
+            case "grid-row-count": native.RoleEquipment = Grid(5); break;
+            case "grid-row-null": native.RoleEquipment = new int[35]; break;
+            case "grid-slot-count": native.RoleEquipment = Grid(7); break;
+            case "grid-undeclared": native.RoleEquipment = Grid(6, 999); break;
+            case "grid-role-mismatch": native.Equipments = Objects(170); native.RoleEquipment = Grid(6, 170); break;
+            case "equipments-null": native.Equipments = null!; break;
+            case "equipment-object-null": native.Equipments = [null!]; break;
+            case "equipment-effects-count":
+                native.Equipments = Objects(170);
+                native.Equipments[0].Effects = native.Equipments[0].Effects[..5];
+                break;
+            case "equipment-statuses-null": native.Equipments = Objects(170); native.Equipments[0].Effects[1].Statuses = null!; break;
+            case "equipment-status-rounds": native.Equipments = Objects(170); native.Equipments[0].Effects[1].Statuses[8] = 500; break;
         }
         InvalidDataException? error = null;
         try { NativeBattleContent.CreateCore(native, "selected-native.tres"); }
@@ -345,7 +405,22 @@ public class NativeBattleContentTests
         return new(collection, new DialogueLanguagePackage("en", []), content, random);
     }
 
-    private static TriggerBattleContent Data()
+    private static TriggerBattleContent Data() => ModernBattleContent.Parse(DataJson().ToJsonString());
+
+    private static int[] Grid(int rows, int role1Object = 0)
+    {
+        var flat = new int[rows * BattleEquipmentState.SlotCount];
+        if (role1Object != 0) flat[BattleEquipmentState.SlotCount + 3] = role1Object;
+        return flat;
+    }
+
+    private static PalBattleEquipment[] Objects(int objectId) =>
+    [
+        new() { ObjectId = objectId, Effects = Enumerable.Range(0, 6).Select(_ => new PalBattleEquipmentEffect
+            { Attack = 0, Defense = 0, Dexterity = 0, BattleSprite = 0, Statuses = new int[9] }).ToArray() }
+    ];
+
+    private static JsonObject DataJson()
     {
         var data = JsonNode.Parse("""
         {"formatVersion":1,"roles":[{
@@ -367,7 +442,41 @@ public class NativeBattleContentTests
         """)!.AsObject();
         data["roles"]![0]!["magics"] = new JsonArray(Enumerable.Range(0, 32).Select(i => JsonValue.Create(i == 0 ? 9 : 0) as JsonNode).ToArray());
         data["growth"]![0]!["levelUpExperience"] = new JsonArray(Enumerable.Repeat(100, 100).Select(x => JsonValue.Create(x) as JsonNode).ToArray());
-        return ModernBattleContent.Parse(data.ToJsonString());
+        return data;
+    }
+
+    private static JsonObject EquipmentData()
+    {
+        var data = DataJson();
+        JsonNode Row(int attack, int defense, int dexterity, int battleSprite, int dualAttack) => new JsonObject
+        {
+            ["attack"] = attack, ["defense"] = defense, ["dexterity"] = dexterity, ["battleSprite"] = battleSprite,
+            ["statuses"] = new JsonArray(0, 0, 0, 0, 0, 0, 0, 0, dualAttack)
+        };
+        JsonNode Object(int id, params JsonNode[] rows) => new JsonObject
+        { ["objectId"] = id, ["effects"] = new JsonArray(
+            rows.Concat(Enumerable.Range(0, 6 - rows.Length).Select(_ => Row(0, 0, 0, 0, 0))).ToArray()) };
+        var zero = Row(0, 0, 0, 0, 0);
+        data["roles"]![0]!["equipment"] = new JsonArray(197, 0, 210, 170, 237, 248);
+        data["players"]![0]!["equipment"] = new JsonArray(197, 0, 210, 170, 237, 248);
+        data["players"]![0]!["attack"] = 35;
+        data["roleEquipment"] = new JsonArray(
+            new JsonArray(196, 225, 208, 166, 235, 249), new JsonArray(197, 0, 210, 170, 237, 248),
+            new JsonArray(0, 0, 0, 0, 0, 0), new JsonArray(0, 0, 0, 0, 0, 0),
+            new JsonArray(0, 0, 0, 0, 0, 0), new JsonArray(0, 0, 0, 0, 0, 0));
+        data["equipments"] = new JsonArray(
+            Object(197, Row(0, 0, 0, 0, 0), Row(3, 1, 0, 0, 0)),
+            Object(210, zero, Row(4, 0, 0, 400, 0)),
+            Object(170, zero, Row(0, 0, 0, 0, 60000)),
+            Object(237, zero, Row(0, 6, 0, 0, 0)),
+            Object(248, zero, Row(0, 0, 8, 450, 0)),
+            Object(196, Row(5, 2, 0, 0, 0)),
+            Object(225, Row(0, 4, 0, 0, 0)),
+            Object(208, Row(0, 0, 0, 500, 0)),
+            Object(166, Row(10, 0, 0, 0, 0)),
+            Object(235, Row(0, 0, 6, 0, 0)),
+            Object(249, Row(0, 0, 0, 600, 0)));
+        return data;
     }
 
     private sealed class BattleRandom : IBattleRandom
