@@ -96,7 +96,8 @@ public static partial class ModernBattleContent
             foreach (JsonElement row in rows)
             {
                 string effectPath = path + $".effects[{rowIndex++}]";
-                EventJson.Keys(row, effectPath, "attack", "defense", "dexterity", "battleSprite", "statuses");
+                EventJson.Keys(row, effectPath, ["attack", "defense", "dexterity", "battleSprite", "statuses"],
+                    ["magicPower", "fleeRate", "poisonResistance"]);
                 var statuses = Words(row, "statuses", effectPath, BattleEquipmentState.StatusCount);
                 for (int status = 0; status < statuses.Count; status++)
                 {
@@ -107,7 +108,9 @@ public static partial class ModernBattleContent
                         throw Error(effectPath + $".statuses[{status}]", $"persistent equipment status must be {BattleEquipmentState.PersistentStatusFloor}..65535");
                 }
                 effects.Add(new(Number(row, "attack", effectPath), Number(row, "defense", effectPath),
-                    Number(row, "dexterity", effectPath), Number(row, "battleSprite", effectPath), statuses));
+                    Number(row, "dexterity", effectPath), Number(row, "battleSprite", effectPath), statuses,
+                    OptionalWord(row, "magicPower", effectPath), OptionalWord(row, "fleeRate", effectPath),
+                    OptionalWord(row, "poisonResistance", effectPath)));
             }
             objects.Add(new(id, effects));
         }

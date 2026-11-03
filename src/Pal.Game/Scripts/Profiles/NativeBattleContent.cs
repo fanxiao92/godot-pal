@@ -69,7 +69,8 @@ public static class NativeBattleContent
             RoleEquipment = content.RoleEquipment.SelectMany(row => row).ToArray(),
             Equipments = content.EquipmentObjects.Select(x => new PalBattleEquipment { ObjectId = x.Key,
                 Effects = x.Value.Effects.Select(effect => new PalBattleEquipmentEffect { Attack = effect.Attack, Defense = effect.Defense,
-                    Dexterity = effect.Dexterity, BattleSprite = effect.BattleSprite, Statuses = effect.Statuses.ToArray() }).ToArray() }).ToArray()
+                    Dexterity = effect.Dexterity, BattleSprite = effect.BattleSprite, Statuses = effect.Statuses.ToArray(),
+                    MagicPower = effect.MagicPower ?? -1, FleeRate = effect.FleeRate ?? -1, PoisonResistance = effect.PoisonResistance ?? -1 }).ToArray() }).ToArray()
         };
     }
 
@@ -96,7 +97,9 @@ public static class NativeBattleContent
             if (rows.Length != BattleEquipmentState.RoleCount)
                 throw new InvalidDataException($"Equipments.Effects requires exactly {BattleEquipmentState.RoleCount} rows");
             objects.Add(new(obj.ObjectId, rows.Select(row => new BattleEquipmentEffect(row.Attack, row.Defense,
-                row.Dexterity, row.BattleSprite, Copy(row.Statuses, "Equipments.Effects.Statuses"))).ToArray()));
+                row.Dexterity, row.BattleSprite, Copy(row.Statuses, "Equipments.Effects.Statuses"),
+                row.MagicPower < 0 ? null : row.MagicPower, row.FleeRate < 0 ? null : row.FleeRate,
+                row.PoisonResistance < 0 ? null : row.PoisonResistance)).ToArray()));
         }
         return objects;
     }

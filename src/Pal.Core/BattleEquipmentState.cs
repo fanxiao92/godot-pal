@@ -2,8 +2,11 @@ using System.Collections.ObjectModel;
 
 namespace Pal.Core;
 
-/// <summary>Per-role effect row of one equipment object's equip script (global.c script 0x0017/0x001A/0x002D word writes).</summary>
-public sealed record BattleEquipmentEffect(int Attack, int Defense, int Dexterity, int BattleSprite, IReadOnlyList<int> Statuses);
+/// <summary>Per-role effect row of one equipment object's equip script (global.c script 0x0017/0x001A/0x002D word writes).
+/// The three optional words cover PLAYERROLES stat 18/21/22 equipment writes (magicStrength, fleeRate,
+/// poisonResistance); absent means the script never writes them, so all #48-era content stays legal.</summary>
+public sealed record BattleEquipmentEffect(int Attack, int Defense, int Dexterity, int BattleSprite, IReadOnlyList<int> Statuses,
+    int? MagicPower = null, int? FleeRate = null, int? PoisonResistance = null);
 
 /// <summary>Authored equip-script closure for one object: exactly six role-indexed effect rows (ObjectId is 1..65535).</summary>
 public sealed record BattleEquipmentObject(int ObjectId, IReadOnlyList<BattleEquipmentEffect> Effects);
@@ -25,6 +28,9 @@ public sealed class BattleEquipmentState
     private readonly int[,] defense = new int[RoleCount, RegisterCount];
     private readonly int[,] dexterity = new int[RoleCount, RegisterCount];
     private readonly int[,] battleSprite = new int[RoleCount, RegisterCount];
+    private readonly int[,] magicPower = new int[RoleCount, RegisterCount];
+    private readonly int[,] fleeRate = new int[RoleCount, RegisterCount];
+    private readonly int[,] poisonResistance = new int[RoleCount, RegisterCount];
     private readonly int[,] statuses = new int[RoleCount, StatusCount];
 
     private BattleEquipmentState() { }
@@ -66,6 +72,9 @@ public sealed class BattleEquipmentState
                 state.defense[role, slot] = effect.Defense;
                 state.dexterity[role, slot] = effect.Dexterity;
                 state.battleSprite[role, slot] = effect.BattleSprite;
+                state.magicPower[role, slot] = effect.MagicPower ?? 0;
+                state.fleeRate[role, slot] = effect.FleeRate ?? 0;
+                state.poisonResistance[role, slot] = effect.PoisonResistance ?? 0;
                 // PAL_SetPlayerStatus good-status branch (global.c:2255): keep the longer value, never stack.
                 for (int status = GoodStatusFirstIndex; status < StatusCount; status++)
                     if (effect.Statuses[status] > state.statuses[role, status])
@@ -92,6 +101,8 @@ public sealed class BattleEquipmentState
                     if (effect is null) throw Error("$.equipments", $"equipment object {obj.ObjectId} has a null effect row");
                     if (!Word(effect.Attack) || !Word(effect.Defense) || !Word(effect.Dexterity) || !Word(effect.BattleSprite))
                         throw Error("$.equipments", $"equipment object {obj.ObjectId} effect words must be 0..65535");
+                    if ((effect.MagicPower is < 0 or > 65535) || (effect.FleeRate is < 0 or > 65535) || (effect.PoisonResistance is < 0 or > 65535))
+                        throw Error("$.equipments", $"equipment object {obj.ObjectId} optional effect words must be 0..65535");
                     if (effect.Statuses is not { Count: StatusCount })
                         throw Error("$.equipments", $"equipment object {obj.ObjectId} requires {StatusCount}-word status rows");
                     for (int status = 0; status < StatusCount; status++)
@@ -143,6 +154,15 @@ public sealed class BattleEquipmentState
     public int EffectiveAttack(int roleId, int baseAttack) => unchecked((ushort)(baseAttack + AttackBonus(roleId)));
     public int EffectiveDefense(int roleId, int baseDefense) => unchecked((ushort)(baseDefense + DefenseBonus(roleId)));
     public int EffectiveDexterity(int roleId, int baseDexterity) => unchecked((ushort)(baseDexterity + DexterityBonus(roleId)));
+    /// <summary>Same register-sum rule for the optional stat-18/21/22 writes
+    /// (PAL_GetPlayerMagicStrength/FleeRate/PoisonResistance, global.c:1768/1868/1900).</summary>
+    public int MagicPowerBonus(int roleId) => Bonus(magicPower, roleId);
+    public int FleeRateBonus(int roleId) => Bonus(fleeRate, roleId);
+    public int PoisonResistanceBonus(int roleId) => Bonus(poisonResistance, roleId);
+    public int EffectiveMagicPower(int roleId, int baseMagicPower) => unchecked((ushort)(baseMagicPower + MagicPowerBonus(roleId)));
+    public int EffectiveFleeRate(int roleId, int baseFleeRate) => unchecked((ushort)(baseFleeRate + FleeRateBonus(roleId)));
+    /// <summary>Panel projection only; the battle poison domain still does not consume it.</summary>
+    public int EffectivePoisonResistance(int roleId, int basePoisonResistance) => unchecked((ushort)(basePoisonResistance + PoisonResistanceBonus(roleId)));
 
     /// <summary>Base panel plus equipment contribution, projected as the battle-consumable player record.</summary>
     public ClassicBattlePlayer EffectivePlayer(ClassicBattlePlayer player)

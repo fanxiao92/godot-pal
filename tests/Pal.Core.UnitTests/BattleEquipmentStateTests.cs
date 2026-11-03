@@ -51,6 +51,44 @@ public sealed class BattleEquipmentStateTests
     }
 
     [Fact]
+    public void Retail_stat18_21_22_equipment_writes_project_into_the_same_effective_panel_rule()
+    {
+        // Independent hand-computed expectation from the retail tables: role1 base panels
+        // (Data.Mkf chunk3 fields 17..22) and the #45-audited equip scripts; item248 slot5 writes
+        // stat18=8, stat21=9, stat22=20 for role1 only (global.c 1768/1868/1900 sum rgEquipmentEffect).
+        JsonNode Row(int attack, int defense, int dexterity, int magic = 0, int flee = 0, int poison = 0) => new JsonObject
+        {
+            ["attack"] = attack, ["defense"] = defense, ["dexterity"] = dexterity, ["battleSprite"] = 0,
+            ["magicPower"] = magic, ["fleeRate"] = flee, ["poisonResistance"] = poison,
+            ["statuses"] = new JsonArray(0, 0, 0, 0, 0, 0, 0, 0, 0)
+        };
+        JsonNode Object(int id, JsonNode role0, JsonNode role1) => new JsonObject
+        { ["objectId"] = id, ["effects"] = new JsonArray(role0.DeepClone(), role1.DeepClone(), Row(0, 0, 0), Row(0, 0, 0), Row(0, 0, 0), Row(0, 0, 0)) };
+        var objects = new JsonArray(
+            Object(196, Row(0, 1, 0), Row(0, 2, 0)), Object(225, Row(0, 2, 0), Row(0, 0, 0)),
+            Object(208, Row(0, 3, 0), Row(0, 0, 0)), Object(166, Row(2, 0, 3), Row(0, 0, 0)),
+            Object(235, Row(0, 1, 0), Row(0, 0, 0)), Object(249, Row(0, 2, 0), Row(0, 0, 0)),
+            Object(197, Row(0, 0, 0), Row(0, 2, 0)), Object(210, Row(0, 0, 0), Row(0, 0, 4)),
+            Object(170, Row(0, 0, 0), Row(8, 5, 0)), Object(237, Row(0, 0, 0), Row(0, 3, 2)),
+            Object(248, Row(0, 0, 0), Row(0, 0, 0, 8, 9, 20)));
+        string grid = "[[196,225,208,166,235,249],[197,0,210,170,237,248],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0]]";
+        var data = JsonNode.Parse(EquipmentData().ToJsonString())!;
+        data["equipments"] = objects;
+        data["roleEquipment"] = JsonNode.Parse(grid);
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+
+        var state = BattleEquipmentState.Initialize(content);
+        Assert.Equal((2, 9, 3), (state.AttackBonus(0), state.DefenseBonus(0), state.DexterityBonus(0)));
+        Assert.Equal((8, 10, 6), (state.AttackBonus(1), state.DefenseBonus(1), state.DexterityBonus(1)));
+        Assert.Equal((8, 9, 20), (state.MagicPowerBonus(1), state.FleeRateBonus(1), state.PoisonResistanceBonus(1)));
+        Assert.Equal((0, 0, 0), (state.MagicPowerBonus(0), state.FleeRateBonus(0), state.PoisonResistanceBonus(0)));
+        Assert.Equal(72, state.EffectiveMagicPower(1, 64));   // retail base 64 + 8
+        Assert.Equal(27, state.EffectiveFleeRate(1, 18));     // retail base 18 + 9
+        Assert.Equal(20, state.EffectivePoisonResistance(1, 0));
+        Assert.Equal(0xFFFF, state.EffectiveMagicPower(1, 0xFFFF - 8 + 65536)); // WORD wraparound, same rule as attack
+    }
+
+    [Fact]
     public void EffectivePanelsWrapAsWordsAndRecomputationIsIdempotent()
     {
         var content = ModernBattleContent.Parse(EquipmentData().ToJsonString());
@@ -109,6 +147,7 @@ public sealed class BattleEquipmentStateTests
     [InlineData("effect-field", "unknown field")]
     [InlineData("status-bad-slot", "only bravery, protect, haste and dualAttack")]
     [InlineData("status-rounds", "persistent equipment status must be 1000..65535")]
+    [InlineData("optional-stat-type", "magicPower")]
     public void StrictEquipmentSectionDefectsAreRejectedWithPreciseDiagnostics(string defect, string diagnostic)
     {
         var data = EquipmentData();
@@ -145,6 +184,9 @@ public sealed class BattleEquipmentStateTests
                 break;
             case "status-rounds":
                 data["equipments"]![0]!["effects"]![1]!["statuses"]![8] = 500;
+                break;
+            case "optional-stat-type":
+                data["equipments"]![0]!["effects"]![1]!["magicPower"] = "8";
                 break;
         }
         var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));

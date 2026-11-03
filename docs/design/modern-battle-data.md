@@ -100,7 +100,7 @@ Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
 
 `roleEquipment`：恰 6 行 × 6 槽 WORD，即参考 `rgwEquipment[6][6]`（global.h）的六角色网格；非 party 角色行同样必须声明（参考 `PAL_UpdateEquipments` 遍历全部 `MAX_PLAYER_ROLES`）。每个 party 角色行必须与 `roles[].equipment` 逐字相等，不匹配即拒。
 
-`equipments`：数组，每项恰 `objectId`（非零 WORD，全数组唯一）与 `effects`（恰 6 行，按 role 索引）——即该对象装备脚本（0x0017/0x001A/0x002D）对每个 role 的真实效应行。每行恰 `attack`/`defense`/`dexterity`/`battleSprite`（WORD，寄存器 SET 语义）与 `statuses`（恰 9 WORD）。非零 status 仅允许 bravery/protect/haste/dualAttack（index 5..8）且值 1000..65535：>999 是参考 `PAL_RemovePlayerStatus` 判定“装备持续状态，不随普通清理清除”的边界，普通 1..999 回合值不属于装备闭包。网格非零项必须在 `equipments` 声明（缺失即拒）；已声明但未被穿戴的对象合法保留（同未引用队）。仅声明其中一个 section 亦合法（零网格+对象、或未带网格的旧内容）；无 section 时非零 `roles[].equipment` 保持格式合法但 `BattleEquipmentState.Initialize` 在任何状态前拒绝（“补闭实际装备脚本”的缺省拒绝面）。
+`equipments`：数组，每项恰 `objectId`（非零 WORD，全数组唯一）与 `effects`（恰 6 行，按 role 索引）——即该对象装备脚本（0x0017/0x001A/0x002D）对每个 role 的真实效应行。每行恰 `attack`/`defense`/`dexterity`/`battleSprite`（WORD，寄存器 SET 语义）与 `statuses`（恰 9 WORD），另可选 `magicPower`/`fleeRate`/`poisonResistance`（WORD，缺席即脚本未写；#53 依 retail stat18/21/22 装备写入加入，有效面板=基面板+寄存器和，同一 WORD 回绕规则；poisonResistance 仅入面板投影，战斗毒域仍不消费）。非零 status 仅允许 bravery/protect/haste/dualAttack（index 5..8）且值 1000..65535：>999 是参考 `PAL_RemovePlayerStatus` 判定“装备持续状态，不随普通清理清除”的边界，普通 1..999 回合值不属于装备闭包。网格非零项必须在 `equipments` 声明（缺失即拒）；已声明但未被穿戴的对象合法保留（同未引用队）。仅声明其中一个 section 亦合法（零网格+对象、或未带网格的旧内容）；无 section 时非零 `roles[].equipment` 保持格式合法但 `BattleEquipmentState.Initialize` 在任何状态前拒绝（“补闭实际装备脚本”的缺省拒绝面）。
 
 Core 正式规则（`Pal.Core.BattleEquipmentState`，纯数据）：
 
