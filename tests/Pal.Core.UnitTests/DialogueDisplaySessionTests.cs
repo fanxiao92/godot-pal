@@ -226,7 +226,7 @@ public class DialogueDisplaySessionTests
         Assert.Equal(1, DialogueTextTokenizer.GetPromptFrame("A)"));
         Assert.Equal(2, DialogueTextTokenizer.GetPromptFrame("A("));
         // text.c 1542: in-dialog '~' ends the line early; the timing digits are consumed.
-        Assert.Empty(DialogueTextTokenizer.Tokenize("~01A", DialogueTextTokenizer.DefaultColor).Tokens);
+        Assert.Empty(DialogueTextTokenizer.Tokenize("~01A", DialogueTextTokenizer.DefaultColor));
         Assert.Throws<InvalidDataException>(() => DialogueTextTokenizer.Tokenize("$7", DialogueTextTokenizer.DefaultColor));
     }
 

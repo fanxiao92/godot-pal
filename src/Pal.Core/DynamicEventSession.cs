@@ -296,6 +296,11 @@ public sealed class DynamicEventSession
     public TriggerScriptSession? Trigger { get; private set; }
     public DynamicEventTriggerRequest? PendingTrigger { get; private set; }
     public DynamicEventWorld World => world;
+
+    /// <summary>Host hook (script.c 0x001D/0x0022): publish one role's current HP/MP words from
+    /// the pre-battle profile before the party-vital verbs can execute.</summary>
+    public void InitializePartyVitals(int roleId, int hp, int maxHp, int mp, int maxMp)
+        => world.InitializeVitals(roleId, hp, maxHp, mp, maxMp);
     public ExplorationState Current => exploration.Current;
     /// <summary>The success flag of the last completed call (script.c g_fScriptSuccess).</summary>
     public bool? LastScriptSuccess { get; private set; }

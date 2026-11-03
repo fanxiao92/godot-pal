@@ -336,7 +336,7 @@ public sealed class TriggerScriptSession
                 requirements?.Displays.Add(new(content.Block, content.References));
                 pending.Push((address, item.Context));
             }
-            else if (command.Op == "setDialog" && command.Box is "upper" or "lower" or "centerWindow" && command.RngWord == 0)
+            else if (command.Op == "setDialog" && command.Box is "upper" or "lower" or "centerWindow" or "center" && command.RngWord == 0)
             {
                 if (command.PortraitId != 0) requirements?.Portraits.Add(command.PortraitId);
                 pending.Push((Next(command), item.Context));
@@ -403,7 +403,9 @@ public sealed class TriggerScriptSession
                     Context = Context with { Box = command.Box, PortraitId = command.PortraitId, Color = command.Color == 0 ? Context.Color : command.Color };
                     _address = Next(command);
                     break;
-                case "setDialog" when command.Box == "centerWindow":
+                case "setDialog" when command.Box is "centerWindow" or "center":
+                    // text.c: the centered boxes carry no portrait; the plain center box is the
+                    // retail game-over presentation (e.g. the Lost branch after fadeToRed).
                     Context = Context with { Box = command.Box, PortraitId = 0, Color = command.Color == 0 ? Context.Color : command.Color };
                     _address = Next(command);
                     break;

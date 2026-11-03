@@ -281,6 +281,17 @@ public sealed class EventCliTests : IDisposable
             0x41, 0, 0, 0,
             0x4f, 0, 0, 0,
             0x4e, 0, 0, 0,
+            0x13, 28, 1280, 256,
+            0x14, 3, 0, 0,
+            0x1d, 1, 9999, 0,
+            0x22, 1, 10, 0,
+            0x24, 28, 4242, 0,
+            0x25, 28, 2500, 0,
+            0x4a, 24, 0, 0,
+            0x50, 0, 0, 0,
+            0x75, 1, 2, 0,
+            0x78, 0, 0, 0,
+            0x9a, 1, 5, 2,
             0, 0, 0, 0);
         WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
@@ -290,7 +301,9 @@ public sealed class EventCliTests : IDisposable
         string[] ops = commands.EnumerateArray().Select(c => c.GetProperty("op").GetString()).ToArray();
         Assert.Equal(new[] { "setMusic", "waitUpdate", "face", "walkStep", "walkTo", "setPartyPos", "setPartyFacing",
             "setState", "hide", "setTriggerMode", "setSceneScripts", "setObjectScript", "fadeScene", "redraw",
-            "markFailed", "fadeToRed", "requestReload", "end" }, ops);
+            "markFailed", "fadeToRed", "requestReload",
+            "setObjectPosition", "setObjectGesture", "changeHpMp", "revivePlayer", "setAutoEntry", "setTriggerEntry",
+            "setBattlefield", "fadeOut", "setParty", "noop", "setStateRange", "end" }, ops);
         var wait = commands[1];
         Assert.Equal(12, wait.GetProperty("frames").GetInt32());
         Assert.Equal(0, wait.GetProperty("runTriggers").GetInt32());
@@ -301,6 +314,13 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(4, commands[11].GetProperty("slotIndex").GetInt32());
         Assert.Equal(1, commands[12].GetProperty("mode").GetInt32());
         Assert.Equal(1, commands[13].GetProperty("delayUnits").GetInt32());
+        Assert.Equal(new[] { 28, 1280, 256 }, commands[17].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
+        Assert.Equal(4242, commands[21].GetProperty("entry").GetInt32());
+        Assert.Equal(28, commands[22].GetProperty("objectId").GetInt32());
+        Assert.Equal(2500, commands[22].GetProperty("entry").GetInt32());
+        Assert.Equal(24, commands[23].GetProperty("battlefieldId").GetInt32());
+        Assert.Equal(new[] { 1, 2, 0 }, commands[25].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
+        Assert.Equal(2, commands[27].GetProperty("state").GetInt32());
 
         var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
         Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
