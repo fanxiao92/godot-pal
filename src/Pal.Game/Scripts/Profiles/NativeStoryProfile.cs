@@ -63,8 +63,10 @@ public static class NativeStoryProfile
                 && entry.SourceAddress != 0 && entry.SourceAddress == native.EntryAddress
                 && entry.OwnerId == native.OwnerId, "story owner-trigger-entry identity mismatch or disabled entry");
             var content = NativeBattleContent.Load(native.BattleContentUri);
-            Require(content.Players.Count == 1 && content.EnemyTeams.Values.All(x => x.Count == 1),
-                "selected story presentation supports only one player and one enemy per team; multiplayer presentation is not connected");
+            // Party/multi-enemy capability is bounded by the actually selected closure: the
+            // language loop below runs TriggerScriptSession.ValidateEntry, which validates every
+            // startBattle team of the selected entry (one or two players and enemy slots) and
+            // ignores unselected teams as plain data. Only the party head is bound to the static leader.
             var font = LoadResource<PalDialogueFont>(dialogue + "/Font.tres");
             Require(!string.IsNullOrWhiteSpace(font.SourceIdentity) && font.FormatVersion == 1 && font.LineHeight == 16,
                 "native font identity/version/line height is invalid");
@@ -97,7 +99,7 @@ public static class NativeStoryProfile
                 var scene = ((PalMapScene)node).Data;
                 Require(scene is not null && scene.BundleSha256 == native.BundleSha256, "story scene BundleSha256 mismatch");
                 CheckedExplorationProfile exploration = NativeExplorationProfile.Load(native.StaticProfile, scene!);
-                Require(content.InitialRole.RoleId == 0, "story battle role must match static leader role0");
+                Require(content.Players[0].RoleId == 0, "story battle role must match static leader role0");
                 Require(scene!.Objects.SingleOrDefault(x => x.Id == entry.OwnerId)?.WTriggerScript == entry.SourceAddress,
                     "story entry does not match bound native scene owner trigger");
                 Require(scene.Palette is not null && scene.Palette.Rgb is { Length: 768 }, "story requires the native 256-color scene palette");

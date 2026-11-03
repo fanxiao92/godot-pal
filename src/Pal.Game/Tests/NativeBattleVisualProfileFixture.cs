@@ -9,7 +9,8 @@ namespace Pal.Game.Tests;
 
 internal sealed class NativeBattleVisualProfileFixture : IDisposable
 {
-    public NativeStoryProfileFixture Story { get; } = new();
+    public bool Party { get; }
+    public NativeStoryProfileFixture Story { get; }
     public CheckedStoryProfile CheckedStory { get; }
     public string Root => Story.Root;
     public string Uri => Root + "/Visual.tres";
@@ -22,15 +23,29 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
     { SourceIdentity = "authored synthetic background", Width = 320, Height = 200, PaletteIndices = new byte[64000], Alpha = Enumerable.Repeat((byte)255, 64000).ToArray() };
     public string[] ExpectedPaths { get; }
 
-    public NativeBattleVisualProfileFixture()
+    public NativeBattleVisualProfileFixture(bool party = false)
     {
+        Party = party;
+        Story = new NativeStoryProfileFixture(party);
         CheckedStory = NativeStoryProfile.Load(Story.Uri);
+        var team = new PalBattleVisualTeam { TeamId = 18, BackgroundUri = Root + "/Background.tres",
+            EnemySpriteUri = Root + "/Enemy.tres", IdleFrames = 1, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 0 };
+        if (party)
+        {
+            // Two story enemy slots share enemy definition id 7; positions use distinct authored slots.
+            team.EnemySlots =
+            [
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(128, 104) }
+            ];
+        }
+        else { team.TargetId = 7; team.EnemyPosition = new(100, 120); }
         Profile = new PalBattleVisualProfile
         {
             FormatVersion = 1, SourceIdentity = "literal synthetic visuals; no provenance authentication", RoleId = 0,
-            PlayerSpriteUri = Root + "/Player.tres", PaletteUri = Root + "/BattlePalette.tres", PlayerPosition = new(240, 170),
-            Teams = [new PalBattleVisualTeam { TeamId = 18, TargetId = 7, BackgroundUri = Root + "/Background.tres",
-                EnemySpriteUri = Root + "/Enemy.tres", EnemyPosition = new(100, 120), IdleFrames = 1, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 0 }]
+            PlayerSpriteUri = Root + "/Player.tres", PaletteUri = Root + "/BattlePalette.tres",
+            PlayerPosition = party ? new(200, 176) : new(240, 170),
+            Teams = [team]
         };
         ExpectedPaths = new[] { "Player.tres", "Enemy.tres", "BattlePalette.tres", "Background.tres" }.Select(x => Root + "/" + x).ToArray();
         SaveLeaves(); RefreshHashes(); Save();
