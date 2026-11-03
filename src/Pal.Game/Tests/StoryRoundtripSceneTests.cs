@@ -99,6 +99,99 @@ public class StoryRoundtripSceneTests
     }
 
     [TestCase(Timeout = 20000)]
+    public async Task NonterminalActionsKeepIdleCounterAndConsumePendingOuterOnNextMainCallback()
+    {
+        // fight.c157–170,279–284,3632–3666: base42 +2, critical3, role0 bonus2,
+        // float<=1.125 gives <=297 per single hit. Two hits cannot exhaust1000.
+        // Enemy strength36..38 vs defense20, resistance2 gives <=23; player HP100 survives.
+        // 1000 also satisfies selected Classic current-HP capability1..32767 (not just WORD format).
+        using var fixture = new AuthoredStoryFixture("Win", enemyHp: 1000);
+        Main old;
+        using (var host = new StoryHost(GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1")))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            Guid origin = old.Interaction!.PendingTrigger!.Id;
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var pending = script.PendingBattle!;
+            var battle = old.StoryBattle!;
+            AssertThat(ReferenceEquals(pending.Lifecycle, battle)).IsTrue();
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            await host.Wait(() => host.Actions.Count == 1);
+            AssertThat(battle.Current.Combat.PlayerHp > 0 && battle.Current.Combat.EnemyHp > 0).IsTrue();
+            AssertThat(battle.Completion).IsNull();
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+            await host.Wait(() => host.PendingOuterCallbacks.Count >= 2);
+            AssertThat(host.NonterminalReturns.Count).IsEqual(2);
+            AssertThat(host.PendingOuterCallbacks.Count).IsEqual(2);
+            for (int i = 0; i < 2; i++)
+            {
+                var ended = host.NonterminalReturns[i];
+                var next = host.PendingOuterCallbacks[i];
+                var started = host.ActionStarts[i];
+                AssertThat(ended.Update + 1).IsEqual(next.Update);
+                AssertThat(ended.FinalPose).IsEqual(15); // 16th transition ends each authored action.
+                AssertThat(ReferenceEquals(ended.Action, started.Action)).IsTrue();
+                // Player: remaining15 TRUE + UpdateFighters =16. Enemy: five TRUE + final =6.
+                // Both even, so literal speed2 counter must survive unchanged from first shown pose.
+                AssertThat(ended.Counter).IsEqual(started.Counter);
+                AssertThat(next.Counter).IsEqual(ended.Counter == 2 ? 1 : 2);
+                AssertThat(ended.Frame).IsEqual(0);
+                AssertThat(next.Frame).IsEqual(i == 0 ? 1 : 0); // First next is active magic pose; second is configured idle.
+                GD.Print($"PAL_CROSS_ACTION:{i+1};endCallback={ended.Update};nextCallback={next.Update};"
+                    + $"gapMs={unchecked(next.Now-ended.Now)};startCounter={started.Counter};endCounter={ended.Counter};nextCounter={next.Counter};finalPose={ended.FinalPose};endFrame={ended.Frame};nextFrame={next.Frame}");
+            }
+            AssertThat(host.NonterminalReturns[0].Mode == StoryBattlePresentation.Resolving).IsTrue();
+            AssertThat(host.PendingOuterCallbacks[0].Mode == StoryBattlePresentation.Feedback).IsTrue();
+            AssertThat(host.NonterminalReturns[1].Mode == StoryBattlePresentation.AttackMenu).IsTrue();
+            AssertThat(host.PendingOuterCallbacks[1].Mode == StoryBattlePresentation.AttackMenu).IsTrue();
+            AssertThat(host.NonterminalReturns[0].Counter != host.NonterminalReturns[1].Counter).IsTrue();
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            await host.Wait(() => host.Actions.Count == 3);
+            AssertThat(host.Actions.Count).IsEqual(3);
+            AssertThat(host.ActionStarts.Count).IsEqual(3);
+            AssertThat(host.Actions[0].Attacker).IsEqual(ClassicBattleSide.Player);
+            AssertThat(host.Actions[1].Attacker).IsEqual(ClassicBattleSide.Enemy);
+            AssertThat(host.Actions[2].Attacker).IsEqual(ClassicBattleSide.Player);
+            AssertThat(host.Actions[0].Round).IsEqual(1);
+            AssertThat(host.Actions[1].Round).IsEqual(1);
+            AssertThat(host.Actions[2].Round).IsEqual(2);
+            AssertThat(ReferenceEquals(host.Actions[0], host.Actions[1]) || ReferenceEquals(host.Actions[1], host.Actions[2])).IsFalse();
+            AssertThat(battle.Current.Combat.PlayerHp > 0 && battle.Current.Combat.EnemyHp > 0).IsTrue();
+            AssertThat(battle.Completion).IsNull();
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(script.SourceRequestId == origin).IsTrue();
+            AssertThat(ReferenceEquals(script.PendingBattle, pending) && ReferenceEquals(old.StoryBattle, battle)).IsTrue();
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+            AssertThat(script.PendingDisplay).IsNull();
+            var overlay = old.GetChildren().OfType<PalStoryBattleView>().Single();
+            AssertThat(old.GetChildren().OfType<Pal.Game.Resources.PalMapScene>().Single().Visible).IsFalse();
+            var adapter = old.Dialogue!;
+            old.GetParent().RemoveChild(old); // Real exit during third feedback, no fabricated receipt.
+            AssertThat(GodotObject.IsInstanceValid(overlay)).IsFalse();
+            AssertThat(adapter.Session).IsNull();
+            AssertThat(old.StoryBattle).IsNull();
+            AssertThat(old.StoryDrawSnapshot is null).IsTrue();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(ReferenceEquals(script.PendingBattle, pending)).IsTrue();
+            AssertThat(script.PendingDisplay).IsNull();
+            AssertThat(battle.Completion).IsNull();
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+    }
+
+    [TestCase(Timeout = 20000)]
     public async Task EnemyFeedbackKeepsDisplayedHpUntilImpact()
     {
         using var fixture = new AuthoredStoryFixture("Loss");
@@ -413,6 +506,14 @@ public class StoryRoundtripSceneTests
         private readonly Control? focus = ((SceneTree)Engine.GetMainLoop()).Root.GuiGetFocusOwner();
         internal List<ClassicBattleAction> Actions { get; } = [];
         internal int PoseChanges { get; private set; }
+        internal sealed record Callback(int Update, uint Now, int Counter, int Frame,
+            StoryBattlePresentation? Mode, ClassicBattleAction? Action, int? FinalPose);
+        internal List<Callback> NonterminalReturns { get; } = [];
+        internal List<Callback> PendingOuterCallbacks { get; } = [];
+        internal List<Callback> ActionStarts { get; } = [];
+        private Callback Capture(StoryBattleDrawSnapshot draw, int? finalPose = null) => new(updates,
+            Main.StoryPresentationTicks, draw.EnemyIdleCounter, draw.EnemyFrame, Main.StoryBattleMode,
+            Main.StoryBattle?.Current.Combat.LastAction, finalPose);
         private StoryBattlePoseSnapshot? previousPose;
         private StoryBattleDrawSnapshot? previousDraw;
         private int beforeEnemyHp;
@@ -480,6 +581,7 @@ public class StoryRoundtripSceneTests
                 else if (draw is { } outerDraw && previousDraw is { } priorDraw && previousPose is null)
                 {
                     int expected = priorDraw.EnemyIdleCounter;
+                    if (outerPending) PendingOuterCallbacks.Add(Capture(outerDraw));
                     if (outerPending || unchecked(Main.StoryPresentationTicks - outerStartedAt) >= 40)
                     {
                         expected = expected == 2 ? 1 : 2;
@@ -495,6 +597,7 @@ public class StoryRoundtripSceneTests
                     int expected = previousCombat!.LastAction!.Attacker == ClassicBattleSide.Enemy
                         ? finalDraw.EnemyIdleCounter == 2 ? 1 : 2 : finalDraw.EnemyIdleCounter;
                     AssertThat(returnedDraw.EnemyIdleCounter).IsEqual(expected);
+                    NonterminalReturns.Add(Capture(returnedDraw, finalPose.Pose));
                     outerPending = true;
                 }
                 if (previousPose is { } beforePose)
@@ -539,6 +642,7 @@ public class StoryRoundtripSceneTests
                     AssertThat(previousMode).IsEqual(StoryBattlePresentation.Resolving);
                     AssertThat(Main.StoryBattleMode).IsEqual(StoryBattlePresentation.Feedback);
                     Actions.Add(action); last = action;
+                    ActionStarts.Add(Capture(draw!.Value));
                 }
                 if (previousMode is not null && Main.StoryBattleMode is null && Main.Dialogue?.Session?.PendingDisplay is not null)
                     resultBoundFrame = Engine.GetProcessFrames();
