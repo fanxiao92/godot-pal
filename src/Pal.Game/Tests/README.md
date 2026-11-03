@@ -50,3 +50,7 @@ headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证�
 #### C independent-review repair
 
 Four additional Core regressions (inventory786) cover completed-call replay, older/foreign/pre-search calls and failed Start identity preservation. Typed story Start now requires the actual pending interaction origin. Two additional scene-dialogue cases cover deterministic Game-layer40ms pose boundaries and active-feedback Main removal/owned overlay cleanup; actual roundtrip observers verify each pose transition and second-search Start origin. Inventory525 =522 positives +3 controls, serial81/96/345. These counts describe registration, not a full-gate run.
+
+### #46 enemy reference presentation D1
+
+Two new Story scene-dialogue cases cover delayed displayed enemy-impact HP/result and independent physical-action tables (magic0/1/3, attack0/2, wait0/2, hit/evade, inclusive indices, recoil/return, dying threshold and indexed shift). Existing real Main observers additionally check production impact/release ticks and cleanup. Inventory527 =524 positives +3 controls, serial81/98/345; metadata remains16 groups. No Core/native schema/Prepare/author inputs changed. D1 does not close player effects, enemy idle-speed/counter binding, floating-number fidelity, GPU/manual/CI/full gate or #46/M4; see the [bounded contract](../../../docs/design/main-story-roundtrip.md#reference-presentation-checkpoint-d1-enemy-active-physical-action).

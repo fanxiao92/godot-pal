@@ -13,6 +13,76 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class StoryRoundtripSceneTests
 {
+    [TestCase(Timeout = 20000)]
+    public async Task EnemyFeedbackKeepsDisplayedHpUntilImpact()
+    {
+        using var fixture = new AuthoredStoryFixture("Loss");
+        using var host = new StoryHost(GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1"));
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+        await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+        await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.Feedback);
+        AssertThat(host.Actions[0].Attacker).IsEqual(ClassicBattleSide.Enemy);
+        AssertThat(host.Actions[0].Damage > 0).IsTrue();
+        AssertThat(host.Main.StoryDisplayedPlayerHp == 20).IsTrue();
+        AssertThat(host.Main.StoryResultVisible).IsFalse();
+    }
+
+    [TestCase]
+    public void EnemyPhysicalReferenceTablesCoverZeroWaitInclusiveFramesAndReturn()
+    {
+        var player = new Vector2(240, 170); var enemy = new Vector2(100, 120);
+        // Independently counted from fight.c4987–5135; columns magic, attack, wait, impact tick.
+        int[,] table = { {0,0,0,6}, {0,0,2,6}, {0,2,0,4}, {0,2,2,10},
+            {1,0,0,7}, {1,0,2,7}, {1,2,0,5}, {1,2,2,11},
+            {3,0,0,9}, {3,0,2,9}, {3,2,0,7}, {3,2,2,13} };
+        for (int row = 0; row < table.GetLength(0); row++)
+        foreach (bool evaded in new[] { false, true })
+        {
+            int magic = table[row,0], attack = table[row,1], wait = table[row,2], hit = table[row,3];
+            var sequence = new StoryEnemyAttackPresentation(2, magic, attack, wait, player, enemy,
+                80, evaded ? 80 : 0, 150, new(1, ClassicBattleSide.Enemy, 0, evaded ? 0 : 80, false, evaded));
+            AssertThat(sequence.Duration == hit + 11).IsTrue();
+            AssertThat(sequence.At(hit - 1).DisplayedPlayerHp).IsEqual(80);
+            AssertThat(sequence.At(hit - 1).ResultVisible).IsFalse();
+            var impact = sequence.At(hit);
+            AssertThat(impact.DisplayedPlayerHp).IsEqual(evaded ? 80 : 0);
+            AssertThat(impact.ResultVisible).IsTrue();
+            AssertThat(impact.PlayerFrame).IsEqual(evaded ? 3 : 4);
+            AssertThat(impact.PlayerColorShift).IsEqual(evaded ? 0 : 6);
+            AssertThat(impact.EnemyPosition == new Vector2(196,154)).IsTrue();
+            AssertThat(sequence.At(hit+1).PlayerPosition == new Vector2(248,174)).IsTrue();
+            AssertThat(sequence.At(hit+2).PlayerPosition == new Vector2(250,175)).IsTrue();
+            AssertThat(sequence.At(hit+5).EnemyPosition == enemy).IsTrue();
+            AssertThat(sequence.At(hit+6).PlayerFrame).IsEqual(evaded ? 0 : 2);
+            AssertThat(sequence.At(hit+11).PlayerPosition == player).IsTrue();
+            if (attack == 2 && wait == 2)
+            {
+                AssertThat(sequence.At(hit-6).EnemyFrame).IsEqual(1 + magic);
+                AssertThat(sequence.At(hit-4).EnemyFrame).IsEqual(2 + magic);
+                AssertThat(sequence.At(hit-2).EnemyFrame).IsEqual(3 + magic);
+            }
+            if (attack == 0) AssertThat(sequence.At(hit-1).EnemyFrame).IsEqual(1);
+            if (magic > 0)
+            {
+                AssertThat(sequence.At(0).EnemyFrame).IsEqual(2);
+                AssertThat(sequence.At(1).EnemyFrame).IsEqual(2);
+            }
+            AssertThat(sequence.At(magic*2).EnemyPosition == enemy - new Vector2(magic < 3 ? 2 : 0, magic < 3 ? 1 : 0)).IsTrue();
+        }
+        AssertThat(StoryEnemyAttackPresentation.RestFrame(29,150)).IsEqual(1);
+        AssertThat(StoryEnemyAttackPresentation.RestFrame(30,150)).IsEqual(0);
+        AssertThat(StoryEnemyAttackPresentation.RestFrame(99,1000)).IsEqual(1);
+        AssertThat(StoryEnemyAttackPresentation.RestFrame(100,1000)).IsEqual(0);
+        AssertThat((int)StoryEnemyAttackPresentation.ShiftIndex(0xa3,6)).IsEqual(0xa9);
+        AssertThat((int)StoryEnemyAttackPresentation.ShiftIndex(0xad,6)).IsEqual(0xaf);
+        AssertThat((int)StoryEnemyAttackPresentation.ShiftIndex(0x21,-6)).IsEqual(0x20);
+    }
+
     [TestCase]
     public void NormalStoryArgumentsAcceptExplicitProfiles()
     {
@@ -222,6 +292,9 @@ public class StoryRoundtripSceneTests
             AssertThat(host.Main.StoryBattle).IsNull();
             AssertThat(host.Main.StoryBattleMode).IsNull();
             AssertThat(host.Main.StoryBattlePose).IsNull();
+            AssertThat(host.Main.StoryEnemyPresentation is null).IsTrue();
+            AssertThat(host.Main.StoryDisplayedPlayerHp is null).IsTrue();
+            AssertThat(host.Main.StoryResultVisible).IsFalse();
             AssertThat(host.Main.Interaction).IsNull();
             AssertThat(host.Main.Dialogue).IsNull();
             AssertThat(host.Main.Display).IsNull();
@@ -288,12 +361,26 @@ public class StoryRoundtripSceneTests
                     {
                         // Even the final pose must finish before feedback releases its action/overlay.
                         AssertThat(unchecked(Main.StoryPresentationTicks - beforePose.PoseStartedAt) >= 40).IsTrue();
+                        if (previousCombat?.LastAction?.Attacker == ClassicBattleSide.Enemy)
+                            AssertThat(beforePose.Pose).IsEqual(15); // hit tick5 + eleven timed recovery ticks.
                     }
                 }
                 if (pose is { } firstPose && previousPose is null)
                 {
                     AssertThat(firstPose.Pose).IsEqual(0);
                     AssertThat(firstPose.PoseStartedAt).IsEqual(firstPose.Now);
+                }
+                if (Main.StoryEnemyPresentation is { } shown && combat is not null)
+                {
+                    AssertThat(Main.StoryDisplayedPlayerHp == shown.DisplayedPlayerHp).IsTrue();
+                    AssertThat(Main.StoryResultVisible == shown.ResultVisible).IsTrue();
+                    // Authored package: magic1*2 + preMove2 + hold1; attack wait0.
+                    bool hit = pose!.Value.Pose >= 5;
+                    AssertThat(shown.ResultVisible == hit).IsTrue();
+                    AssertThat(shown.DisplayedPlayerHp).IsEqual(hit ? combat.PlayerHp :
+                        previousCombat!.PlayerHp + (previousMode == StoryBattlePresentation.Feedback ? combat.LastAction!.Damage : 0));
+                    if (hit && pose.Value.Pose == 5)
+                        AssertThat(shown.PlayerFrame).IsEqual(combat.LastAction!.Evaded ? 3 : 4);
                 }
                 previousPose = pose;
                 if (Main.StoryBattleMode == StoryBattlePresentation.Feedback && previousMode == StoryBattlePresentation.Feedback)

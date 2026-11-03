@@ -19,11 +19,15 @@ public partial class Main
     private bool resumeStoryDisplay;
     private StoryBattlePoseClock poseClock;
     private uint presentationNow;
+    private StoryEnemyAttackPresentation? enemyPresentation;
+    internal StoryEnemyAttackSnapshot? StoryEnemyPresentation => storyView?.EnemyPresentation;
     internal uint StoryPresentationTicks => presentationNow;
     internal StoryBattlePoseSnapshot? StoryBattlePose => StoryBattleMode == StoryBattlePresentation.Feedback
         ? new(presentationNow, poseClock.PoseStartedAt, poseClock.Pose) : null;
     public StoryBattlePresentation? StoryBattleMode { get; private set; }
     public ClassicBattleLifecycleSession? StoryBattle => storyRequest?.Lifecycle;
+    internal int? StoryDisplayedPlayerHp => storyView?.DisplayedPlayerHp;
+    internal bool StoryResultVisible => storyView?.ResultVisible ?? false;
 
     private void InitializeStory(GameSceneConfiguration selected)
     {
@@ -113,7 +117,14 @@ public partial class Main
                 }
                 break;
             case StoryBattlePresentation.Resolving:
+                int beforeHp = lifecycle.Current.Combat.PlayerHp;
                 if (!lifecycle.ResolveNextAction()) throw new InvalidOperationException("Battle action owner did not resolve an action.");
+                var action = lifecycle.Current.Combat.LastAction!;
+                var actingTeam = storyVisual!.Teams[storyRequest.TeamId];
+                enemyPresentation = action.Attacker != ClassicBattleSide.Enemy ? null : new(
+                    actingTeam.IdleFrames, actingTeam.MagicFrames, actingTeam.AttackFrames, actingTeam.ActWaitFrames,
+                    storyVisual.PlayerPosition, actingTeam.EnemyPosition, beforeHp,
+                    lifecycle.Current.Combat.PlayerHp, story.BattleContent.Player.MaxHp, action);
                 StoryBattleMode = StoryBattlePresentation.Feedback;
                 poseClock = StoryBattlePoseClock.Start(now);
                 break;
@@ -121,9 +132,7 @@ public partial class Main
                 var nextPose = poseClock.Advance(now);
                 if (nextPose == poseClock) break;
                 poseClock = nextPose;
-                var team = storyVisual!.Teams[storyRequest.TeamId];
-                int poses = lifecycle.Current.Combat.LastAction!.Attacker == ClassicBattleSide.Player ? 8
-                    : Math.Max(8, team.MagicFrames * 2 + Math.Max(1, team.AttackFrames) * Math.Max(1, team.ActWaitFrames));
+                long poses = enemyPresentation?.Duration ?? 8;
                 if (poseClock.Pose < poses) break;
                 if (lifecycle.Completion is { } completion)
                 {
@@ -131,7 +140,7 @@ public partial class Main
                     // Remove the complete feedback overlay and restore the map before the owned receipt.
                     RemoveChild(storyView!); storyView!.Free(); storyView = null;
                     mapScene!.Visible = true; RestoreStoryMap();
-                    storyRequest = null; StoryBattleMode = null;
+                    storyRequest = null; StoryBattleMode = null; enemyPresentation = null;
                     if (!Dialogue!.AcknowledgeBattle(request.Id, completion))
                         throw new InvalidOperationException("Story battle completion was not owned by the active trigger.");
                     // A child display must not consume this battle callback's delta.
@@ -143,7 +152,8 @@ public partial class Main
                     ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
                 break;
         }
-        storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, poseClock.Pose);
+        storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, poseClock.Pose,
+            StoryBattleMode == StoryBattlePresentation.Feedback ? enemyPresentation?.At(poseClock.Pose) : null);
         return true;
     }
     private void ReleaseStory()
@@ -158,6 +168,7 @@ public partial class Main
             storyView.GetParent()?.RemoveChild(storyView); storyView.ReleaseTextures(); storyView.Free();
         }
         storyView = null; storyRequest = null; StoryBattleMode = null; battleConfirm = false; resumeStoryDisplay = false;
+        enemyPresentation = null;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
     }
 }
