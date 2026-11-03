@@ -87,7 +87,17 @@ public class AuthoredBattlePackageTests
                 AssertThat(story.Language.Resolve(1, 0).Parts[0].Text!).IsEqual(language == "en" ? "FIGHT" : "战");
                 AssertThat(story.Language.Resolve(2, 0).Parts[0].Text!).IsEqual(language == "en" ? "WIN" : "胜");
                 AssertThat(story.Language.Resolve(3, 0).Parts[0].Text!).IsEqual(language == "en" ? "LOSE" : "败");
-                foreach (var glyph in story.Font.Glyphs) AssertThat(glyph.Bitmap.Any(b => b != 0)).IsTrue();
+                // #49 added the U+0020 space glyph for dialogue word spacing; its bitmap is
+                // legitimately all zero, so the nonblank pin skips exactly that codepoint and
+                // instead pins the space glyph's blank semantics directly.
+                var space = story.Font.GetGlyph(' ');
+                AssertThat(space.Bitmap.All(b => b == 0)).IsTrue();
+                for (int y = 0; y < space.Height; y++)
+                    for (int x = 0; x < space.Width; x++)
+                        AssertThat(space.IsSet(x, y)).IsFalse();
+                foreach (var glyph in story.Font.Glyphs)
+                    if (glyph.Codepoint != ' ')
+                        AssertThat(glyph.Bitmap.Any(b => b != 0)).IsTrue();
                 AssertThat(story.Font.GetGlyph('F').IsSet(2, 1)).IsTrue();
                 AssertThat(story.Palette[79]).IsEqual(new Color(1, 248f / 255, 224f / 255));
                 AssertThat(visual.PlayerSprite.SpriteId).IsEqual(41);
