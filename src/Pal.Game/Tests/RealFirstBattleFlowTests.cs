@@ -13,7 +13,7 @@ namespace Pal.Game.Tests;
 /// prepared closure profile; the class lives in its own name-level batch with an explicit
 /// 300000ms session timeout.</summary>
 [TestSuite, RequireGodotRuntime]
-public sealed class RealFirstBattleFlowTests
+public class RealFirstBattleFlowTests
 {
     private const string ProfileUri = "res://Assets/M4RealBattle53Closure/Battle/Profile.tres";
 
