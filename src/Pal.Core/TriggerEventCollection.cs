@@ -362,13 +362,12 @@ public sealed class TriggerEventCollection
                     break;
                 case "waitUpdate":
                     // script.c 0x0009: wait frames while running the real scene update each frame
-                    // (triggers optional per operand1, party gestures optional per operand2).
+                    // (triggers optional per operand1, party gestures per operand2). The reference
+                    // tests both operands for truthiness only; retail rows carry 0xFFFF too.
                     if (opcode != 9) throw new InvalidDataException("Invalid waitUpdate mapping.");
                     command.Frames = EventJson.Word(node, "frames");
                     command.RunTriggers = EventJson.Word(node, "runTriggers");
                     command.UpdateGestures = EventJson.Word(node, "updateGestures");
-                    if (command.RunTriggers is not (0 or 1) || command.UpdateGestures is not (0 or 1))
-                        throw new InvalidDataException("waitUpdate.runTriggers/updateGestures must be 0 or 1.");
                     break;
                 case "redraw":
                     // script.c 0x0005: redraw the scene and delay 60ms units (0 -> 1).

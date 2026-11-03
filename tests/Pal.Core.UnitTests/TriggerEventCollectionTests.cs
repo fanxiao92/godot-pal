@@ -371,6 +371,19 @@ public class TriggerEventCollectionTests
         Assert.Equal("trigger", entry.Kind);
         Assert.Equal("wTriggerScript", entry.Slot);
     }
+
+    [Fact]
+    public void WaitUpdate_accepts_the_retail_truthy_operand_words_not_only_zero_and_one()
+    {
+        // Retail chunk-4 rows carry 0xFFFF for the gesture flag; script.c tests it for truthiness only.
+        var events = new EventFixture();
+        events.Commands[3] = JsonNode.Parse("""
+          {"label":"L0003","op":"waitUpdate","frames":12,"runTriggers":0,"updateGestures":65535,
+           "next":"L0004","source":{"index":3,"opcode":9,"operands":[12,0,65535]}}
+          """);
+        Assert.NotNull(events.Load()); // strict parse accepts the full WORD domain
+    }
+
 }
 
 internal sealed class EventFixture

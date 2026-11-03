@@ -259,6 +259,55 @@ public sealed class EventCliTests : IDisposable
     }
 
     [Fact]
+    public async Task Export_names_runtime_registered_verbs_and_rebuilds_original_chunk4_exactly()
+    {
+        // One row per runtime-registered verb family, including the retail waitUpdate shape
+        // whose truthy operands are 0/0xFFFF and a negative setState SHORT.
+        byte[] original = Words(
+            0x43, 34, 0, 0,
+            9, 12, 0, 65535,
+            0x0f, 2, 0, 0,
+            0x0b, 0, 0, 0,
+            0x10, 9, 21, 0,
+            0x46, 10, 20, 0,
+            0x15, 3, 0, 0,
+            0x49, 2, unchecked((int)0xff85), 0,
+            0x52, 15, 0, 0,
+            0x40, 1, 0, 0,
+            0x6d, 1, 0, 18,
+            0x90, 777, 18, 4,
+            0x73, 1, 0, 0,
+            5, 1, 0, 0,
+            0x41, 0, 0, 0,
+            0x4f, 0, 0, 0,
+            0x4e, 0, 0, 0,
+            0, 0, 0, 0);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        using var events = JsonDocument.Parse(File.ReadAllText(Path.Combine(exported, "shared.json")));
+        var commands = events.RootElement.GetProperty("commands");
+        string[] ops = commands.EnumerateArray().Select(c => c.GetProperty("op").GetString()).ToArray();
+        Assert.Equal(new[] { "setMusic", "waitUpdate", "face", "walkStep", "walkTo", "setPartyPos", "setPartyFacing",
+            "setState", "hide", "setTriggerMode", "setSceneScripts", "setObjectScript", "fadeScene", "redraw",
+            "markFailed", "fadeToRed", "requestReload", "end" }, ops);
+        var wait = commands[1];
+        Assert.Equal(12, wait.GetProperty("frames").GetInt32());
+        Assert.Equal(0, wait.GetProperty("runTriggers").GetInt32());
+        Assert.Equal(65535, wait.GetProperty("updateGestures").GetInt32());
+        Assert.Equal(2, commands[2].GetProperty("direction").GetInt32());
+        Assert.Equal(0, commands[3].GetProperty("direction").GetInt32());
+        Assert.Equal(-123, commands[7].GetProperty("state").GetInt32());
+        Assert.Equal(4, commands[11].GetProperty("slotIndex").GetInt32());
+        Assert.Equal(1, commands[12].GetProperty("mode").GetInt32());
+        Assert.Equal(1, commands[13].GetProperty("delayUnits").GetInt32());
+
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt));
+    }
+
+    [Fact]
     public async Task Export_events_preserves_complete_script_and_rebuilds_original_chunk4()
     {
         byte[] original = ReadChunk4();
