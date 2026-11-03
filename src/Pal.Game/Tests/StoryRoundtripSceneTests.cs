@@ -792,6 +792,300 @@ public class StoryRoundtripSceneTests
         AssertThat(host.Main.Exploration).IsNull();
     }
 
+    private static System.Collections.Generic.HashSet<string> FriendDeathHookFirstDisplaysSet(bool zh) =>
+        zh ? FriendDeathHookFirstDisplays : FriendDeathHookFirstDisplaysEn;
+
+    private static readonly System.Collections.Generic.HashSet<string> DyingHookFirstDisplays =
+        new(["我能战", "别管我", "我败了", "谢"]);
+    private static readonly System.Collections.Generic.HashSet<string> DyingHookFirstDisplaysEn =
+        new(["I CAN FIGHT", "LET ME GO", "I LOST", "THANKS"]);
+    private static readonly System.Collections.Generic.HashSet<string> FriendDeathHookFirstDisplays =
+        new(["兄弟", "我会胜", "悲为力", "回家"]);
+    private static readonly System.Collections.Generic.HashSet<string> FriendDeathHookFirstDisplaysEn =
+        new(["BROTHER", "I WILL WIN", "GRIEF TO POWER", "HOME"]);
+
+    // Menus, action feedback and (once connected) the paused role-hook dialogue are all driven
+    // from the real Main callback; no direct session advancing.
+    private static async Task DriveMidbattleMenus(StoryHost host, Main main)
+    {
+        var script = main.Dialogue!.Session!;
+        var battle = main.StoryBattle!;
+        while (script.PendingBattle is not null)
+        {
+            if (main.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+            {
+                if (script.PendingBattleHook is not null)
+                {
+                    // A paused hook must show its dialogue before any further menu input.
+                    await host.Wait(() => script.PendingDisplay is not null);
+                    while (main.Dialogue!.Session!.PendingDisplay is { } parked)
+                    {
+                        await host.FinishDisplay();
+                        if (main.Dialogue.Session.PendingDisplay?.Id == parked.Id) break;
+                    }
+                    await host.Wait(() => main.StoryBattleMode != StoryBattlePresentation.HookDialogue || script.PendingBattle is null);
+                    continue;
+                }
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMemberTarget(battle);
+            }
+            else if (main.StoryBattleMode == StoryBattlePresentation.Feedback)
+                await host.Wait(() => main.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+            else if (main.StoryBattleMode == StoryBattlePresentation.HookDialogue)
+            {
+                while (main.Dialogue!.Session!.PendingDisplay is { } current)
+                {
+                    await host.FinishDisplay();
+                    if (main.Dialogue.Session.PendingDisplay?.Id == current.Id) break;
+                }
+                await host.Wait(() => main.StoryBattleMode != StoryBattlePresentation.HookDialogue || script.PendingBattle is null);
+            }
+            else
+                await host.Wait(() => main.StoryBattleMode is StoryBattlePresentation.AttackMenu
+                    or StoryBattlePresentation.Feedback or StoryBattlePresentation.HookDialogue || script.PendingBattle is null);
+        }
+    }
+
+    // Drives menus/feedback until the battle pauses on its first role hook, then proves the real
+    // Main consumes it: the paused hook's script dialogue reaches the real display boundary.
+    private static async Task AwaitFirstHookDisplay(StoryHost host, Main main)
+    {
+        var script = main.Dialogue!.Session!;
+        while (script.PendingBattleHook is null && script.PendingBattle is not null)
+        {
+            if (main.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+            {
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMemberTarget(main.StoryBattle!);
+            }
+            else if (main.StoryBattleMode == StoryBattlePresentation.Feedback)
+                await host.Wait(() => main.StoryBattleMode != StoryBattlePresentation.Feedback);
+            else
+                await host.Wait(() => main.StoryBattleMode is StoryBattlePresentation.AttackMenu
+                    or StoryBattlePresentation.Feedback || script.PendingBattle is null);
+        }
+        await host.Wait(() => script.PendingDisplay is not null);
+    }
+
+    [TestCase("zh-Hans", Timeout = 120000)]
+    [TestCase("en", Timeout = 120000)]
+    public async Task DyingRoleHookShowsDialogueInRealBattleAndResumesToWin(string language)
+    {
+        // Midbattle: two strong enemy slots act first; their strikes push role1 (dual-attack closure,
+        // covered by role0) across the dying threshold mid-queue, so the paused role hook must run its
+        // script dialogue over the real battle and the queue resumes from its saved position.
+        using var fixture = new AuthoredStoryFixture("Midbattle");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", language, "--battle-seed", "1");
+        bool zh = language == "zh-Hans";
+        var firstDisplays = zh ? DyingHookFirstDisplays : DyingHookFirstDisplaysEn;
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            var hookKinds = new System.Collections.Generic.List<Pal.Core.ClassicBattleHookKind>();
+            var hookFirstTexts = new System.Collections.Generic.List<string>();
+            var secondStrikeAfterHook = -1;
+            int hookCount = 0;
+            while (script.PendingBattle is not null)
+            {
+                var hook = script.PendingBattleHook;
+                if (hook is not null)
+                {
+                    hookKinds.Add(hook.Kind);
+                    hookCount++;
+                    await host.Wait(() => script.PendingDisplay is not null);
+                    var first = script.PendingDisplay!;
+                    AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.HookDialogue);
+                    AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(1); // battle stays visible behind the dialogue
+                    AssertThat(firstDisplays.Contains(first.Content.Parts[0].Text!) ||
+                        FriendDeathHookFirstDisplaysSet(zh).Contains(first.Content.Parts[0].Text!)).IsTrue();
+                    hookFirstTexts.Add(first.Content.Parts[0].Text!);
+                    GD.Print($"PAL_HOOK_{hookCount}:kind={hook.Kind};role={hook.RoleId};first={first.Content.Parts[0].Text}");
+                }
+                await DriveMidbattleMenus(host, old);
+                if (hook is not null && secondStrikeAfterHook < 0
+                    && host.Actions.Any(a => a.SecondStrike)) secondStrikeAfterHook = host.Actions.Count(a => a.SecondStrike);
+            }
+            AssertThat(hookKinds.Contains(Pal.Core.ClassicBattleHookKind.Dying)).IsTrue();
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            // The dying member really acted after the pause (its dual strikes are real queue actions).
+            AssertThat(host.Actions.Any(a => a.Attacker == Pal.Core.ClassicBattleSide.Player && a.ActorIndex == 1)).IsTrue();
+            AssertThat(host.Actions.Any(a => a.SecondStrike)).IsTrue(); // the dual second strike ran in the resumed queue
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual(zh ? "胜" : "WIN");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+            GD.Print("PAL_MIDBATTLE_WIN:hooks=" + string.Join(",", hookKinds) + ";first=" + string.Join("|", hookFirstTexts)
+                + ";secondStrike=" + secondStrikeAfterHook + ";hp=" + string.Join('/',
+                    battle.Current.Combat.Players.Select(p => p.Hp)) + ";enemies=" + string.Join('/',
+                    battle.Current.Combat.Enemies.Select(e => e.Hp)) + ";actions=" + host.Actions.Count);
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        // Same-URI fresh Main: prepared resources are reused read-only; no session state leaks.
+        using (var fresh = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            AssertThat(fresh.Main.Failure).IsNull();
+            AssertThat(fresh.Main.Dialogue!.Session!.CallId).IsEqual(Guid.Empty);
+            AssertThat(fresh.Main.StoryBattle).IsNull();
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            AssertThat(fresh.Main.Dialogue!.Session!.PendingDisplay!.Content.Parts[0].Text!).IsEqual(zh ? "战" : "FIGHT");
+        }
+    }
+
+    [TestCase(Timeout = 120000)]
+    public async Task FriendDeathHookHealsCovererAndBattleStillEndsWon()
+    {
+        // The cover scenario: once an enemy strike kills role1, the coverer role0's friend-death
+        // script runs (dialogue + changeHp/changeMp/boostStat on the caller); the outcome stays
+        // deferred until the hook completes and the battle continues to a real end.
+        using var fixture = new AuthoredStoryFixture("Midbattle");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            int hpBeforeHook = 0, mpBeforeHook = 0, attackBeforeHook = 0;
+            bool friendDeathSeen = false;
+            var observedBoosts = new System.Collections.Generic.List<IReadOnlyList<int>>();
+            void CaptureBoosts()
+            {
+                var panel = old.StoryBattleBoosts;
+                if (panel.Count > 0 && (observedBoosts.Count == 0 || !observedBoosts[^1].SequenceEqual(panel)))
+                    observedBoosts.Add(panel.ToArray());
+            }
+            old.UpdateCompleted += CaptureBoosts;
+            while (script.PendingBattle is not null)
+            {
+                if (script.PendingBattleHook is { Kind: Pal.Core.ClassicBattleHookKind.FriendDeath } hook && !friendDeathSeen)
+                {
+                    friendDeathSeen = true;
+                    var player = battle.Current.Combat.Players[hook.PartyIndex];
+                    hpBeforeHook = player.Hp; mpBeforeHook = battle.Current.Roles[hook.RoleId].Mp;
+                    attackBeforeHook = player.Attack;
+                    AssertThat(hook.RoleId).IsEqual(0); // the coverer is the friend-death caller
+                    AssertThat(battle.Current.Combat.Players[1].Hp).IsEqual(0); // the covered member died
+                    await host.Wait(() => script.PendingDisplay is not null);
+                    AssertThat(FriendDeathHookFirstDisplays.Contains(script.PendingDisplay!.Content.Parts[0].Text!)).IsTrue();
+                    GD.Print($"PAL_FRIEND_DEATH:before hp={hpBeforeHook} mp={mpBeforeHook} atk={attackBeforeHook} first={script.PendingDisplay!.Content.Parts[0].Text}");
+                }
+                await DriveMidbattleMenus(host, old);
+            }
+            AssertThat(friendDeathSeen).IsTrue();
+            old.UpdateCompleted -= CaptureBoosts;
+            var healed = battle.Current.Roles[0];
+            // The hook's changeHp +9999 healed the coverer full (capped at maxHp 150) before the
+            // Won half recovery, and the boost panel exposed the applied boost registers.
+            AssertThat(observedBoosts.Count > 0).IsTrue();
+            foreach (var panel in observedBoosts)
+            {
+                AssertThat(panel.Count).IsEqual(2);
+                AssertThat(panel[1]).IsEqual(0); // only the caller (coverer) is boosted
+                AssertThat(panel[0] is 2 or 15 or 99).IsTrue(); // 5%/10% attack|mana or 25% or 90% bands
+            }
+            GD.Print("PAL_BOOST_PANELS:" + string.Join("|", observedBoosts.Select(p => string.Join('/', p))));
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            // Won halves recovery for both roles; the hook's +9999 heal landed full before it.
+            AssertThat(healed.Mp).IsEqual(Math.Min(50, mpBeforeHook + 9999 + (50 - Math.Min(50, mpBeforeHook + 9999)) / 2));
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+            GD.Print("PAL_FRIEND_DEATH_AFTER:hp0=" + healed.Hp + " mp0=" + healed.Mp + " actions=" + host.Actions.Count);
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+    }
+
+    [TestCase(Timeout = 240000)]
+    public async Task HookRandomBandsDrawDifferentDialoguePaths()
+    {
+        // The three retail random bands select different dialogue blocks; two fixed seeds must
+        // produce at least two distinct first-display paths for the first hook in each battle.
+        var firstTexts = new System.Collections.Generic.List<string>();
+        foreach (uint seed in new[] { 1u, 7u })
+        {
+            using var fixture = new AuthoredStoryFixture("Midbattle");
+            var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+                "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", seed.ToString());
+            using var host = new StoryHost(selection,
+                enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]);
+            AssertThat(host.Main.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+            var script = host.Main.Dialogue!.Session!;
+            await host.FinishDisplay();
+            await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            await AwaitFirstHookDisplay(host, host.Main);
+            firstTexts.Add(script.PendingDisplay!.Content.Parts[0].Text!);
+            GD.Print($"PAL_BAND_SEED{seed}:first={script.PendingDisplay!.Content.Parts[0].Text}");
+            // Enough of the battle runs to prove the hook's displays really bind; the remainder
+            // of this battle is covered by the other roundtrips, so free the host here.
+            host.Main.GetParent().RemoveChild(host.Main);
+        }
+        AssertThat(firstTexts.Count).IsEqual(2);
+        AssertThat(firstTexts[0] != firstTexts[1]).IsTrue();
+    }
+
+    [TestCase(Timeout = 120000)]
+    public async Task HooklessCounterpartNeverBindsMidbattleDialogue()
+    {
+        // Targeted counterexample: PartyEquip shares the numeric/visual shape but declares no
+        // role-hook scripts; its battle must never pause on a hook or bind a mid-battle display,
+        // and the dual attack still presents exactly two strikes.
+        using var fixture = new AuthoredStoryFixture("PartyEquip");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        using var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]);
+        AssertThat(host.Main.Failure).IsNull();
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        var script = host.Main.Dialogue!.Session!;
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+        while (script.PendingBattle is not null)
+        {
+            AssertThat(script.PendingBattleHook).IsNull();
+            AssertThat(script.PendingDisplay).IsNull();
+            if (host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+            {
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMemberTarget(host.Main.StoryBattle!);
+            }
+            else if (host.Main.StoryBattleMode == StoryBattlePresentation.Feedback)
+                await host.Wait(() => host.Main.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+            else
+                await host.Wait(() => host.Main.StoryBattleMode is StoryBattlePresentation.AttackMenu
+                    or StoryBattlePresentation.Feedback || script.PendingBattle is null);
+        }
+        AssertThat(host.Main.StoryBattle!.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+        AssertThat(host.Actions.Count(a => a.SecondStrike)).IsEqual(2); // role1's dual action: two strikes
+        AssertThat(host.Main.StoryBattleMode).IsNull();
+    }
+
     [TestCase]
     public void StoryParserRejectsIncompleteMixedDuplicateUnknownAndInvalidValues()
     {

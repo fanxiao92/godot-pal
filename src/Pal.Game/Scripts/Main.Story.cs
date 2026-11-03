@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Godot;
 using Pal.Core;
@@ -39,6 +40,8 @@ public partial class Main
     internal uint StoryPresentationTicks => presentationNow;
     internal StoryBattlePoseSnapshot? StoryBattlePose => StoryBattleMode == StoryBattlePresentation.Feedback
         ? new(presentationNow, poseClock.PoseStartedAt, poseClock.Pose) : null;
+    /// <summary>Per-member sum of the live role-hook boost registers; empty while none applied.</summary>
+    internal IReadOnlyList<int> StoryBattleBoosts => storyView?.DrawSnapshot.PartyBoosts ?? [];
     public StoryBattlePresentation? StoryBattleMode { get; private set; }
     public ClassicBattleLifecycleSession? StoryBattle => storyRequest?.Lifecycle;
     internal int? StoryDisplayedPlayerHp => storyView?.DisplayedPlayerHp;
@@ -170,6 +173,9 @@ public partial class Main
                 break;
             case StoryBattlePresentation.Resolving:
             {
+                // fight.c 768-880: the paused battle shows its role-hook dialogue before the queue
+                // continues; the resume returns to this saved queue position afterwards.
+                if (lifecycle.Current.Combat.PendingRoleHook is not null) { BeginStoryBattleHook(); break; }
                 // Dead actors' queue entries pass without a new LastAction; queue advancement and
                 // action feedback are distinguished by reference so a pass never re-presents it.
                 ClassicBattleAction? presented = null;
@@ -224,19 +230,32 @@ public partial class Main
                 if (enemyPresentation is not null) enemyIdle!.Advance();
                 if (lifecycle.Completion is { } completion)
                 {
-                    var request = storyRequest;
-                    // Remove the complete feedback overlay and restore the map before the owned receipt.
-                    storyNumbers.Clear();
-                    RemoveChild(storyView!); storyView!.Free(); storyView = null;
-                    mapScene!.Visible = true; RestoreStoryMap();
-                    storyRequest = null; StoryBattleMode = null; enemyPresentation = null; playerPresentation = null; enemyIdle = null;
-                    if (!Dialogue!.AcknowledgeBattle(request.Id, completion))
-                        throw new InvalidOperationException("Story battle completion was not owned by the active trigger.");
-                    // A child display must not consume this battle callback's delta.
-                    resumeStoryDisplay = true;
-                    CompleteTrigger();
+                    CompleteStoryBattle(completion);
                     return true;
                 }
+                // The triggering action's feedback is done; a paused role hook shows its script now.
+                if (lifecycle.Current.Combat.PendingRoleHook is not null) { BeginStoryBattleHook(); break; }
+                // The outer deadline set before the blocking action is already overdue.
+                outerDue = true;
+                StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Selecting
+                    ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
+                break;
+            case StoryBattlePresentation.HookDialogue:
+                // The hook script runs on the real display; its completion acknowledges the paused
+                // battle (TriggerScriptSession.Complete), which is observed through the combat phase.
+                if (lifecycle.Current.Combat.Phase != ClassicBattlePhase.RoleHook)
+                {
+                    EndStoryBattleHook();
+                    if (lifecycle.Completion is { } hookCompletion)
+                    {
+                        CompleteStoryBattle(hookCompletion);
+                        return true;
+                    }
+                    outerDue = true;
+                    StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Selecting
+                        ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
+                }
+                break;
                 // The outer deadline set before the blocking action is already overdue.
                 outerDue = true;
                 StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Selecting
@@ -269,6 +288,39 @@ public partial class Main
             storyNumbers.At(now), storyNumbers.LabelAt(now), storyTargetSlot);
         return true;
     }
+    private void BeginStoryBattleHook()
+    {
+        // The paused battle stays visible behind the real dialogue display; the display is parked
+        // again when the hook completes so it cannot consume battle-frame time or input.
+        StoryBattleMode = StoryBattlePresentation.HookDialogue;
+        Display!.ZIndex = 200; // above the battle view's ZIndex 100
+        Display!.SetProcess(true);
+        Dialogue!.StartBattleHook();
+        storyView!.Present(storyRequest!.Lifecycle.Current.Combat, StoryBattleMode.Value,
+            enemyIdle!.Frame, enemyIdle!.Counter, highlightedEnemySlot: storyTargetSlot);
+    }
+
+    private void EndStoryBattleHook()
+    {
+        Display!.ZIndex = 0;
+        Display!.SetProcess(false);
+    }
+
+    private void CompleteStoryBattle(ClassicBattleLifecycleSession.CompletionReceipt completion)
+    {
+        var request = storyRequest;
+        // Remove the complete feedback overlay and restore the map before the owned receipt.
+        storyNumbers.Clear();
+        RemoveChild(storyView!); storyView!.Free(); storyView = null;
+        mapScene!.Visible = true; RestoreStoryMap();
+        storyRequest = null; StoryBattleMode = null; enemyPresentation = null; playerPresentation = null; enemyIdle = null;
+        if (!Dialogue!.AcknowledgeBattle(request.Id, completion))
+            throw new InvalidOperationException("Story battle completion was not owned by the active trigger.");
+        // A child display must not consume this battle callback's delta.
+        resumeStoryDisplay = true;
+        CompleteTrigger();
+    }
+
     private void AdvanceStoryGesture(int pose)
     {
         if (playerPresentation is not null)

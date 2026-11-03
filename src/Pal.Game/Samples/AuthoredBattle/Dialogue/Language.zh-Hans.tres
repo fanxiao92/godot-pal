@@ -38,187 +38,157 @@ Entries = Array[ExtResource("1")]([SubResource("s4")])
 script = ExtResource("1")
 Text = "我能战"
 
-[sub_resource type="Resource" id="m4r"]
-script = ExtResource("2")
-StartMessageId = 4
-EndMessageId = 4
-Entries = Array[ExtResource("1")]([SubResource("m4e")])
-
 [sub_resource type="Resource" id="m5e"]
 script = ExtResource("1")
 Text = "别管我"
-
-[sub_resource type="Resource" id="m5r"]
-script = ExtResource("2")
-StartMessageId = 5
-EndMessageId = 5
-Entries = Array[ExtResource("1")]([SubResource("m5e")])
 
 [sub_resource type="Resource" id="m6e"]
 script = ExtResource("1")
 Text = "快攻"
 
-[sub_resource type="Resource" id="m6r"]
-script = ExtResource("2")
-StartMessageId = 6
-EndMessageId = 6
-Entries = Array[ExtResource("1")]([SubResource("m6e")])
-
 [sub_resource type="Resource" id="m7e"]
 script = ExtResource("1")
 Text = "小心"
-
-[sub_resource type="Resource" id="m7r"]
-script = ExtResource("2")
-StartMessageId = 7
-EndMessageId = 7
-Entries = Array[ExtResource("1")]([SubResource("m7e")])
 
 [sub_resource type="Resource" id="m8e"]
 script = ExtResource("1")
 Text = "我败了"
 
-[sub_resource type="Resource" id="m8r"]
-script = ExtResource("2")
-StartMessageId = 8
-EndMessageId = 8
-Entries = Array[ExtResource("1")]([SubResource("m8e")])
-
 [sub_resource type="Resource" id="m9e"]
 script = ExtResource("1")
 Text = "报仇"
-
-[sub_resource type="Resource" id="m9r"]
-script = ExtResource("2")
-StartMessageId = 9
-EndMessageId = 9
-Entries = Array[ExtResource("1")]([SubResource("m9e")])
 
 [sub_resource type="Resource" id="m10e"]
 script = ExtResource("1")
 Text = "别哭"
 
-[sub_resource type="Resource" id="m10r"]
-script = ExtResource("2")
-StartMessageId = 10
-EndMessageId = 10
-Entries = Array[ExtResource("1")]([SubResource("m10e")])
-
 [sub_resource type="Resource" id="m11e"]
 script = ExtResource("1")
 Text = "护大家"
-
-[sub_resource type="Resource" id="m11r"]
-script = ExtResource("2")
-StartMessageId = 11
-EndMessageId = 11
-Entries = Array[ExtResource("1")]([SubResource("m11e")])
 
 [sub_resource type="Resource" id="m12e"]
 script = ExtResource("1")
 Text = "谢"
 
-[sub_resource type="Resource" id="m12r"]
-script = ExtResource("2")
-StartMessageId = 12
-EndMessageId = 12
-Entries = Array[ExtResource("1")]([SubResource("m12e")])
-
 [sub_resource type="Resource" id="m13e"]
 script = ExtResource("1")
 Text = "必胜"
-
-[sub_resource type="Resource" id="m13r"]
-script = ExtResource("2")
-StartMessageId = 13
-EndMessageId = 13
-Entries = Array[ExtResource("1")]([SubResource("m13e")])
 
 [sub_resource type="Resource" id="m14e"]
 script = ExtResource("1")
 Text = "集中"
 
-[sub_resource type="Resource" id="m14r"]
-script = ExtResource("2")
-StartMessageId = 14
-EndMessageId = 14
-Entries = Array[ExtResource("1")]([SubResource("m14e")])
-
 [sub_resource type="Resource" id="m15e"]
 script = ExtResource("1")
 Text = "别慌"
-
-[sub_resource type="Resource" id="m15r"]
-script = ExtResource("2")
-StartMessageId = 15
-EndMessageId = 15
-Entries = Array[ExtResource("1")]([SubResource("m15e")])
 
 [sub_resource type="Resource" id="m16e"]
 script = ExtResource("1")
 Text = "兄弟"
 
-[sub_resource type="Resource" id="m16r"]
-script = ExtResource("2")
-StartMessageId = 16
-EndMessageId = 16
-Entries = Array[ExtResource("1")]([SubResource("m16e")])
-
 [sub_resource type="Resource" id="m17e"]
 script = ExtResource("1")
 Text = "安息"
-
-[sub_resource type="Resource" id="m17r"]
-script = ExtResource("2")
-StartMessageId = 17
-EndMessageId = 17
-Entries = Array[ExtResource("1")]([SubResource("m17e")])
 
 [sub_resource type="Resource" id="m18e"]
 script = ExtResource("1")
 Text = "我会胜"
 
-[sub_resource type="Resource" id="m18r"]
-script = ExtResource("2")
-StartMessageId = 18
-EndMessageId = 18
-Entries = Array[ExtResource("1")]([SubResource("m18e")])
-
 [sub_resource type="Resource" id="m19e"]
 script = ExtResource("1")
 Text = "悲为力"
-
-[sub_resource type="Resource" id="m19r"]
-script = ExtResource("2")
-StartMessageId = 19
-EndMessageId = 19
-Entries = Array[ExtResource("1")]([SubResource("m19e")])
 
 [sub_resource type="Resource" id="m20e"]
 script = ExtResource("1")
 Text = "别倒"
 
-[sub_resource type="Resource" id="m20r"]
-script = ExtResource("2")
-StartMessageId = 20
-EndMessageId = 20
-Entries = Array[ExtResource("1")]([SubResource("m20e")])
-
 [sub_resource type="Resource" id="m21e"]
 script = ExtResource("1")
 Text = "站起"
-
-[sub_resource type="Resource" id="m21r"]
-script = ExtResource("2")
-StartMessageId = 21
-EndMessageId = 21
-Entries = Array[ExtResource("1")]([SubResource("m21e")])
 
 [sub_resource type="Resource" id="m22e"]
 script = ExtResource("1")
 Text = "回家"
 
-[sub_resource type="Resource" id="m22r"]
+[sub_resource type="Resource" id="m6_7r"]
+script = ExtResource("2")
+StartMessageId = 6
+EndMessageId = 7
+Entries = Array[ExtResource("1")]([SubResource("m6e"), SubResource("m7e")])
+
+[sub_resource type="Resource" id="m8_9r"]
+script = ExtResource("2")
+StartMessageId = 8
+EndMessageId = 9
+Entries = Array[ExtResource("1")]([SubResource("m8e"), SubResource("m9e")])
+
+[sub_resource type="Resource" id="m10_11r"]
+script = ExtResource("2")
+StartMessageId = 10
+EndMessageId = 11
+Entries = Array[ExtResource("1")]([SubResource("m10e"), SubResource("m11e")])
+
+[sub_resource type="Resource" id="m12_13r"]
+script = ExtResource("2")
+StartMessageId = 12
+EndMessageId = 13
+Entries = Array[ExtResource("1")]([SubResource("m12e"), SubResource("m13e")])
+
+[sub_resource type="Resource" id="m14_15r"]
+script = ExtResource("2")
+StartMessageId = 14
+EndMessageId = 15
+Entries = Array[ExtResource("1")]([SubResource("m14e"), SubResource("m15e")])
+
+[sub_resource type="Resource" id="m4_4r"]
+script = ExtResource("2")
+StartMessageId = 4
+EndMessageId = 4
+Entries = Array[ExtResource("1")]([SubResource("m4e")])
+
+[sub_resource type="Resource" id="m5_5r"]
+script = ExtResource("2")
+StartMessageId = 5
+EndMessageId = 5
+Entries = Array[ExtResource("1")]([SubResource("m5e")])
+
+[sub_resource type="Resource" id="m16_16r"]
+script = ExtResource("2")
+StartMessageId = 16
+EndMessageId = 16
+Entries = Array[ExtResource("1")]([SubResource("m16e")])
+
+[sub_resource type="Resource" id="m17_17r"]
+script = ExtResource("2")
+StartMessageId = 17
+EndMessageId = 17
+Entries = Array[ExtResource("1")]([SubResource("m17e")])
+
+[sub_resource type="Resource" id="m18_18r"]
+script = ExtResource("2")
+StartMessageId = 18
+EndMessageId = 18
+Entries = Array[ExtResource("1")]([SubResource("m18e")])
+
+[sub_resource type="Resource" id="m19_19r"]
+script = ExtResource("2")
+StartMessageId = 19
+EndMessageId = 19
+Entries = Array[ExtResource("1")]([SubResource("m19e")])
+
+[sub_resource type="Resource" id="m20_20r"]
+script = ExtResource("2")
+StartMessageId = 20
+EndMessageId = 20
+Entries = Array[ExtResource("1")]([SubResource("m20e")])
+
+[sub_resource type="Resource" id="m21_21r"]
+script = ExtResource("2")
+StartMessageId = 21
+EndMessageId = 21
+Entries = Array[ExtResource("1")]([SubResource("m21e")])
+
+[sub_resource type="Resource" id="m22_22r"]
 script = ExtResource("2")
 StartMessageId = 22
 EndMessageId = 22
@@ -228,6 +198,6 @@ Entries = Array[ExtResource("1")]([SubResource("m22e")])
 script = ExtResource("3")
 Language = "zh-Hans"
 SourceIdentity = "Original pixel art and bitmap lettering authored for godot-pal #46; no retail assets or extraction evidence."
-Messages = Array[ExtResource("2")]([SubResource("s1"), SubResource("s3"), SubResource("s5"), SubResource("m4r"), SubResource("m5r"), SubResource("m6r"), SubResource("m7r"), SubResource("m8r"), SubResource("m9r"), SubResource("m10r"), SubResource("m11r"), SubResource("m12r"), SubResource("m13r"), SubResource("m14r"), SubResource("m15r"), SubResource("m16r"), SubResource("m17r"), SubResource("m18r"), SubResource("m19r"), SubResource("m20r"), SubResource("m21r"), SubResource("m22r")])
+Messages = Array[ExtResource("2")]([SubResource("s1"), SubResource("s3"), SubResource("s5"), SubResource("m6_7r"), SubResource("m8_9r"), SubResource("m10_11r"), SubResource("m12_13r"), SubResource("m14_15r"), SubResource("m4_4r"), SubResource("m5_5r"), SubResource("m16_16r"), SubResource("m17_17r"), SubResource("m18_18r"), SubResource("m19_19r"), SubResource("m20_20r"), SubResource("m21_21r"), SubResource("m22_22r")])
 
 Words = Dictionary[int, String]({60000: "攻击", 60001: "目标", 60002: "闪避", 60003: "暴击", 60004: "生命", 60005: "提升"})

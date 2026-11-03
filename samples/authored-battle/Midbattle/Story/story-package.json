@@ -10,11 +10,20 @@
   "entryAddress": 1,
   "battleContentUri": "res://Assets/AuthoredBattle/Midbattle/Numbers/BattleContent.tres",
   "dialogueDirectory": "res://Samples/AuthoredBattle/Dialogue",
-  "portraits": {
-    "2": "res://Samples/AuthoredBattle/Dialogue/Portrait-002.tres",
-    "5": "res://Samples/AuthoredBattle/Dialogue/Portrait-005.tres",
-    "15": "res://Samples/AuthoredBattle/Dialogue/Portrait-015.tres"
-  },
+  "portraits": [
+    {
+      "id": 2,
+      "uri": "res://Samples/AuthoredBattle/Dialogue/Portrait-002.tres"
+    },
+    {
+      "id": 5,
+      "uri": "res://Samples/AuthoredBattle/Dialogue/Portrait-005.tres"
+    },
+    {
+      "id": 15,
+      "uri": "res://Samples/AuthoredBattle/Dialogue/Portrait-015.tres"
+    }
+  ],
   "visual": {
     "roleId": 0,
     "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",

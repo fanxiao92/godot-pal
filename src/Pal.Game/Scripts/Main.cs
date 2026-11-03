@@ -205,7 +205,12 @@ public partial class Main : Node2D
             if (key.Pressed && !key.Echo
                 && (key.Keycode is Key.Enter or Key.Space or Key.KpEnter || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right))
             {
-                if (storyRequest is not null) battleConfirm = true;
+                if (storyRequest is not null)
+                {
+                    // The paused role hook's dialogue display consumes input itself; a menu
+                    // confirm must not queue behind the script (fight.c 768-880 pause).
+                    if (StoryBattleMode != StoryBattlePresentation.HookDialogue) battleConfirm = true;
+                }
                 else if (battle is not null) battle.PressSearch();
                 else if (Interaction is { Phase: not NpcInteractionPhase.Trigger } npc) npc.PressSearch();
                 else return;

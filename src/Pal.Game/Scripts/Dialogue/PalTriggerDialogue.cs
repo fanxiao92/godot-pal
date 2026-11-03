@@ -78,6 +78,15 @@ public partial class PalTriggerDialogue : Node
         return true;
     }
 
+    /// <summary>Runs the paused battle's role-hook script on the real display (fight.c 768-880);
+    /// the parked outer call stays on its startBattle command until the hook completes.</summary>
+    public void StartBattleHook()
+    {
+        if (Session is null) throw new InvalidOperationException("Initialize trigger dialogue before starting a battle hook.");
+        Session.StartBattleHook();
+        BindPendingDisplay();
+    }
+
     public void Start(string fileId, string entryId, int caller) => StartCall(fileId, entryId, caller, null);
 
     public void Start(string fileId, string entryId, int caller, Guid sourceRequestId)

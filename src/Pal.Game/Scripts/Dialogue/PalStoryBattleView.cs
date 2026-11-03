@@ -9,13 +9,13 @@ using Pal.Game.Resources;
 
 namespace Pal.Game.Dialogue;
 
-public enum StoryBattlePresentation { AttackMenu, TargetMenu, Resolving, Feedback }
+public enum StoryBattlePresentation { AttackMenu, TargetMenu, Resolving, Feedback, HookDialogue }
 
 /// <summary>Indexed native art and authored WORD labels. Main alone advances combat and presentation.</summary>
 internal partial class PalStoryBattleView : Node2D
 {
     // Modern demo WORD convention, not retail SDL IDs (SDL attack selection uses an icon).
-    internal const int AttackWord = 60000, TargetWord = 60001, MissWord = 60002, CriticalWord = 60003, HpWord = 60004;
+    internal const int AttackWord = 60000, TargetWord = 60001, MissWord = 60002, CriticalWord = 60003, HpWord = 60004, BoostWord = 60005;
     private CheckedStoryProfile story = null!;
     private CheckedBattleVisualProfile visual = null!;
     private CheckedBattleVisualTeam team = null!;
@@ -37,7 +37,7 @@ internal partial class PalStoryBattleView : Node2D
 
     internal static void ValidateUi(CheckedStoryProfile story)
     {
-        foreach (int id in new[] { AttackWord, TargetWord, MissWord, CriticalWord, HpWord })
+        foreach (int id in new[] { AttackWord, TargetWord, MissWord, CriticalWord, HpWord, BoostWord })
         {
             if (!story.SelectedWords.TryGetValue(id, out string? text) || string.IsNullOrWhiteSpace(text))
                 throw new InvalidDataException($"Story battle UI requires nonempty WORD {id}.");
@@ -136,7 +136,21 @@ internal partial class PalStoryBattleView : Node2D
         }
         DrawSnapshot = new(pf, ef, player, enemy, playerShift, enemyShift, fx, fxPosition, php, ehp, result, idleCounter)
         { NumberDigits = NumberDigits, FeedbackWord = FeedbackWord, PartyPlayers = partyPlayers, PartyEnemies = partyEnemies,
-            SelectingPlayer = party ? combat.SelectingPlayerIndex : null };
+            SelectingPlayer = party ? combat.SelectingPlayerIndex : null,
+            PartyBoosts = BoostSums(combat) };
+    }
+
+    // The boost panel exists only while a role-hook boost register actually changed a member's
+    // panel (script.c 0x0030); each entry is that member's five-register sum.
+    private static int[] BoostSums(ClassicBattleView combat)
+    {
+        var sums = new int[combat.Players.Count];
+        for (int i = 0; i < sums.Length; i++)
+        {
+            var member = combat.Players[i];
+            sums[i] = member.BoostAttack + member.BoostMagicPower + member.BoostDefense + member.BoostDexterity + member.BoostFlee;
+        }
+        return sums.Any(value => value != 0) ? sums : Array.Empty<int>();
     }
 
     private StoryActorDraw[] PlayerDraws(ClassicBattleAction? action)
@@ -206,7 +220,7 @@ internal partial class PalStoryBattleView : Node2D
             var texture = effects[effect];
             DrawTexture(texture, shown.EffectPosition - new Vector2(texture.GetWidth() / 2, texture.GetHeight()));
         }
-        DrawRect(new Rect2(0, 174, 320, 26), new Color(0, 0, 0, .9f));
+        DrawRect(new Rect2(0, 174, 320, shown.PartyBoosts.Count > 0 ? 33 : 26), new Color(0, 0, 0, .9f));
         if (shown.PartyEnemies.Count > 0)
         {
             // Per-actor HP panel: members then enemy slots, slash-separated in slot order.
@@ -215,6 +229,8 @@ internal partial class PalStoryBattleView : Node2D
         }
         else
             Text(story.SelectedWords[HpWord] + ":" + DisplayedPlayerHp + "/" + DisplayedEnemyHp, new Vector2(4, 176));
+        if (shown.PartyBoosts.Count > 0)
+            Text(story.SelectedWords[BoostWord] + ":" + string.Join("/", shown.PartyBoosts), new Vector2(4, 191));
         string label = mode == StoryBattlePresentation.AttackMenu
             ? shown.PartyEnemies.Count > 0 && shown.SelectingPlayer is { } member
                 ? story.SelectedWords[AttackWord] + ":" + (member + 1) : story.SelectedWords[AttackWord]
@@ -254,6 +270,8 @@ internal readonly record struct StoryBattleDrawSnapshot(int PlayerFrame, int Ene
     // Party per-actor truth in party/slot order; empty keeps the legacy single-pair projection.
     internal IReadOnlyList<StoryActorDraw> PartyPlayers { get; init; } = Array.Empty<StoryActorDraw>();
     internal IReadOnlyList<StoryActorDraw> PartyEnemies { get; init; } = Array.Empty<StoryActorDraw>();
+    // Per-member role-hook boost sums; empty while no boost register is set.
+    internal IReadOnlyList<int> PartyBoosts { get; init; } = Array.Empty<int>();
     internal int? SelectingPlayer { get; init; }
 }
 

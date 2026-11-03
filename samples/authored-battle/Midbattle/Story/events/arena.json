@@ -168,7 +168,7 @@
     {
       "label": "L0009",
       "op": "end",
-      "next": null,
+      "next": "L0010",
       "source": {
         "index": 9,
         "opcode": 0,
@@ -265,7 +265,7 @@
     {
       "label": "L0015",
       "op": "end",
-      "next": null,
+      "next": "L0016",
       "source": {
         "index": 15,
         "opcode": 0,
@@ -364,7 +364,7 @@
     {
       "label": "L0021",
       "op": "end",
-      "next": null,
+      "next": "L0022",
       "source": {
         "index": 21,
         "opcode": 0,
@@ -479,7 +479,7 @@
     {
       "label": "L0028",
       "op": "end",
-      "next": null,
+      "next": "L0029",
       "source": {
         "index": 28,
         "opcode": 0,
@@ -594,7 +594,7 @@
     {
       "label": "L0035",
       "op": "end",
-      "next": null,
+      "next": "L0036",
       "source": {
         "index": 35,
         "opcode": 0,
@@ -756,7 +756,7 @@
     {
       "label": "L0045",
       "op": "end",
-      "next": null,
+      "next": "L0046",
       "source": {
         "index": 45,
         "opcode": 0,
@@ -870,7 +870,7 @@
     {
       "label": "L0052",
       "op": "end",
-      "next": null,
+      "next": "L0053",
       "source": {
         "index": 52,
         "opcode": 0,
@@ -985,7 +985,7 @@
     {
       "label": "L0059",
       "op": "end",
-      "next": null,
+      "next": "L0060",
       "source": {
         "index": 59,
         "opcode": 0,
