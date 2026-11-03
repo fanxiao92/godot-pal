@@ -412,7 +412,7 @@ public sealed class TriggerScriptBattleBindingTests
         fixture.Commands[3] = fault switch
         {
             "raw" => JsonNode.Parse("""{"label":"L0003","op":"raw","next":"L0004","source":{"index":3,"opcode":7,"operands":[18,0,0]}}"""),
-            "unsupported" => JsonNode.Parse("""{"label":"L0003","op":"setDialog","box":"lower","portraitId":0,"color":0,"rngWord":0,"next":"L0004","source":{"index":3,"opcode":61,"operands":[0,0,0]}}"""),
+            "unsupported" => JsonNode.Parse("""{"label":"L0003","op":"setDialog","box":"center","color":0,"rngWord":0,"next":"L0004","source":{"index":3,"opcode":59,"operands":[0,0,0]}}"""),
             "language" => new EventFixture().Commands[3]!.DeepClone(),
             _ => Battle(3, team: 19)
         };

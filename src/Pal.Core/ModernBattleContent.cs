@@ -144,8 +144,8 @@ public static partial class ModernBattleContent
 
     private static ClassicBattlePlayer Player(JsonElement value, string path)
     {
-        EventJson.Keys(value, path, "roleId", "hp", "maxHp", "attack", "defense", "dexterity", "equipment",
-            "statuses", "poisons", "dyingScript", "friendDeathScript", "coveredByRoleId", "attackAll");
+        EventJson.Keys(value, path, ["roleId", "hp", "maxHp", "attack", "defense", "dexterity", "equipment",
+            "statuses", "poisons", "dyingScript", "friendDeathScript", "coveredByRoleId", "attackAll"], ["magicPower", "fleeRate"]);
         int hp = Number(value, "hp", path), maxHp = Number(value, "maxHp", path, 1);
         if (hp > maxHp) throw Error(path + ".hp", "must not exceed maxHp");
         var cover = Property(value, "coveredByRoleId", path);
@@ -156,9 +156,13 @@ public static partial class ModernBattleContent
             Poisons = Words(value, "poisons", path), DyingScript = Number(value, "dyingScript", path),
             FriendDeathScript = Number(value, "friendDeathScript", path),
             CoveredByRoleId = cover.ValueKind == JsonValueKind.Null ? null : Integer(cover, path + ".coveredByRoleId", 0, 5),
-            AttackAll = Boolean(value, "attackAll", path)
+            AttackAll = Boolean(value, "attackAll", path),
+            MagicPower = OptionalWord(value, "magicPower", path), FleeRate = OptionalWord(value, "fleeRate", path)
         };
     }
+
+    private static int OptionalWord(JsonElement value, string key, string path) =>
+        value.TryGetProperty(key, out var item) ? Integer(item, path + "." + key, 0, 65535) : 0;
 
     private static ClassicBattleEnemy Enemy(JsonElement value, string path)
     {

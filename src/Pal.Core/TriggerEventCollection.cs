@@ -329,6 +329,18 @@ internal static class EventJson
             if (!element.TryGetProperty(key, out _)) throw new InvalidDataException($"{context}: missing field '{key}'.");
     }
 
+    /// <summary>Required keys plus optional keys: present optionals are strictly validated, absent ones use their default.</summary>
+    internal static void Keys(JsonElement element, string context, string[] required, string[] optional)
+    {
+        if (element.ValueKind != JsonValueKind.Object) throw new InvalidDataException($"{context}: expected an object.");
+        foreach (var property in element.EnumerateObject())
+            if (!required.Contains(property.Name, StringComparer.Ordinal) && !optional.Contains(property.Name, StringComparer.Ordinal)
+                && !property.Name.StartsWith('_'))
+                throw new InvalidDataException($"{context}: unknown field '{property.Name}'.");
+        foreach (string key in required)
+            if (!element.TryGetProperty(key, out _)) throw new InvalidDataException($"{context}: missing field '{key}'.");
+    }
+
     internal static void Version(JsonElement element, string context)
     {
         if (Number(element, "formatVersion") != 1 || Text(element, "profile") != "faithful")

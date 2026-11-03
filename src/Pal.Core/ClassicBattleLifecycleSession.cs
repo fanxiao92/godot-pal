@@ -58,14 +58,35 @@ public sealed class ClassicBattleLifecycleSession
     public bool ResolveNextAction()
     {
         if (activeCombat is null || !activeCombat.ResolveNextAction()) return false;
-        ClassicBattleView combat = activeCombat.Current;
-        foreach (var player in combat.Players)
+        SyncPartyFromCombat();
+        SettleCombatCompletion();
+        return true;
+    }
+
+    /// <summary>Resumes the battle after its role hook completed (the script executor acknowledges the
+    /// paused battle). Outcome settlement follows the same rules as a regular action resolution.</summary>
+    public void AcknowledgeRoleHook()
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.AcknowledgeRoleHook();
+        SyncPartyFromCombat();
+        SettleCombatCompletion();
+    }
+
+    private void SyncPartyFromCombat()
+    {
+        foreach (var player in activeCombat!.Current.Players)
         {
             var role = roles[player.RoleId];
             role.Hp = player.Hp;
             role.HiddenExperience["attack"].Count = player.Counts.Attack;
             role.HiddenExperience["health"].Count = player.Counts.Health;
         }
+    }
+
+    private void SettleCombatCompletion()
+    {
+        ClassicBattleView combat = activeCombat!.Current;
         if (activeCombat.Completion is not null)
         {
             // Preflight proved primary/hidden XP remain below their real thresholds and no magic can be added.
@@ -87,7 +108,38 @@ public sealed class ClassicBattleLifecycleSession
             Completion = new(this);
         }
         else Current = View(combat);
-        return true;
+    }
+
+    /// <summary>Role-hook side effects (script.c 0x001B/0x001C/0x0030) land on the live battle state;
+    /// only a running hook's caller context may route them, never a host input.</summary>
+    internal void ApplyRoleHookHp(int partyIndex, int delta)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.HealRoleHookHp(partyIndex, delta);
+        SyncPartyFromCombat();
+        Current = View(activeCombat.Current);
+    }
+
+    internal void ApplyRoleHookMp(int partyIndex, int delta)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        var player = activeCombat.Current.Players[partyIndex];
+        var role = roles[player.RoleId];
+        // PAL_IncreaseHPMP only changes alive players (global.c:1272).
+        if (role.Hp > 0)
+        {
+            int mp = unchecked((ushort)(role.Mp + delta));
+            if ((short)mp < 0) mp = 0;
+            role.Mp = Math.Min(mp, role.MaxMp);
+        }
+        Current = View(activeCombat.Current);
+    }
+
+    internal void ApplyRoleHookStatBoost(int partyIndex, int statField, int percent)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.BoostRoleHookStat(partyIndex, statField, percent);
+        Current = View(activeCombat.Current);
     }
 
     public bool OwnsCompletion(CompletionReceipt? receipt) => Completion is not null && ReferenceEquals(Completion, receipt);

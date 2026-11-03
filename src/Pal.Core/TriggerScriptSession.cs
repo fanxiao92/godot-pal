@@ -11,6 +11,8 @@ public sealed class TriggerScriptSession
     private int _lastCaller;
     private readonly TriggerBattleContent? _battleContent;
     private readonly IBattleRandom? _battleRandom;
+    private ClassicBattleRoleHook? _battleHook;
+    private int _parkedCaller;
 
     // Metadata discovery for the host's selected interaction; does not start or preview a call.
     public IReadOnlyList<TriggerEventEntry> Entries => _events.Entries;
@@ -25,6 +27,11 @@ public sealed class TriggerScriptSession
     public TriggerPosition? CurrentPosition { get; private set; }
     public TriggerDialogueRequest? PendingDisplay { get; private set; }
     public TriggerBattleRequest? PendingBattle { get; private set; }
+    /// <summary>The battle's paused role hook (fight.c 768-880) awaiting StartBattleHook; the paused combat
+    /// is the only source of this state, never a host-written input.</summary>
+    public ClassicBattleRoleHook? PendingBattleHook => PendingBattle?.Lifecycle.Current.Combat.PendingRoleHook;
+    /// <summary>The role hook whose script this executor is currently running; null outside a hook run.</summary>
+    public ClassicBattleRoleHook? RunningBattleHook => _battleHook;
     public IReadOnlyDictionary<int, BattleRoleSnapshot>? BattleRoles { get; private set; }
     public BattleRoleSnapshot? BattleRole => BattleRoles is null ? null : BattleRoles.Count == 1 ? BattleRoles.Values.Single()
         : throw new InvalidOperationException("Use BattleRoles for a multiplayer trigger session.");
@@ -115,8 +122,25 @@ public sealed class TriggerScriptSession
         return true;
     }
 
-    private void ValidateCapabilityClosure(int address) =>
-        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address);
+    /// <summary>Runs the paused battle's role-hook script with the formal caller semantics (the dying
+    /// member's role, or the coverer's role for a friend death). The outer call stays parked on its
+    /// startBattle command; preflight covers every random branch before any side effect.</summary>
+    public void StartBattleHook()
+    {
+        if (Phase != TriggerScriptPhase.WaitingForBattle || PendingBattle is null)
+            throw new InvalidOperationException("No battle is waiting for this trigger call.");
+        if (_battleHook is not null) throw new InvalidOperationException("A battle role hook is already running.");
+        var hook = PendingBattleHook ?? throw new InvalidOperationException("The waiting battle has no pending role hook.");
+        ValidateCapabilityClosure(hook.ScriptAddress, battleHook: true);
+        _battleHook = hook;
+        _parkedCaller = Caller;
+        _lastCaller = Caller = hook.RoleId;
+        _address = hook.ScriptAddress;
+        Continue();
+    }
+
+    private void ValidateCapabilityClosure(int address, bool battleHook = false) =>
+        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, battleHook: battleHook);
 
     private sealed class EntryRequirementsCollector
     {
@@ -127,24 +151,49 @@ public sealed class TriggerScriptSession
 
     private static void ValidateCapabilityClosure(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent? battleContent, IReadOnlyDictionary<int, BattleRoleSnapshot>? battleRoles, int color, int address,
-        EntryRequirementsCollector? requirements = null)
+        EntryRequirementsCollector? requirements = null, bool battleHook = false)
     {
-        var pending = new Stack<int>();
-        var visited = new HashSet<int>();
-        pending.Push(address);
-        while (pending.TryPop(out address))
+        var pending = new Stack<(int Address, bool Hook)>();
+        var visited = new HashSet<(int Address, bool Hook)>();
+        pending.Push((address, battleHook));
+        while (pending.TryPop(out var item))
         {
-            if (address == 0 || !visited.Add(address)) continue;
+            address = item.Address;
+            if (address == 0 || !visited.Add(item)) continue;
             var command = events.CommandAt(address);
             if (command.Op == "end" && command.Mode == "keep") continue;
-            if (command.Op == "startBattle" && battleContent is not null)
+            if (command.Op == "startBattle" && battleContent is not null && !item.Hook)
             {
                 try { battleContent.Validate(command.TeamId, battleRoles!); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 requirements?.Teams.Add(command.TeamId);
-                pending.Push(Next(command));
-                if (command.LossAddress is { } loss) pending.Push(loss);
-                if (command.FleeAddress is { } flee) pending.Push(flee);
+                pending.Push((Next(command), false));
+                if (command.LossAddress is { } loss) pending.Push((loss, false));
+                if (command.FleeAddress is { } flee) pending.Push((flee, false));
+                // fight.c 768-880: the party's dying and friend-death scripts may run mid-battle; their
+                // whole random closure is preflighted with the battle's declared party players.
+                foreach (var player in battleContent.SettledPlayers(battleRoles!))
+                {
+                    if (player.FriendDeathScript != 0) PushHook(events, pending, command.Position, player.FriendDeathScript);
+                    if (player.DyingScript != 0) PushHook(events, pending, command.Position, player.DyingScript);
+                }
+            }
+            else if (command.Op == "randomJump" && battleContent is not null)
+            {
+                // script.c 3301: both the rate-miss successor and the jump target are real branches.
+                pending.Push((Next(command), item.Hook));
+                pending.Push((command.TargetAddress!.Value, item.Hook));
+            }
+            else if (command.Op is "changeHp" or "changeMp" or "boostStat")
+            {
+                if (!item.Hook) throw new InvalidDataException($"{command.Position}: {command.Op} is only supported inside a battle role hook.");
+                if (command.Op != "boostStat" && command.Scope != 0)
+                    throw new InvalidDataException($"{command.Position}: party-wide {command.Op} is unsupported; the role hook applies to its caller.");
+                if (command.Op == "boostStat" && command.RoleOperand != 0)
+                    throw new InvalidDataException($"{command.Position}: boostStat must target the role hook's caller.");
+                if (command.Op == "boostStat" && command.StatField is not (17 or 18 or 19 or 20 or 21))
+                    throw new InvalidDataException($"{command.Position}: temporary stat boost field {command.StatField} is not a supported panel word.");
+                pending.Push((Next(command), true));
             }
             else if (command.Op == "showDialog")
             {
@@ -157,15 +206,23 @@ public sealed class TriggerScriptSession
                 }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 requirements?.Displays.Add(new(content.Block, content.References));
-                pending.Push(address);
+                pending.Push((address, item.Hook));
             }
-            else if (command.Op == "setDialog" && command.Box == "upper" && command.RngWord == 0)
+            else if (command.Op == "setDialog" && command.Box is "upper" or "lower" or "centerWindow" && command.RngWord == 0)
             {
                 if (command.PortraitId != 0) requirements?.Portraits.Add(command.PortraitId);
-                pending.Push(Next(command));
+                pending.Push((Next(command), item.Hook));
             }
             else throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
         }
+    }
+
+    private static void PushHook(TriggerEventCollection events, Stack<(int Address, bool Hook)> pending,
+        TriggerPosition position, int scriptAddress)
+    {
+        if (scriptAddress >= events.InstructionCount)
+            throw new InvalidDataException($"{position}: role hook address {scriptAddress:X4} is outside the event collection.");
+        pending.Push((scriptAddress, true));
     }
 
     private (DialogueMessageBlock Block, IReadOnlyList<TriggerMessageReference> References) ReadDisplay(ref int address) =>
@@ -206,8 +263,31 @@ public sealed class TriggerScriptSession
             switch (command.Op)
             {
                 case "end" when command.Mode == "keep": Complete(); return;
-                case "setDialog" when command.Box == "upper" && command.RngWord == 0:
+                case "setDialog" when command.Box is "upper" or "lower" && command.RngWord == 0:
                     Context = Context with { Box = command.Box, PortraitId = command.PortraitId, Color = command.Color == 0 ? Context.Color : command.Color };
+                    _address = Next(command);
+                    break;
+                case "setDialog" when command.Box == "centerWindow":
+                    Context = Context with { Box = command.Box, PortraitId = 0, Color = command.Color == 0 ? Context.Color : command.Color };
+                    _address = Next(command);
+                    break;
+                case "randomJump" when _battleRandom is not null:
+                    // script.c 3301-3312: the production draw is taken when at or above the rate; the
+                    // other successor stays untouched, consuming exactly one draw per jump command.
+                    _address = _battleRandom.NextInclusive(1, 100) >= command.Rate ? command.TargetAddress!.Value : Next(command);
+                    break;
+                case "changeHp" when _battleHook is not null:
+                case "changeMp" when _battleHook is not null:
+                    if (command.Scope != 0)
+                        throw new InvalidDataException($"{command.Position}: party-wide {command.Op} is unsupported; the role hook applies to its caller.");
+                    if (command.Op == "changeHp") PendingBattle!.Lifecycle.ApplyRoleHookHp(_battleHook.PartyIndex, command.Amount);
+                    else PendingBattle!.Lifecycle.ApplyRoleHookMp(_battleHook.PartyIndex, command.Amount);
+                    _address = Next(command);
+                    break;
+                case "boostStat" when _battleHook is not null:
+                    if (command.RoleOperand != 0)
+                        throw new InvalidDataException($"{command.Position}: boostStat must target the role hook's caller.");
+                    PendingBattle!.Lifecycle.ApplyRoleHookStatBoost(_battleHook.PartyIndex, command.StatField, command.Amount);
                     _address = Next(command);
                     break;
                 case "startBattle" when _battleContent is not null:
@@ -242,6 +322,16 @@ public sealed class TriggerScriptSession
 
     private void Complete()
     {
+        // A finished role hook resumes its paused battle; the outer call stays parked on its startBattle
+        // command and keeps the hook's final dialog context (the reference dialog state is global).
+        if (_battleHook is not null)
+        {
+            _battleHook = null;
+            PendingBattle!.Lifecycle.AcknowledgeRoleHook();
+            Caller = _parkedCaller; // the parked outer call keeps its own caller (PAL_RunTriggerScript state)
+            Phase = TriggerScriptPhase.WaitingForBattle;
+            return;
+        }
         Phase = TriggerScriptPhase.Completed;
         Context = new TriggerDialogueContext("upper", 0, DialogueTextTokenizer.DefaultColor, false, Context.DelayMilliseconds);
     }
