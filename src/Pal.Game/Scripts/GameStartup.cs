@@ -33,6 +33,13 @@ public partial class GameStartup : Main
     private void ExitOnFailure(string message)
     {
         GD.PrintErr(message);
+        // The failing child has already freed its scene node (Main._Ready's map.Free()); the
+        // loaded scene's Godot.Collections.Array wrappers are now unreachable. If their
+        // finalizers only run at process exit (GC.RunFinalizers), godotsharp_array_destroy
+        // fires after native teardown and the child dies with 0xC0000005 instead of exit 1
+        // (load/timing-sensitive). Drain finalizers here, while the engine is still alive.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
         GetTree().Quit(1);
     }
 
