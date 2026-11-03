@@ -292,12 +292,11 @@ public sealed class TriggerEventCollection
                         throw new InvalidDataException("Invalid walkStep direction/opcode mapping.");
                     break;
                 case "face":
-                    // script.c 0x000F: caller object direction/gesture; 0xFFFF keeps the current value.
+                    // script.c 0x000F: direction/gesture are plain WORDs (retail rows use gesture
+                    // poses beyond 3); 0xFFFF keeps the current value for that word.
                     if (opcode != 0x000f) throw new InvalidDataException("Invalid face mapping.");
                     command.Direction = EventJson.Word(node, "direction");
                     command.Frame = EventJson.Word(node, "frame");
-                    if (command.Direction is not (>= 0 and <= 3 or 0xffff) || command.Frame is not (>= 0 and <= 3 or 0xffff))
-                        throw new InvalidDataException("face direction/frame must be 0..3 or 0xFFFF (keep).");
                     break;
                 case "walkTo":
                     // script.c 0x0010: caller walks to map tile (x,y,h) at speed 3; the command
@@ -352,13 +351,15 @@ public sealed class TriggerEventCollection
                     if (command.Layer is < 0 or > 1) throw new InvalidDataException("setPartyPos.h must be 0 or 1.");
                     break;
                 case "setPartyFacing":
-                    // script.c 0x0015: party direction + member gesture (frame = direction*3+gesture).
+                    // script.c 0x0015: wPartyDirection and the member gesture are plain WORDs
+                    // (retail rows use gesture poses well beyond 2; frame = direction*3+gesture
+                    // at render time). memberIndex still bounds the party array.
                     if (opcode != 0x15) throw new InvalidDataException("Invalid setPartyFacing mapping.");
                     command.Direction = EventJson.Word(node, "direction");
                     command.Frame = EventJson.Word(node, "gesture");
                     command.MemberIndex = EventJson.Word(node, "memberIndex");
-                    if (command.Direction is < 0 or > 3 || command.Frame is < 0 or > 2 || command.MemberIndex > 4)
-                        throw new InvalidDataException("setPartyFacing direction/gesture/memberIndex out of range.");
+                    if (command.MemberIndex > 4)
+                        throw new InvalidDataException("setPartyFacing memberIndex is outside the party array.");
                     break;
                 case "waitUpdate":
                     // script.c 0x0009: wait frames while running the real scene update each frame

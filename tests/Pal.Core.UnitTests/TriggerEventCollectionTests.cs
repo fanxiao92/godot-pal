@@ -373,6 +373,23 @@ public class TriggerEventCollectionTests
     }
 
     [Fact]
+    public void Retail_pose_words_parse_beyond_the_authored_small_domains()
+    {
+        // Retail rows use gesture poses far beyond the authored 0..2/0..3 sample space
+        // (script.c 0x0015/0x000F words are plain WORDs; 0xFFFF stays the keep value).
+        var events = new EventFixture();
+        events.Commands[1] = JsonNode.Parse("""
+          {"label":"L0001","op":"setPartyFacing","direction":0,"gesture":26,"memberIndex":0,
+           "next":"L0002","source":{"index":1,"opcode":21,"operands":[0,26,0]}}
+          """);
+        events.Commands[2] = JsonNode.Parse("""
+          {"label":"L0002","op":"face","direction":0,"frame":11,
+           "next":"L0003","source":{"index":2,"opcode":15,"operands":[0,11,0]}}
+          """);
+        Assert.NotNull(events.Load());
+    }
+
+    [Fact]
     public void WaitUpdate_accepts_the_retail_truthy_operand_words_not_only_zero_and_one()
     {
         // Retail chunk-4 rows carry 0xFFFF for the gesture flag; script.c tests it for truthiness only.

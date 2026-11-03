@@ -70,7 +70,7 @@ try {
         $bindingPath=[IO.Path]::GetFullPath($options['-BattleResources']); Assert-NoLink $bindingPath
         if(-not [IO.File]::Exists($bindingPath)){throw 'BattleResources must select an existing binding file.'}
         if((Test-Inside $bindingPath $project)){throw 'BattleResources must be outside src/Pal.Game.'}
-        if((Test-Inside $bindingPath $inputRoot)-or(Test-Inside $inputRoot ([IO.Path]::GetDirectoryName($bindingPath)))){throw 'BattleResources must not overlap the authored input directory.'}
+        if(Test-Inside $bindingPath $inputRoot){throw 'BattleResources must not be inside the authored input directory.'}
         $resourceArgs=@('--battle-resources',$bindingPath)
     }
     Invoke-Checked $godot @('--headless','--path',$project,'res://Editor/PrepareBattleContext.tscn','--','--battle-input',$inputRoot,'--battle-output',$outputRoot,'--static-resources',$options['-StaticResources'],'--static-profile',$options['-StaticProfile'])+$resourceArgs 'PAL_PREPARE_BATTLE_CONTEXT:first-mandatory-battle-pre-trigger-v1'

@@ -134,15 +134,18 @@ public partial class PrepareBattleContext : Node
         native.ImageIncludesLayoutAndEffectFrames = binding.IncludesLayoutAndEffectFrames;
         foreach ((int id, string uri) in binding.Portraits) native.Portraits.Add(id, uri);
         string dialogue = binding.DialogueDirectory;
-        string[] seeds = new[] { binding.BattleContentUri, binding.EventsIndex, dialogue + "/Font.tres",
+        // The events index is a modern JSON collection input, not a native resource type; the
+        // story chain likewise unions the complete event file list instead of walking into it.
+        string[] seeds = new[] { binding.BattleContentUri, dialogue + "/Font.tres",
             dialogue + "/Language.zh-Hans.tres", dialogue + "/Language.en.tres",
             dialogue + "/Prompt-00.tres", dialogue + "/Prompt-01.tres", dialogue + "/Prompt-02.tres" }
             .Concat(binding.Portraits.Select(pair => pair.Uri)).Concat(binding.PlayerSpriteUris).ToArray();
-        foreach (string seed in seeds) _ = PreparationPathSafety.AssetResourcePath(seed, directory: seed.EndsWith(".tres") || seed.EndsWith(".json"));
+        foreach (string seed in seeds) _ = PreparationPathSafety.AssetResourcePath(seed, directory: !(seed.EndsWith(".tres") || seed.EndsWith(".json")));
         var graph = NativeContentDependencies.ContentDependencies(seeds);
         string indexPath = ProjectSettings.GlobalizePath(binding.EventsIndex);
         using var indexDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(indexPath));
         string directory = binding.EventsIndex[..binding.EventsIndex.LastIndexOf('/')];
+        graph.Add(binding.EventsIndex);
         foreach (var file in indexDocument.RootElement.GetProperty("files").EnumerateArray())
         {
             string uri = directory + "/" + file.GetString() + ".json";

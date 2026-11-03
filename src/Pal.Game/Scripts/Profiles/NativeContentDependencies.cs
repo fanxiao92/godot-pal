@@ -48,7 +48,7 @@ internal static class NativeContentDependencies
         NativeExplorationProfile.ValidateUri(path);
         Require(hashes.TryGetValue(path, out string? expected) && IsHash(expected)
             && Godot.FileAccess.FileExists(path) && Godot.FileAccess.GetSha256(path) == expected,
-            path + ": story resource SHA-256 mismatch, missing hash or missing resource");
+            path + ": resource SHA-256 mismatch, missing hash or missing resource");
     }
     internal static bool IsHash(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
     internal static IEnumerable<string> Dependencies(string path)
