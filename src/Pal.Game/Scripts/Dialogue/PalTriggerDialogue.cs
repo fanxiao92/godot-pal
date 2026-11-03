@@ -60,6 +60,9 @@ public partial class PalTriggerDialogue : Node
     private CheckedStoryProfile? _story;
     private TriggerBattleContent? _previewContent;
     private IBattleRandom? _previewRandom;
+    /// <summary>Host factory for the preflight executor; the real @09C3 mixes world verbs with
+    /// battles, so its preview needs its own throwaway world (never the production one).</summary>
+    internal Func<TriggerScriptSession>? PreviewSessionFactory { private get; set; }
 
     /// <summary>The active 256-color scene palette, set by the host before the first-battle
     /// initialization (the #53 host owns the scene, not a story profile).</summary>
@@ -157,9 +160,11 @@ public partial class PalTriggerDialogue : Node
         ValidateOwner(entry);
         // Preflight every selected display and native resource before modifying the real call.
         // This separate executor uses the same public rules; it never advances request.Display.
-        var preview = _previewContent is { } content && _previewRandom is { } previewRandom
-            ? new TriggerScriptSession(_events, _language, content, previewRandom, Session.Context.Color)
-            : new TriggerScriptSession(_events, _language, Session.Context.Color);
+        var preview = PreviewSessionFactory is { } factory
+            ? factory()
+            : _previewContent is { } content && _previewRandom is { } previewRandom
+                ? new TriggerScriptSession(_events, _language, content, previewRandom, Session.Context.Color)
+                : new TriggerScriptSession(_events, _language, Session.Context.Color);
         preview.Start(fileId, entryId, caller);
         while (preview.PendingDisplay is { } request)
         {
