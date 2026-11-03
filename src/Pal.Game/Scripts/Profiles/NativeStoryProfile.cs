@@ -63,6 +63,8 @@ public static class NativeStoryProfile
                 && entry.SourceAddress != 0 && entry.SourceAddress == native.EntryAddress
                 && entry.OwnerId == native.OwnerId, "story owner-trigger-entry identity mismatch or disabled entry");
             var content = NativeBattleContent.Load(native.BattleContentUri);
+            Require(content.Players.Count == 1 && content.EnemyTeams.Values.All(x => x.Count == 1),
+                "selected story presentation supports only one player and one enemy per team; multiplayer presentation is not connected");
             var font = LoadResource<PalDialogueFont>(dialogue + "/Font.tres");
             Require(!string.IsNullOrWhiteSpace(font.SourceIdentity) && font.FormatVersion == 1 && font.LineHeight == 16,
                 "native font identity/version/line height is invalid");

@@ -29,22 +29,23 @@ public static class NativeBattleContent
         try
         {
             if (native is null || native.FormatVersion != 1) throw new InvalidDataException("FormatVersion must be 1");
-            var role = Single(native.Roles, "Roles");
-            var player = Single(native.Players, "Players");
-            var growth = Single(native.Growth, "Growth");
-            if (growth.RoleId != role.RoleId) throw new InvalidDataException("Growth.RoleId must match Roles[0].RoleId");
-            // Absent cover has one canonical encoding; present zero still means role0.
-            if (!player.HasCoveredByRoleId && player.CoveredByRoleId != 0)
-                throw new InvalidDataException("Player.CoveredByRoleId must be 0 when HasCoveredByRoleId is false");
-            var teams = new Dictionary<int, ClassicBattleEnemy>();
-            foreach (var team in Items(native.Teams, "Teams"))
+            var roles = Items(native.Roles, "Roles").Select(NativeBattleRoleAdapter.Read).ToArray();
+            var players = Items(native.Players, "Players").Select(player =>
             {
-                var enemy = Single(team.Enemies, "Team.Enemies");
-                if (!teams.TryAdd(team.TeamId, ReadEnemy(enemy))) throw new InvalidDataException("duplicate TeamId");
-            }
-            var content = new TriggerBattleContent(NativeBattleRoleAdapter.Read(role), ReadPlayer(player),
-                new(Copy(growth.LevelUpExperience, "Growth.LevelUpExperience"),
-                    Items(growth.LevelUpMagics, "Growth.LevelUpMagics").Select(x => new BattleLevelUpMagic(x.Level, x.MagicId)).ToArray()), teams);
+                if (!player.HasCoveredByRoleId && player.CoveredByRoleId != 0)
+                    throw new InvalidDataException("Player.CoveredByRoleId must be 0 when HasCoveredByRoleId is false");
+                return ReadPlayer(player);
+            }).ToArray();
+            var growth = new Dictionary<int, ClassicBattleGrowthData>();
+            foreach (var row in Items(native.Growth, "Growth"))
+                if (!growth.TryAdd(row.RoleId, new(Copy(row.LevelUpExperience, "Growth.LevelUpExperience"),
+                    Items(row.LevelUpMagics, "Growth.LevelUpMagics").Select(x => new BattleLevelUpMagic(x.Level, x.MagicId)).ToArray())))
+                    throw new InvalidDataException("duplicate Growth.RoleId");
+            var teams = new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>>();
+            foreach (var team in Items(native.Teams, "Teams"))
+                if (!teams.TryAdd(team.TeamId, Items(team.Enemies, "Team.Enemies").Select(ReadEnemy).ToArray()))
+                    throw new InvalidDataException("duplicate TeamId");
+            var content = new TriggerBattleContent(roles, players, growth, teams);
             ModernBattleContent.Validate(content);
             return content;
         }
@@ -58,18 +59,16 @@ public static class NativeBattleContent
         return new()
         {
             FormatVersion = 1,
-            Roles = [NativeBattleRoleAdapter.Write(content.InitialRole)],
-            Players = [WritePlayer(content.Player)],
-            Growth = [new() { RoleId = content.InitialRole.RoleId, LevelUpExperience = content.Growth.LevelUpExperience.ToArray(),
-                LevelUpMagics = content.Growth.LevelUpMagics.Select(x => new PalBattleLearnableMagic { Level = x.Level, MagicId = x.MagicId }).ToArray() }],
-            Teams = content.Teams.Select(x => new PalBattleTeam { TeamId = x.Key, Enemies = [WriteEnemy(x.Value)] }).ToArray()
+            Roles = content.InitialRoles.Values.Select(NativeBattleRoleAdapter.Write).ToArray(),
+            Players = content.Players.Select(WritePlayer).ToArray(),
+            Growth = content.GrowthByRole.Select(x => new PalBattleGrowth { RoleId = x.Key, LevelUpExperience = x.Value.LevelUpExperience.ToArray(),
+                LevelUpMagics = x.Value.LevelUpMagics.Select(row => new PalBattleLearnableMagic { Level = row.Level, MagicId = row.MagicId }).ToArray() }).ToArray(),
+            Teams = content.EnemyTeams.Select(x => new PalBattleTeam { TeamId = x.Key, Enemies = x.Value.Select(WriteEnemy).ToArray() }).ToArray()
         };
     }
 
     private static T[] Items<T>(T[]? values, string field) where T : class =>
         values is not null && values.All(x => x is not null) ? values : throw new InvalidDataException(field + " contains null");
-    private static T Single<T>(T[]? values, string field) where T : class =>
-        Items(values, field).Length == 1 ? values![0] : throw new InvalidDataException(field + " requires exactly one item");
     private static int[] Copy(int[]? values, string field) => values?.ToArray() ?? throw new InvalidDataException(field + " is null");
 
     private static ClassicBattlePlayer ReadPlayer(PalBattlePlayer x) => new(x.RoleId, x.Hp, x.MaxHp, x.Attack, x.Defense, x.Dexterity)

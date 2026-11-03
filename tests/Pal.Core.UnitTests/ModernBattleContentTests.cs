@@ -5,6 +5,159 @@ namespace Pal.Core.Tests;
 
 public sealed class ModernBattleContentTests
 {
+    [Fact]
+    public void Two_roles_and_duplicate_enemy_slots_enter_the_same_owned_lifecycle()
+    {
+        var data = PartyData();
+        var random = new BattleRandom();
+        var script = Script(ModernBattleContent.Parse(data.ToJsonString()), random);
+        script.Start("shared", "npc", 28);
+        Assert.Equal(0, random.Draws);
+        Assert.Equal(new[] { 4, 1 }, script.PendingBattle!.Lifecycle.Current.Combat.Players.Select(x => x.RoleId));
+        Assert.Equal(new[] { 7, 7 }, script.PendingBattle.Lifecycle.Current.Combat.Enemies.Select(x => x.Id));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Party_real_terminal_settlement_receipt_and_next_battle_keep_role_identity(bool lost)
+    {
+        var data = PartyData();
+        if (lost)
+        {
+            foreach (var role in data["roles"]!.AsArray()) role!["hp"] = 1;
+            foreach (var player in data["players"]!.AsArray()) { player!["hp"] = 1; player["dexterity"] = 0; }
+            foreach (var enemy in data["teams"]![0]!["enemies"]!.AsArray()) { enemy!["hp"] = 1000; enemy["dexterity"] = 200; }
+        }
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        IBattleRandom random = lost ? new PartyLossRandom() : new BattleRandom();
+        var script = Script(content, random);
+        script.Start("shared", "npc", 28);
+        var request = script.PendingBattle!;
+        var old = request.Lifecycle.Current;
+        Assert.Throws<InvalidOperationException>(() => _ = content.Player);
+        Assert.Throws<InvalidOperationException>(() => _ = content.InitialRole);
+        Assert.Throws<InvalidOperationException>(() => _ = content.Growth);
+        Assert.Throws<InvalidOperationException>(() => _ = content.Teams);
+        Assert.Throws<InvalidOperationException>(() => _ = script.BattleRole);
+        Assert.Throws<InvalidOperationException>(() => _ = old.Role);
+        Assert.False(script.AcknowledgeBattle(Guid.NewGuid(), null));
+        var battle = request.Lifecycle;
+        for (int guard = 0; guard < 100 && battle.Completion is null; guard++)
+        {
+            if (battle.Current.Combat.SelectingPlayerIndex is int party) battle.SelectAttack(party, battle.Current.Combat.Enemies.First(x => x.Hp > 0).Slot);
+            else Assert.True(battle.ResolveNextAction());
+        }
+        Assert.NotNull(battle.Completion);
+        Assert.Equal(lost ? ClassicBattlePhase.Lost : ClassicBattlePhase.Won, battle.Completion.Outcome);
+        Assert.False(battle.Current.IsInBattle);
+        foreach (var role in battle.Current.Roles.Values)
+        {
+            int hp = battle.Current.Combat.Players.Single(x => x.RoleId == role.RoleId).Hp;
+            Assert.Equal(lost ? hp : hp + (150 - hp) / 2, role.Hp);
+            Assert.Equal(lost ? 20 : 35, role.Mp);
+            Assert.Equal(new BattleExperienceSnapshot(5, 2, 17), role.PrimaryExperience);
+            Assert.All(role.Statuses, x => Assert.Equal(0, x));
+        }
+        Assert.True(script.AcknowledgeBattle(request.Id, battle.Completion));
+        Assert.False(script.AcknowledgeBattle(request.Id, battle.Completion));
+        Assert.False(battle.ResolveNextAction());
+        if (!lost) FinishDisplays(script);
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Equal(1, script.ReturnEntry);
+        Assert.Equal(28, script.Caller);
+        script.Start("shared", "npc", 28);
+        foreach (var role in battle.Current.Roles.Values)
+        {
+            Assert.Equal(Math.Max(1, role.Hp), script.PendingBattle!.Lifecycle.Current.Roles[role.RoleId].Hp);
+            Assert.Equal(0, script.PendingBattle.Lifecycle.Current.Roles[role.RoleId].HiddenExperience["attack"].Count);
+        }
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<int, BattleRoleSnapshot>)battle.Current.Roles).Clear());
+        Assert.Equal(lost ? 1 : 100, old.Roles[4].Hp);
+    }
+
+    [Theory]
+    [InlineData("next")]
+    [InlineData("loss")]
+    [InlineData("flee")]
+    [InlineData("growth")]
+    public void Party_complete_downstream_closure_rejects_without_session_or_random_effects(string branch)
+    {
+        var data = PartyData();
+        var events = new EventFixture();
+        events.Commands[1] = JsonNode.Parse("""
+          {"label":"L0001","op":"startBattle","teamId":18,"lossTarget":null,"isBoss":true,"fleeTarget":null,
+           "next":"L0002","source":{"index":1,"opcode":7,"operands":[18,0,0]}}
+          """);
+        if (branch == "growth") data["growth"]![1]!["levelUpExperience"]![2] = 0;
+        else
+        {
+            // next is always the actual WORD successor; loss/flee alone may branch to L0004.
+            int downstream = branch == "next" ? 2 : 4;
+            events.Commands[downstream] = JsonNode.Parse($$"""
+              {"label":"L{{downstream:X4}}","op":"startBattle","teamId":19,"lossTarget":null,"isBoss":true,"fleeTarget":null,
+               "next":"L{{downstream + 1:X4}}","source":{"index":{{downstream}},"opcode":7,"operands":[19,0,0]}}
+              """);
+            if (downstream == 4)
+            {
+                events.Commands.Add(JsonNode.Parse("""{"label":"L0005","op":"end","mode":"keep","next":null,"source":{"index":5,"opcode":0,"operands":[0,0,0]}}"""));
+                events.Index["source"]!["instructionCount"] = 6;
+                events.Index["source"]!["byteLength"] = 48;
+            }
+            if (branch == "loss") events.Commands[1]!["lossTarget"] = "L0004";
+            if (branch == "flee")
+            {
+                events.Commands[1]!["fleeTarget"] = "L0004";
+                events.Commands[1]!["isBoss"] = false;
+            }
+        }
+        var random = new BattleRandom();
+        var script = new TriggerScriptSession(events.Load(), TriggerScriptSessionTests.Language(), ModernBattleContent.Parse(data.ToJsonString()), random);
+        Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 28));
+        Assert.Equal(0, random.Draws);
+        Assert.Equal(Guid.Empty, script.CallId);
+        Assert.Null(script.PendingBattle);
+        Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+    }
+
+    [Theory]
+    [InlineData("roles")]
+    [InlineData("players")]
+    [InlineData("growth")]
+    [InlineData("enemies")]
+    public void Party_schema_rejects_null_empty_and_over_capacity_arrays(string field)
+    {
+        foreach (int kind in new[] { 0, 1, 2 })
+        {
+            var data = PartyData();
+            var parent = field == "enemies" ? data["teams"]![0]! : data;
+            if (kind == 0) parent[field] = null;
+            else if (kind == 1) parent[field]!.AsArray().Clear();
+            else parent[field]!.AsArray().Add(parent[field]![0]!.DeepClone());
+            Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        }
+    }
+
+    private static JsonObject PartyData()
+    {
+        var data = Data();
+        foreach (string key in new[] { "roles", "players", "growth" })
+        {
+            var second = data[key]![0]!.DeepClone();
+            data[key]![0]!["roleId"] = 4;
+            data[key]!.AsArray().Add(second);
+        }
+        // Role and growth order deliberately differ from party order.
+        foreach (string key in new[] { "roles", "growth" })
+        {
+            var first = data[key]![0]!.DeepClone();
+            data[key]!.AsArray().RemoveAt(0);
+            data[key]!.AsArray().Add(first);
+        }
+        data["teams"]![0]!["enemies"]!.AsArray().Add(data["teams"]![0]!["enemies"]![0]!.DeepClone());
+        return data;
+    }
+
     [Theory]
     [InlineData("role-level")]
     [InlineData("role-mp")]
@@ -431,8 +584,7 @@ public sealed class ModernBattleContentTests
     [InlineData("roles")]
     [InlineData("players")]
     [InlineData("growth")]
-    [InlineData("teams.0.enemies")]
-    public void Single_actor_binding_rejects_zero_and_multiple_items_including_duplicate_IDs(string path)
+    public void Actor_binding_rejects_zero_and_duplicate_RoleIds(string path)
     {
         foreach (bool duplicate in new[] { false, true })
         {
@@ -440,7 +592,7 @@ public sealed class ModernBattleContentTests
             var list = At(data, path).AsArray();
             if (duplicate) list.Add(list[0]!.DeepClone()); else list.Clear();
             var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
-            Assert.Contains("exactly one item", error.Message);
+            Assert.Contains("battle-data.json.$", error.Message);
         }
     }
 
@@ -615,6 +767,29 @@ public sealed class ModernBattleContentTests
         Assert.Null(script.PendingDisplay);
         Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
         Assert.Equal(new TriggerPosition("shared", "L0004", 4), script.CurrentPosition);
+    }
+
+    // Four speed draws, then two enemy hits. Targets 0 and 1 are fixed independently of SUT state.
+    private sealed class PartyLossRandom : IBattleRandom
+    {
+        private int speeds;
+        private readonly Queue<(int From, int To, int Value)> hits = new([
+            (0, 1, 0), (0, 16, 0), (0, 2, 0), (0, 1, 0), (1, 10, 1),
+            (0, 1, 1), (0, 16, 0), (0, 2, 0), (0, 1, 0), (1, 10, 1)]);
+        public float NextInclusive(float from, float to)
+        {
+            Assert.Equal((.9f, 1.1f), (from, to));
+            Assert.True(++speeds <= 4);
+            return 1;
+        }
+        public int NextInclusive(int from, int to)
+        {
+            Assert.Equal(4, speeds);
+            Assert.NotEmpty(hits);
+            var hit = hits.Dequeue();
+            Assert.Equal((hit.From, hit.To), (from, to));
+            return hit.Value;
+        }
     }
 
     private sealed class BattleRandom : IBattleRandom

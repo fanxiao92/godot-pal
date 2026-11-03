@@ -14,39 +14,44 @@ public static partial class ModernBattleContent
         EventJson.Keys(root, Root, "formatVersion", "roles", "players", "growth", "teams");
         if (Number(root, "formatVersion", Root) != 1)
             throw Error(Root, "unsupported formatVersion");
-        var role = Single(root, "roles", Root);
-        var player = Single(root, "players", Root);
-        var growth = Single(root, "growth", Root);
-        string rp = Root + ".roles[0]", pp = Root + ".players[0]", gp = Root + ".growth[0]";
-        ValidateRole(role, rp);
-        var initialRole = BattleModels.Role(role);
-        var combatPlayer = Player(player, pp);
-        EventJson.Keys(growth, gp, "roleId", "levelUpExperience", "levelUpMagics");
-        int growthRole = Number(growth, "roleId", gp, 0, 5);
-        if (initialRole.RoleId != combatPlayer.RoleId || initialRole.Hp != combatPlayer.Hp || initialRole.MaxHp != combatPlayer.MaxHp
-            || initialRole.RoleId != growthRole)
-            throw Error(Root, "roles[0], players[0] and growth[0] must describe the same role, HP and maxHp");
-        var thresholds = Words(growth, "levelUpExperience", gp, 100);
-        var rows = new List<BattleLevelUpMagic>();
-        int rowIndex = 0;
-        foreach (var row in Array(growth, "levelUpMagics", gp))
+        var roles = new List<BattleRoleSnapshot>();
+        foreach (var (item, i) in Array(root, "roles", Root).Select((x, i) => (x, i)))
         {
-            string path = gp + $".levelUpMagics[{rowIndex++}]";
-            EventJson.Keys(row, path, "level", "magicId");
-            rows.Add(new(Number(row, "level", path), Number(row, "magicId", path)));
+            ValidateRole(item, Root + $".roles[{i}]");
+            roles.Add(BattleModels.Role(item));
         }
-        var teams = new Dictionary<int, ClassicBattleEnemy>();
+        var players = Array(root, "players", Root).Select((x, i) => Player(x, Root + $".players[{i}]")).ToArray();
+        var growthByRole = new Dictionary<int, ClassicBattleGrowthData>();
+        foreach (var (growth, i) in Array(root, "growth", Root).Select((x, i) => (x, i)))
+        {
+            string gp = Root + $".growth[{i}]";
+            EventJson.Keys(growth, gp, "roleId", "levelUpExperience", "levelUpMagics");
+            int growthRole = Number(growth, "roleId", gp, 0, 5);
+            var thresholds = Words(growth, "levelUpExperience", gp, 100);
+            var rows = new List<BattleLevelUpMagic>();
+            int rowIndex = 0;
+            foreach (var row in Array(growth, "levelUpMagics", gp))
+            {
+                string path = gp + $".levelUpMagics[{rowIndex++}]";
+                EventJson.Keys(row, path, "level", "magicId");
+                rows.Add(new(Number(row, "level", path), Number(row, "magicId", path)));
+            }
+            if (!growthByRole.TryAdd(growthRole, new(thresholds, rows))) throw Error(gp, "duplicate growth roleId");
+        }
+        var teams = new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>>();
         int teamIndex = 0;
         foreach (var team in Array(root, "teams", Root))
         {
             string path = Root + $".teams[{teamIndex++}]";
             EventJson.Keys(team, path, "teamId", "enemies");
             int id = Number(team, "teamId", path);
-            var enemy = Enemy(Single(team, "enemies", path), path + ".enemies[0]");
+            var enemy = Array(team, "enemies", path).Select((x, i) => Enemy(x, path + $".enemies[{i}]")).ToArray();
             if (!teams.TryAdd(id, enemy)) throw Error(path + ".teamId", $"duplicate team ID {id}");
         }
         if (teams.Count == 0) throw Error(Root + ".teams", "expected at least one team");
-        var content = new TriggerBattleContent(initialRole, combatPlayer, new(thresholds, rows), teams);
+        TriggerBattleContent content;
+        try { content = new TriggerBattleContent(roles, players, growthByRole, teams); }
+        catch (InvalidDataException error) { throw Error(Root, error.Message); }
         Validate(content);
         return content;
     }
@@ -138,13 +143,6 @@ public static partial class ModernBattleContent
     {
         var array = Property(value, key, path);
         return array.ValueKind == JsonValueKind.Array ? array.EnumerateArray() : throw Error(path + "." + key, "expected array");
-    }
-
-    private static JsonElement Single(JsonElement value, string key, string path)
-    {
-        var items = Array(value, key, path).ToArray();
-        if (items.Length != 1) throw Error(path + "." + key, "current content binding requires exactly one item");
-        return items[0];
     }
 
     private static IReadOnlyList<int> Words(JsonElement value, string key, string path, int? count = null)

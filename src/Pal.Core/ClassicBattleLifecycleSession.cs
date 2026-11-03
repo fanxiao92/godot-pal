@@ -6,28 +6,37 @@ namespace Pal.Core;
 public sealed class ClassicBattleLifecycleSession
 {
     private static readonly string[] HiddenNames = ["health", "magic", "attack", "magicPower", "defense", "dexterity", "flee"];
-    private readonly BattleRoleState role;
+    private readonly Dictionary<int, BattleRoleState> roles;
     private ClassicBattleSession? activeCombat;
     public ClassicBattleLifecycleView Current { get; private set; }
     public CompletionReceipt? Completion { get; private set; }
 
     public ClassicBattleLifecycleSession(BattleRoleSnapshot role, ClassicBattlePlayer player, ClassicBattleEnemy enemy,
         ClassicBattleGrowthData growth, IBattleRandom random)
+        : this([role], [player], [enemy], new Dictionary<int, ClassicBattleGrowthData> { [role.RoleId] = growth }, random) { }
+
+    public ClassicBattleLifecycleSession(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
+        IReadOnlyList<ClassicBattleEnemy> enemies, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth, IBattleRandom random)
     {
-        ArgumentNullException.ThrowIfNull(role);
-        ArgumentNullException.ThrowIfNull(player);
-        ArgumentNullException.ThrowIfNull(enemy);
-        ArgumentNullException.ThrowIfNull(growth);
         ArgumentNullException.ThrowIfNull(random);
-        ValidateNoGrowth(role, player, growth);
-        // Combat validates all remaining capabilities before any lifecycle state is changed or RNG is consumed.
-        // HP0 revival belongs to StartBattle, not the combat numeric contract.
-        var combat = new ClassicBattleSession(new([player with { Hp = Math.Max(1, role.Hp) }], [enemy]), random);
-        this.role = new BattleRoleState(role);
-        this.role.Hp = Math.Max(1, role.Hp);
-        foreach (BattleExperienceState xp in this.role.HiddenExperience.Values) xp.Count = 0;
+        Validate(roles, players, enemies, growth);
+        var byId = roles.ToDictionary(x => x.RoleId);
+        var combat = new ClassicBattleSession(new(players.Select(x => x with { Hp = Math.Max(1, byId[x.RoleId].Hp) }).ToArray(), enemies), random);
+        this.roles = byId.ToDictionary(x => x.Key, x => new BattleRoleState(x.Value));
+        foreach (var role in this.roles.Values)
+        {
+            role.Hp = Math.Max(1, role.Hp);
+            foreach (BattleExperienceState xp in role.HiddenExperience.Values) xp.Count = 0;
+        }
         activeCombat = combat;
         Current = View(combat.Current);
+    }
+
+    public void SelectAttack(int partyIndex, int enemySlot)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.SelectAttack(partyIndex, enemySlot);
+        Current = View(activeCombat.Current);
     }
 
     public void SelectAttack(int targetId)
@@ -41,20 +50,27 @@ public sealed class ClassicBattleLifecycleSession
     {
         if (activeCombat is null || !activeCombat.ResolveNextAction()) return false;
         ClassicBattleView combat = activeCombat.Current;
-        role.Hp = combat.PlayerHp;
-        role.HiddenExperience["attack"].Count = combat.Counts.Attack;
-        role.HiddenExperience["health"].Count = combat.Counts.Health;
+        foreach (var player in combat.Players)
+        {
+            var role = roles[player.RoleId];
+            role.Hp = player.Hp;
+            role.HiddenExperience["attack"].Count = player.Counts.Attack;
+            role.HiddenExperience["health"].Count = player.Counts.Health;
+        }
         if (activeCombat.Completion is not null)
         {
             // Preflight proved primary/hidden XP remain below their real thresholds and no magic can be added.
             // Actual attack weights are retained even though zero EXP distributes zero to each hidden track.
-            if (combat.Phase == ClassicBattlePhase.Won)
+            foreach (var role in roles.Values)
             {
-                role.Hp += (role.MaxHp - role.Hp) / 2;
-                role.Mp += (role.MaxMp - role.Mp) / 2;
+                if (combat.Phase == ClassicBattlePhase.Won)
+                {
+                    role.Hp += (role.MaxHp - role.Hp) / 2;
+                    role.Mp += (role.MaxMp - role.Mp) / 2;
+                }
+                for (int i = 0; i < role.Statuses.Length; i++)
+                    if (role.Statuses[i] <= 999) role.Statuses[i] = 0;
             }
-            for (int i = 0; i < role.Statuses.Length; i++)
-                if (role.Statuses[i] <= 999) role.Statuses[i] = 0;
             // No inventory, poison or extra-slot effects exist in this supported baseline.
             // Release the action owner before publishing a lifecycle (not raw combat) completion.
             activeCombat = null;
@@ -67,18 +83,22 @@ public sealed class ClassicBattleLifecycleSession
 
     public bool OwnsCompletion(CompletionReceipt? receipt) => Completion is not null && ReferenceEquals(Completion, receipt);
 
-    private ClassicBattleLifecycleView View(ClassicBattleView combat) => new(activeCombat is not null, Snapshot(), combat);
+    private ClassicBattleLifecycleView View(ClassicBattleView combat) => new(activeCombat is not null, new ReadOnlyDictionary<int, BattleRoleSnapshot>(roles.ToDictionary(x => x.Key, x => Snapshot(x.Value))), combat);
 
-    private BattleRoleSnapshot Snapshot() => new(role.RoleId, role.Level, role.Hp, role.MaxHp, role.Mp, role.MaxMp,
+    private static BattleRoleSnapshot Snapshot(BattleRoleState role) => new(role.RoleId, role.Level, role.Hp, role.MaxHp, role.Mp, role.MaxMp,
         new(role.PrimaryExperience.Value, role.PrimaryExperience.Level, role.PrimaryExperience.Count),
         new ReadOnlyDictionary<string, BattleExperienceSnapshot>(role.HiddenExperience.ToDictionary(x => x.Key,
             x => new BattleExperienceSnapshot(x.Value.Value, x.Value.Level, x.Value.Count), StringComparer.Ordinal)),
         Array.AsReadOnly(role.Equipment.ToArray()), Array.AsReadOnly(role.Magics.ToArray()), Array.AsReadOnly(role.Statuses.ToArray()), role.CoveredByRoleId);
 
-    internal static void Validate(BattleRoleSnapshot role, ClassicBattlePlayer player, ClassicBattleEnemy enemy, ClassicBattleGrowthData growth)
+    internal static void Validate(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
+        IReadOnlyList<ClassicBattleEnemy> enemies, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth)
     {
-        ValidateNoGrowth(role, player, growth);
-        ClassicBattleSession.Validate(new([player with { Hp = Math.Max(1, role.Hp) }], [enemy]));
+        var content = new TriggerBattleContent(roles, players, growth,
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [0] = enemies });
+        foreach (var player in content.Players)
+            ValidateNoGrowth(content.InitialRoles[player.RoleId], player, content.GrowthByRole[player.RoleId]);
+        ClassicBattleSession.Validate(new(content.Players.Select(x => x with { Hp = Math.Max(1, x.Hp) }).ToArray(), enemies));
     }
 
     private static void ValidateNoGrowth(BattleRoleSnapshot role, ClassicBattlePlayer player, ClassicBattleGrowthData growth)

@@ -16,6 +16,45 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class NativeBattleContentTests
 {
+    [TestCase]
+    public void PartyNativeRoundtripRetainsRoleKeysSlotsAndRealOwnedCompletion()
+    {
+        var initial = Data();
+        var content = new TriggerBattleContent([initial.InitialRole, initial.InitialRole with { RoleId = 4, Hp = 80 }],
+            [initial.Player with { RoleId = 4, Hp = 80 }, initial.Player],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = initial.Growth, [initial.Player.RoleId] = initial.Growth },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = [initial.Teams[18], initial.Teams[18]] });
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/Party.tres";
+            AssertThat(ResourceSaver.Save(NativeBattleContent.Write(content), uri)).IsEqual(Error.Ok);
+            var loaded = NativeBattleContent.Load(uri);
+            AssertThat(loaded.Players.Select(x => x.RoleId).ToArray()).IsEqual(new[] { 4, initial.Player.RoleId });
+            AssertThat(loaded.EnemyTeams[18].Select(x => x.Id).ToArray()).IsEqual(new[] { 7, 7 });
+            AssertThat(loaded.InitialRoles[4].Hp).IsEqual(80);
+            var script = Script(loaded, new BattleRandom());
+            script.Start("shared", "npc", 28);
+            var request = script.PendingBattle!;
+            var battle = request.Lifecycle;
+            for (int i = 0; i < 100 && battle.Completion is null; i++)
+                if (battle.Current.Combat.SelectingPlayerIndex is int party)
+                    battle.SelectAttack(party, battle.Current.Combat.Enemies.First(x => x.Hp > 0).Slot);
+                else AssertThat(battle.ResolveNextAction()).IsTrue();
+            AssertThat(battle.Completion is not null).IsTrue();
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(battle.Current.Roles[4].Hp).IsEqual(115);
+            AssertThat(battle.Current.Roles[initial.Player.RoleId].Hp).IsEqual(125);
+            AssertThat(script.AcknowledgeBattle(request.Id, battle.Completion)).IsTrue();
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(script.AcknowledgeBattle(request.Id, battle.Completion)).IsFalse();
+            AssertThat(((IList<ClassicBattleEnemy>)loaded.EnemyTeams[18]).IsReadOnly).IsTrue();
+            AssertThat(NativeBattleContent.Load(uri).InitialRoles[4].Hp).IsEqual(80);
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
     [TestCase(100)]
     [TestCase(20)]
     public void NumericContentSavesLoadsAndCompletesRealLifecycle(int hp)
@@ -163,7 +202,7 @@ public class NativeBattleContentTests
     [TestCase("duplicate-team")]
     [TestCase("team-id")]
     [TestCase("enemies-empty")]
-    [TestCase("enemies-multiple")]
+    [TestCase("enemies-overcapacity")]
     [TestCase("enemy-null")]
     [TestCase("enemy-statuses-null")]
     [TestCase("enemy-attack")]
@@ -201,7 +240,7 @@ public class NativeBattleContentTests
             case "duplicate-team": native.Teams = [native.Teams[0], native.Teams[0]]; break;
             case "team-id": native.Teams[0].TeamId = -1; break;
             case "enemies-empty": native.Teams[0].Enemies = []; break;
-            case "enemies-multiple": native.Teams[0].Enemies = [native.Teams[0].Enemies[0], native.Teams[0].Enemies[0]]; break;
+            case "enemies-overcapacity": native.Teams[0].Enemies = [native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0]]; break;
             case "enemy-null": native.Teams[0].Enemies = [null!]; break;
             case "enemy-statuses-null": native.Teams[0].Enemies[0].Statuses = null!; break;
             case "enemy-attack": native.Teams[0].Enemies[0].Attack = 32768; break;

@@ -25,7 +25,9 @@ public sealed class TriggerScriptSession
     public TriggerPosition? CurrentPosition { get; private set; }
     public TriggerDialogueRequest? PendingDisplay { get; private set; }
     public TriggerBattleRequest? PendingBattle { get; private set; }
-    public BattleRoleSnapshot? BattleRole { get; private set; }
+    public IReadOnlyDictionary<int, BattleRoleSnapshot>? BattleRoles { get; private set; }
+    public BattleRoleSnapshot? BattleRole => BattleRoles is null ? null : BattleRoles.Count == 1 ? BattleRoles.Values.Single()
+        : throw new InvalidOperationException("Use BattleRoles for a multiplayer trigger session.");
     public TriggerDialogueContext Context { get; private set; }
 
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language, int inheritedColor = DialogueTextTokenizer.DefaultColor)
@@ -46,7 +48,7 @@ public sealed class TriggerScriptSession
         ArgumentNullException.ThrowIfNull(battleRandom);
         _battleContent = battleContent;
         _battleRandom = battleRandom;
-        BattleRole = battleContent.InitialRole;
+        BattleRoles = battleContent.InitialRoles;
     }
 
     /// <summary>Pure selected-entry capability check against the content's initial role. Does not start a call,
@@ -61,7 +63,7 @@ public sealed class TriggerScriptSession
         var entry = events.GetEntry(fileId, entryId);
         if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
         var requirements = new EntryRequirementsCollector();
-        ValidateCapabilityClosure(events, language, battleContent, battleContent.InitialRole, inheritedColor, entry.SourceAddress, requirements);
+        ValidateCapabilityClosure(events, language, battleContent, battleContent.InitialRoles, inheritedColor, entry.SourceAddress, requirements);
         return new(requirements.Displays, requirements.Portraits, requirements.Teams);
     }
 
@@ -106,7 +108,7 @@ public sealed class TriggerScriptSession
     {
         if (Phase != TriggerScriptPhase.WaitingForBattle || PendingBattle is not { } request || request.Id != requestId
             || !request.Lifecycle.OwnsCompletion(completion)) return false;
-        BattleRole = request.Lifecycle.Current.Role;
+        BattleRoles = request.Lifecycle.Current.Roles;
         _address = completion!.Outcome == ClassicBattlePhase.Lost ? request.LossAddress ?? request.NextAddress : request.NextAddress;
         PendingBattle = null;
         Continue();
@@ -114,7 +116,7 @@ public sealed class TriggerScriptSession
     }
 
     private void ValidateCapabilityClosure(int address) =>
-        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRole, Context.Color, address);
+        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address);
 
     private sealed class EntryRequirementsCollector
     {
@@ -124,7 +126,7 @@ public sealed class TriggerScriptSession
     }
 
     private static void ValidateCapabilityClosure(TriggerEventCollection events, DialogueLanguagePackage language,
-        TriggerBattleContent? battleContent, BattleRoleSnapshot? battleRole, int color, int address,
+        TriggerBattleContent? battleContent, IReadOnlyDictionary<int, BattleRoleSnapshot>? battleRoles, int color, int address,
         EntryRequirementsCollector? requirements = null)
     {
         var pending = new Stack<int>();
@@ -137,7 +139,7 @@ public sealed class TriggerScriptSession
             if (command.Op == "end" && command.Mode == "keep") continue;
             if (command.Op == "startBattle" && battleContent is not null)
             {
-                try { battleContent.Validate(command.TeamId, battleRole!); }
+                try { battleContent.Validate(command.TeamId, battleRoles!); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 requirements?.Teams.Add(command.TeamId);
                 pending.Push(Next(command));
@@ -209,8 +211,8 @@ public sealed class TriggerScriptSession
                     _address = Next(command);
                     break;
                 case "startBattle" when _battleContent is not null:
-                    var lifecycle = new ClassicBattleLifecycleSession(BattleRole!, _battleContent.Player with { Hp = BattleRole!.Hp },
-                        _battleContent.Enemy(command.TeamId), _battleContent.Growth, _battleRandom!);
+                    var lifecycle = new ClassicBattleLifecycleSession(BattleRoles!.Values.ToArray(), _battleContent.SettledPlayers(BattleRoles),
+                        _battleContent.Enemies(command.TeamId), _battleContent.GrowthByRole, _battleRandom!);
                     PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.TeamId, command.IsBoss,
                         Next(command), command.LossAddress, command.FleeAddress, lifecycle);
                     Phase = TriggerScriptPhase.WaitingForBattle;

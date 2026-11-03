@@ -15,6 +15,37 @@ namespace Pal.Game.Tests;
 public class PrepareBattleDataTests
 {
     [TestCase]
+    public void PublicPreparePublishesTwoRolesAndRepeatedEnemySlotsWithoutProjection()
+    {
+        using var fixture = new Preparation();
+        var json = JsonNode.Parse(File.ReadAllText(fixture.Source))!;
+        foreach (string field in new[] { "roles", "players", "growth" })
+        {
+            var copy = json[field]![0]!.DeepClone(); copy["roleId"] = 4;
+            json[field]!.AsArray().Add(copy);
+        }
+        json["players"]![0]!["roleId"] = 4;
+        json["players"]![1]!["roleId"] = 1;
+        json["teams"]![0]!["enemies"]!.AsArray().Add(json["teams"]![0]!["enemies"]![0]!.DeepClone());
+        File.WriteAllText(fixture.Source, json.ToJsonString(), new System.Text.UTF8Encoding(false));
+        byte[] before = File.ReadAllBytes(fixture.Source);
+        var content = NativeBattleContent.Load(PrepareBattleData.Prepare(fixture.Input, fixture.Output));
+        AssertThat(content.Players.Select(x => x.RoleId).ToArray()).IsEqual(new[] { 4, 1 });
+        AssertThat(content.InitialRoles.Keys.OrderBy(x => x).ToArray()).IsEqual(new[] { 1, 4 });
+        AssertThat(content.GrowthByRole.Count).IsEqual(2);
+        AssertThat(content.EnemyTeams[18].Select(x => x.Id).ToArray()).IsEqual(new[] { 7, 7 });
+        var battle = new ClassicBattleLifecycleSession(content.InitialRoles.Values.ToArray(), content.Players,
+            content.EnemyTeams[18], content.GrowthByRole, new BattleRandom());
+        battle.SelectAttack(0, 0); battle.SelectAttack(1, 1);
+        AssertThat(battle.ResolveNextAction()).IsTrue(); AssertThat(battle.ResolveNextAction()).IsTrue();
+        AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+        AssertThat(battle.Current.Roles[4].Hp).IsEqual(125);
+        AssertThat(battle.Current.Roles[1].Mp).IsEqual(35);
+        AssertThat(File.ReadAllBytes(fixture.Source)).IsEqual(before);
+        AssertThat(Directory.GetFileSystemEntries(fixture.Output).Length).IsEqual(1);
+    }
+
+    [TestCase]
     public void PublicPreparePublishesStrictNativeContentAndRealKoSettlesRole()
     {
         using var fixture = new Preparation();
