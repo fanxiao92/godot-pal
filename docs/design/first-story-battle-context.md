@@ -122,7 +122,7 @@ owner28 的已冻结身份为：坐标 `(1280,256)`、前置 `@0936` 后 `state=
 
 ## 4. 完整局部 closure 与后续票所有权
 
-`closure.entry` 固定 `@09C3`。每个 `entries` 项包含唯一 `id`、固定 `category` (`command/resource/validation`)、按下表内容结构化并逐字段精确核对的 `identity`、精确且无重复的 `ownerTickets` 集合、`status` 和精确 `resourceIds` 链。v1 必须且只能包含以下九项，缺一、多一或任意字段不符均拒绝 author。当前后续能力均未交付，所以九项 `status` 只能是 `contract-only`；不能仅凭引用或 hash 自称 `prepared`：
+`closure.entry` 固定 `@09C3`。每个 `entries` 项包含唯一 `id`、固定 `category` (`command/resource/validation`)、按下表内容结构化并逐字段精确核对的 `identity`、精确且无重复的 `ownerTickets` 集合、`status` 和精确 `resourceIds` 链。v1 必须且只能包含以下九项，缺一、多一或任意字段不符均拒绝 author。九项 `status` 必须统一为 `contract-only` 或 `prepared`；不能仅凭引用或 hash 自称 `prepared`：#53 unit 1 起，`prepared` 只代表 author 已把六项资源重绑到真实现代资源，真实入口的开放仍以 `FirstMandatoryBattleClosure.Verify` 的能力预检回执为准（全路径/钩子/装备/成长/auto/图像身份逐一核实，缺项在副作用前拒绝），不是对声明状态的信任。
 
 | id | 内容边界 | 执行所有权 |
 |---|---|---|
@@ -140,7 +140,7 @@ owner28 的已冻结身份为：坐标 `(1280,256)`、前置 `@0936` 后 `state=
 
 `resources` 必须且只能包含下列固定 ID/kind/`ownerTickets`：`events/faithful-events/[52,53]`、`battle-data/battle-data/[46,47,48,49,50,51,53]`、`battle-images/battle-images/[53]`、`dialogue-zh-cn/dialogue-language/[49,53]`、`dialogue-en/dialogue-language/[49,53]`、`glyphs/glyph-atlas/[49,53]`。每项另存 `reference/sha256`；reference 必须是纯词法、跨平台的 forward-slash 相对路径，禁止绝对路径、反斜线、控制字符、空或 `.`/`..` segment、首尾或重复 slash、冒号/scheme、Windows 非法字符、设备名（包括 `COM`/`LPT` 后接 ASCII `1..9` 或 `¹`/`²`/`³`，无论是否带扩展名）及 segment 尾随点/空格；普通 Unicode 文件名仍合法。SHA-256 必须为小写 64 位十六进制。九项 closure 的资源链接逐项冻结：trigger/dynamic 依赖 events；battle command 依赖 events+battle-data；角色钩子依赖 events+battle-data+双语对话+glyphs；装备/成长依赖 battle-data；失败边界依赖 events+双语对话+glyphs；图像和语言项分别链接其精确资源。`battle-team-18.identity` 明确保存 `@09FE`、操作数 `(0012,A073,0000)`、team/object/enemy/count/battlefield、第三操作数 boss/no-flee 特值和语义字段反向编码规则。资源来源身份不替代内容独立核对。
 
-在九项均为 `contract-only` 的 #45 阶段，六项资源引用可绑定工程外的**未满足依赖的合同声明**，而非尚未交付的战斗/对话 payload。此时 reference 文件名必须明确标识未准备合同，声明须注明 `contract-only` / `not-runtime-resource`、资源角色、真实期望身份、ownerTickets 与具体缺口；SHA-256 只证明声明自身 exact bytes，不证明真实资源已转换、准备或加载。声明不加入 author 的恰好两文件目录，也不得被运行时作为数据消费。#53 必须用真正现代资源替换全部声明、重新绑定 author/native envelope 并完成闭包严格校验，才能开放 `@09C3`；静态场景和选定语言的启动 marker 不证明战斗图像、局部双语对白或 glyph 资源已载入。
+在九项均为 `contract-only` 的 #45 阶段，六项资源引用可绑定工程外的**未满足依赖的合同声明**，而非尚未交付的战斗/对话 payload。此时 reference 文件名必须明确标识未准备合同，声明须注明 `contract-only` / `not-runtime-resource`、资源角色、真实期望身份、ownerTickets 与具体缺口；SHA-256 只证明声明自身 exact bytes，不证明真实资源已转换、准备或加载。声明不加入 author 的恰好两文件目录，也不得被运行时作为数据消费。#53 已提供该替换链：真实 SSS chunk4 经 `export-events` 全具名动词导出并 `rebuild-events` 逐字节往返，运行时严格集合可加载；`FirstMandatoryBattleClosure.Verify` 用真实事件/数值/双语/图像闭包逐一核对冻结身份后才开放 `@09C3`；静态场景和选定语言的启动 marker 不证明战斗图像、局部双语对白或 glyph 资源已载入。
 
 ## 5. 覆盖审计与明确不扩张
 
