@@ -10,6 +10,7 @@ public partial class PalBattleVisualProfile : Resource
     [Export] public int RoleId { get; set; } = -1;
     [Export] public string PlayerSpriteUri { get; set; } = "";
     [Export] public string AttackEffectSpriteUri { get; set; } = "";
+    [Export] public string NumberSpriteUri { get; set; } = "";
     // Resolved column 1 of the effect table for the actual battle sprite, not RoleId.
     [Export] public int AttackEffectIndex { get; set; } = -1;
     [Export] public Vector2I PlayerPosition { get; set; } = new(int.MinValue, int.MinValue);

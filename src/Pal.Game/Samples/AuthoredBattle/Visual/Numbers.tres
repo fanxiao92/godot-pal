@@ -1,0 +1,292 @@
+[gd_resource type="Resource" script_class="PalSprite" format=3]
+
+[ext_resource type="Script" path="res://Scripts/Resources/PalFrame.cs" id="1"]
+
+[ext_resource type="Script" path="res://Scripts/Resources/PalSprite.cs" id="2"]
+
+[sub_resource type="Resource" id="f0"]
+script = ExtResource("1")
+Index = 0
+SourceOffset = 0
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+Alpha = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+[sub_resource type="Resource" id="f19"]
+script = ExtResource("1")
+Index = 19
+SourceOffset = 912
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 5, 5, 5, 0, 0, 5, 0, 79, 79, 5, 0, 5, 79, 0, 5, 5, 79, 5, 79, 5, 0, 5, 79, 5, 5, 0, 79, 5, 79, 5, 79, 79, 0, 5, 79, 0, 5, 5, 5, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 255, 255, 255, 0, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f20"]
+script = ExtResource("1")
+Index = 20
+SourceOffset = 960
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 0, 5, 0, 0, 0, 0, 5, 5, 79, 0, 0, 0, 0, 5, 79, 0, 0, 0, 0, 5, 79, 0, 0, 0, 0, 5, 79, 0, 0, 0, 0, 5, 79, 0, 0, 0, 5, 5, 5, 0, 0, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f21"]
+script = ExtResource("1")
+Index = 21
+SourceOffset = 1008
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 5, 5, 5, 0, 0, 5, 0, 79, 79, 5, 0, 0, 79, 0, 0, 5, 79, 0, 0, 0, 5, 0, 79, 0, 0, 5, 0, 79, 0, 0, 5, 0, 79, 0, 0, 5, 5, 5, 5, 5, 0, 0, 79, 79, 79, 79, 79)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255)
+
+[sub_resource type="Resource" id="f22"]
+script = ExtResource("1")
+Index = 22
+SourceOffset = 1056
+Width = 6
+Height = 8
+Indices = PackedByteArray(5, 5, 5, 5, 0, 0, 0, 79, 79, 79, 5, 0, 0, 0, 0, 0, 5, 79, 0, 5, 5, 5, 0, 79, 0, 0, 79, 79, 5, 0, 0, 0, 0, 0, 5, 79, 5, 5, 5, 5, 0, 79, 0, 79, 79, 79, 79, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f23"]
+script = ExtResource("1")
+Index = 23
+SourceOffset = 1104
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 0, 0, 5, 0, 0, 0, 0, 5, 5, 79, 0, 0, 5, 0, 5, 79, 0, 5, 0, 79, 5, 79, 0, 5, 5, 5, 5, 5, 0, 0, 79, 79, 5, 79, 79, 0, 0, 0, 5, 79, 0, 0, 0, 0, 0, 79, 0)
+Alpha = PackedByteArray(0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 255, 0, 0, 0, 0, 0, 255, 0)
+
+[sub_resource type="Resource" id="f24"]
+script = ExtResource("1")
+Index = 24
+SourceOffset = 1152
+Width = 6
+Height = 8
+Indices = PackedByteArray(5, 5, 5, 5, 5, 0, 5, 79, 79, 79, 79, 79, 5, 79, 0, 0, 0, 0, 5, 5, 5, 5, 0, 0, 0, 79, 79, 79, 5, 0, 0, 0, 0, 0, 5, 79, 5, 5, 5, 5, 0, 79, 0, 79, 79, 79, 79, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f25"]
+script = ExtResource("1")
+Index = 25
+SourceOffset = 1200
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 5, 5, 5, 0, 0, 5, 0, 79, 79, 79, 0, 5, 79, 0, 0, 0, 0, 5, 5, 5, 5, 0, 0, 5, 79, 79, 79, 5, 0, 5, 79, 0, 0, 5, 79, 0, 5, 5, 5, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f26"]
+script = ExtResource("1")
+Index = 26
+SourceOffset = 1248
+Width = 6
+Height = 8
+Indices = PackedByteArray(5, 5, 5, 5, 5, 0, 0, 79, 79, 79, 5, 79, 0, 0, 0, 5, 0, 79, 0, 0, 5, 0, 79, 0, 0, 5, 0, 79, 0, 0, 0, 5, 79, 0, 0, 0, 0, 5, 79, 0, 0, 0, 0, 0, 79, 0, 0, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 0, 255, 0, 0, 0)
+
+[sub_resource type="Resource" id="f27"]
+script = ExtResource("1")
+Index = 27
+SourceOffset = 1296
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 5, 5, 5, 0, 0, 5, 0, 79, 79, 5, 0, 5, 79, 0, 0, 5, 79, 0, 5, 5, 5, 0, 79, 5, 0, 79, 79, 5, 0, 5, 79, 0, 0, 5, 79, 0, 5, 5, 5, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f28"]
+script = ExtResource("1")
+Index = 28
+SourceOffset = 1344
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 5, 5, 5, 0, 0, 5, 0, 79, 79, 5, 0, 5, 79, 0, 0, 5, 79, 0, 5, 5, 5, 5, 79, 0, 0, 79, 79, 5, 79, 0, 0, 0, 0, 5, 79, 0, 5, 5, 5, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f29"]
+script = ExtResource("1")
+Index = 29
+SourceOffset = 1392
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 1, 1, 1, 0, 0, 1, 0, 79, 79, 1, 0, 1, 79, 0, 1, 1, 79, 1, 79, 1, 0, 1, 79, 1, 1, 0, 79, 1, 79, 1, 79, 79, 0, 1, 79, 0, 1, 1, 1, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 255, 255, 255, 0, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f30"]
+script = ExtResource("1")
+Index = 30
+SourceOffset = 1440
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 0, 1, 0, 0, 0, 0, 1, 1, 79, 0, 0, 0, 0, 1, 79, 0, 0, 0, 0, 1, 79, 0, 0, 0, 0, 1, 79, 0, 0, 0, 0, 1, 79, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f31"]
+script = ExtResource("1")
+Index = 31
+SourceOffset = 1488
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 1, 1, 1, 0, 0, 1, 0, 79, 79, 1, 0, 0, 79, 0, 0, 1, 79, 0, 0, 0, 1, 0, 79, 0, 0, 1, 0, 79, 0, 0, 1, 0, 79, 0, 0, 1, 1, 1, 1, 1, 0, 0, 79, 79, 79, 79, 79)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255)
+
+[sub_resource type="Resource" id="f32"]
+script = ExtResource("1")
+Index = 32
+SourceOffset = 1536
+Width = 6
+Height = 8
+Indices = PackedByteArray(1, 1, 1, 1, 0, 0, 0, 79, 79, 79, 1, 0, 0, 0, 0, 0, 1, 79, 0, 1, 1, 1, 0, 79, 0, 0, 79, 79, 1, 0, 0, 0, 0, 0, 1, 79, 1, 1, 1, 1, 0, 79, 0, 79, 79, 79, 79, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f33"]
+script = ExtResource("1")
+Index = 33
+SourceOffset = 1584
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 79, 0, 0, 1, 0, 1, 79, 0, 1, 0, 79, 1, 79, 0, 1, 1, 1, 1, 1, 0, 0, 79, 79, 1, 79, 79, 0, 0, 0, 1, 79, 0, 0, 0, 0, 0, 79, 0)
+Alpha = PackedByteArray(0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 255, 0, 0, 0, 0, 0, 255, 0)
+
+[sub_resource type="Resource" id="f34"]
+script = ExtResource("1")
+Index = 34
+SourceOffset = 1632
+Width = 6
+Height = 8
+Indices = PackedByteArray(1, 1, 1, 1, 1, 0, 1, 79, 79, 79, 79, 79, 1, 79, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 79, 79, 79, 1, 0, 0, 0, 0, 0, 1, 79, 1, 1, 1, 1, 0, 79, 0, 79, 79, 79, 79, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f35"]
+script = ExtResource("1")
+Index = 35
+SourceOffset = 1680
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 1, 1, 1, 0, 0, 1, 0, 79, 79, 79, 0, 1, 79, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 79, 79, 79, 1, 0, 1, 79, 0, 0, 1, 79, 0, 1, 1, 1, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f36"]
+script = ExtResource("1")
+Index = 36
+SourceOffset = 1728
+Width = 6
+Height = 8
+Indices = PackedByteArray(1, 1, 1, 1, 1, 0, 0, 79, 79, 79, 1, 79, 0, 0, 0, 1, 0, 79, 0, 0, 1, 0, 79, 0, 0, 1, 0, 79, 0, 0, 0, 1, 79, 0, 0, 0, 0, 1, 79, 0, 0, 0, 0, 0, 79, 0, 0, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 0, 255, 0, 0, 0)
+
+[sub_resource type="Resource" id="f37"]
+script = ExtResource("1")
+Index = 37
+SourceOffset = 1776
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 1, 1, 1, 0, 0, 1, 0, 79, 79, 1, 0, 1, 79, 0, 0, 1, 79, 0, 1, 1, 1, 0, 79, 1, 0, 79, 79, 1, 0, 1, 79, 0, 0, 1, 79, 0, 1, 1, 1, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f38"]
+script = ExtResource("1")
+Index = 38
+SourceOffset = 1824
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 1, 1, 1, 0, 0, 1, 0, 79, 79, 1, 0, 1, 79, 0, 0, 1, 79, 0, 1, 1, 1, 1, 79, 0, 0, 79, 79, 1, 79, 0, 0, 0, 0, 1, 79, 0, 1, 1, 1, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f56"]
+script = ExtResource("1")
+Index = 56
+SourceOffset = 2688
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 4, 4, 4, 0, 0, 4, 0, 79, 79, 4, 0, 4, 79, 0, 4, 4, 79, 4, 79, 4, 0, 4, 79, 4, 4, 0, 79, 4, 79, 4, 79, 79, 0, 4, 79, 0, 4, 4, 4, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 255, 255, 255, 0, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f57"]
+script = ExtResource("1")
+Index = 57
+SourceOffset = 2736
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 0, 4, 0, 0, 0, 0, 4, 4, 79, 0, 0, 0, 0, 4, 79, 0, 0, 0, 0, 4, 79, 0, 0, 0, 0, 4, 79, 0, 0, 0, 0, 4, 79, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f58"]
+script = ExtResource("1")
+Index = 58
+SourceOffset = 2784
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 4, 4, 4, 0, 0, 4, 0, 79, 79, 4, 0, 0, 79, 0, 0, 4, 79, 0, 0, 0, 4, 0, 79, 0, 0, 4, 0, 79, 0, 0, 4, 0, 79, 0, 0, 4, 4, 4, 4, 4, 0, 0, 79, 79, 79, 79, 79)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255)
+
+[sub_resource type="Resource" id="f59"]
+script = ExtResource("1")
+Index = 59
+SourceOffset = 2832
+Width = 6
+Height = 8
+Indices = PackedByteArray(4, 4, 4, 4, 0, 0, 0, 79, 79, 79, 4, 0, 0, 0, 0, 0, 4, 79, 0, 4, 4, 4, 0, 79, 0, 0, 79, 79, 4, 0, 0, 0, 0, 0, 4, 79, 4, 4, 4, 4, 0, 79, 0, 79, 79, 79, 79, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f60"]
+script = ExtResource("1")
+Index = 60
+SourceOffset = 2880
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 0, 0, 4, 0, 0, 0, 0, 4, 4, 79, 0, 0, 4, 0, 4, 79, 0, 4, 0, 79, 4, 79, 0, 4, 4, 4, 4, 4, 0, 0, 79, 79, 4, 79, 79, 0, 0, 0, 4, 79, 0, 0, 0, 0, 0, 79, 0)
+Alpha = PackedByteArray(0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 255, 0, 0, 0, 0, 0, 255, 0)
+
+[sub_resource type="Resource" id="f61"]
+script = ExtResource("1")
+Index = 61
+SourceOffset = 2928
+Width = 6
+Height = 8
+Indices = PackedByteArray(4, 4, 4, 4, 4, 0, 4, 79, 79, 79, 79, 79, 4, 79, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 79, 79, 79, 4, 0, 0, 0, 0, 0, 4, 79, 4, 4, 4, 4, 0, 79, 0, 79, 79, 79, 79, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f62"]
+script = ExtResource("1")
+Index = 62
+SourceOffset = 2976
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 4, 4, 4, 0, 0, 4, 0, 79, 79, 79, 0, 4, 79, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 4, 79, 79, 79, 4, 0, 4, 79, 0, 0, 4, 79, 0, 4, 4, 4, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f63"]
+script = ExtResource("1")
+Index = 63
+SourceOffset = 3024
+Width = 6
+Height = 8
+Indices = PackedByteArray(4, 4, 4, 4, 4, 0, 0, 79, 79, 79, 4, 79, 0, 0, 0, 4, 0, 79, 0, 0, 4, 0, 79, 0, 0, 4, 0, 79, 0, 0, 0, 4, 79, 0, 0, 0, 0, 4, 79, 0, 0, 0, 0, 0, 79, 0, 0, 0)
+Alpha = PackedByteArray(255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0, 0, 255, 0, 0, 0)
+
+[sub_resource type="Resource" id="f64"]
+script = ExtResource("1")
+Index = 64
+SourceOffset = 3072
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 4, 4, 4, 0, 0, 4, 0, 79, 79, 4, 0, 4, 79, 0, 0, 4, 79, 0, 4, 4, 4, 0, 79, 4, 0, 79, 79, 4, 0, 4, 79, 0, 0, 4, 79, 0, 4, 4, 4, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[sub_resource type="Resource" id="f65"]
+script = ExtResource("1")
+Index = 65
+SourceOffset = 3120
+Width = 6
+Height = 8
+Indices = PackedByteArray(0, 4, 4, 4, 0, 0, 4, 0, 79, 79, 4, 0, 4, 79, 0, 0, 4, 79, 0, 4, 4, 4, 4, 79, 0, 0, 79, 79, 4, 79, 0, 0, 0, 0, 4, 79, 0, 4, 4, 4, 0, 79, 0, 0, 79, 79, 79, 0)
+Alpha = PackedByteArray(0, 255, 255, 255, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 255, 255, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 0, 0, 255, 255, 255, 0)
+
+[resource]
+script = ExtResource("2")
+SpriteId = 0
+DecodedByteLength = 3168
+FrameCount = 1
+Source = {"author": "Original five-by-seven digit strokes with warm-white offset shadow; not retail UI art."}
+Frames = Array[ExtResource("1")]([SubResource("f0"), SubResource("f19"), SubResource("f20"), SubResource("f21"), SubResource("f22"), SubResource("f23"), SubResource("f24"), SubResource("f25"), SubResource("f26"), SubResource("f27"), SubResource("f28"), SubResource("f29"), SubResource("f30"), SubResource("f31"), SubResource("f32"), SubResource("f33"), SubResource("f34"), SubResource("f35"), SubResource("f36"), SubResource("f37"), SubResource("f38"), SubResource("f56"), SubResource("f57"), SubResource("f58"), SubResource("f59"), SubResource("f60"), SubResource("f61"), SubResource("f62"), SubResource("f63"), SubResource("f64"), SubResource("f65")])

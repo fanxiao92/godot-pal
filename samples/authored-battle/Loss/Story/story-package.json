@@ -37,6 +37,7 @@
       }
     ],
     "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
-    "attackEffectIndex": 0
+    "attackEffectIndex": 0,
+    "numberSpriteUri": "res://Samples/AuthoredBattle/Visual/Numbers.tres"
   }
 }

@@ -47,6 +47,18 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
     }
     public void Save() => NativeProfileFixture.SaveResource(Profile, Uri);
     public CheckedBattleVisualProfile Load() => NativeBattleVisualProfile.Load(Uri, CheckedStory);
+    public void AddNumberSprite()
+    {
+        var sprite = Sprite(0, 1);
+        foreach (int index in Enumerable.Range(19, 20).Concat(Enumerable.Range(56, 10)))
+            sprite.Frames.Add(new PalFrame { Index = index, SourceOffset = index * 4, Width = 2, Height = 1,
+                Indices = [(byte)index, 79], Alpha = [17, 255] });
+        Story.Save(sprite, "Numbers.tres");
+        Profile.NumberSpriteUri = Root + "/Numbers.tres";
+        Profile.ResourceSha256.Add(Profile.NumberSpriteUri, Godot.FileAccess.GetSha256(Profile.NumberSpriteUri));
+        Save();
+    }
+
     private static PalSprite Sprite(int id, int count)
     {
         var sprite = new PalSprite { SpriteId = id, FrameCount = count, DecodedByteLength = 200,

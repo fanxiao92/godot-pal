@@ -14,6 +14,65 @@ namespace Pal.Game.Tests;
 public class NativeBattleVisualProfileTests
 {
     [TestCase]
+    public void DeclaredNumberSpriteCannotEscapeExactHashClosure()
+    {
+        using var f = new NativeBattleVisualProfileFixture();
+        f.Story.Save(f.Enemy, "Numbers.tres");
+        f.Profile.NumberSpriteUri = f.Root + "/Numbers.tres";
+        f.Save();
+        AssertThat(f.Story.Read("Visual.tres").Contains("NumberSpriteUri = \"" + f.Root + "/Numbers.tres\"")).IsTrue();
+        bool rejected = false;
+        try { _ = f.Load(); }
+        catch (InvalidDataException error) { rejected = error.Message.Contains("SHA-256"); }
+        AssertThat(rejected).IsTrue();
+    }
+
+    [TestCase]
+    public void AbsentNumbersRemainFormatValidButCannotSelectNumberPresentation()
+    {
+        using var f = new NativeBattleVisualProfileFixture();
+        var visual = f.Load();
+        AssertThat(visual.NumberSprite is null).IsTrue();
+        AssertThat(visual.BlueNumberFrames.Count).IsEqual(0);
+        AssertThat(Failure(visual.RequireNumberPresentation).Contains("NumberSpriteUri")).IsTrue();
+    }
+
+    [TestCase]
+    public void NumberAliasesRetainThreeLiteralDigitGroupsAndIsolatedNativePlanes()
+    {
+        using var f = new NativeBattleVisualProfileFixture();
+        f.AddNumberSprite();
+        var visual = f.Load();
+        visual.RequireNumberPresentation();
+        AssertThat(visual.NumberSprite!.FrameCount).IsEqual(1);
+        AssertThat(visual.YellowNumberFrames.Select(x => x.Index).SequenceEqual(new[] { 19,20,21,22,23,24,25,26,27,28 })).IsTrue();
+        AssertThat(visual.BlueNumberFrames.Select(x => x.Index).SequenceEqual(new[] { 29,30,31,32,33,34,35,36,37,38 })).IsTrue();
+        AssertThat(visual.CyanNumberFrames.Select(x => x.Index).SequenceEqual(new[] { 56,57,58,59,60,61,62,63,64,65 })).IsTrue();
+        AssertThat(visual.BlueNumberFrames[0].Indices.SequenceEqual(new byte[] { 29, 79 })).IsTrue();
+        AssertThat(visual.BlueNumberFrames[0].Alpha.SequenceEqual(new byte[] { 17, 255 })).IsTrue();
+        AssertThat(ReferenceEquals(visual.NumberSprite.Frames.Single(x => x.Index == 29), visual.BlueNumberFrames[0])).IsTrue();
+        AssertThat(((IList<PalFrame>)visual.BlueNumberFrames).IsReadOnly).IsTrue();
+        AssertThat(visual.ResourceSha256[f.Profile.NumberSpriteUri]).IsEqual(Godot.FileAccess.GetSha256(f.Profile.NumberSpriteUri));
+        visual.BlueNumberFrames[0].Indices[0] = 199;
+        AssertThat(f.Load().BlueNumberFrames[0].Indices[0]).IsEqual((byte)29);
+    }
+
+    [TestCase(19)]
+    [TestCase(38)]
+    [TestCase(65)]
+    public void DeclaredNumberSpriteRequiresAllThreeAddressableDigitGroups(int missing)
+    {
+        using var f = new NativeBattleVisualProfileFixture();
+        f.AddNumberSprite();
+        var sprite = f.Load().NumberSprite!;
+        sprite.Frames.Remove(sprite.Frames.Single(x => x.Index == missing));
+        f.Story.Save(sprite, "Numbers.tres");
+        f.Profile.ResourceSha256[f.Profile.NumberSpriteUri] = Godot.FileAccess.GetSha256(f.Profile.NumberSpriteUri);
+        f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("number sprite requires addressable")).IsTrue();
+    }
+
+    [TestCase]
     public void DeclaredAttackEffectCannotEscapeExactHashClosure()
     {
         using var f = new NativeBattleVisualProfileFixture();

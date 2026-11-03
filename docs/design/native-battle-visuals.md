@@ -49,3 +49,14 @@ B now supplies three different original indexed diagonal light-stroke frames, sh
 
 
 D2-B now selects this capability at normal Story startup, before map/session/RNG creation. Old v1 absence is still legal for strict **format** loading, but no longer runs normal Story silently in C/D1 fallback. Playback and live WORD counters consume these same checked resources; see [the D2-B runtime boundary](main-story-roundtrip.md#d2-b-player-effects-persistent-enemy-idle-and-impact-hp). Floating-number/reference label lifecycle remains D2-C; this is not full D/#46 completion.
+
+
+## D2-C-A: optional native UI digit binding (not runtime floating feedback)
+
+Version1 adds `NumberSpriteUri=""` (absent). A declared URI means a complete three-color UI digit sprite: Yellow19..28, Blue29..38, Cyan56..65, each ordered digit0..9 (`ui.c639–745`). The existing `PalSprite` validator still permits legal extra frames, aliases beyond nominal FrameCount, arbitrary valid frame dimensions and original alpha. Completeness is this binding's contract, not a new generic sprite rule; FrameCount need not be66. The full native graph participates in the existing exact dependency/hash checks before loading and after validation.
+
+`CheckedBattleVisualProfile.NumberSprite` retains the loaded native object. `YellowNumberFrames`, `BlueNumberFrames`, `CyanNumberFrames` are read-only lists of those same frames; resources themselves remain mutable, consumed read-only, **not deep immutable**. `RequireNumberPresentation()` purely rejects absence without loading URIs, creating nodes, advancing time or consuming RNG. Absence is base-format valid; normal Main does **not yet select** this new capability, so D2-B startup compatibility is unchanged. A present incomplete sprite is malformed for this binding. Hash identity is not provenance.
+
+Digits are UI sprite images, not natural-language Words or dialogue-font glyphs. Their reference drawing origin is **top-left**, not fighter bottom-center. Six pixels is layout advance, not a source-frame width requirement. The authored sample supplies original5×7 digit strokes with an offset warm-white shadow in6×8 indexed planes, using the unchanged active palette (Yellow5, Blue1, Cyan4, shadow79). This is original artificial art, not retail UI extraction, and no language/font registry or runtime preparation is added.
+
+Public Story Prepare accepts optional `visual.numberSpriteUri`, leases its same native graph, hashes it and performs strict readback through the normal writer. Both authored inputs bind `Visual/Numbers.tres`. Fresh prepared `Assets/AuthoredBattleD2CA-20261103/{Win,Loss}/Story` reuse Static/Numbers; old outputs remain untouched. This checkpoint only delivers the complete resource vertical. Main floating-number lifecycle, queue, real-wall age, critical/evade Words lifecycle and drawing remain **D2-C-B**, not delivered here. Audio, GPU/manual/CI/fullgate and #46/M4 completion remain out of scope.

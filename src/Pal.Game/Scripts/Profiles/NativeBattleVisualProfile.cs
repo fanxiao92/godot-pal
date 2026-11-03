@@ -45,6 +45,7 @@ public static class NativeBattleVisualProfile
                 "attack effect requires paired SpriteUri and WORD AttackEffectIndex");
             var seeds = new[] { native.PlayerSpriteUri, native.PaletteUri }
                 .Concat(hasEffect ? new[] { native.AttackEffectSpriteUri } : Array.Empty<string>())
+                .Concat(native.NumberSpriteUri != "" ? new[] { native.NumberSpriteUri } : Array.Empty<string>())
                 .Concat(teams.Values.SelectMany(x => new[] { x.BackgroundUri, x.EnemySpriteUri }))
                 .Concat(Dependencies(uri)).ToArray();
             Require(!hashes.ContainsKey(uri), "visual root cannot hash itself");
@@ -64,6 +65,13 @@ public static class NativeBattleVisualProfile
             if (effect is not null)
                 Require(Enumerable.Range(native.AttackEffectIndex * 3, 3).All(effect.Frames.Select(x => x.Index).ToHashSet().Contains),
                     "attack effect references unaddressable frames");
+            PalSprite? numbers = native.NumberSpriteUri != "" ? LoadSprite(native.NumberSpriteUri) : null;
+            if (numbers is not null)
+            {
+                var indices = numbers.Frames.Select(frame => frame.Index).ToHashSet();
+                Require(new[] { 19, 29, 56 }.All(start => Enumerable.Range(start, 10).All(indices.Contains)),
+                    "number sprite requires addressable Yellow19..28, Blue29..38 and Cyan56..65 digits");
+            }
             var checkedTeams = new Dictionary<int, CheckedBattleVisualTeam>();
             foreach (var team in teams.Values)
             {
@@ -77,7 +85,7 @@ public static class NativeBattleVisualProfile
                 checkedTeams.Add(team.TeamId, new(team, background, sprite));
             }
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
-            return new(native, player, palette, effect, checkedTeams, hashes);
+            return new(native, player, palette, effect, numbers, checkedTeams, hashes);
         }
         catch (InvalidDataException error) { throw new InvalidDataException(uri + ": " + error.Message, error); }
         catch (Exception error) when (error is ArgumentException or NullReferenceException or InvalidCastException or InvalidOperationException)
@@ -122,6 +130,16 @@ public sealed class CheckedBattleVisualProfile
     public int AttackEffectIndex { get; }
     public PalSprite? AttackEffectSprite { get; }
     public IReadOnlyList<PalFrame> AttackEffectFrames { get; }
+    public PalSprite? NumberSprite { get; }
+    // UI digits use top-left coordinates; six pixels is layout advance, not a frame-size constraint.
+    public IReadOnlyList<PalFrame> YellowNumberFrames { get; }
+    public IReadOnlyList<PalFrame> BlueNumberFrames { get; }
+    public IReadOnlyList<PalFrame> CyanNumberFrames { get; }
+
+    public void RequireNumberPresentation()
+    {
+        if (NumberSprite is null) throw new InvalidDataException("number presentation requires NumberSpriteUri");
+    }
 
     public void RequireReferencePresentation()
     {
@@ -130,7 +148,7 @@ public sealed class CheckedBattleVisualProfile
     }
     public IReadOnlyDictionary<int, CheckedBattleVisualTeam> Teams { get; }
     public IReadOnlyDictionary<string, string> ResourceSha256 { get; }
-    internal CheckedBattleVisualProfile(PalBattleVisualProfile native, PalSprite player, PalPalette palette, PalSprite? effect,
+    internal CheckedBattleVisualProfile(PalBattleVisualProfile native, PalSprite player, PalPalette palette, PalSprite? effect, PalSprite? numbers,
         Dictionary<int, CheckedBattleVisualTeam> teams, Dictionary<string, string> hashes)
     {
         SourceIdentity = native.SourceIdentity; RoleId = native.RoleId; PlayerPosition = native.PlayerPosition;
@@ -138,6 +156,10 @@ public sealed class CheckedBattleVisualProfile
         AttackEffectIndex = native.AttackEffectIndex; AttackEffectSprite = effect;
         AttackEffectFrames = Array.AsReadOnly(effect is null ? Array.Empty<PalFrame>() : Enumerable.Range(AttackEffectIndex * 3, 3)
             .Select(index => effect.Frames.Single(frame => frame.Index == index)).ToArray());
+        NumberSprite = numbers;
+        YellowNumberFrames = NumberFrames(19); BlueNumberFrames = NumberFrames(29); CyanNumberFrames = NumberFrames(56);
+        IReadOnlyList<PalFrame> NumberFrames(int start) => Array.AsReadOnly(numbers is null ? Array.Empty<PalFrame>() :
+            Enumerable.Range(start, 10).Select(index => numbers.Frames.Single(frame => frame.Index == index)).ToArray());
         Teams = new ReadOnlyDictionary<int, CheckedBattleVisualTeam>(new Dictionary<int, CheckedBattleVisualTeam>(teams));
         ResourceSha256 = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(hashes, StringComparer.Ordinal));
     }

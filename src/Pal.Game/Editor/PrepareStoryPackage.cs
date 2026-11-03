@@ -82,6 +82,7 @@ public partial class PrepareStoryPackage : Node
                 story.DialogueDirectory + "/Prompt-00.tres", story.DialogueDirectory + "/Prompt-01.tres", story.DialogueDirectory + "/Prompt-02.tres" }.Concat(story.Portraits.Values).ToArray();
             string[] visualSeeds = new[] { visual.PlayerSpriteUri, visual.PaletteUri }
                 .Concat(visual.AttackEffectSpriteUri != "" ? new[] { visual.AttackEffectSpriteUri } : Array.Empty<string>())
+                .Concat(visual.NumberSpriteUri != "" ? new[] { visual.NumberSpriteUri } : Array.Empty<string>())
                 .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri, t.EnemySpriteUri })).ToArray();
             foreach (string root in new[] { story.StaticResources, story.DialogueDirectory })
             {
@@ -242,9 +243,10 @@ public partial class PrepareStoryPackage : Node
             story.Portraits.Add(id, Text(portrait, "uri"));
         }
         var v = root.GetProperty("visual");
-        PropertiesWithOptional(v, new[] { "attackEffectSpriteUri", "attackEffectIndex" }, "roleId", "playerSpriteUri", "playerPosition", "paletteUri", "teams");
+        PropertiesWithOptional(v, new[] { "attackEffectSpriteUri", "attackEffectIndex", "numberSpriteUri" }, "roleId", "playerSpriteUri", "playerPosition", "paletteUri", "teams");
         var visual = new PalBattleVisualProfile { FormatVersion = 1, SourceIdentity = story.SourceIdentity, RoleId = Int(v, "roleId"),
             PlayerSpriteUri = Text(v, "playerSpriteUri"), PlayerPosition = Position(v, "playerPosition"), PaletteUri = Text(v, "paletteUri") };
+        if (v.TryGetProperty("numberSpriteUri", out _)) visual.NumberSpriteUri = Text(v, "numberSpriteUri");
         if (v.TryGetProperty("attackEffectSpriteUri", out _)) visual.AttackEffectSpriteUri = Text(v, "attackEffectSpriteUri");
         if (v.TryGetProperty("attackEffectIndex", out _)) visual.AttackEffectIndex = Int(v, "attackEffectIndex");
         Require((visual.AttackEffectSpriteUri != "") == v.TryGetProperty("attackEffectIndex", out _), "attack effect fields must be paired");

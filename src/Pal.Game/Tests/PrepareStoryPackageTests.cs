@@ -207,6 +207,41 @@ public class PrepareStoryPackageTests
     }
 
     [TestCase]
+    public void PublicPrepareBindsNumberSpriteWithExactNativeClosure()
+    {
+        using var source = new Preparation();
+        source.Native.AddNumberSprite();
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
+        metadata["visual"]!["numberSpriteUri"] = source.Native.Profile.NumberSpriteUri;
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        string[] before = source.Snapshot();
+        var result = PrepareStoryPackage.Prepare(source.Input, source.Output);
+        var visual = NativeBattleVisualProfile.Load(result.VisualUri, NativeStoryProfile.Load(result.StoryUri));
+        visual.RequireNumberPresentation();
+        AssertThat(visual.BlueNumberFrames[0].Index).IsEqual(29);
+        AssertThat(visual.CyanNumberFrames[9].Index).IsEqual(65);
+        AssertThat(visual.ResourceSha256[source.Native.Profile.NumberSpriteUri]).IsEqual(Godot.FileAccess.GetSha256(source.Native.Profile.NumberSpriteUri));
+        AssertThat(source.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase("blank")]
+    [TestCase("missing")]
+    [TestCase("duplicate")]
+    public void NumberAuthorFieldCannotBypassSchemaOrNativeDependencyChecks(string fault)
+    {
+        using var source = new Preparation();
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
+        metadata["visual"]!["numberSpriteUri"] = fault == "blank" ? " " : source.Native.Root + "/MissingNumbers.tres";
+        string json = metadata.ToJsonString();
+        if (fault == "duplicate") json = json.Replace("\"numberSpriteUri\":", "\"numberSpriteUri\":\"duplicate\",\"numberSpriteUri\":");
+        File.WriteAllText(source.Metadata, json);
+        string[] before = source.Snapshot();
+        Reject(source.Input, source.Output, fault == "duplicate" ? "fields" : fault == "blank" ? "numberSpriteUri" : "missing");
+        AssertThat(source.Snapshot()).IsEqual(before);
+        AssertThat(Directory.Exists(source.Output)).IsFalse();
+    }
+
+    [TestCase]
     public void PublicPrepareBindsOptionalReferenceDataAndExactEffectClosure()
     {
         using var source = new Preparation();
