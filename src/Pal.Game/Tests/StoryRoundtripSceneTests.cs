@@ -401,6 +401,119 @@ public class StoryRoundtripSceneTests
     }
 
     [TestCase(Timeout = 120000)]
+    public async Task BossFleeFailsStaysInBattleAndLostRunEndsAtTheReloadTerminal()
+    {
+        // LostReload with playerHp150: the enemy slot (dex500) strikes first (~120 damage,
+        // hp150 -> 30ish), then the committed boss flee (Q, fight.c 4119-4173) fails while still
+        // consuming its RandomLong(0, 524) draw; the menu returns, so the failed escape really
+        // stayed in battle. Round 2's attack cannot clear the 100hp slot and the next strike
+        // kills the member: an actual Lost, never an injected one.
+        using var fixture = new AuthoredStoryFixture("LostReload", playerHp: 150);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            AssertThat(battle.Completion).IsNull();
+            // input.c kKeyFlee: the boss flee attempt from the action menu. The enemy slot
+            // (dex500) resolves first, so the escape-fail feedback follows the enemy strike.
+            host.Tap(Key.Q);
+            await host.Wait(() => battle.Current.Combat.LastFleeAttempt is not null);
+            bool escapeFailLabel = false;
+            await host.Wait(() =>
+            {
+                escapeFailLabel |= old.StoryDrawSnapshot?.FeedbackWord == Pal.Game.Dialogue.PalStoryBattleView.EscapeFailWord;
+                return escapeFailLabel;
+            });
+            await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback);
+            AssertThat(escapeFailLabel).IsTrue();
+            var flee = battle.Current.Combat.LastFleeAttempt;
+            AssertThat(flee).IsNotNull();
+            AssertThat(flee!.Escaped).IsFalse();
+            AssertThat(flee.EnemyFleeDefense).IsEqual(524); // dex500 + (level0+6)*4, fight.c 4128-4137
+            AssertThat(battle.Current.Combat.Players[0].Counts.Flee).IsEqual(2);
+            // The failed escape spent the member's action; the round ended and selection returned.
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu
+                || battle.Completion is not null);
+            AssertThat(battle.Completion).IsNull();
+            AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.AttackMenu);
+            AssertThat(old.StoryCashGranted == 0 && old.StoryExperienceGranted == 0).IsTrue();
+            while (script.PendingBattle is not null)
+            {
+                if (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                {
+                    await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                    await host.ConfirmMemberTarget(battle);
+                }
+                else await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+            }
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Lost);
+            AssertThat(battle.Current.Combat.Players.All(p => p.Hp == 0)).IsTrue();
+            // fight.c 4171: the failed flee's hidden flee count survives into the settled roles.
+            AssertThat(battle.Current.Roles[0].HiddenExperience["flee"].Count).IsEqual(2);
+            // The failure branch reconnects through the loss target as a centered dialogue.
+            await host.Wait(() => script.PendingDisplay is not null);
+            AssertThat(script.PendingDisplay!.Context.Box).IsEqual("centerWindow");
+            AssertThat(old.Display!.DisplayBox).IsEqual("centerWindow");
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("大败");
+            await host.FinishDisplay();
+            // setMusic/fadeToRed/reload park the call: the terminal prints one diagnostic and
+            // never completes, rewards or returns to exploration.
+            await host.Wait(() => old.StoryLostTerminal);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForLostReload);
+            AssertThat(script.PendingLostReload!.Position.SourceAddress).IsEqual(11);
+            AssertThat(script.PendingLostReload.EnemyTeamId).IsEqual(18);
+            AssertThat(script.PendingLostReload.IsBoss).IsTrue();
+            AssertThat(script.Music).IsEqual(new TriggerMusicState(0, 0));
+            AssertThat(script.FadedToRed).IsTrue();
+            AssertThat(old.StoryLostReloadDiagnostics).IsEqual(1);
+            AssertThat(old.StoryCashGranted == 0 && old.StoryExperienceGranted == 0).IsTrue();
+            AssertThat(old.Interaction!.Phase).IsEqual(NpcInteractionPhase.Trigger);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<Pal.Game.Dialogue.PalStoryBattleView>().Count()).IsEqual(0);
+            // The red fade converges (32 steps of 75ms) with the text palette preserved.
+            await host.Wait(() => old.StoryRedFadeStep >= 32);
+            var red = old.StoryRedPalette!;
+            AssertThat(red.Length).IsEqual(256);
+            AssertThat(red[0x4F].G8 > 0).IsTrue(); // palette.c preserves 0x4F for readable text
+            AssertThat(red.Count(color => color.G8 == 0 && color.B8 == 0) > 200).IsTrue();
+            int leaderX = old.Exploration!.Leader.X, leaderY = old.Exploration.Leader.Y;
+            int updatesAtTerminal = 0;
+            old.UpdateCompleted += () => updatesAtTerminal++;
+            for (int i = 0; i < 3; i++) { host.Tap(Key.Enter); host.Tap(Key.Q); }
+            await host.Wait(() => updatesAtTerminal >= 5);
+            AssertThat(old.StoryLostReloadDiagnostics).IsEqual(1);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForLostReload);
+            AssertThat(old.Interaction!.Phase).IsEqual(NpcInteractionPhase.Trigger);
+            AssertThat(old.Exploration!.Leader.X == leaderX && old.Exploration.Leader.Y == leaderY).IsTrue();
+            AssertThat(old.Failure).IsNull();
+            AssertThat(script.CallId).IsEqual(call);
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Q)).IsFalse();
+        // Same-URI fresh Main: the terminal poisoned nothing; a new interaction starts normally.
+        using (var fresh = new StoryHost(selection))
+        {
+            AssertThat(fresh.Main.Failure).IsNull();
+            AssertThat(fresh.Main.Interaction!.Phase).IsEqual(NpcInteractionPhase.Exploring);
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            AssertThat(fresh.Main.Dialogue!.Session!.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
+        }
+    }
+
+    [TestCase(Timeout = 120000)]
     public async Task PartyLossCoversEnemyActionsMemberDeathPassAndLostClosure()
     {
         // PartyLoss: enemy slots (dex500) act before both members; every landed hit kills a
@@ -1531,8 +1644,11 @@ public class StoryRoundtripSceneTests
                         }
                     }
                 }
-                if (!party && pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction)
+                if (!party && pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction
+                    && feedbackDraw.FeedbackWord != PalStoryBattleView.EscapeFailWord)
                 {
+                    // (#51) The failed-escape feedback carries its own label and no digits; the
+                    // strike-model assertions below apply only to real attack feedback.
                     // Author B: idle1/magic1/attack1/wait0. fight.c5078 enqueues after the
                     // last prehit draw (4); Delay(FALSE) waits40 before its first impact UIUpdate (5).
                     int birthPose = feedbackAction.Attacker == ClassicBattleSide.Player ? 7 : 4;
@@ -1620,7 +1736,10 @@ public class StoryRoundtripSceneTests
                 }
                 if (!party && pose is null && previousPose is { } finalPose && draw is { } returnedDraw && previousDraw is { } finalDraw)
                 {
-                    int expected = previousCombat!.LastAction!.Attacker == ClassicBattleSide.Enemy
+                    // (#51) The authored flee feedback (11 poses, final pose 10) freezes the
+                    // scene instead of the enemy strike's final UpdateFighters tick.
+                    bool fleeEnded = finalPose.Pose == StoryPlayerFleePresentation.Duration - 1;
+                    int expected = !fleeEnded && previousCombat!.LastAction!.Attacker == ClassicBattleSide.Enemy
                         ? finalDraw.EnemyIdleCounter == 2 ? 1 : 2 : finalDraw.EnemyIdleCounter;
                     AssertThat(returnedDraw.EnemyIdleCounter).IsEqual(expected);
                     NonterminalReturns.Add(Capture(returnedDraw, finalPose.Pose));
@@ -1639,7 +1758,8 @@ public class StoryRoundtripSceneTests
                     {
                         // Even the final pose must finish before feedback releases its action/overlay.
                         AssertThat(unchecked(Main.StoryPresentationTicks - beforePose.PoseStartedAt) >= 40).IsTrue();
-                        if (previousCombat?.LastAction?.Attacker == ClassicBattleSide.Enemy)
+                        if (beforePose.Pose != StoryPlayerFleePresentation.Duration - 1
+                            && previousCombat?.LastAction?.Attacker == ClassicBattleSide.Enemy)
                             AssertThat(beforePose.Pose).IsEqual(15); // hit tick5 + eleven timed recovery ticks.
                     }
                 }

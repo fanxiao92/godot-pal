@@ -25,7 +25,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
         {
             File.Copy(ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -34,29 +34,23 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 string dataPath = Path.Combine(numericInput, "battle-data.json");
                 var data = JsonNode.Parse(File.ReadAllText(dataPath, System.Text.Encoding.UTF8))!;
                 var team = System.Linq.Enumerable.Single(data["teams"]!.AsArray(), t => (int)t!["teamId"]! == 18)!;
-                var enemy = System.Linq.Enumerable.Single(team["enemies"]!.AsArray(), e => (int)e!["id"]! == 7)!;
-                enemy["hp"] = hp;
+                if (enemyHp is { } enemyHpValue)
+                {
+                    var enemy = System.Linq.Enumerable.Single(team["enemies"]!.AsArray(), e => (int)e!["id"]! == 7)!;
+                    enemy["hp"] = enemyHpValue;
+                }
                 if (playerHp is { } memberHp)
                 {
                     // Both the role snapshot and its player must keep matching HP words.
                     data["roles"]![0]!["hp"] = memberHp;
                     data["players"]![0]!["hp"] = memberHp;
                 }
-                File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
-                numbers = numericInput;
-            }
-            if (removeDualAttack)
-            {
-                // Targeted counterexample input: object 170 is unworn everywhere; the declared
-                // object itself stays (declared-but-unworn is legal), only the grid rows change.
-                numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(numericInput);
-                foreach (string path in Directory.GetFiles(numbers)) File.Copy(path, Path.Combine(numericInput, Path.GetFileName(path)));
-                string dataPath = Path.Combine(numericInput, "battle-data.json");
-                var data = JsonNode.Parse(File.ReadAllText(dataPath, System.Text.Encoding.UTF8))!;
-                foreach (string section in new[] { "roles", "players" })
-                    data[section]![1]!["equipment"]![3] = 0;
-                data["roleEquipment"]![1]![3] = 0;
+                if (removeDualAttack)
+                {
+                    foreach (string section in new[] { "roles", "players" })
+                        data[section]![1]!["equipment"]![3] = 0;
+                    data["roleEquipment"]![1]![3] = 0;
+                }
                 File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
                 numbers = numericInput;
             }

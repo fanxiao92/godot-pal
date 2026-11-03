@@ -67,12 +67,13 @@ function Get-GameSourceInventory([string]$Directory) {
 function Get-GameBatchPlan([string]$Repository) {
     $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
     $definitions = @(
-        @{ name = 'process'; count = 84; classes = @('StoryMainProcessTests', 'MainProcessTests', 'ExplorationProcessTests') }
+        @{ name = 'process'; count = 85; classes = @('StoryMainProcessTests', 'MainProcessTests', 'ExplorationProcessTests') }
         @{ name = 'scene-dialogue'; count = 74; classes = @('ExplorationSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
         @{ name = 'scene-battle-heavy-a'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
             'Pal.Game.Tests.StoryRoundtripSceneTests.ActiveBattleExit', 'Pal.Game.Tests.StoryRoundtripSceneTests.DeadMember',
             'Pal.Game.Tests.StoryRoundtripSceneTests.DyingRoleHook', 'Pal.Game.Tests.StoryRoundtripSceneTests.EquipmentDualAttack') }
-        @{ name = 'scene-battle-heavy-b'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
+        @{ name = 'scene-battle-heavy-b'; count = 6; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.BossFleeFails',
             'Pal.Game.Tests.StoryRoundtripSceneTests.EquipmentStatus', 'Pal.Game.Tests.StoryRoundtripSceneTests.FriendDeathHook',
             'Pal.Game.Tests.StoryRoundtripSceneTests.HookRandomBands', 'Pal.Game.Tests.StoryRoundtripSceneTests.HooklessCounterpart',
             'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:0') }
@@ -112,14 +113,14 @@ function Get-GameBatchPlan([string]$Repository) {
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object class -CNE 'FailureControlTests' | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 615) { throw "Game inventory differs: $($inventory.Count)/615." }
+    if ($inventory.Count -ne 617) { throw "Game inventory differs: $($inventory.Count)/617." }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
-        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 876; skipped = 0 }
+        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 886; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 142; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 268; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = 612; skipped = 0 }
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = 614; skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {

@@ -369,6 +369,8 @@ public partial class Main
             storyTargetSlot, settlementLine, fleeSnapshot);
         return true;
     }
+    /// <summary>True while the failed-escape feedback presents (authored: the scene freezes).</summary>
+    internal bool StoryFleeFeedback => fleeOrigin is not null;
     /// <summary>palette.c PAL_FadeToRed (script.c 0x004F game-over fade): every palette entry
     /// except the preserved 0x4F text color moves red by 8 per step for 32 steps of 75ms;
     /// this is the step-<paramref name="step"/> palette of that reference convergence.</summary>
@@ -518,12 +520,14 @@ public partial class Main
             if (pose == 13) enemyIdle!.Advance();
             enemyIdle!.Advance();
         }
-        else
+        else if (enemyPresentation is { } enemy)
         {
-            long tail = enemyPresentation!.Duration - 5;
-            if (pose < tail) enemyIdle!.SetFrame(enemyPresentation.At(pose).EnemyFrame);
+            long tail = enemy.Duration - 5;
+            if (pose < tail) enemyIdle!.SetFrame(enemy.At(pose).EnemyFrame);
             else enemyIdle!.Advance();
         }
+        // Flee feedback (authored presentation): the escaper steps while the held scene
+        // otherwise freezes; the enemy idle resumes with the outer clock after the label.
     }
     private void ReleaseStory()
     {
