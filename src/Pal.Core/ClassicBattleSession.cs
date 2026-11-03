@@ -241,7 +241,9 @@ public sealed class ClassicBattleSession
             _ = random.NextInclusive(1, 10);
         }
         playerHp[target] -= damage;
-        Current = Current with { LastAction = new(Current.Round, ClassicBattleSide.Enemy, player.RoleId, damage, false, evaded)
+        // A covered strike is not an evade: the coverer intercepted it (fight.c:4959-4973 keeps
+        // the target's frame; only a plain defend roll shows the evade frame).
+        Current = Current with { LastAction = new(Current.Round, ClassicBattleSide.Enemy, player.RoleId, damage, false, evaded && coverer is null)
             { ActorIndex = enemySlot, TargetIndex = target, CovererPartyIndex = coverer } };
     }
 
