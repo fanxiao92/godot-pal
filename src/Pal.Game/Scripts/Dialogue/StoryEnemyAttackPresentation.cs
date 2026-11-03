@@ -6,7 +6,7 @@ using Pal.Core;
 namespace Pal.Game.Dialogue;
 
 /// <summary>Active single-enemy physical sequence, fight.c4987–5135. No RNG or combat advancement.
-/// Tail idle gestures retain frame0 until native idle speed/counter binding is delivered.</summary>
+/// Main supplies the persistent gesture for TRUE tail segments; this timeline owns active FALSE frames.</summary>
 internal sealed class StoryEnemyAttackPresentation
 {
     private readonly List<(long End, StoryEnemyAttackSnapshot Snapshot)> segments = new();
@@ -19,9 +19,9 @@ internal sealed class StoryEnemyAttackPresentation
     }
 
     internal StoryEnemyAttackPresentation(int idle, int magic, int attack, int wait,
-        Vector2 player, Vector2 enemy, int beforeHp, int afterHp, int maxHp, ClassicBattleAction action)
+        Vector2 player, Vector2 enemy, int beforeHp, int afterHp, int maxHp, ClassicBattleAction action, int initialEnemyFrame = 0)
     {
-        int pf = RestFrame(beforeHp, maxHp), ef = 0;
+        int pf = RestFrame(beforeHp, maxHp), ef = initialEnemyFrame;
         Vector2 pp = player, ep = enemy;
         bool impact = false;
         int shift = 0;

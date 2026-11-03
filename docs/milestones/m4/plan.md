@@ -66,3 +66,8 @@ Lost 进入原失败剧情至 `0x004E` 重载请求，输出一次可定位诊�
 - 完整 M4 候选 fresh Standards/Spec 独立复核、必要修复和匹配验证；通过授权的普通 PR 流程合入 main，并核真实主干结果、同步任务与入口文档。
 
 工具链与会话预算沿用批准基线，不升级或加时换绿。未知 Godot 仅查 PID/Name并暂停，不结束未知进程或采集无关信息。非预期测试失败、中止、崩溃、未知退出或缺报告保全后停止该执行，诊断和明确有界恢复分开记录；不自动重试、拼接 partial 或放宽断言。
+
+
+#### #46 D2-B bounded runtime checkpoint
+
+Normal Story now requires the optional-format reference-presentation capability before map/session/RNG creation and consumes retained checked FX for the full16tick player physical sequence, impact-only HP and per-battle persistent enemy idle frame/WORD counter. See [runtime details and exact caller/counter boundaries](../../design/main-story-roundtrip.md#d2-b-player-effects-persistent-enemy-idle-and-impact-hp). This supersedes the earlier runtime-D2 gaps in the historical status paragraph, not the unchanged native format. Floating-number layout/color and retail label lifecycle are explicit D2-C; fullD/#46/M4, GPU/manual/CI/fullgate remain open. No new native schema, producer, Core entropy, prepared-output overwrite, M3 or frozen owner28 gate changes.

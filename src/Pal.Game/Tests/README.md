@@ -59,3 +59,8 @@ Two new Story scene-dialogue cases cover delayed displayed enemy-impact HP/resul
 ### #46 D2-A resource binding
 
 Fourteen NativeVisual cases and seven public Story Prepare cases add optional effect/speed format-vs-capability, no-wrap int triples, zero idle speed, exact effect hash closure, retained checked planes, strict author schema and old-input compatibility. The two authored B cases additionally require the capability and literal original effect pixels. Inventory548 =545 positives+3 controls; serial81/98/366, metadata16 groups. NativeVisual63 and direct Story Prepare38 are the matching ranges; complete Prepare remains89. These are resource/preparation checks, not Main playback, an idle counter, floating feedback, GPU/manual/CI/fullgate or #46/M4 completion. Core/Main/clock are unchanged.
+
+
+### #46 D2-B runtime presentation
+
+StoryRoundtrip18 and StoryMainProcess9 cover the real Main player windup/three checked FX/impact-only enemy HP, persistent enemy gesture WORD counters and optional-format-vs-required-startup capability. The same `_Draw` snapshot is observed on actual `UpdateCompleted`; literal tables cover player positions/shift first-frame ordering/recoil/return, multi-idle cycling, zero WORD wrap and incoming enemy frame preservation. Existing40ms/late/wrap/restart, enemy impacts, owned Win/Loss × both languages, same-URI independence and active removal remain. Matching old Main11 and display10 are separate ranges, not full Game evidence. Inventory555=552 positives+3 controls, serial83/103/366; metadata16. No Prepare/native contract or authored source bytes change; D2-A evidence remains reusable. Floating numbers and retail label lifecycle are explicitly D2-C; GPU/manual/CI/full gate and #46/M4 completion are not claimed.

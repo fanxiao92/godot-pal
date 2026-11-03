@@ -20,13 +20,20 @@ public partial class Main
     private StoryBattlePoseClock poseClock;
     private uint presentationNow;
     private StoryEnemyAttackPresentation? enemyPresentation;
+    private StoryPlayerAttackPresentation? playerPresentation;
+    private int effectEnemyHeight;
+    private StoryEnemyIdleState? enemyIdle;
+    private StoryBattlePoseClock outerClock;
+    private bool outerDue;
     internal StoryEnemyAttackSnapshot? StoryEnemyPresentation => storyView?.EnemyPresentation;
+    internal StoryBattleDrawSnapshot? StoryDrawSnapshot => storyView?.DrawSnapshot;
     internal uint StoryPresentationTicks => presentationNow;
     internal StoryBattlePoseSnapshot? StoryBattlePose => StoryBattleMode == StoryBattlePresentation.Feedback
         ? new(presentationNow, poseClock.PoseStartedAt, poseClock.Pose) : null;
     public StoryBattlePresentation? StoryBattleMode { get; private set; }
     public ClassicBattleLifecycleSession? StoryBattle => storyRequest?.Lifecycle;
     internal int? StoryDisplayedPlayerHp => storyView?.DisplayedPlayerHp;
+    internal int? StoryDisplayedEnemyHp => storyView?.DisplayedEnemyHp;
     internal bool StoryResultVisible => storyView?.ResultVisible ?? false;
 
     private void InitializeStory(GameSceneConfiguration selected)
@@ -34,6 +41,7 @@ public partial class Main
         // All capability, hash and native validation completes before publishing children.
         var checkedStory = NativeStoryProfile.Load(selected.StoryProfile!, selected.Language);
         var checkedVisual = NativeBattleVisualProfile.Load(selected.VisualProfile!, checkedStory);
+        checkedVisual.RequireReferencePresentation();
         PalStoryBattleView.ValidateUi(checkedStory);
         var map = (PalMapScene)checkedStory.Scene.Instantiate();
         PalDialogueDisplay? display = null;
@@ -95,14 +103,27 @@ public partial class Main
             var view = new PalStoryBattleView();
             try { view.Initialize(story, storyVisual!, pending.TeamId); }
             catch { view.ReleaseTextures(); view.Free(); throw; }
+            var team = storyVisual!.Teams[pending.TeamId];
+            enemyIdle = new(team.IdleFrames, team.IdleAnimSpeed);
+            // battle.c1782 startup, then the immediately due first StartFrame (battle.c763–792).
+            enemyIdle.Advance(); enemyIdle.Advance();
+            outerClock = StoryBattlePoseClock.Start(now); outerDue = false;
             storyRequest = pending; storyView = view; battleConfirm = false;
             StoryBattleMode = StoryBattlePresentation.AttackMenu;
             Display!.SetProcess(false);
             mapScene!.Visible = false; AddChild(view);
-            view.Present(pending.Lifecycle.Current.Combat, StoryBattleMode.Value, 0);
+            view.Present(pending.Lifecycle.Current.Combat, StoryBattleMode.Value, enemyIdle.Frame, enemyIdle.Counter);
             return true;
         }
         var lifecycle = storyRequest.Lifecycle;
+        if (StoryBattleMode != StoryBattlePresentation.Feedback)
+        {
+            var nextOuter = outerClock.Advance(now);
+            if (outerDue || nextOuter != outerClock)
+            {
+                enemyIdle!.Advance(); outerDue = false; outerClock = StoryBattlePoseClock.Start(now);
+            }
+        }
         bool confirm = battleConfirm; battleConfirm = false;
         switch (StoryBattleMode)
         {
@@ -118,29 +139,38 @@ public partial class Main
                 break;
             case StoryBattlePresentation.Resolving:
                 int beforeHp = lifecycle.Current.Combat.PlayerHp;
+                int beforeEnemyHp = lifecycle.Current.Combat.EnemyHp;
                 if (!lifecycle.ResolveNextAction()) throw new InvalidOperationException("Battle action owner did not resolve an action.");
                 var action = lifecycle.Current.Combat.LastAction!;
                 var actingTeam = storyVisual!.Teams[storyRequest.TeamId];
                 enemyPresentation = action.Attacker != ClassicBattleSide.Enemy ? null : new(
                     actingTeam.IdleFrames, actingTeam.MagicFrames, actingTeam.AttackFrames, actingTeam.ActWaitFrames,
                     storyVisual.PlayerPosition, actingTeam.EnemyPosition, beforeHp,
-                    lifecycle.Current.Combat.PlayerHp, story.BattleContent.Player.MaxHp, action);
+                    lifecycle.Current.Combat.PlayerHp, story.BattleContent.Player.MaxHp, action, enemyIdle!.Frame);
+                playerPresentation = action.Attacker != ClassicBattleSide.Player ? null : new(
+                    storyVisual.PlayerPosition, actingTeam.EnemyPosition,
+                    beforeEnemyHp, lifecycle.Current.Combat.EnemyHp,
+                    StoryEnemyAttackPresentation.RestFrame(lifecycle.Current.Combat.PlayerHp, story.BattleContent.Player.MaxHp));
                 StoryBattleMode = StoryBattlePresentation.Feedback;
                 poseClock = StoryBattlePoseClock.Start(now);
+                AdvanceStoryGesture(0);
                 break;
             case StoryBattlePresentation.Feedback:
                 var nextPose = poseClock.Advance(now);
                 if (nextPose == poseClock) break;
                 poseClock = nextPose;
-                long poses = enemyPresentation?.Duration ?? 8;
+                long poses = enemyPresentation?.Duration ?? StoryPlayerAttackPresentation.Duration;
+                if (poseClock.Pose < poses) AdvanceStoryGesture(poseClock.Pose);
                 if (poseClock.Pose < poses) break;
+                // Enemy action's final UpdateFighters is not another timed pose (fight.c5137).
+                if (enemyPresentation is not null) enemyIdle!.Advance();
                 if (lifecycle.Completion is { } completion)
                 {
                     var request = storyRequest;
                     // Remove the complete feedback overlay and restore the map before the owned receipt.
                     RemoveChild(storyView!); storyView!.Free(); storyView = null;
                     mapScene!.Visible = true; RestoreStoryMap();
-                    storyRequest = null; StoryBattleMode = null; enemyPresentation = null;
+                    storyRequest = null; StoryBattleMode = null; enemyPresentation = null; playerPresentation = null; enemyIdle = null;
                     if (!Dialogue!.AcknowledgeBattle(request.Id, completion))
                         throw new InvalidOperationException("Story battle completion was not owned by the active trigger.");
                     // A child display must not consume this battle callback's delta.
@@ -148,13 +178,36 @@ public partial class Main
                     CompleteTrigger();
                     return true;
                 }
+                // The outer deadline set before the blocking action is already overdue.
+                outerDue = true;
                 StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Selecting
                     ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
                 break;
         }
-        storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, poseClock.Pose,
-            StoryBattleMode == StoryBattlePresentation.Feedback ? enemyPresentation?.At(poseClock.Pose) : null);
+        var shownEnemy = StoryBattleMode == StoryBattlePresentation.Feedback ? enemyPresentation?.At(poseClock.Pose) : null;
+        if (shownEnemy is { } shown) shownEnemy = shown with { EnemyFrame = enemyIdle!.Frame };
+        storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, enemyIdle!.Frame, enemyIdle.Counter,
+            shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null);
         return true;
+    }
+    private void AdvanceStoryGesture(int pose)
+    {
+        if (playerPresentation is not null)
+        {
+            // Four TRUE windup, three TRUE approach, three manual FX, three TRUE recoil,
+            // UpdateFighters at13 followed by three TRUE tail frames.
+            // ShowPlayerAttackAnim reads target height after windup, before its first TRUE approach delay.
+            if (pose == 4) effectEnemyHeight = storyVisual!.Teams[storyRequest!.TeamId].EnemySprite.Frames
+                .Single(f => f.Index == enemyIdle!.Frame).Height;
+            if (pose == 13) enemyIdle!.Advance();
+            enemyIdle!.Advance();
+        }
+        else
+        {
+            long tail = enemyPresentation!.Duration - 5;
+            if (pose < tail) enemyIdle!.SetFrame(enemyPresentation.At(pose).EnemyFrame);
+            else enemyIdle!.Advance();
+        }
     }
     private void ReleaseStory()
     {
@@ -168,7 +221,7 @@ public partial class Main
             storyView.GetParent()?.RemoveChild(storyView); storyView.ReleaseTextures(); storyView.Free();
         }
         storyView = null; storyRequest = null; StoryBattleMode = null; battleConfirm = false; resumeStoryDisplay = false;
-        enemyPresentation = null;
+        enemyPresentation = null; playerPresentation = null; enemyIdle = null; outerDue = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
     }
 }

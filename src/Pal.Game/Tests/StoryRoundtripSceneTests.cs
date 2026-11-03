@@ -13,6 +13,91 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class StoryRoundtripSceneTests
 {
+    [TestCase]
+    public void PlayerPhysicalLiteralFramesEffectsRecoilAndHitOnlyHp()
+    {
+        var sequence = new StoryPlayerAttackPresentation(new(240,170), new(100,120), 80, 0, 1);
+        int[] frames = [7,7,7,7,8,8,8,9,9,9,9,9,9,1,1,1];
+        Vector2[] positions = [new(240,170),new(240,170),new(240,170),new(240,170),
+            new(164,140),new(164,140),new(154,138),new(154,138),new(154,138),new(156,139),
+            new(156,139),new(156,139),new(156,139),new(240,170),new(240,170),new(240,170)];
+        Vector2[] enemyPositions = [new(92,116),new(96,118),new(94,117)];
+        Vector2[] fxPositions = [new(100,122),new(84,138),new(68,154)];
+        for (int tick = 0; tick < 16; tick++)
+        {
+            var shown = sequence.At(tick, 25);
+            AssertThat(shown.PlayerFrame).IsEqual(frames[tick]);
+            AssertThat(shown.PlayerPosition == positions[tick]).IsTrue();
+            AssertThat(shown.DisplayedEnemyHp).IsEqual(tick < 7 ? 80 : 0);
+            AssertThat(shown.ResultVisible == (tick >= 7)).IsTrue();
+            AssertThat(shown.EnemyColorShift).IsEqual(tick is 8 or 9 ? 6 : 0);
+            AssertThat(shown.EnemyPosition == (tick is >= 10 and <= 12 ? enemyPositions[tick-10] : new Vector2(100,120))).IsTrue();
+            AssertThat(shown.EffectFrame == (tick is >= 7 and <= 9 ? tick-7 : (int?)null)).IsTrue();
+            if (tick is >= 7 and <= 9) AssertThat(shown.EffectPosition == fxPositions[tick-7]).IsTrue();
+        }
+    }
+
+    [TestCase]
+    public void EnemyIdleWordCounterCyclesPersistsAcrossActionsAndDoesNotCoerceZero()
+    {
+        var idle = new StoryEnemyIdleState(3, 2);
+        // Startup UpdateFighters, immediate first outer; then four TRUE windup ticks.
+        int[] expectedFrames = [0,1,1,2,2,0];
+        int[] expectedCounters = [1,2,1,2,1,2];
+        for (int i = 0; i < 6; i++)
+        {
+            idle.Advance();
+            AssertThat(idle.Frame).IsEqual(expectedFrames[i]);
+            AssertThat((int)idle.Counter).IsEqual(expectedCounters[i]);
+        }
+        // FALSE active gestures assign but do not reset WORD; next TRUE tail clamps active frame.
+        idle.SetFrame(5);
+        AssertThat((int)idle.Counter).IsEqual(2);
+        idle.Advance(); AssertThat(idle.Frame).IsEqual(0); AssertThat((int)idle.Counter).IsEqual(1);
+        idle.Advance(); AssertThat(idle.Frame).IsEqual(1); AssertThat((int)idle.Counter).IsEqual(2);
+        idle.Advance(); AssertThat(idle.Frame).IsEqual(1); AssertThat((int)idle.Counter).IsEqual(1);
+        var zero = new StoryEnemyIdleState(3, 0);
+        zero.Advance(); AssertThat((int)zero.Counter).IsEqual(65535); AssertThat(zero.Frame).IsEqual(0);
+        zero.SetFrame(2); zero.Advance(); AssertThat((int)zero.Counter).IsEqual(65534); AssertThat(zero.Frame).IsEqual(2);
+        var fresh = new StoryEnemyIdleState(3, 2);
+        AssertThat(fresh.Frame).IsEqual(0); AssertThat((int)fresh.Counter).IsEqual(2);
+    }
+
+    [TestCase("effect")]
+    [TestCase("idle")]
+    public void BaseFormatWithoutSelectedPresentationFailsBeforePartialMain(string missing)
+    {
+        using var fixture = new AuthoredStoryFixture("Win", missing);
+        var story = Pal.Game.Profiles.NativeStoryProfile.Load(fixture.StoryUri);
+        var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+        AssertThat(visual.Teams.Count).IsEqual(1); // Format remains legal independently of selected capability.
+        using var host = new StoryHost(GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1"));
+        AssertThat(host.Main.Failure!.Contains(missing == "effect" ? "attack effect" : "IdleAnimSpeed")).IsTrue();
+        AssertThat(host.Main.GetChildCount()).IsEqual(0);
+        AssertThat(host.Main.Dialogue).IsNull(); AssertThat(host.Main.StoryBattle).IsNull();
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task PlayerPhysicalStartsWithReferenceWindupBeforeImpact()
+    {
+        using var fixture = new AuthoredStoryFixture("Win");
+        using var host = new StoryHost(GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1"));
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+        await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+        await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.Feedback);
+        AssertThat(host.Actions[0].Attacker).IsEqual(ClassicBattleSide.Player);
+        AssertThat(host.Main.StoryDrawSnapshot!.Value.PlayerFrame).IsEqual(7);
+        AssertThat(host.Main.StoryDisplayedEnemyHp == 43).IsTrue();
+        AssertThat(host.Main.StoryBattle!.Current.Combat.EnemyHp < 43).IsTrue();
+        AssertThat(host.Main.StoryResultVisible).IsFalse();
+    }
+
     [TestCase(Timeout = 20000)]
     public async Task EnemyFeedbackKeepsDisplayedHpUntilImpact()
     {
@@ -74,6 +159,10 @@ public class StoryRoundtripSceneTests
             }
             AssertThat(sequence.At(magic*2).EnemyPosition == enemy - new Vector2(magic < 3 ? 2 : 0, magic < 3 ? 1 : 0)).IsTrue();
         }
+        var incomingIdle = new StoryEnemyAttackPresentation(3, 0, 0, 0, player, enemy, 80, 80, 150,
+            new(1, ClassicBattleSide.Enemy, 0, 0, false, true), 2);
+        AssertThat(incomingIdle.At(0).EnemyFrame).IsEqual(2);
+        AssertThat(incomingIdle.At(3).EnemyFrame).IsEqual(2);
         AssertThat(StoryEnemyAttackPresentation.RestFrame(29,150)).IsEqual(1);
         AssertThat(StoryEnemyAttackPresentation.RestFrame(30,150)).IsEqual(0);
         AssertThat(StoryEnemyAttackPresentation.RestFrame(99,1000)).IsEqual(1);
@@ -294,6 +383,7 @@ public class StoryRoundtripSceneTests
             AssertThat(host.Main.StoryBattlePose).IsNull();
             AssertThat(host.Main.StoryEnemyPresentation is null).IsTrue();
             AssertThat(host.Main.StoryDisplayedPlayerHp is null).IsTrue();
+            AssertThat(host.Main.StoryDisplayedEnemyHp is null && host.Main.StoryDrawSnapshot is null).IsTrue();
             AssertThat(host.Main.StoryResultVisible).IsFalse();
             AssertThat(host.Main.Interaction).IsNull();
             AssertThat(host.Main.Dialogue).IsNull();
@@ -324,6 +414,10 @@ public class StoryRoundtripSceneTests
         internal List<ClassicBattleAction> Actions { get; } = [];
         internal int PoseChanges { get; private set; }
         private StoryBattlePoseSnapshot? previousPose;
+        private StoryBattleDrawSnapshot? previousDraw;
+        private int beforeEnemyHp;
+        private uint outerStartedAt;
+        private bool outerPending;
         private ClassicBattleAction? last;
         private int updates;
         private Exception? observationFailure;
@@ -348,6 +442,61 @@ public class StoryRoundtripSceneTests
             {
                 var combat = Main.StoryBattle?.Current.Combat;
                 var pose = Main.StoryBattlePose;
+                var draw = Main.StoryDrawSnapshot;
+                if (pose is { Pose: 0 } && previousPose is null) beforeEnemyHp = previousCombat!.EnemyHp;
+                if (pose is { } playerPose && combat?.LastAction?.Attacker == ClassicBattleSide.Player && draw is { } playerDraw)
+                {
+                    int tick = playerPose.Pose;
+                    int[] frames = [7,7,7,7,8,8,8,9,9,9,9,9,9,0,0,0];
+                    // Rest can be dying/dead; active frames are independent literals.
+                    if (tick < 13) AssertThat(playerDraw.PlayerFrame).IsEqual(frames[tick]);
+                    AssertThat(playerDraw.ResultVisible == (tick >= 7)).IsTrue();
+                    AssertThat(playerDraw.DisplayedEnemyHp).IsEqual(tick < 7 ? beforeEnemyHp : combat.EnemyHp);
+                    AssertThat(Main.StoryDisplayedEnemyHp == playerDraw.DisplayedEnemyHp).IsTrue();
+                    AssertThat(playerDraw.EffectFrame == (tick is >= 7 and <= 9 ? tick - 7 : (int?)null)).IsTrue();
+                    AssertThat(playerDraw.EnemyColorShift).IsEqual(tick is 8 or 9 ? 6 : 0);
+                    if (tick == 7) AssertThat(playerDraw.EffectPosition == new Vector2(100,122)).IsTrue();
+                    if (tick == 8) AssertThat(playerDraw.EffectPosition == new Vector2(84,138)).IsTrue();
+                    if (tick == 9) AssertThat(playerDraw.EffectPosition == new Vector2(68,154)).IsTrue();
+                    if (previousPose is { } lastPose && previousDraw is { } lastDraw)
+                    {
+                        int expected = lastDraw.EnemyIdleCounter;
+                        if (lastPose.Pose != tick && tick != 13) expected = expected == 2 ? 1 : 2;
+                        AssertThat(playerDraw.EnemyIdleCounter).IsEqual(expected);
+                    }
+                }
+                if (pose is { } enemyPose && combat?.LastAction?.Attacker == ClassicBattleSide.Enemy && draw is { } enemyDraw
+                    && previousPose is { } prevEnemyPose && previousDraw is { } prevEnemyDraw)
+                {
+                    int expected = prevEnemyDraw.EnemyIdleCounter;
+                    if (enemyPose.Pose != prevEnemyPose.Pose && enemyPose.Pose >= 11) expected = expected == 2 ? 1 : 2;
+                    AssertThat(enemyDraw.EnemyIdleCounter).IsEqual(expected);
+                }
+                if (draw is { } firstDraw && previousDraw is null)
+                {
+                    AssertThat(firstDraw.EnemyIdleCounter).IsEqual(2);
+                    outerStartedAt = Main.StoryPresentationTicks;
+                }
+                else if (draw is { } outerDraw && previousDraw is { } priorDraw && previousPose is null)
+                {
+                    int expected = priorDraw.EnemyIdleCounter;
+                    if (outerPending || unchecked(Main.StoryPresentationTicks - outerStartedAt) >= 40)
+                    {
+                        expected = expected == 2 ? 1 : 2;
+                        outerStartedAt = Main.StoryPresentationTicks; outerPending = false;
+                    }
+                    // A player's first TRUE windup happens in the resolving callback, after the outer caller.
+                    if (pose is { Pose: 0 } && combat!.LastAction!.Attacker == ClassicBattleSide.Player)
+                        expected = expected == 2 ? 1 : 2;
+                    AssertThat(outerDraw.EnemyIdleCounter).IsEqual(expected);
+                }
+                if (pose is null && previousPose is { } finalPose && draw is { } returnedDraw && previousDraw is { } finalDraw)
+                {
+                    int expected = previousCombat!.LastAction!.Attacker == ClassicBattleSide.Enemy
+                        ? finalDraw.EnemyIdleCounter == 2 ? 1 : 2 : finalDraw.EnemyIdleCounter;
+                    AssertThat(returnedDraw.EnemyIdleCounter).IsEqual(expected);
+                    outerPending = true;
+                }
                 if (previousPose is { } beforePose)
                 {
                     if (pose is { } currentPose && currentPose.Pose != beforePose.Pose)
@@ -382,7 +531,7 @@ public class StoryRoundtripSceneTests
                     if (hit && pose.Value.Pose == 5)
                         AssertThat(shown.PlayerFrame).IsEqual(combat.LastAction!.Evaded ? 3 : 4);
                 }
-                previousPose = pose;
+                previousPose = pose; previousDraw = draw;
                 if (Main.StoryBattleMode == StoryBattlePresentation.Feedback && previousMode == StoryBattlePresentation.Feedback)
                     AssertThat(ReferenceEquals(combat, previousCombat)).IsTrue();
                 if (combat?.LastAction is { } action && !ReferenceEquals(action, last))

@@ -12,7 +12,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
     internal string Root { get; } = "res://Assets/RuntimeTests/story-c-" + Guid.NewGuid().ToString("N");
     internal string StoryUri { get; }
     internal string VisualUri { get; }
-    internal AuthoredStoryFixture(string scenario)
+    internal AuthoredStoryFixture(string scenario, string? missingPresentation = null)
     {
         string repository = Path.GetFullPath(Path.Combine(ProjectSettings.GlobalizePath("res://"), "../.."));
         string source = Path.Combine(repository, "samples/authored-battle", scenario);
@@ -26,6 +26,12 @@ internal sealed class AuthoredStoryFixture : IDisposable
             Directory.CreateDirectory(Path.Combine(input, "events"));
             foreach (string path in Directory.GetFiles(Path.Combine(source, "Story/events"))) File.Copy(path, Path.Combine(input, "events", Path.GetFileName(path)));
             var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "Story/story-package.json")))!;
+            if (missingPresentation == "effect")
+            {
+                metadata["visual"]!.AsObject().Remove("attackEffectSpriteUri");
+                metadata["visual"]!.AsObject().Remove("attackEffectIndex");
+            }
+            if (missingPresentation == "idle") metadata["visual"]!["teams"]![0]!.AsObject().Remove("idleAnimSpeed");
             metadata["staticResources"] = Root + "/Static";
             metadata["battleContentUri"] = numeric;
             File.WriteAllText(Path.Combine(input, "story-package.json"), metadata.ToJsonString());
