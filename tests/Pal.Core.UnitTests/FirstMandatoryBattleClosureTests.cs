@@ -141,7 +141,7 @@ internal sealed class RealClosureFixture(string fault)
     private const int InstructionCount = 0xa9d2;
 
     public TriggerEventCollection Events() => TriggerEventCollection.Parse(Index.ToJsonString(),
-        new Dictionary<string, string> { ["story"] = File.ToJsonString() });
+        new Dictionary<string, string> { ["story"] = EventFile.ToJsonString() });
 
     public DialogueLanguagePackage Chinese() => Language("zh-Hans", includeFirst: true);
     public DialogueLanguagePackage English() => Language("en", includeFirst: fault != "missing-english-message");
@@ -206,7 +206,7 @@ internal sealed class RealClosureFixture(string fault)
     };
 
     private JsonObject? file;
-    public JsonObject File => file ??= BuildFile();
+    public JsonObject EventFile => file ??= BuildFile();
 
     private static void Put(JsonArray commands, int address, string op, JsonNode? next, int opcode, JsonArray operands,
         params (string Key, JsonNode? Value)[] fields)
