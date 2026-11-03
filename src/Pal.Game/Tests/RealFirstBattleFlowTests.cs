@@ -54,6 +54,10 @@ public class RealFirstBattleFlowTests
                 }
                 await scene.RunnerIdle();
             }
+            System.Console.WriteLine($"REAL_PARK:phase={main.Dialogue?.Session?.Phase} pos={main.Dialogue?.Session?.CurrentPosition} " +
+                $"display={main.Dialogue?.Session?.PendingDisplay is not null} pages={pages} failure={main.Failure} updates={scene.Updates.Count} " +
+                $"pending={main.Dialogue?.Session?.PendingBattle is not null} wait={main.Dialogue?.Session?.PendingSceneWait is not null} " +
+                $"move={main.Dialogue?.Session?.PendingMovement is not null} trans={main.Dialogue?.Session?.PendingTransition is not null}");
             AssertThat(main.StoryBattle is not null).IsTrue(); // @09FE engaged through the facade
 
             int rounds = 0;
