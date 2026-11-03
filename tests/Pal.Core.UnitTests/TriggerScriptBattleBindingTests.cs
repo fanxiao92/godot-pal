@@ -605,6 +605,142 @@ public sealed class TriggerScriptBattleBindingTests
         Assert.Throws<InvalidDataException>(() => new TriggerBattleContent(Role(), player, Growth(), new Dictionary<int, ClassicBattleEnemy>()));
     }
 
+    private static void Pad(EventFixture fixture, int count)
+    {
+        while (fixture.Commands.Count < count)
+        {
+            int index = fixture.Commands.Count;
+            string label = "L" + index.ToString("D4", System.Globalization.CultureInfo.InvariantCulture);
+            // WORD order: once more commands exist, a trailing end's null next points at its successor.
+            if (index > 0 && fixture.Commands[index - 1]!["next"] is null)
+                fixture.Commands[index - 1]!["next"] = label;
+            fixture.Commands.Add(JsonNode.Parse(
+                "{\"label\":\"" + label + "\",\"op\":\"end\",\"mode\":\"keep\",\"next\":null,\"source\":{\"index\":" + index
+                + ",\"opcode\":0,\"operands\":[0,0,0]}}"));
+        }
+    }
+
+    [Fact]
+    public void Battle_end_script_pauses_settlement_runs_with_enemy_slot_caller_then_completes()
+    {
+        var fixture = Fixture();
+        fixture.Index["source"]!["instructionCount"] = 13;
+        fixture.Index["source"]!["byteLength"] = 104;
+        Pad(fixture, 13);
+        fixture.Commands[8] = JsonNode.Parse("""
+          {"label":"L0008","op":"setDialog","box":"lower","portraitId":0,"color":0,"rngWord":0,"next":"L0009","source":{"index":8,"opcode":61,"operands":[0,0,0]}}
+          """);
+        fixture.Commands[9] = JsonNode.Parse("""
+          {"label":"L0009","op":"showDialog","messageId":61,"descriptionLineWord":0,"next":"L0010","source":{"index":9,"opcode":65535,"operands":[61,0,0]}}
+          """);
+        fixture.Commands[10] = JsonNode.Parse("""
+          {"label":"L0010","op":"showDialog","messageId":62,"descriptionLineWord":0,"next":"L0011","source":{"index":10,"opcode":65535,"operands":[62,0,0]}}
+          """);
+        fixture.Commands[11] = JsonNode.Parse("""
+          {"label":"L0011","op":"randomJump","rate":50,"to":"L0009","next":"L0012","source":{"index":11,"opcode":6,"operands":[50,9,0]}}
+          """);
+        fixture.Commands[12] = JsonNode.Parse("""
+          {"label":"L0012","op":"end","mode":"keep","next":null,"source":{"index":12,"opcode":0,"operands":[0,0,0]}}
+          """);
+        var random = new BindingRandom();
+        var script = Script(fixture, random, Content(enemy: new(7, 0, 43, 0, 0, 0, 1) { BattleEndScript = 8 }));
+        Assert.Throws<InvalidOperationException>(script.StartBattleEndScript);
+        script.Start("shared", "npc", 28);
+        var request = script.PendingBattle!;
+        request.Lifecycle.SelectAttack(7);
+        Assert.True(request.Lifecycle.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Won, request.Lifecycle.Current.Combat.Phase);
+        // battle.c 1334-1337: the settlement pauses on the enemy's declared script before recovery.
+        Assert.Null(request.Lifecycle.Completion);
+        Assert.Equal(new ClassicBattleEndScript(0, 7, 8), request.Lifecycle.PendingBattleEndScript);
+        Assert.NotNull(request.Lifecycle.VictorySettlement);
+        int hpBeforeScript = request.Lifecycle.Current.Role.Hp;
+        script.StartBattleEndScript();
+        Assert.Equal(new ClassicBattleEndScript(0, 7, 8), script.RunningBattleEndScript);
+        Assert.Equal(0, script.Caller); // the enemy slot is the run's caller
+        Assert.Equal(TriggerScriptPhase.WaitingForDisplay, script.Phase);
+        var display = script.PendingDisplay!;
+        display.Display.Update(24, false, true);
+        display.Display.Update(100, true, false);
+        Assert.True(script.AcknowledgeDisplay(display.Id));
+        // The finished script acknowledges the settlement: recovery completes and the receipt exists.
+        Assert.Null(script.RunningBattleEndScript);
+        Assert.Null(request.Lifecycle.PendingBattleEndScript);
+        Assert.Equal(ClassicBattlePhase.Won, request.Lifecycle.Completion!.Outcome);
+        Assert.Equal(hpBeforeScript + (150 - hpBeforeScript) / 2, request.Lifecycle.Current.Role.Hp);
+        Assert.Equal(28, script.Caller);
+        Assert.True(script.AcknowledgeBattle(request.Id, request.Lifecycle.Completion));
+        FinishDisplay(script);
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+    }
+
+    [Theory]
+    [InlineData("fault")]
+    [InlineData("changeHp")]
+    [InlineData("startBattle")]
+    public void Battle_end_script_closure_is_preflighted_and_rejects_before_any_side_effect(string fault)
+    {
+        var fixture = Fixture();
+        fixture.Index["source"]!["instructionCount"] = 10;
+        fixture.Index["source"]!["byteLength"] = 80;
+        Pad(fixture, 10);
+        fixture.Commands[8] = fault switch
+        {
+            "fault" => JsonNode.Parse("""
+              {"label":"L0008","op":"raw","next":"L0009","source":{"index":8,"opcode":134,"operands":[0,65535,8]}}
+              """),
+            "changeHp" => JsonNode.Parse("""
+              {"label":"L0008","op":"changeHp","scope":0,"amount":10,"next":"L0009","source":{"index":8,"opcode":27,"operands":[0,10,0]}}
+              """),
+            _ => Battle(8)
+        };
+        fixture.Commands[9] = JsonNode.Parse("""
+          {"label":"L0009","op":"end","mode":"keep","next":null,"source":{"index":9,"opcode":0,"operands":[0,0,0]}}
+          """);
+        var random = new BindingRandom();
+        var script = Script(fixture, random, Content(enemy: new(7, 0, 43, 0, 0, 0, 1) { BattleEndScript = 8 }));
+        Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 28));
+        Assert.Equal(0, random.Draws);
+        Assert.Null(script.PendingBattle);
+        Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+    }
+
+    [Fact]
+    public void Declared_role_panels_flow_into_the_next_battle_base_declaration()
+    {
+        var fixture = Fixture();
+        fixture.Commands[2] = Battle(2);
+        fixture.Commands[3] = End(3);
+        var role = Role() with { Attack = 40, MagicPower = 12, Defense = 20, Dexterity = 100, FleeRate = 6 };
+        var enemy = new ClassicBattleEnemy(7, 0, 43, 0, 0, 0, 1) { Experience = 120 };
+        var declared = new TriggerBattleContent([role], [new(1, 100, 150, 40, 20, 100)],
+            new Dictionary<int, ClassicBattleGrowthData> { [1] = Growth() },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = new[] { enemy } }, panelDeclaredRoles: [1]);
+        var script = Script(fixture, new BindingRandom(), declared);
+        script.Start("shared", "npc", 28);
+        var first = script.PendingBattle!;
+        Win(first);
+        // PAL_PlayerLevelUp draw order with the binding draws: attack 40+4+0, defense 20+2+0,
+        // dexterity 100+2+0, magicPower 12+4+0, flee 6+2; the settled panels are the next base.
+        Assert.True(script.AcknowledgeBattle(first.Id, first.Lifecycle.Completion));
+        var second = script.PendingBattle!;
+        var settled = first.Lifecycle.Current.Role;
+        var basePlayer = second.Lifecycle.Current.Combat.Players[0];
+        Assert.Equal(settled.Attack, basePlayer.Attack);
+        Assert.Equal(settled.Defense, basePlayer.Defense);
+        Assert.Equal(settled.Dexterity, basePlayer.Dexterity);
+        // Without the declaration the per-battle player panel stays the base (legacy behavior).
+        var legacy = Script(fixture, new BindingRandom(), Content(role, enemy));
+        legacy.Start("shared", "npc", 28);
+        var firstLegacy = legacy.PendingBattle!;
+        Win(firstLegacy);
+        Assert.True(legacy.AcknowledgeBattle(firstLegacy.Id, firstLegacy.Lifecycle.Completion));
+        var legacySecond = legacy.PendingBattle!.Lifecycle.Current.Combat.Players[0];
+        Assert.Equal(40, legacySecond.Attack);
+        Assert.Equal(20, legacySecond.Defense);
+        Assert.Equal(100, legacySecond.Dexterity);
+    }
+
     private static void AssertInert(TriggerScriptSession script, BindingRandom random, Func<bool> acknowledge)
     {
         var before = (script.Phase, script.Caller, script.ReturnEntry, script.CurrentPosition, script.Context,

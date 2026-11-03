@@ -736,6 +736,27 @@ public sealed class ModernBattleContentTests
         else parent[key] = value;
     }
 
+    [Fact]
+    public void Role_panel_words_declare_together_and_mark_the_flowback_source()
+    {
+        var data = Data();
+        data["roles"]![0]!["attack"] = 40;
+        data["roles"]![0]!["magicPower"] = 12;
+        data["roles"]![0]!["defense"] = 20;
+        data["roles"]![0]!["dexterity"] = 100;
+        data["roles"]![0]!["fleeRate"] = 6;
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        Assert.Equal(40, content.InitialRole.Attack);
+        Assert.True(content.PanelDeclaredRoles.SetEquals([1]));
+        // Absent panel words stay legal and declare no flowback (legacy content is unchanged).
+        var legacy = ModernBattleContent.Parse(Data().ToJsonString());
+        Assert.Empty(legacy.PanelDeclaredRoles);
+        // A partial declaration is rejected before any content is granted.
+        data["roles"]![0]!.AsObject().Remove("fleeRate");
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("must be declared together", error.Message);
+    }
+
     private static JsonNode At(JsonNode root, string path)
     {
         if (path == "$") return root;
