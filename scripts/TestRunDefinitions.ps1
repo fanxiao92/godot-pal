@@ -180,3 +180,70 @@ function Assert-Version7TrxRun {
     if (-not $actualIds.SetEquals($expectedIds)) { throw "TRX case IDs missing or extra: $Path" }
     [pscustomobject]@{ identity = $identity; runId = $identity.runId; executionIds = $identity.executionIds; cases = $rows; fqn = @($identity.names) }
 }
+
+# The pinned xUnit adapter (executor://xunit/VsTestRunner3/netcore/) may collapse a
+# multi-case theory into ONE UnitTest definition on full-suite runs: its cases share
+# that testId while keeping one result row each with a distinct executionId, and
+# TestEntries still pair 1:1 with the rows (filtered per-case runs stay 1:1:1). That
+# shape is a legal TRX graph, not corruption, so xUnit runs without frozen discovery
+# are verified per row instead of through the strict 1:1:1 graph: entries must pair
+# with rows by (testId, executionId), every row must resolve to a definition whose
+# TestMethod binds to the expected assembly and whose FQN matches the row name or its
+# parameterized form, and run/execution GUID identities stay unique. GdUnit Game TRX
+# keeps the strict 1:1:1 Read-TestRunIdentity graph because that adapter emits one
+# definition per case and the Game gate pins exact source-derived FQN identity sets.
+function Read-XUnitTrxIdentity {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Assembly
+    )
+    $document = [xml]::new()
+    $document.XmlResolver = $null
+    $document.Load($Path)
+    $ns = [Xml.XmlNamespaceManager]::new($document.NameTable)
+    $ns.AddNamespace('t', 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010')
+    $root = $document.SelectSingleNode('/t:TestRun', $ns)
+    if (-not $root -or -not $root.GetAttribute('id')) { throw "Missing TRX run identity: $Path." }
+    $rows = @($root.SelectNodes('t:Results/t:UnitTestResult', $ns))
+    $definitions = @($root.SelectNodes('t:TestDefinitions/t:UnitTest', $ns))
+    $entries = @($root.SelectNodes('t:TestEntries/t:TestEntry', $ns))
+    if (-not $rows.Count -or -not $definitions.Count -or $rows.Count -ne $entries.Count) { throw "Incomplete xUnit TRX identity graph: $Path." }
+    $byId = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+    foreach ($definition in $definitions) {
+        $id = $definition.GetAttribute('id')
+        $method = $definition.SelectSingleNode('t:TestMethod', $ns)
+        if (-not $id -or $byId.ContainsKey($id) -or -not $method -or
+            -not $method.GetAttribute('className') -or -not $method.GetAttribute('name') -or
+            -not $method.GetAttribute('codeBase') -or
+            [IO.Path]::GetFullPath($method.GetAttribute('codeBase')) -cne [IO.Path]::GetFullPath($Assembly)) {
+            throw "Invalid xUnit TRX definition identity: $Path."
+        }
+        $byId.Add($id, @{ fqn = $method.GetAttribute('className') + '.' + $method.GetAttribute('name') })
+    }
+    $rowIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $executionIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $rowPairs = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $names = [Collections.Generic.List[string]]::new()
+    foreach ($row in $rows) {
+        $id = $row.GetAttribute('testId'); $execution = $row.GetAttribute('executionId'); $name = $row.GetAttribute('testName')
+        $guid = [guid]::Empty
+        if (-not $id -or -not $byId.ContainsKey($id) -or -not $name -or -not $execution -or
+            -not $executionIds.Add($execution) -or -not [guid]::TryParse($execution, [ref]$guid) -or $guid -eq [guid]::Empty -or
+            -not $rowPairs.Add("$id|$execution") -or
+            ($name -cne $byId[$id].fqn -and -not $name.StartsWith($byId[$id].fqn + '(', [StringComparison]::Ordinal))) {
+            throw "xUnit TRX result/definition mismatch or duplicate identity: $Path."
+        }
+        $null = $rowIds.Add($id)
+        $names.Add($name)
+    }
+    if (-not $rowIds.SetEquals($byId.Keys)) { throw "Unreferenced xUnit TRX definitions: $Path." }
+    $entryPairs = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in $entries) {
+        $pair = "$($entry.GetAttribute('testId'))|$($entry.GetAttribute('executionId'))"
+        if (-not $entryPairs.Add($pair) -or -not $rowPairs.Contains($pair)) { throw "xUnit TRX entry/row pair mismatch: $Path." }
+    }
+    if (-not $entryPairs.SetEquals($rowPairs)) { throw "xUnit TRX entry/result identity sets differ: $Path." }
+    $runGuid = [guid]::Empty
+    if (-not [guid]::TryParse($root.GetAttribute('id'), [ref]$runGuid) -or $runGuid -eq [guid]::Empty) { throw "Invalid xUnit TRX run GUID: $Path." }
+    [pscustomobject]@{ runId = $root.GetAttribute('id'); names = $names.ToArray(); executionIds = @($executionIds); document = $document; ns = $ns }
+}

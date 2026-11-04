@@ -81,5 +81,48 @@ try {
     Check 'failed row does not qualify as an expected skip' $false { param($d) $d.TestRun.Results.UnitTestResult[1].outcome = 'Failed' }
     # Even a permitted set of skips cannot become a zero-executed success.
     Check 'all eligible rows skipped is never success' $false { param($d) $d.TestRun.Results.UnitTestResult[0].outcome = 'NotExecuted'; $d.TestRun.ResultSummary.Counters.executed = '0'; $d.TestRun.ResultSummary.Counters.passed = '0' } -Whitelist @($allowed + 'Fixture.Cases.Positive')
+    # Per-row xUnit reader: one plain case plus a two-case theory collapsed onto a single
+    # shared definition (per-case rows with distinct executionIds, entries pairing 1:1).
+    function TheoryFixture {
+        $base = [Security.SecurityElement]::Escape($assembly)
+        $rows = @(
+            "<UnitTestResult testId='11111111-1111-4111-8111-111111111111' executionId='aaaaaaaa-1111-4111-8111-111111111111' testName='Fixture.Theory.Positive' outcome='Passed'/>",
+            "<UnitTestResult testId='22222222-2222-4222-8222-222222222222' executionId='bbbbbbbb-2222-4222-8222-222222222222' testName='Fixture.Theory.Cases(1)' outcome='Passed'/>",
+            "<UnitTestResult testId='22222222-2222-4222-8222-222222222222' executionId='cccccccc-3333-4333-8333-333333333333' testName='Fixture.Theory.Cases(2)' outcome='Passed'/>"
+        )
+        $defs = @(
+            "<UnitTest id='11111111-1111-4111-8111-111111111111' name='Fixture.Theory.Positive'><Execution id='aaaaaaaa-1111-4111-8111-111111111111'/><TestMethod className='Fixture.Theory' name='Positive' codeBase='$base'/></UnitTest>",
+            "<UnitTest id='22222222-2222-4222-8222-222222222222' name='Fixture.Theory.Cases'><Execution id='dddddddd-4444-4444-8444-444444444444'/><TestMethod className='Fixture.Theory' name='Cases' codeBase='$base'/></UnitTest>"
+        )
+        $entries = @(
+            "<TestEntry testId='11111111-1111-4111-8111-111111111111' executionId='aaaaaaaa-1111-4111-8111-111111111111'/>",
+            "<TestEntry testId='22222222-2222-4222-8222-222222222222' executionId='bbbbbbbb-2222-4222-8222-222222222222'/>",
+            "<TestEntry testId='22222222-2222-4222-8222-222222222222' executionId='cccccccc-3333-4333-8333-333333333333'/>"
+        )
+        [xml]@"
+<TestRun xmlns='http://microsoft.com/schemas/VisualStudio/TeamTest/2010' id='dddddddd-4444-4444-8444-444444444444'>
+<Results>$($rows -join '')</Results><TestDefinitions>$($defs -join '')</TestDefinitions><TestEntries>$($entries -join '')</TestEntries>
+</TestRun>
+"@
+    }
+    function Check-XUnit([string]$Name, [bool]$Expected, [scriptblock]$Mutation = {}) {
+        $doc = TheoryFixture; & $Mutation $doc
+        $path = Join-Path $root 'current-xunit.trx'; [IO.File]::WriteAllText($path, $doc.OuterXml, $utf8)
+        $actual = $false; $diagnostic = ''
+        try { $null = Read-XUnitTrxIdentity -Path $path -Assembly $assembly; $actual = $true }
+        catch { $diagnostic = $_.Exception.Message }
+        if ($actual -ne $Expected) { throw "${Name}: expected accepted=$Expected, actual=$actual; $diagnostic" }
+        $script:count++; Write-Host "PASS $Name"
+    }
+    Check-XUnit 'collapsed theory definition pairs two parameterized rows' $true
+    Check-XUnit 'entry count must equal row count' $false { param($d) $null = $d.TestRun.TestEntries.RemoveChild($d.TestRun.TestEntries.TestEntry[2]) }
+    Check-XUnit 'entry must pair with its own row executionId' $false { param($d) $d.TestRun.TestEntries.TestEntry[2].executionId = 'bbbbbbbb-2222-4222-8222-222222222222' }
+    Check-XUnit 'row without definition rejected' $false { param($d) $d.TestRun.Results.UnitTestResult[1].testId = 'eeeeeeee-5555-4555-8555-555555555555' }
+    Check-XUnit 'duplicate row executionId rejected' $false { param($d) $d.TestRun.Results.UnitTestResult[2].executionId = 'bbbbbbbb-2222-4222-8222-222222222222' }
+    Check-XUnit 'row name must bind to definition FQN or parameterized form' $false { param($d) $d.TestRun.Results.UnitTestResult[0].testName = 'substitute' }
+    Check-XUnit 'definition must bind to expected assembly' $false { param($d) $d.TestRun.TestDefinitions.UnitTest[0].TestMethod.codeBase = (Join-Path $root 'Other.dll') }
+    Check-XUnit 'orphan definition rejected' $false { param($d) $uri = $d.DocumentElement.NamespaceURI; $n = $d.CreateElement('UnitTest', $uri); $n.SetAttribute('id', 'ffffffff-6666-4666-8666-666666666666'); $m = $d.CreateElement('TestMethod', $uri); $m.SetAttribute('className', 'Fixture.Theory'); $m.SetAttribute('name', 'Orphan'); $m.SetAttribute('codeBase', $assembly); $null = $n.AppendChild($m); $null = $d.TestRun.TestDefinitions.AppendChild($n) }
+    Check-XUnit 'duplicate definition id rejected' $false { param($d) $null = $d.TestRun.TestDefinitions.AppendChild($d.TestRun.TestDefinitions.UnitTest[0].Clone()) }
+    Check-XUnit 'nonempty numeric GUID required for xUnit run' $false { param($d) $d.TestRun.id = 'not-a-guid' }
     Write-Host "PASS range identity regression: $count independent literal fixtures."
 } finally { Remove-Item -LiteralPath $root -Recurse -Force }
