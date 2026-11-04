@@ -496,6 +496,89 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Dialog_batch4_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 batch 4 (#99): dialog presentation - the four setDialog variants, showDialog, redraw
+        // (corrected: delay on operand 1, gesture flag on operand 2, operand 0 unused), plus the new
+        // restoreScreen / backupScreen. Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x00A6, 0, 0, 0,           // backupScreen (shared executor, no operands)
+            0x003C, 59, 0x4F79, 1,     // setDialog upper: portrait 59, color 0x79 (high byte 0x4F), rng 1
+            0xFFFF, 101, 0, 0,         // showDialog 101
+            0x008E, 0, 0, 0,           // restoreScreen (trigger switch only)
+            0x0005, 77, 2, 1,          // redraw: 2 delay units (120 ms), gestures on, operand 0 unused
+            0x003B, 0x3112, 0, 0,      // setDialog center: color 0x12 (high byte 0x31), rng 0
+            0x003D, 60, 200, 0,        // setDialog lower: portrait 60, color 200, rng 0
+            0x003E, 0x2107, 9, 8,      // setDialog centerWindow: color 7 (high byte 0x21), operands 1/2 preserved
+            0, 0, 0, 0);               // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(9, commands.Count);
+        Assert.Equal("backupScreen", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal("setDialog", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("upper", commands[1]!["box"]!.GetValue<string>());
+        Assert.Equal(59, commands[1]!["portraitId"]!.GetValue<int>());
+        Assert.Equal(0x79, commands[1]!["color"]!.GetValue<int>());
+        Assert.Equal(1, commands[1]!["rngWord"]!.GetValue<int>());
+        Assert.Equal("showDialog", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(101, commands[2]!["messageId"]!.GetValue<int>());
+        Assert.Equal(0, commands[2]!["descriptionLineWord"]!.GetValue<int>());
+        Assert.Equal("restoreScreen", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("redraw", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[4]!["delayUnits"]!.GetValue<int>());
+        Assert.Equal(1, commands[4]!["updateGestures"]!.GetValue<int>());
+        Assert.Equal("setDialog", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal("center", commands[5]!["box"]!.GetValue<string>());
+        Assert.Equal(0x12, commands[5]!["color"]!.GetValue<int>());
+        Assert.Equal("setDialog", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("lower", commands[6]!["box"]!.GetValue<string>());
+        Assert.Equal("setDialog", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal("centerWindow", commands[7]!["box"]!.GetValue<string>());
+        Assert.Equal(7, commands[7]!["color"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields, not source words: low-byte colors keep their source
+        // high bytes, the portrait / rng / delay / gesture / message words are rewritten, and the
+        // unused redraw operand 0 plus centerWindow operands 1-2 keep their source WORDs.
+        commands[1]!["portraitId"] = 61;
+        commands[1]!["color"] = 200;
+        commands[2]!["messageId"] = 102;
+        commands[2]!["descriptionLineWord"] = 1;
+        commands[4]!["delayUnits"] = 5;
+        commands[4]!["updateGestures"] = 0;
+        commands[5]!["rngWord"] = 1;
+        commands[6]!["portraitId"] = 58;
+        commands[7]!["color"] = 200;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x00A6, 0, 0, 0,
+            0x003C, 61, 0x4FC8, 1,
+            0xFFFF, 102, 1, 0,
+            0x008E, 0, 0, 0,
+            0x0005, 77, 5, 0,
+            0x003B, 0x3112, 0, 1,
+            0x003D, 58, 200, 0,
+            0x003E, 0x21C8, 9, 8,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // An unrelated semantic field is rejected without producing output.
+        commands[2]!["text"] = "hello";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
@@ -527,7 +610,7 @@ public sealed class EventCliTests : IDisposable
             0x6d, 1, 0, 18,
             0x90, 777, 18, 4,
             0x73, 1, 0, 0,
-            5, 1, 0, 0,
+            5, 0, 2, 1,
             0x41, 0, 0, 0,
             0x4f, 0, 0, 0,
             0x4e, 0, 0, 0,
@@ -563,7 +646,8 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(-123, commands[7].GetProperty("state").GetInt32());
         Assert.Equal(4, commands[11].GetProperty("slotIndex").GetInt32());
         Assert.Equal(1, commands[12].GetProperty("mode").GetInt32());
-        Assert.Equal(1, commands[13].GetProperty("delayUnits").GetInt32());
+        Assert.Equal(2, commands[13].GetProperty("delayUnits").GetInt32());
+        Assert.Equal(1, commands[13].GetProperty("updateGestures").GetInt32());
         Assert.Equal(new[] { 28, 1280, 256 }, commands[17].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
         Assert.Equal(4242, commands[21].GetProperty("entry").GetInt32());
         Assert.Equal(28, commands[22].GetProperty("eventObjectId").GetInt32());

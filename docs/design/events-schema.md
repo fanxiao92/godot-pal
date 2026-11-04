@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（66 个 opcode 位、58 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（68 个 opcode 位、60 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二、批4 #99 对话表现，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -13,7 +13,7 @@ pal-extract rebuild-events --input <events目录> --output <新文件>
 
 `export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
 
-实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 66 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`itemShortageJump`（#97）、`playerLacksPoisonJump`（#97）、`enemyLacksPoisonJump`（#97）、`notPoisonedJump`（#97）、`enemyHpAboveJump`（#97）、`enemyTurnJump`（#97）、`partyHpNotFullJump`（#97）、`waitForAnyKey`（#97）、`roleInPartyJump`（#98）、`notFacingObjectJump`（#98）、`objectOutOfZoneJump`（#98）、`delay`（#98）、`itemNotEquippedJump`（#98）、`notFirstOfKindJump`（#98）、`stateMatchJump`（#98）、`sceneMatchJump`（#98）、`quitGame`（#98）、`randomBranch`（#98）、`randomJump`、`startBattle`、`changeHp`、`changeMp`、`boostStat`、`setDialog` 四变体、`showDialog`、`redraw`、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 68 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`itemShortageJump`（#97）、`playerLacksPoisonJump`（#97）、`enemyLacksPoisonJump`（#97）、`notPoisonedJump`（#97）、`enemyHpAboveJump`（#97）、`enemyTurnJump`（#97）、`partyHpNotFullJump`（#97）、`waitForAnyKey`（#97）、`roleInPartyJump`（#98）、`notFacingObjectJump`（#98）、`objectOutOfZoneJump`（#98）、`delay`（#98）、`itemNotEquippedJump`（#98）、`notFirstOfKindJump`（#98）、`stateMatchJump`（#98）、`sceneMatchJump`（#98）、`quitGame`（#98）、`randomBranch`（#98）、`restoreScreen`（#99）、`backupScreen`（#99）、`randomJump`、`startBattle`、`changeHp`、`changeMp`、`boostStat`、`setDialog` 四变体（#99 复核）、`showDialog`（#99 复核）、`redraw`（#99 复核修正）、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
 
 导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
@@ -181,10 +181,12 @@ data/extracted/events/
 | `0x001B` | `changeHp` | `scope` 为 WORD 映射 operand 0（0=调用者角色，非 0=全队）、`amount` 为有符号整数映射 operand 1；operand 2 保留。仅战中角色钩子执行语义已交付：PAL_IncreaseHPMP 只改活人并封顶（#49） |
 | `0x001C` | `changeMp` | 同 `changeHp`，作用于 MP；仅战中角色钩子执行语义已交付（#49） |
 | `0x0030` | `boostStat` | `field` 为 WORD 映射 operand 0（PLAYERROLES WORD 块索引：17 攻击、18 灵力、19 防御、20 身法、21 逃跑）、`percent` 为有符号整数映射 operand 1、`roleOperand` 为 WORD 映射 operand 2（0=调用者）。执行按 `kBodyPartExtra` 寄存器写入 `基面板×percent/100`（WORD 截断、覆盖写），战后随寄存器清理（#49） |
-| `0x003B` | `setDialog` | `box: "center"`、`color` 为 `0..255` 映射 operand 0 低字节、`rngWord` 为 WORD 映射 operand 2；operand 1 保留 |
-| `0x003C` / `0x003D` | `setDialog` | `box: "upper"` / `"lower"`、`portraitId` 为 WORD 映射 operand 0、`color` 为 `0..255` 映射 operand 1 低字节、`rngWord` 为 WORD 映射 operand 2 |
-| `0x003E` | `setDialog` | `box: "centerWindow"`、`color` 为 `0..255` 映射 operand 0 低字节；operand 1、2 保留 |
-| `0xFFFF` | `showDialog` | `messageId` 为 WORD 映射 operand 0、`descriptionLineWord` 为 WORD 映射 operand 1；operand 2 保留。正文通过语言包解析，不内嵌可执行的 `text` 字段 |
+| `0x003B` | `setDialog` | `box: "center"`、`color` 为 `0..255` 映射 operand 0 低字节、`rngWord` 为 WORD 映射 operand 2；operand 1 保留（#99 复核） |
+| `0x003C` / `0x003D` | `setDialog` | `box: "upper"` / `"lower"`、`portraitId` 为 WORD 映射 operand 0、`color` 为 `0..255` 映射 operand 1 低字节、`rngWord` 为 WORD 映射 operand 2（#99 复核） |
+| `0x003E` | `setDialog` | `box: "centerWindow"`、`color` 为 `0..255` 映射 operand 0 低字节；operand 1、2 保留（#99 复核） |
+| `0x008E` | `restoreScreen` | 无操作数映射；三操作数保留；trigger switch only（script.c:3430），auto 到达即 TerminateOnError（#99） |
+| `0x00A6` | `backupScreen` | 无操作数映射；三操作数保留；shared（InterpretInstruction script.c:3071）（#99） |
+| `0xFFFF` | `showDialog` | `messageId` 为 WORD 映射 operand 0、`descriptionLineWord` 为 WORD 映射 operand 1；operand 2 保留。正文通过语言包解析，不内嵌可执行的 `text` 字段（#99 复核） |
 
 ### opcode 注册表（表驱动，#78 冻结）
 
@@ -234,7 +236,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x006D setSceneScripts | case 0x006D：`rgScene[operand0−1].wScriptOnEnter/wScriptOnTeleport = operand1/2` | scene 下标 → `sceneId`（1 基） |
 | 0x004A setBattlefield | case 0x004A：`gpGlobals->wNumBattleField = operand0` | 战场编号 → `battlefieldId` |
 
-#### 当前注册表（66 个 opcode 位，58 个动词）
+#### 当前注册表（68 个 opcode 位，60 个动词）
 
 | opcode | op | 字段（绑定） | 执行方式 | 后继 |
 |---|---|---|---|---|
@@ -282,7 +284,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0061 | `notPoisonedJump` | `to`(reference,0) | shared | conditionalJump |
 | 0x0064 | `enemyHpAboveJump` | `percent`(word,0)、`to`(reference,1) | shared | conditionalJump |
 | 0x0068 | `enemyTurnJump` | `to`(reference,0) | shared | conditionalJump |
-| 0x0005 | `redraw` | `delayUnits`(word,0) | triggerSwitchOnly | sequential |
+| 0x0005 | `redraw` | `delayUnits`(word,1)、`updateGestures`(word,2) | triggerSwitchOnly | sequential（#99 复核修正） |
 | 0x006D | `setSceneScripts` | `sceneId`(word,0)、`onEnter`(word,1)、`onTeleport`(word,2) | shared | sequential |
 | 0x0073 | `fadeScene` | `mode`(word,0) | shared | sequential |
 | 0x0074 | `partyHpNotFullJump` | `to`(reference,0) | shared | conditionalJump |
@@ -293,11 +295,13 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0083 | `objectOutOfZoneJump` | `eventObjectId`(word,0)、`zoneUnits`(word,1)、`to`(reference,2) | shared | conditionalJump |
 | 0x0085 | `delay` | `delayUnits`(word,0) | shared | sequential |
 | 0x0086 | `itemNotEquippedJump` | `itemId`(word,0)、`count`(word,1)、`to`(reference,2) | shared | conditionalJump |
+| 0x008E | `restoreScreen` | — | triggerSwitchOnly | sequential |
 | 0x0091 | `notFirstOfKindJump` | `to`(reference,0) | shared | conditionalJump |
 | 0x0094 | `stateMatchJump` | `eventObjectId`(word,0)、`state`(signedWord,1)、`to`(reference,2) | shared | conditionalJump |
 | 0x0095 | `sceneMatchJump` | `sceneId`(word,0)、`to`(reference,1) | shared | conditionalJump |
 | 0x00A0 | `quitGame` | — | shared | stop |
 | 0x00A2 | `randomBranch` | `count`(word,0) | shared | randomBranch |
+| 0x00A6 | `backupScreen` | — | shared | sequential |
 | 0x0090 | `setObjectScript` | `objectId`(word,0)、`value`(word,1)、`slotIndex`(word,2) | shared | sequential |
 | 0x009A | `setStateRange` | `fromEventObjectId`(word,0)、`toEventObjectId`(word,1)、`state`(signedWord,2) | shared | sequential |
 | 0xFFFF | `showDialog` | `messageId`(word,0)、`descriptionLineWord`(word,1) | bothSwitchesDiffer | messageSpan |
@@ -358,6 +362,23 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 
 真实数据核对：六个显式目标跳转类 opcode（0x0079/0x0081/0x0083/0x0086/0x0094/0x0095）的全部目标操作数要么为 0（引用 L0000，合法）要么落在 chunk 4（43538 条）内；0x0091 全部 5 个目标恰为 0；0x00A2 的两个分支 span 均在数组内。raw 命中从 #97 的 7142 降至 7060（−82 = 本批 10 个新具名 opcode 命中之和）。export→rebuild 字节一致回归见 #98 回执。框架最小扩展：`OpcodeSuccessor` 新增 `randomBranch` 成员（纯声明，不参与 decode/validate/encode 路径）；字段模型无需扩展，word/signedWord/reference 足以表达本批全部语义。引用字段命名遵守冻结约定：`eventObjectId`（event-object.json，0x0081/0x0083/0x0094）、`itemId`（object.json item 视图，0x0086）、`sceneId`（scene.json，0x0095）；`roleNameWord` 为本批新定名——操作数比较的是 rgwName 名字 WORD（player-roles.json 的 name 列值，WORD.DAT 索引），不是角色下标，真实数据操作数 37/38/39/41 亦非 0..5；`zoneUnits` 亦为新定名（32 像素为 1 单位的区域半径）。
 
+#### M5 批4 条目：对话表现（#99）
+
+本批核对结论：全部操作数仍为立即 WORD（同批1–3，`pScript->rgwOperand[n]` 直读，无变量寻址）；8 个 opcode 中 6 个为既有具名复核、2 个新具名（0x008E restoreScreen、0x00A6 backupScreen）。拓扑：0x0005/0x003B–0x003E/0x008E 位于 `PAL_RunTriggerScript` 的 trigger switch（executor `triggerSwitchOnly`；auto 执行到这些 opcode 经 default 委托 `PAL_InterpretInstruction`，两者均无对应 case → 3078 `TerminateOnError`）；0x00A6 位于共享 `PAL_InterpretInstruction`（executor `shared`）；0xFFFF 两 switch 各有 case 且行为不同（executor `bothSwitchesDiffer` 维持）。**复核修正一处：0x0005 redraw 的延迟操作数是 operand 1 而非 #78 原绑定的 operand 0**——script.c:3295 `UTIL_Delay((operand1 == 0) ? 60 : (operand1 * 60))`，operand 2 是重绘前更新队伍手势的开关（3287），operand 0 整个 case 未使用；修正后 `delayUnits` 重绑 operand 1、新增 `updateGestures`(word,2)，operand 0 保留源 WORD（真实数据 operand 0 全 0）。`rngWord` 语义核实：参考对 operand 2 做整 WORD 非零测试（3397/3407/3417 `? TRUE : FALSE`），非零且头像非零时 `PAL_StartDialog` 先 `VIDEO_BackupScreen` 再播放 RGM.MKF 动态头像（[text.c](../../reference/sdlpal/text.c):1271-1274），屏幕由 redraw 的 `PAL_DialogIsPlayingRNG` 分支（3275-3277）或 0x008E 恢复——编码保留完整 WORD 的既有决定维持不变。行号与逐条语义如下。
+
+| opcode | 动词 | 字段映射与寻址 | 执行方式（script.c 行号） | 后继 | 反向编码 | 真实数据 |
+|---|---|---|---|---|---|---|
+| 0x0005 | `redraw`（#78 已具名，**复核修正**） | `delayUnits`=operand1（×60 ms 墙钟延迟；0 运行时按 60 ms 计，仅表达式内归一，编码仍按 0）、`updateGestures`=operand2（非零才重绘前 `PAL_UpdatePartyGestures(FALSE)`，真值 WORD 同 waitUpdate 的 0/0xFFFF 形状）；operand0 参考 case 全程未用，保留源 WORD | triggerSwitchOnly（3269：3273 先 `PAL_ClearDialog(TRUE)`；3275 `PAL_DialogIsPlayingRNG()` 为真则 3277 `VIDEO_RestoreScreen`（RNG 对话启动时备份的屏幕由此恢复）；3279 战斗中 `PAL_BattleMakeScene`+整屏拷贝；否则 3287-3289 手势更新、3292-3294 `PAL_MakeScene`+`VIDEO_UpdateScreen`、3295 延迟；3298 `wScriptEntry++`） | sequential | delayUnits/updateGestures 由字段值重编码；operand0 保留 | 2673（2657 条全零；2×5、3×6、5×1；updateGestures=0xFFFF×4；operand0 全 0 佐证其未用） |
+| 0x003B | `setDialog`（#78 已具名，复核） | `color`=operand0 低字节（`(BYTE)` 转型，高位保留）、`rngWord`=operand2；operand1 保留（`PAL_StartDialog` 头像参数硬传 0） | triggerSwitchOnly（3391：3395 清对话、3396-3397 `PAL_StartDialog(kDialogCenter, (BYTE)operand0, 0, operand2 ? TRUE : FALSE)`；3398 推进） | sequential | color 低字节重编码保高位、rngWord 重编码；operand1 保留 | 112（rngWord 全 0、颜色高位全 0） |
+| 0x003C | `setDialog`（复核） | `portraitId`=operand0（RGM.MKF 头像 chunk 下标）、`color`=operand1 低字节、`rngWord`=operand2 | triggerSwitchOnly（3401：3406-3407 `PAL_StartDialog(kDialogUpper, (BYTE)operand1, operand0, operand2 ? TRUE : FALSE)`；3408 推进） | sequential | 三字段重编码；无保留操作数 | 1307（portraitId 非零 985；rngWord 非零 4） |
+| 0x003D | `setDialog`（复核） | 同 0x003C 布局，`kDialogLower` | triggerSwitchOnly（3411：3416-3417；3418 推进） | sequential | 同 0x003C | 1544（portraitId 非零 1246；rngWord 非零 3） |
+| 0x003E | `setDialog`（复核） | `color`=operand0 低字节；头像硬 0、`fPlayingRNG` 硬 FALSE，operand1、2 保留 | triggerSwitchOnly（3421：3426 `PAL_StartDialog(kDialogCenterWindow, (BYTE)operand0, 0, FALSE)`；3427 推进） | sequential | color 低字节重编码保高位；operand1、2 保留 | 452（三操作数全 0） |
+| 0x008E | `restoreScreen`（新） | 无操作数映射 | triggerSwitchOnly（3430：3434 `PAL_ClearDialog(TRUE)`、3435 `VIDEO_RestoreScreen(gpScreen)`、3436 `VIDEO_UpdateScreen(NULL)`、3437 推进；auto 无 case→InterpretInstruction 无 case→TerminateOnError。另注：`MESSAGE_GetSpan` 扫描消息块时把块内 0x008E 条目一并跨过（3125 循环条件含 `wOperation == 0x008E`）——restoreScreen 常嵌在消息块内，由跨度推进隐式消费而非逐条执行） | sequential | 三操作数保留源 WORD | 351（三操作数全 0） |
+| 0x00A6 | `backupScreen`（新） | 无操作数映射 | shared（3071：3075 `VIDEO_BackupScreen(gpScreen)`、3077 break 后函数尾 3085 `return wScriptEntry + 1`；两执行器均经 default 委托到达） | sequential | 三操作数保留源 WORD | 0（真实数据零命中；备份由 text.c:1273 RNG 对话启动、战斗等其他非脚本调用点触发，不影响描述符声明） |
+| 0xFFFF | `showDialog`（#78 已具名，复核） | `messageId`=operand0（原始消息引用；消息 0 在显示循环中触发清屏恢复 3455-3457）、`descriptionLineWord`=operand1（trigger 显示不用；WIN95 [itemmenu.c](../../reference/sdlpal/itemmenu.c):275 / [magicmenu.c](../../reference/sdlpal/magicmenu.c):197 描述循环按 `operand1 != 1 ? 1 : 0` 推进行号；本批真实数据全 0） | bothSwitchesDiffer（trigger 3440：`pszMsgFile` 配置下 3446 `MESSAGE_GetSpan` 跨度推进 + 3448-3461 `PAL_GetMsgNum` 逐条 `PAL_ShowDialogText`；无消息文件时 3464 单条显示 + 3466 推进。auto 3609：WIN95 下 3612-3614 按 `wEventObjectID`（`iDescLine = wEventObjectID & ~PAL_ITEM_DESC_BOTTOM`）算描述行位、3618 `MESSAGE_GetSpan` + 3620-3627 `PAL_DrawText` 直绘描述行；非 `pszMsgFile` 时 3631 单条直绘 + 3632 推进；非 WIN95 3637 仅推进） | **messageSpan**（bothSwitchesDiffer 依据复核：trigger 是玩家确认式对话框、auto 是 WIN95 描述行直绘，显示语义不同；但两者的 `pszMsgFile` 路径都用 `MESSAGE_GetSpan` 跨度推进，后继声明按跨度口径维持） | messageId/descriptionLineWord 重编码；operand2 保留 | 13514（messageId=0 ×1（清屏恢复哨兵）、operand1/operand2 全 0） |
+
+真实数据核对：本批命中 redraw 2673 + setDialog 四变体 3415（112+1307+1544+452，与 #78 的 3415 总数吻合）+ restoreScreen 351 + backupScreen 0 + showDialog 13514，共 19953。raw 命中从 #98 的 7060 降至 6709（−351 = 0x008E 新具名命中；0x00A6 零命中；六个复核项本已具名，无 raw 变化）。export→rebuild SHA `f36cf853…b39e72a` 字节一致（0x0005 字段重绑不破坏往返：映射操作数 1/2 由字段重编码回原 WORD、operand0 保留源值）。本批无引用字段，无悬空拒绝面变化；`DecodeValidatesReferenceRange` 导出期预检不启用。
+
 #### raw 保底与反向编码规则
 
 - 未登记 opcode 一律 `raw`，仅携带公共字段；已登记 opcode 不得用 `raw`（唯一例外：兼容旧 M2/M3 包的 raw opcode 7 仍可无损重建，其操作数不按引用解释，见 startBattle 章节）。
@@ -383,7 +404,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 - `limit` 是对应空闲计数器的比较上限，**不是帧延迟**；0 的特殊语义保留。
 - `0x0002` 在计数条件成立时停止/改入口，条件失败会清零计数并继续 `next`。因此不能把所有 `end` 当成无条件终止。
 - `giveItem.count` 可以为负；不把原始 `65535` 错读成增加 65535 个。
-- `setDialog` 与 `showDialog` 分开保留，不能把前者吞并进后一条文字命令。对话框、头像、颜色及 RNG 状态是执行上下文；`rngWord` 非零表示真，但编码仍保留完整 WORD。
+- `setDialog` 与 `showDialog` 分开保留，不能把前者吞并进后一条文字命令。对话框、头像、颜色及 RNG 状态是执行上下文；`rngWord` 非零表示真，但编码仍保留完整 WORD。`rngWord` 非零且头像非零时 `PAL_StartDialog` 先备份屏幕再播放 RGM.MKF 动态头像（text.c:1271-1274），该屏幕由 redraw 的 RNG 分支（script.c:3275-3277）或 0x008E 恢复（#99 核）。
 - `showDialog.messageId` 是原始消息引用，不是某个语言包内部重新编号的字符串下标。同文不同 ID 仍是不同引用；反向编译使用 ID，而非按文字内容反查索引。正文及控制信息保存在语言包，保留原文、空行和转义，不 trim 或自行合并。
 - `descriptionLineWord` 在 trigger 中不参与消息显示，在 WIN95 物品/法术描述调用方中用于行号推进：值 1 不增加行号，其他值增加一行。该行为见 [itemmenu.c](../../reference/sdlpal/itemmenu.c)、[magicmenu.c](../../reference/sdlpal/magicmenu.c)，不能误当成始终未使用的操作数。
 - 语言包内容不参与 chunk 4 编码。编辑文字不会自动改写 `M.MSG`；脚本 chunk 的 round-trip 也不覆盖文字编码与消息偏移表的往返。
