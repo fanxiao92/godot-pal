@@ -687,6 +687,115 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Status_item_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 status-item batch 2 (#101): the nine new removeEquipment / applyPoisonToEnemy /
+        // applyPoisonToPlayer / curePoisonByObjectIdForEnemy / curePoisonByObjectIdForPlayer /
+        // curePoisonsByLevel / setStatusPlayer / setStatusEnemy / clearPlayerStatus verbs plus
+        // the re-verified revivePlayer. Hand-built stream, not retail data. Poison operands are
+        // object.json poison-view object IDs, status numbers are rgPlayerStatus/rgwStatus row
+        // indices, every numeric operand is an unsigned WORD, and setStatusEnemy's operand 2 is
+        // the resisted conditional-jump target.
+        byte[] original = Words(
+            0x0022, 0, 5, 9,                      // revivePlayer: one player, half of max HP
+            0x0023, 2, 3, 7,                      // removeEquipment: role 2, 1-based part 3
+            0x0028, 1, 556, 0,                    // applyPoisonToEnemy: all enemies, poison 556
+            0x0029, 0, 560, 4,                    // applyPoisonToPlayer: one player, poison 560
+            0x002A, 1, 555, 0,                    // curePoisonByObjectIdForEnemy: all enemies
+            0x002B, 0, 557, 6,                    // curePoisonByObjectIdForPlayer: one player
+            0x002C, 1, 2, 0,                      // curePoisonsByLevel: whole party, level <= 2
+            0x002D, 3, 5, 8,                      // setStatusPlayer: row 3, 5 rounds
+            0x002E, 5, 3, 11,                     // setStatusEnemy: row 5, 3 rounds, resist target L000B
+            0x002F, 2, 11, 13,                    // clearPlayerStatus: row 2
+            0, 0, 0, 0,                           // end keep
+            0, 0, 0, 0);                          // end keep (jump target L000B)
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(12, commands.Count);
+        Assert.Equal("revivePlayer", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[0]!["scope"]!.GetValue<int>());
+        Assert.Equal(5, commands[0]!["healthTenths"]!.GetValue<int>());
+        Assert.Equal("removeEquipment", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[1]!["playerRole"]!.GetValue<int>());
+        Assert.Equal(3, commands[1]!["partWord"]!.GetValue<int>());
+        Assert.Equal("applyPoisonToEnemy", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[2]!["scope"]!.GetValue<int>());
+        Assert.Equal(556, commands[2]!["objectId"]!.GetValue<int>());
+        Assert.Equal("applyPoisonToPlayer", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[3]!["scope"]!.GetValue<int>());
+        Assert.Equal(560, commands[3]!["objectId"]!.GetValue<int>());
+        Assert.Equal("curePoisonByObjectIdForEnemy", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal("curePoisonByObjectIdForPlayer", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(557, commands[5]!["objectId"]!.GetValue<int>());
+        Assert.Equal("curePoisonsByLevel", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[6]!["maxLevel"]!.GetValue<int>());
+        Assert.Equal("setStatusPlayer", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[7]!["status"]!.GetValue<int>());
+        Assert.Equal(5, commands[7]!["rounds"]!.GetValue<int>());
+        Assert.Equal("setStatusEnemy", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(5, commands[8]!["status"]!.GetValue<int>());
+        Assert.Equal(3, commands[8]!["rounds"]!.GetValue<int>());
+        Assert.Equal("L000B", commands[8]!["to"]!.GetValue<string>());
+        Assert.Equal("clearPlayerStatus", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[9]!["status"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the scope flags flip, poison object IDs move,
+        // the level and round counts change, setStatusEnemy's resisted target moves to L0000
+        // (zero-target rule), and the untouched preserved operands keep their source WORDs.
+        commands[0]!["scope"] = 1;
+        commands[0]!["healthTenths"] = 10;
+        commands[1]!["playerRole"] = 0;
+        commands[1]!["partWord"] = 0; // remove every part
+        commands[2]!["scope"] = 0;
+        commands[2]!["objectId"] = 560;
+        commands[3]!["scope"] = 1;
+        commands[3]!["objectId"] = 556;
+        commands[4]!["scope"] = 0;
+        commands[4]!["objectId"] = 558;
+        commands[5]!["scope"] = 1;
+        commands[5]!["objectId"] = 559;
+        commands[6]!["scope"] = 0;
+        commands[6]!["maxLevel"] = 3;
+        commands[7]!["status"] = 6;
+        commands[7]!["rounds"] = 999;
+        commands[8]!["status"] = 0;
+        commands[8]!["rounds"] = 65535;
+        commands[8]!["to"] = "L0000";
+        commands[9]!["status"] = 8;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0022, 1, 10, 9,
+            0x0023, 0, 0, 7,
+            0x0028, 0, 560, 0,
+            0x0029, 1, 556, 4,
+            0x002A, 0, 558, 0,
+            0x002B, 1, 559, 6,
+            0x002C, 0, 3, 0,
+            0x002D, 6, 999, 8,
+            0x002E, 0, 65535, 0,
+            0x002F, 8, 11, 13,
+            0, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A resisted target that dangles is rejected without output.
+        commands[8]!["to"] = "L0100";
+        File.WriteAllText(path, events.ToJsonString());
+        var dangling = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "dangling.bin"));
+        Assert.Equal(1, dangling.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "dangling.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]

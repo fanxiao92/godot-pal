@@ -116,8 +116,21 @@ public static class OpcodeRegistry
         // to address 0 is rejected; non-zero words are chunk-4 jump targets (script.c:1023).
         new(0x0020, "removeItem", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.Word, 1), new("shortageTarget", OpcodeFieldKind.BattleTarget, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0022, "revivePlayer", [new("scope", OpcodeFieldKind.Word, 0), new("healthTenths", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #101: removeEquipment's operand 0 is a fourth player-addressing shape: a direct
+        // 0-based PLAYERROLES role index operand (script.c:1108 assigns iPlayerRole with no -1,
+        // unlike the 0x0019/0x001A roleOperand shape); operand 1 is 0 = remove every part,
+        // 1..MAX_PLAYER_EQUIPMENTS = that part (1-based, script.c:1129 indexes operand1 - 1).
+        new(0x0023, "removeEquipment", [new("playerRole", OpcodeFieldKind.Word, 0), new("partWord", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0024, "setAutoEntry", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("entry", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0025, "setTriggerEntry", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("entry", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x0028, "applyPoisonToEnemy", [new("scope", OpcodeFieldKind.Word, 0), new("objectId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x0029, "applyPoisonToPlayer", [new("scope", OpcodeFieldKind.Word, 0), new("objectId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x002A, "curePoisonByObjectIdForEnemy", [new("scope", OpcodeFieldKind.Word, 0), new("objectId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x002B, "curePoisonByObjectIdForPlayer", [new("scope", OpcodeFieldKind.Word, 0), new("objectId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x002C, "curePoisonsByLevel", [new("scope", OpcodeFieldKind.Word, 0), new("maxLevel", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x002D, "setStatusPlayer", [new("status", OpcodeFieldKind.Word, 0), new("rounds", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x002E, "setStatusEnemy", [new("status", OpcodeFieldKind.Word, 0), new("rounds", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x002F, "clearPlayerStatus", [new("status", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0030, "boostStat", [new("field", OpcodeFieldKind.Word, 0), new("percent", OpcodeFieldKind.SignedWord, 1), new("roleOperand", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x003B, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "center"), new("color", OpcodeFieldKind.LowByte, 0), new("rngWord", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x003C, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "upper"), new("portraitId", OpcodeFieldKind.Word, 0), new("color", OpcodeFieldKind.LowByte, 1), new("rngWord", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
