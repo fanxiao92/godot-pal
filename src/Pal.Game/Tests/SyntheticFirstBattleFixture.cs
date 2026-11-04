@@ -40,6 +40,22 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 ("Dialogue/Prompt-01.tres", "Leaves/Dialogue/Prompt-01.tres"),
                 ("Dialogue/Prompt-02.tres", "Leaves/Dialogue/Prompt-02.tres") })
                 File.Copy(Path.Combine(samples, relative), Path.Combine(root, name));
+            // Ruling (b): the copied languages become rotation-free local copies — the authored
+            // texts carry color codes that drive palette rotation, and the synthetic scene
+            // frames carry no indices/alpha planes for re-tinting. Plain text only (fixture
+            // files; the production chain, real leaves and sprite formats are untouched).
+            foreach (string languageId in new[] { "zh-Hans", "en" })
+            {
+                string path = Path.Combine(root, $"Leaves/Dialogue/Language.{languageId}.tres");
+                var language = (PalDialogueLanguage)ResourceLoader.Load(path, cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+                foreach (var message in language.Messages)
+                    foreach (var entry in message.Entries)
+                        if (entry.Kind == PalDialogueMessageEntry.EntryKind.Text)
+                            entry.Text = new string(entry.Text.Where(character =>
+                                character is not ('-' or '\'' or '@' or '"' or '$' or '~' or '\\' or '(' or ')')).ToArray());
+                language.SourceIdentity += " Synthetic rotation-free copy for #53 fixture; plain text only.";
+                NativeProfileFixture.SaveResource(language, path);
+            }
             // Background and enemy leaves are relabeled copies: the closure cross-checks the
             // declared FBP24 battlefield identity and the ABC bitmap number 97.
             {
