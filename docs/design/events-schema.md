@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 当前离线具名映射为 `0x0000`、`0x0006`、`0x0007`、`0x001B`、`0x001C`、`0x0030`、`0x003B`、`0x003C`、`0x003D`、`0x003E` 与 `0xFFFF`；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（36 个 opcode 位，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -13,7 +13,7 @@ pal-extract rebuild-events --input <events目录> --output <新文件>
 
 `export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
 
-实现的具名映射限于 `0x0000 end(keep)`、`0x0006 randomJump`、`0x0007 startBattle`、`0x001B changeHp`、`0x001C changeMp`、`0x0030 boostStat`、`0x003B/0x003C/0x003D/0x003E setDialog(center/upper/lower/centerWindow)`、`0xFFFF showDialog`；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 36 条描述符承载（`end(keep)`、`randomJump`、`startBattle`、`changeHp`、`changeMp`、`boostStat`、`setDialog` 四变体、`showDialog`、`redraw`、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
 
 导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
@@ -141,7 +141,7 @@ data/extracted/events/
 
 ## 4. 双向注册表与基础命令
 
-注册表在离线工具中定义。每个具名 opcode 必须声明：动词、三个操作数各自的字段映射或保留规则、WORD/有符号转换、引用及特殊值、trigger/auto 差异、控制流后继和编码规则。没有核实完整映射时保持 `raw`。
+注册表在离线工具中定义（#78 起为表驱动实现，见下文章节）。每个具名 opcode 必须声明：动词、三个操作数各自的字段映射或保留规则、WORD/有符号转换、引用及特殊值、trigger/auto 差异、控制流后继和编码规则。没有核实完整映射时保持 `raw`。
 
 反向编译以 `source.opcode` 和三个原始操作数为基础，使用**具名语义字段重新编码所有已映射操作数**，保留未映射的位和操作数；不能只把 `source` 原样复制就宣称具名转换正确。动词与原始 opcode 不匹配时拒绝。字段若只对应低位，例如颜色 BYTE，编码时保留原 WORD 中未映射的高位。
 
@@ -153,7 +153,7 @@ data/extracted/events/
 | `0x0001` | `end` | `mode: "advance"`；保留三个原操作数，推进到 `next` |
 | `0x0002` | `end` | `mode: "redirect"`、`to` 为引用映射 operand 0、`limit` 为 WORD 映射 operand 1；operand 2 保留 |
 | `0x0003` | `goto` | `to` 为引用映射 operand 0、`limit` 为 WORD 映射 operand 1；operand 2 保留 |
-| `0x0007` | `startBattle` | `teamId` 为 WORD 映射 operand 0；`lossTarget` 为可空引用映射 operand 1；`isBoss` 为布尔值，`fleeTarget` 为可空引用，二者共同映射 operand 2，规则见下文 |
+| `0x0007` | `startBattle` | `enemyTeamId` 为 WORD 映射 operand 0；`lossTarget` 为可空引用映射 operand 1；`isBoss` 为布尔值，`fleeTarget` 为可空引用，二者共同映射 operand 2，规则见下文 |
 | `0x001F` | `giveItem` | `itemId` 为 WORD 映射 operand 0、`count` 为有符号整数映射 operand 1；operand 2 保留 |
 | `0x0006` | `randomJump` | `rate` 为 WORD 映射 operand 0、`to` 为引用映射 operand 1；operand 2 保留。执行时抽取 `RandomLong(1,100)`，**抽取值 ≥ rate 时跳转**，否则顺序后继；预检必须同时覆盖两个真实分支（#49） |
 | `0x001B` | `changeHp` | `scope` 为 WORD 映射 operand 0（0=调用者角色，非 0=全队）、`amount` 为有符号整数映射 operand 1；operand 2 保留。仅战中角色钩子执行语义已交付：PAL_IncreaseHPMP 只改活人并封顶（#49） |
@@ -164,16 +164,114 @@ data/extracted/events/
 | `0x003E` | `setDialog` | `box: "centerWindow"`、`color` 为 `0..255` 映射 operand 0 低字节；operand 1、2 保留 |
 | `0xFFFF` | `showDialog` | `messageId` 为 WORD 映射 operand 0、`descriptionLineWord` 为 WORD 映射 operand 1；operand 2 保留。正文通过语言包解析，不内嵌可执行的 `text` 字段 |
 
+### opcode 注册表（表驱动，#78 冻结）
+
+Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每个已核对的 opcode 一条描述符，decode / validate / encode 全部走通用路径；后续 17 批 opcode 票只需追加描述符与对应测试，不改动通用路径。未登记 opcode 一律 `raw`。
+
+每条描述符声明：
+
+- `opcode` 与 `op` 动词；
+- 三个操作数的**字段绑定**（未列出的操作数原样保留源 WORD）：
+
+| 绑定种类 | 语义 |
+|---|---|
+| `word` | 无符号 0..65535，由字段值重编码 |
+| `signedWord` | -32768..32767，补码编码回 WORD |
+| `lowByte` | 0..255 映射操作数低字节；源 WORD 未映射的高位保留 |
+| `reference` | 必填标签引用，解析为 chunk 4 地址 |
+| `battleTarget` | 可空标签引用：null 编码 0；引用下标 0 被拒绝（须用 null） |
+| `bossFlag` | 与同一操作数上 battleTarget 的空值严格等价的布尔（`isBoss` ⟺ `fleeTarget == null`） |
+| `opcodeOffset` | 值 = opcode − base（如 `walkStep.direction`），编码时校验与 opcode 一致 |
+| 常量字段 | 固定 JSON 值必须与描述符一致（`setDialog.box`、`end.mode`） |
+
+- **执行方式声明**（trigger/auto 差异，对应 `script.c` 的 switch 拓扑：`PAL_RunTriggerScript` 与 `PAL_RunAutoScript` 各自持有少量控制流 case，其余统一委托 `PAL_InterpretInstruction`）：`shared`（两执行器都经 InterpretInstruction）／`triggerSwitchOnly`（仅 trigger 循环直接处理，auto 执行到该 opcode 会 TerminateOnError）／`bothSwitches`（两个执行器各自处理、语义一致）／`bothSwitchesDiffer`（两个执行器各自处理、行为不同，如各自空闲计数器、WIN95 描述文字）；
+- **控制流后继声明**：`sequential`／`stop`／`conditionalJump`（引用目标或 next 二选一）／`battleResult`（Won→next、Lost→lossTarget、Fled→fleeTarget）／`messageSpan`（随消息跨度推进）。
+
+#### 字段命名约定（T0 冻结，与 data-schema 共用）
+
+| 字段 | 引用目标 |
+|---|---|
+| `itemId` | object.json 的 item 视图 |
+| `magicId` | magic.json（或 object.json magic 视图） |
+| `enemyId` | enemy.json |
+| `enemyTeamId` | enemy-team.json |
+| `sceneId` | scene.json |
+| `objectId` | object.json union（须带视图类型） |
+| `eventObjectId` | event-object.json（SSS chunk 0） |
+
+**`eventObjectId` 与 `objectId` 是两张不同的表**：`event-object.json`（场景事件对象，EVENTOBJECT，16 WORD）与 `object.json`（物品/法术/敌人/毒脚本 union，7 WORD）是不同数据源。指向前者的操作数命名 `eventObjectId`，指向后者的命名 `objectId`（并声明视图）。#78 依此重命名：`startBattle.teamId`→`enemyTeamId`；`setAutoEntry`/`setTriggerEntry`/`setTriggerMode`/`setState`/`setObjectPosition` 的 `objectId`→`eventObjectId`；`setStateRange` 的 `fromObjectId`/`toObjectId`→`fromEventObjectId`/`toEventObjectId`。既有 `src/Pal.Core` 严格加载器与 Pal.Game prepare 仍按旧字段名解析，迁移由后续票处理（#78 写入范围不含 src/）。
+
+#### script.c 逐 opcode 核对结论（#78）
+
+| opcode | 参考实际寻址（[script.c](../../reference/sdlpal/script.c)） | 结论 |
+|---|---|---|
+| 0x0024 setAutoEntry / 0x0025 setTriggerEntry / 0x0040 setTriggerMode / 0x0049 setState / 0x0013 setObjectPosition | `PAL_InterpretInstruction` 前奏按 operand 0 选 `pCurrent`：0 或 0xFFFF=调用者，否则 `lprgEventObject[operand0−1]`（1 基）；case 体写 `pCurrent->wAutoScript`/`wTriggerScript`/`wTriggerMode`/`sState`/`x,y`（0x0024/0x0025/0x0040/0x0049 另有 operand0≠0 守卫） | **event object 下标** → `eventObjectId` |
+| 0x0090 setObjectScript | case 0x0090：`gpGlobals->g.rgObject[operand0].rgwData[2 + operand2] = operand1` | **object union 下标，不是 event object** → 保留 `objectId`（配合 `slotIndex`；语义槽随 union 视图而定，与第 3.2 节对象表入口槽对应） |
+| 0x009A setStateRange | case 0x009A：`for (i = operand0; i <= operand1; i++) lprgEventObject[i−1].sState = operand2` | **event object 闭区间** → `fromEventObjectId`/`toEventObjectId` |
+| 0x0007 startBattle | `PAL_StartBattle(wEnemyTeam, ...)`；敌队表为 DATA chunk 2（enemy-team.json） | → `enemyTeamId` |
+| 0x006D setSceneScripts | case 0x006D：`rgScene[operand0−1].wScriptOnEnter/wScriptOnTeleport = operand1/2` | scene 下标 → `sceneId`（1 基） |
+| 0x004A setBattlefield | case 0x004A：`gpGlobals->wNumBattleField = operand0` | 战场编号 → `battlefieldId` |
+
+#### 当前注册表（36 个 opcode 位）
+
+| opcode | op | 字段（绑定） | 执行方式 | 后继 |
+|---|---|---|---|---|
+| 0x0000 | `end` | `mode`="keep"（常量） | bothSwitches | stop |
+| 0x0006 | `randomJump` | `rate`(word,0)、`to`(reference,1) | bothSwitches | conditionalJump |
+| 0x0007 | `startBattle` | `enemyTeamId`(word,0)、`lossTarget`(battleTarget,1)、`isBoss`(bossFlag,2⟺fleeTarget)、`fleeTarget`(battleTarget,2) | triggerSwitchOnly | battleResult |
+| 0x0009 | `waitUpdate` | `frames`(word,0)、`runTriggers`(word,1)、`updateGestures`(word,2) | bothSwitchesDiffer | sequential |
+| 0x000B–0x000E | `walkStep` | `direction`(opcodeOffset, base 0x000B) | shared | sequential |
+| 0x000F | `face` | `direction`(word,0)、`frame`(word,1) | shared | sequential |
+| 0x0010 | `walkTo` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
+| 0x0013 | `setObjectPosition` | `eventObjectId`(word,0)、`x`(word,1)、`y`(word,2) | shared | sequential |
+| 0x0014 | `setObjectGesture` | `frame`(word,0) | shared | sequential |
+| 0x0015 | `setPartyFacing` | `direction`(word,0)、`gesture`(word,1)、`memberIndex`(word,2) | shared | sequential |
+| 0x001B | `changeHp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential |
+| 0x001C | `changeMp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential |
+| 0x001D | `changeHpMp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential |
+| 0x0022 | `revivePlayer` | `scope`(word,0)、`healthTenths`(word,1) | shared | sequential |
+| 0x0024 | `setAutoEntry` | `eventObjectId`(word,0)、`entry`(word,1) | shared | sequential |
+| 0x0025 | `setTriggerEntry` | `eventObjectId`(word,0)、`entry`(word,1) | shared | sequential |
+| 0x0030 | `boostStat` | `field`(word,0)、`percent`(signedWord,1)、`roleOperand`(word,2) | shared | sequential |
+| 0x003B | `setDialog` | `box`="center"、`color`(lowByte,0)、`rngWord`(word,2) | triggerSwitchOnly | sequential |
+| 0x003C | `setDialog` | `box`="upper"、`portraitId`(word,0)、`color`(lowByte,1)、`rngWord`(word,2) | triggerSwitchOnly | sequential |
+| 0x003D | `setDialog` | `box`="lower"、`portraitId`(word,0)、`color`(lowByte,1)、`rngWord`(word,2) | triggerSwitchOnly | sequential |
+| 0x003E | `setDialog` | `box`="centerWindow"、`color`(lowByte,0) | triggerSwitchOnly | sequential |
+| 0x0040 | `setTriggerMode` | `eventObjectId`(word,0)、`mode`(word,1) | shared | sequential |
+| 0x0041 | `markFailed` | — | shared | sequential |
+| 0x0043 | `setMusic` | `musicId`(word,0)、`mode`(word,1) | shared | sequential |
+| 0x0046 | `setPartyPos` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
+| 0x0049 | `setState` | `eventObjectId`(word,0)、`state`(signedWord,1) | shared | sequential |
+| 0x004A | `setBattlefield` | `battlefieldId`(word,0) | shared | sequential |
+| 0x004E | `requestReload` | — | shared | sequential |
+| 0x004F | `fadeToRed` | — | shared | sequential |
+| 0x0050 | `fadeOut` | `frames`(word,0) | shared | sequential |
+| 0x0052 | `hide` | `frames`(word,0) | shared | sequential |
+| 0x0005 | `redraw` | `delayUnits`(word,0) | triggerSwitchOnly | sequential |
+| 0x006D | `setSceneScripts` | `sceneId`(word,0)、`onEnter`(word,1)、`onTeleport`(word,2) | shared | sequential |
+| 0x0073 | `fadeScene` | `mode`(word,0) | shared | sequential |
+| 0x0075 | `setParty` | `roleId0`(word,0)、`roleId1`(word,1)、`roleId2`(word,2) | shared | sequential |
+| 0x0078 | `noop` | — | shared | sequential |
+| 0x0090 | `setObjectScript` | `objectId`(word,0)、`value`(word,1)、`slotIndex`(word,2) | shared | sequential |
+| 0x009A | `setStateRange` | `fromEventObjectId`(word,0)、`toEventObjectId`(word,1)、`state`(signedWord,2) | shared | sequential |
+| 0xFFFF | `showDialog` | `messageId`(word,0)、`descriptionLineWord`(word,1) | bothSwitchesDiffer | messageSpan |
+
+#### raw 保底与反向编码规则
+
+- 未登记 opcode 一律 `raw`，仅携带公共字段；已登记 opcode 不得用 `raw`（唯一例外：兼容旧 M2/M3 包的 raw opcode 7 仍可无损重建，其操作数不按引用解释，见 startBattle 章节）。
+- 反向编码以 `source.opcode` 与三个源操作数为底，**全部映射字段重新编码**；未映射操作数原样保留；`lowByte` 字段保留源 WORD 高位；动词与源 opcode 不匹配时拒绝。
+- 单元层的反例测试骨架（编辑语义字段 → 产物字节必须不同于源字节且等于手工重算值）作为后续每批 opcode 票的强制样板。
+
 ### `startBattle` 的完整双向映射（M4 codec 检查点）
 
 依据固定 [script.c](../../reference/sdlpal/script.c) 的 `PAL_RunTriggerScript` / `case 0x0007` 与 [battle.c](../../reference/sdlpal/battle.c) 的 `PAL_StartBattle(WORD wEnemyTeam, BOOL fIsBoss)`：
 
-- operand 0 为敌队编号，完整映射 `teamId: 0..65535`，本层不假设敌队资源存在。
+- operand 0 为敌队编号，完整映射 `enemyTeamId: 0..65535`，本层不假设敌队资源存在（#78 起由 `teamId` 更名，指向 enemy-team.json）。
 - operand 1 为 0 时 `lossTarget: null`，Lost 也走 `next`；非零时为 Lost 的标签目标。
 - operand 2 为 0 时 `isBoss: true`、`fleeTarget: null`，传入 boss 参数，正常逃跑不允许成功；非零时 `isBoss: false`、`fleeTarget` 为该地址，Fled（参考枚举拼写 `kBattleResultFleed`）跳到该目标。`isBoss` 必须恰好等价于 `fleeTarget` 为空，不允许互相矛盾的两个独立设置。
 - Won 或其他未命中上述条件的返回结果均走 `next`；参考同时清除 `fAutoBattle`，本指令不改写返回保存入口。`PAL_StartBattle` 自身处理真实战斗、Won 结算及公共清理后返回结果，不能由 codec 模拟这些副作用。
-- 非空 `lossTarget` / `fleeTarget` 必须按本文件或 `file#label` 解析到集合内**非零**地址。引用下标 0 会与原始零值特殊含义冲突，故拒绝，必须用 `null`。`0xFFFF` 在本指令没有 sentinel 含义：teamId 可为 65535，结果目标 65535 仅在完整 65536 条集合中引用实际命令。
-- 三个 WORD 全部由语义字段重新编码：`teamId`、已解析的 loss 地址或 0、已解析的 flee 地址或 0。`source.operands` 完整保留作来源诊断，但不能覆盖编辑后的字段；`next` 仍严格遵守完整数组的 WORD 顺序后继，包括回绕和真末端 `null`。即使真末端也校验所有结果引用。
+- 非空 `lossTarget` / `fleeTarget` 必须按本文件或 `file#label` 解析到集合内**非零**地址。引用下标 0 会与原始零值特殊含义冲突，故拒绝，必须用 `null`。`0xFFFF` 在本指令没有 sentinel 含义：enemyTeamId 可为 65535，结果目标 65535 仅在完整 65536 条集合中引用实际命令。
+- 三个 WORD 全部由语义字段重新编码：`enemyTeamId`、已解析的 loss 地址或 0、已解析的 flee 地址或 0。`source.operands` 完整保留作来源诊断，但不能覆盖编辑后的字段；`next` 仍严格遵守完整数组的 WORD 顺序后继，包括回绕和真末端 `null`。即使真末端也校验所有结果引用。
 - 新导出总是使用具名 `startBattle`。为兼容此前合法 M2/M3 完整包，旧 `raw` opcode 7 仍可严格仅携带公共字段，离线无损重建及 Core 集合加载；其原始操作数不按引用解析。此例外不放松 `0x0000` / `0x003C` / `0xFFFF` 必须具名的既有规则，也不为运行时提供 raw 执行通道，不要求迁移旧资源或改变 v1/profile。
 - Core 已追加显式 `TriggerBattleContent` + `IBattleRandom` 的 trigger 战斗 binding 检查点：具名 `startBattle` 暂停于准确 active `ClassicBattleLifecycleSession`，真实结算完成且匹配回执后 Won 走 next、Lost 走 lossTarget（null 则 next），不改原 ReturnEntry。详见[正式接口及支持域](classic-battle-session.md#trigger-事件binding46-有界检查点)。原有无战斗配置的构造器仍在副作用前拒绝 `startBattle`，所有构造器都拒绝执行 `raw`。
 - 能力预检覆盖选中入口的 next、lossTarget、编码的 fleeTarget 完整保守闭包（包括跨文件与循环），至 end(keep)/零地址停止；不因当前只会产生 Won/Lost 而忽略 fleeTarget。预检使用纯数据验证与独立语言 preview，不创建预演战斗或消耗生产随机值。auto 没有获得战斗执行语义；逃跑动作/结果仍属 #51，Main、native 准备与表现尚未接通。

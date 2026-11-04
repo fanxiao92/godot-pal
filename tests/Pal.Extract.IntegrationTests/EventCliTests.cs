@@ -37,7 +37,7 @@ public sealed class EventCliTests : IDisposable
         var commands = events["commands"]!.AsArray();
         Assert.Equal(5, commands.Count);
         Assert.Equal("startBattle", commands[0]!["op"]!.GetValue<string>());
-        Assert.Equal(65535, commands[0]!["teamId"]!.GetValue<int>());
+        Assert.Equal(65535, commands[0]!["enemyTeamId"]!.GetValue<int>());
         Assert.True(commands[0]!["isBoss"]!.GetValue<bool>());
         Assert.Null(commands[0]!["lossTarget"]);
         Assert.Null(commands[0]!["fleeTarget"]);
@@ -54,11 +54,11 @@ public sealed class EventCliTests : IDisposable
         var last = commands[4]!.DeepClone();
         commands.RemoveAt(4);
         commands[3]!["next"] = "targets#L0004";
-        commands[0]!["teamId"] = 19;
+        commands[0]!["enemyTeamId"] = 19;
         commands[0]!["lossTarget"] = "targets#L0004";
         commands[0]!["isBoss"] = false;
         commands[0]!["fleeTarget"] = "L0001";
-        commands[1]!["teamId"] = 20;
+        commands[1]!["enemyTeamId"] = 20;
         commands[1]!["lossTarget"] = null;
         commands[1]!["isBoss"] = true;
         commands[1]!["fleeTarget"] = null;
@@ -119,9 +119,9 @@ public sealed class EventCliTests : IDisposable
         var command = events["commands"]![1]!.AsObject();
         switch (fault)
         {
-            case "team-negative": command["teamId"] = -1; break;
-            case "team-overflow": command["teamId"] = 65536; break;
-            case "team-type": command["teamId"] = "18"; break;
+            case "team-negative": command["enemyTeamId"] = -1; break;
+            case "team-overflow": command["enemyTeamId"] = 65536; break;
+            case "team-type": command["enemyTeamId"] = "18"; break;
             case "boss-type": command["isBoss"] = 1; break;
             case "boss-flee": command["fleeTarget"] = "L0001"; break;
             case "nonboss-null": command["isBoss"] = false; break;
@@ -137,7 +137,7 @@ public sealed class EventCliTests : IDisposable
             case "ffff-outside": command["lossTarget"] = "LFFFF"; break;
         }
         string text = events.ToJsonString();
-        if (fault == "duplicate-key") text = text.Replace("\"teamId\":18", "\"teamId\":18,\"teamId\":19");
+        if (fault == "duplicate-key") text = text.Replace("\"enemyTeamId\":18", "\"enemyTeamId\":18,\"enemyTeamId\":19");
         File.WriteAllText(path, text);
         var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
         Assert.Equal(1, result.ExitCode);
@@ -316,7 +316,7 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(1, commands[13].GetProperty("delayUnits").GetInt32());
         Assert.Equal(new[] { 28, 1280, 256 }, commands[17].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
         Assert.Equal(4242, commands[21].GetProperty("entry").GetInt32());
-        Assert.Equal(28, commands[22].GetProperty("objectId").GetInt32());
+        Assert.Equal(28, commands[22].GetProperty("eventObjectId").GetInt32());
         Assert.Equal(2500, commands[22].GetProperty("entry").GetInt32());
         Assert.Equal(24, commands[23].GetProperty("battlefieldId").GetInt32());
         Assert.Equal(new[] { 1, 2, 0 }, commands[25].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
