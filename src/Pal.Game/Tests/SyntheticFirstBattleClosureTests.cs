@@ -18,6 +18,20 @@ public class SyntheticFirstBattleClosureTests
     {
         using var battleFixture = new NativeBattleProfileFixture();
         var statics = battleFixture.Static;
+        // The bound branch re-tints every scene frame when the display palette changes
+        // (PalDialogueDisplay.Start fires one palette event unconditionally); the synthetic
+        // fixture frames start texture-only, so fill their indices/alpha planes first.
+        foreach (var frame in statics.MapScene.Data.Map.Tiles.Frames)
+        {
+            frame.Indices = Array.Empty<byte>().Concat(Enumerable.Repeat((byte)0, frame.Width * frame.Height)).ToArray();
+            frame.Alpha = Array.Empty<byte>().Concat(Enumerable.Repeat((byte)255, frame.Width * frame.Height)).ToArray();
+        }
+        foreach (var sprite in statics.MapScene.Data.Sprites)
+            foreach (var frame in sprite.Frames)
+            {
+                frame.Indices = Array.Empty<byte>().Concat(Enumerable.Repeat((byte)0, frame.Width * frame.Height)).ToArray();
+                frame.Alpha = Array.Empty<byte>().Concat(Enumerable.Repeat((byte)255, frame.Width * frame.Height)).ToArray();
+            }
         // The bound branch reads the active scene palette; the synthetic scene data starts
         // without one, so the authored palette leaf fills it before the scene is packed.
         statics.MapScene.Data.Palette = (Pal.Game.Resources.PalPalette)ResourceLoader.Load(
@@ -67,6 +81,20 @@ public class SyntheticFirstBattleClosureTests
     {
         using var battleFixture = new NativeBattleProfileFixture();
         var statics = battleFixture.Static;
+        // The bound branch re-tints every scene frame when the display palette changes
+        // (PalDialogueDisplay.Start fires one palette event unconditionally); the synthetic
+        // fixture frames start texture-only, so fill their indices/alpha planes first.
+        foreach (var frame in statics.MapScene.Data.Map.Tiles.Frames)
+        {
+            frame.Indices = Array.Empty<byte>().Concat(Enumerable.Repeat((byte)0, frame.Width * frame.Height)).ToArray();
+            frame.Alpha = Array.Empty<byte>().Concat(Enumerable.Repeat((byte)255, frame.Width * frame.Height)).ToArray();
+        }
+        foreach (var sprite in statics.MapScene.Data.Sprites)
+            foreach (var frame in sprite.Frames)
+            {
+                frame.Indices = Array.Empty<byte>().Concat(Enumerable.Repeat((byte)0, frame.Width * frame.Height)).ToArray();
+                frame.Alpha = Array.Empty<byte>().Concat(Enumerable.Repeat((byte)255, frame.Width * frame.Height)).ToArray();
+            }
         // The bound branch reads the active scene palette; the synthetic scene data starts
         // without one, so the authored palette leaf fills it before the scene is packed.
         statics.MapScene.Data.Palette = (Pal.Game.Resources.PalPalette)ResourceLoader.Load(
