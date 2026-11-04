@@ -97,6 +97,19 @@ public static class DataTables
             new DataField("collectValue", DataFieldType.Word),
         ]);
 
+    // enemy-team.json - DATA.MKF chunk 2, ENEMYTEAM, 5 WORD (10 bytes) per record.
+    // Record count = chunk byte length / 10; global.h declares rgwEnemy as a plain
+    // WORD array of MAX_ENEMIES_IN_TEAM = 5 (palcommon.h:60) elements, so nothing
+    // decodes as SignedWord. Each element is an object.json enemy-view index that
+    // battle.c:1601-1615 loads through rgObject[w].enemy, where 0 = empty slot and
+    // 0xFFFF = skip - the same 10-byte layout ObjectUnionTable reads as its
+    // enemy-view evidence (DATA chunk 2 is deliberately read twice; see DataGameData).
+    public static readonly DataTableDescriptor EnemyTeam = new(
+        "enemy-team", "DATA.MKF", 2,
+        [
+            new DataField("enemies", DataFieldType.Word, [5]),
+        ]);
+
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
     // DataTableDescriptor: every record declares one union view (player/item by #81,
     // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant
