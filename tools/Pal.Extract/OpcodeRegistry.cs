@@ -147,9 +147,21 @@ public static class OpcodeRegistry
         new(0x004F, "fadeToRed", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0050, "fadeOut", [new("frames", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0052, "hide", [new("frames", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #102: addMagic/removeMagic's operand 0 is the object.json magic-view object ID
+        // (PAL_AddMagic/PAL_RemoveMagic store it into rgwMagic and compare by equality,
+        // global.c:2084/2139); operand 1 is the boostStat roleOperand shape (script.c:1820-1828:
+        // 0 = caller role wEventObjectID, non-zero = operand - 1 as a 1-based role index).
+        new(0x0055, "addMagic", [new("magicId", OpcodeFieldKind.Word, 0), new("roleOperand", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x0056, "removeMagic", [new("magicId", OpcodeFieldKind.Word, 0), new("roleOperand", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #102: operand 1 multiplies the caller-role player's current MP into the magic table's
+        // wBaseDamage, then zeroes that MP; WORD 0 is normalized to 8 at runtime only
+        // (script.c:1852) and still encodes as 0.
+        new(0x0057, "setMagicBaseDamageByMp", [new("magicId", OpcodeFieldKind.Word, 0), new("mpMultiplier", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0058, "itemShortageJump", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x005A, "halveHp", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x005D, "playerLacksPoisonJump", [new("objectId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x005E, "enemyLacksPoisonJump", [new("objectId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x005F, "killPlayer", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0061, "notPoisonedJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0064, "enemyHpAboveJump", [new("percent", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0068, "enemyTurnJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
@@ -166,7 +178,13 @@ public static class OpcodeRegistry
         new(0x0083, "objectOutOfZoneJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("zoneUnits", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0085, "delay", [new("delayUnits", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0086, "itemNotEquippedJump", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #102: unlike 0x0057 (by MP), this has no role/multiplier operand: the base damage is
+        // min(cash, 5000) * 2 / 5 written into the magic table entry named by operand 0, and
+        // the same amount is deducted from cash (script.c:2549-2557).
+        new(0x0088, "setMagicBaseDamageByCash", [new("magicId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x008D, "increaseLevel", [new("levels", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x008E, "restoreScreen", NoFields, OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
+        new(0x008F, "halveCash", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0091, "notFirstOfKindJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0094, "stateMatchJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0095, "sceneMatchJump", [new("sceneId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),

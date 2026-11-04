@@ -796,6 +796,98 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "dangling.bin")));
     }
 
+    [Fact]
+    public async Task Status_item_batch3_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 status-item batch 3 (#102): the eight new addMagic / removeMagic /
+        // setMagicBaseDamageByMp / halveHp / killPlayer / setMagicBaseDamageByCash / increaseLevel /
+        // halveCash verbs plus the re-verified boostStat. Hand-built stream, not retail data.
+        // Magic operands are object.json magic-view object IDs (addMagic/removeMagic store them
+        // into rgwMagic; the two base-damage verbs dereference .magic.wMagicNumber), operand 1 of
+        // 0x0055/0x0056 is the boostStat roleOperand shape, and 0x0057's WORD 0 multiplier
+        // normalizes to 8 at runtime only (encodes as 0). The halving and kill verbs map no
+        // operands; increaseLevel counts levels; every numeric operand of the batch is an
+        // unsigned WORD except boostStat's percent.
+        byte[] original = Words(
+            0x0030, 17, 50, 2,                     // boostStat: attack row, +50%, role index 1
+            0x0055, 300, 0, 7,                     // addMagic: object 300 to the caller role
+            0x0056, 311, 2, 0,                     // removeMagic: object 311 from role index 1
+            0x0057, 305, 0, 5,                     // setMagicBaseDamageByMp: MP x 8 (encoded 0)
+            0x005A, 3, 4, 5,                       // halveHp
+            0x005F, 1, 2, 3,                       // killPlayer
+            0x0088, 295, 6, 0,                     // setMagicBaseDamageByCash
+            0x008D, 1, 2, 3,                       // increaseLevel: one level
+            0x008F, 4, 5, 6,                       // halveCash
+            0, 0, 0, 0);                           // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(10, commands.Count);
+        Assert.Equal("boostStat", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(17, commands[0]!["field"]!.GetValue<int>());
+        Assert.Equal(50, commands[0]!["percent"]!.GetValue<int>());
+        Assert.Equal(2, commands[0]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("addMagic", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(300, commands[1]!["magicId"]!.GetValue<int>());
+        Assert.Equal(0, commands[1]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("removeMagic", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(311, commands[2]!["magicId"]!.GetValue<int>());
+        Assert.Equal(2, commands[2]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("setMagicBaseDamageByMp", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(305, commands[3]!["magicId"]!.GetValue<int>());
+        Assert.Equal(0, commands[3]!["mpMultiplier"]!.GetValue<int>());
+        Assert.Equal("halveHp", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal("killPlayer", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal("setMagicBaseDamageByCash", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(295, commands[6]!["magicId"]!.GetValue<int>());
+        Assert.Equal("increaseLevel", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[7]!["levels"]!.GetValue<int>());
+        Assert.Equal("halveCash", commands[8]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the stat row, percent and role change, the magic
+        // object IDs move, the MP multiplier becomes an explicit 8, the level count grows, and
+        // the untouched preserved operands keep their source WORDs.
+        commands[0]!["field"] = 18; // magicStrength row
+        commands[0]!["percent"] = -25;
+        commands[0]!["roleOperand"] = 0;
+        commands[1]!["magicId"] = 310;
+        commands[1]!["roleOperand"] = 2;
+        commands[2]!["magicId"] = 300;
+        commands[2]!["roleOperand"] = 0;
+        commands[3]!["magicId"] = 321;
+        commands[3]!["mpMultiplier"] = 8;
+        commands[6]!["magicId"] = 300;
+        commands[7]!["levels"] = 5;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0030, 18, unchecked((int)0xFFE7), 0,
+            0x0055, 310, 2, 7,
+            0x0056, 300, 0, 0,
+            0x0057, 321, 8, 5,
+            0x005A, 3, 4, 5,
+            0x005F, 1, 2, 3,
+            0x0088, 300, 6, 0,
+            0x008D, 5, 2, 3,
+            0x008F, 4, 5, 6,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A negative level count is rejected without output (unsigned WORD, no SHORT cast).
+        commands[7]!["levels"] = -1;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
