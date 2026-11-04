@@ -40,14 +40,17 @@ internal static class DataGameData
                 entries.Add((descriptor.FileId + ".json", DataTableSchema.DescribeIndexEntry(descriptor, chunk)));
                 files.Add((descriptor.FileId + ".json", document));
             }
-            // object.json (#81): the OBJECT union table reads SSS.MKF chunk 2 plus the DATA.MKF
-            // view-evidence chunks (store/enemy/player-roles item and player references).
+            // object.json (#81/#82): the OBJECT union table reads SSS.MKF chunk 2 plus the
+            // DATA.MKF view-evidence chunks (store/enemy/enemy-team/player-roles item,
+            // player, magic and enemy references; the poison view has no extraction-time
+            // source and stays undetermined until script-reference evidence exists).
             var dataArchive = archiveByName["DATA.MKF"];
             {
                 byte[] chunk = archiveByName[ObjectUnionTable.Archive].ReadChunk(ObjectUnionTable.Chunk, MaximumChunkBytes);
                 var evidence = ObjectUnionTable.ReadViewEvidence(
                     dataArchive.ReadChunk(ObjectUnionTable.StoreEvidenceChunk, MaximumChunkBytes),
                     dataArchive.ReadChunk(ObjectUnionTable.EnemyEvidenceChunk, MaximumChunkBytes),
+                    dataArchive.ReadChunk(ObjectUnionTable.EnemyTeamEvidenceChunk, MaximumChunkBytes),
                     dataArchive.ReadChunk(ObjectUnionTable.PlayerRolesEvidenceChunk, MaximumChunkBytes));
                 var document = ObjectUnionTable.DecodeTable(chunk, evidence);
                 ObjectUnionTable.ValidateDocument(chunk.Length, document);

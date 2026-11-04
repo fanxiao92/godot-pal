@@ -127,16 +127,21 @@ data/extracted/data/
 
 ### object.json — SSS 2，`OBJECT` union，14 字节（7 WORD，WIN95）/ 12 字节（6 WORD，DOS）
 
-union 表：**每条记录必须声明 `view`（`player` / `item` / `magic` / `enemy` / `poison`，无判定证据时为 `undetermined`，见下「视图判定」）之一，同一物理 WORD 组不得同时按多视图解释**；记录对象只含所声明视图的字段（`undetermined` 记录只含 `data` 原始 WORD 数组）。视图判定依据独立证据（脚本引用、入口槽、语言包名称区间），由 object 表提取票（拆 2）核对固定；未确定视图的记录显式留待调查，不猜测、不默认。#81 已核对固定 player 与 item 两视图的证据来源（见「视图判定」）；magic/enemy/poison 三视图的证据由 #82 补齐。
+union 表：**每条记录必须声明 `view`（`player` / `item` / `magic` / `enemy` / `poison`，无判定证据时为 `undetermined`，见下「视图判定」）之一，同一物理 WORD 组不得同时按多视图解释**；记录对象只含所声明视图的字段（`undetermined` 记录只含 `data` 原始 WORD 数组）。视图判定依据独立证据（脚本引用、入口槽、语言包名称区间），由 object 表提取票（拆 2）核对固定；未确定视图的记录显式留待调查，不猜测、不默认。#81 已核对固定 player 与 item 两视图的证据来源；#82 补齐 magic/enemy/poison 三视图的证据来源与逐字段解码（见下），union 五视图完整。
 
-**视图判定（#81 核对固定，player/item）**：union 本身无视图标签，参考按用途在不同代码路径读取。提取时的判定证据（均在 export-data 输入归档内）：
+**视图判定（#81 核对固定 player/item；#82 补齐 magic/enemy/poison）**：union 本身无视图标签，参考按用途在不同代码路径读取。提取时的判定证据（均在 export-data 输入归档内）：
 
 | 视图 | 证据来源 | 参考读取点 |
 |---|---|---|
 | player | `DATA.MKF` chunk 3（PLAYERROLES）`rgwName[6]`（WORD 18..23）的全部 6 个值（含 0：名字文字下标为 0 时仍被按 player 视图读取） | [fight.c](../../reference/sdlpal/fight.c):800-813、848-876：`rgObject[PlayerRoles.rgwName[w]].player.wScriptOnFriendDeath/.wScriptOnDying`（参考中仅有的 `.player` 读取点） |
 | item | `DATA.MKF` chunk 0（STORE）`rgwItems`（每记录 WORD 0..8，0=空槽）、chunk 1（ENEMY）`wAttackEquivItem`（WORD 17）/`wStealItem`（WORD 19，0=无此物）、chunk 3（PLAYERROLES）`rgwEquipment`（WORD 66..101，0=未装备）中的非零引用 | itemmenu.c:148/171/202/269/363、play.c:273-316、fight.c:4361-4397/5135-5145、global.c:1364-1365、uibattle.c:653 等（含以 store/装备/敌表引用为下标的 `.item` 读取） |
+| magic | `DATA.MKF` chunk 3（PLAYERROLES）`rgwMagic[32][6]`（WORD 192..383，0=未习得）非零值 ∪ `rgwCooperativeMagic[6]`（WORD 390..395，0=无合击法术）非零值 ∪ chunk 1（ENEMY）`wMagic`（WORD 15）中非 0 且非 0xFFFF（两者均=无法术）的值 | [magicmenu.c](../../reference/sdlpal/magicmenu.c):339-354、[uibattle.c](../../reference/sdlpal/uibattle.c):753-759（`rgwMagic` 槽，`w != 0` 跳过后按 magic 视图读取）；[fight.c](../../reference/sdlpal/fight.c):3859-3861、uibattle.c:1120-1125（合击，经 [global.c](../../reference/sdlpal/global.c):2034 `PAL_GetPlayerCooperativeMagic`，0=无合击仍为返回语义）；fight.c:4580、4651、4660-4671、4761-4769（敌方法术，`wMagic != 0` 才进入施法分支，0xFFFF 另显式跳过） |
+| enemy | `DATA.MKF` chunk 2（ENEMYTEAM）`rgwEnemy[5]`（每记录 WORD 0..4）中非 0（空位）且非 0xFFFF 的值 | [battle.c](../../reference/sdlpal/battle.c):1601-1615（`w == 0xFFFF` continue、`w != 0` 才按 `rgObject[w].enemy` 读取；参考仅有的静态敌对象读取入口，[script.c](../../reference/sdlpal/script.c):2919/2969 的重载敌人为运行时脚本操作数，不纳入） |
+| poison | **提取期无证据源**：参考中全部 `.poison` 读取点（global.c:1440/1515/1608/1667、script.c:1213/1248、uibattle.c:132-137、uigame.c:1249-1251）都以运行时毒状态 `rgPoisonStatus`/`rgPoisons[].wPoisonID` 或脚本操作数为下标，该状态零初始化（global.c:450/630）且只由脚本填入（global.c:1513-1515 `PAL_SetPoisonStatus`；script.c:1211-1213/1246-1248）；#78 冻结的「脚本引用」证据需 opcode 注册表（#96 起）落地，此前 poison 区间记录保持 `undetermined` | ——（无提取期静态读取点；poison 视图解码与校验已就绪，由人工构造证据/文档校验路径覆盖） |
 
-同一对象下标同时落在两类证据 ⇒ 数据不一致，明确失败定位（同一记录不得按多视图表达）；证据下标超出记录数 ⇒ 明确失败定位。其余记录（含法术/敌人/毒区间与未被引用的物品）一律 `view: "undetermined"`，以 `data` 数组原样导出整组 WORD（WIN95 7 个 / DOS 6 个，小端），不做任何视图解读——#78 冻结了「未确定视图的记录显式留待调查」但未定其表示法，`undetermined` + `data` 为 #81 的最小扩展。真实数据核对（#81，本机只读）：player 6 条（下标 36..41 = `rgwName` 实值 [36,37,38,40,39,41]）、item 159 条（引用并集落在 61..278）、undetermined 400 条；共 565。
+magic 证据的两点边界如实说明：其一，`LEVELUPMAGIC`（DATA chunk 6）`m[].wMagic` **不纳入**——battle.c:1302-1309 仅把它经 `PAL_AddMagic` 写入运行时 `rgwMagic`，不是提取期的直接视图读取（script.c:1829 的脚本操作数同理）；真实数据中该来源独有的 17 个法术对象下标（300、310、311、…、392）如实保持 `undetermined`。其二，[magicmenu.c](../../reference/sdlpal/magicmenu.c):191 经 `.item.wScriptDesc` 成员名读取法术对象的 WORD 5（WIN95 数据中该槽为法术描述脚本，如 object[295] WORD5=43308=0xA92C；global.h 对 `wReserved2` 注释「always zero」描述的是 DOS 布局语义）——其下标来自法术列表 `rgwMagic`，不构成 item 证据；提取按冻结字段名 `reserved2` 原样导出。
+
+同一对象下标同时落在任意两类证据 ⇒ 数据不一致，明确失败定位（同一记录不得按多视图表达）；证据下标超出记录数 ⇒ 明确失败定位。其余记录（含未被引用的物品/法术、poison 区间与仅由脚本运行时引用的对象）一律 `view: "undetermined"`，以 `data` 数组原样导出整组 WORD（WIN95 7 个 / DOS 6 个，小端），不做任何视图解读——#78 冻结了「未确定视图的记录显式留待调查」但未定其表示法，`undetermined` + `data` 为 #81 的最小扩展。真实数据核对（#81+#82，本机只读，独立 Python 复核逐条一致）：player 6 条（下标 36..41 = `rgwName` 实值 [36,37,38,40,39,41]）、item 159 条（引用并集落在 61..278）、magic 65 条（引用并集落在 295..394：rgwMagic 31 + 合击 5 + 敌方 wMagic 41 的并集）、enemy 152 条（敌队引用落在 398..550，其 `wEnemyID` 1..153 均在 154 条敌表内）、undetermined 183 条；共 565。#81 时 undetermined 400，本票降 217（magic 65 + enemy 152）；poison 区间 551..564（14 条）与 17 个仅升级习得的法术对象等如实留待脚本引用证据。
 
 变体判定沿用参考 `PAL_IsWINVersion`：chunk 2 字节长度对 `sizeof(OBJECT)`（14）整除且对 12 不整除 ⇒ WIN95；反向 ⇒ DOS（参考另以 ABC/MAP/F/FBP/FIRE/MGO 的压缩签名计分）。长度同时整除 14 与 12（即 84 的倍数）时整除性不可判定，而压缩签名计分所需的归档不在 export-data 输入内 ⇒ 提取明确失败并定位 SSS.MKF chunk 2，不猜测。DOS 包加载时参考把 `rgwData[6]=rgwData[5]`（flags）、`rgwData[5]=0` 转成 WIN 布局（[global.c](../../reference/sdlpal/global.c) `PAL_LoadDefaultGame`）；提取按 chunk 内原始布局忠实导出，WIN/DOS 视图字段差异见下（`scriptDesc` 为 WIN95 新增槽）。真实数据核对：7910 ÷ 14 = 565 条（÷12 余 2）⇒ WIN95。
 
@@ -170,7 +175,7 @@ union 表：**每条记录必须声明 `view`（`player` / `item` / `magic` / `e
 | poison | `reserved` | `wReserved` | WORD | 参考注明恒零，原样导出 |
 | poison | `enemyScript` | `wEnemyScript` | WORD | 敌人中毒每回合脚本（入口槽 `poison.wEnemyScript`） |
 
-player 视图物理上占 union 前段（4 WORD 有定义，保留位原样导出为 `padding` 数组：WIN95 布局 7 WORD 中未定义槽不丢弃，DOS 布局余 2 WORD）。DOS 布局（6 WORD）下 item 视图无 `scriptDesc` 槽（`flags` 落在 WORD 5）；WIN95 布局下 `scriptDesc` 在 WORD 5、`flags` 在 WORD 6。`undetermined` 记录：`{ "view": "undetermined", "data": [整组 WORD 原样] }`。
+player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h），未定义槽不丢弃，原样导出为 `padding` 数组（player：WIN95 余 3 / DOS 余 2；enemy/poison：WIN95 余 2 / DOS 余 1）。magic 与 item 视图占满物理记录：DOS 布局（6 WORD）下两者均无 `scriptDesc` 槽（magic 的 `reserved2` 落 WORD 4、`flags` 落 WORD 5；item 的 `flags` 落 WORD 5）；WIN95 布局下 magic 的 `scriptDesc` 在 WORD 4、`reserved2` 在 WORD 5、`flags` 在 WORD 6，item 的 `scriptDesc` 在 WORD 5、`flags` 在 WORD 6。`undetermined` 记录：`{ "view": "undetermined", "data": [整组 WORD 原样] }`。
 
 ### store.json — DATA 0，`STORE`，18 字节（WORD[9]）
 
@@ -199,7 +204,7 @@ player 视图物理上占 union 前段（4 WORD 有定义，保留位原样导�
 | `exp` | `wExp` | WORD | 击败经验 |
 | `cash` | `wCash` | WORD | 击败现金 |
 | `level` | `wLevel` | WORD | 等级 |
-| `magicId` | `wMagic` | WORD | 法术编号，指向 magic.json |
+| `magicId` | `wMagic` | WORD | 施法对象下标，指向 object.json magic 视图（fight.c:4580/4660-4671 经 `rgObject[wMagic].magic` 读取，#82 核实；0/0xFFFF = 无法术）；指向 magic.json 的是该对象的 `wMagicNumber` |
 | `magicRate` | `wMagicRate` | WORD | 施法概率 |
 | `attackEquivItemId` | `wAttackEquivItem` | WORD | 普攻等价物品，指向 object.json item 视图 |
 | `attackEquivItemRate` | `wAttackEquivItemRate` | WORD | 等价物品概率 |
@@ -222,7 +227,7 @@ player 视图物理上占 union 前段（4 WORD 有定义，保留位原样导�
 
 | JSON 字段 | C 名 | 类型 | 说明 |
 |---|---|---|---|
-| `enemies` | `rgwEnemy[MAX_ENEMIES_IN_TEAM]` | WORD[5] | 敌队成员；元素为 `enemyId`（enemy.json），0 = 空位 |
+| `enemies` | `rgwEnemy[MAX_ENEMIES_IN_TEAM]` | WORD[5] | 敌队成员；元素为 `objectId`（object.json enemy 视图，battle.c:1601-1615 经 `rgObject[w].enemy` 读取，#82 核实），0 = 空位、0xFFFF = 跳过 |
 
 真实数据核对：3800 ÷ 10 = 380 条。
 
@@ -255,9 +260,9 @@ player 视图物理上占 union 前段（4 WORD 有定义，保留位原样导�
 | `unknown3` | `rgwUnknown3` | WORD[6] | 参考标注 FIXME |
 | `unknown4` | `rgwUnknown4` | WORD[6] | 参考标注 FIXME |
 | `coveredBy` | `rgwCoveredBy` | WORD[6] | 低 HP/异常时代为承受的角色 |
-| `magic` | `rgwMagic[MAX_PLAYER_MAGICS][MAX_PLAYER_ROLES]` | WORD[32][6] | 法术表（槽×角色）；元素为 `magicId`，0 = 未习得 |
+| `magic` | `rgwMagic[MAX_PLAYER_MAGICS][MAX_PLAYER_ROLES]` | WORD[32][6] | 法术表（槽×角色）；元素为 `objectId`（object.json magic 视图，magicmenu.c:339-354/uibattle.c:753-759 经 `rgObject[w].magic` 读取，#82 核实），0 = 未习得 |
 | `walkFrames` | `rgwWalkFrames` | WORD[6] | 行走帧（参考标注 ???） |
-| `cooperativeMagic` | `rgwCooperativeMagic` | WORD[6] | 合击法术编号 |
+| `cooperativeMagic` | `rgwCooperativeMagic` | WORD[6] | 合击法术对象，指向 object.json magic 视图（fight.c:3859-3861/uibattle.c:1120-1125，#82 核实），0 = 无合击 |
 | `unknown5` | `rgwUnknown5` | WORD[6] | 参考标注 FIXME |
 | `unknown6` | `rgwUnknown6` | WORD[6] | 参考标注 FIXME |
 | `deathSound` | `rgwDeathSound` | WORD[6] | 死亡音效 |
@@ -316,7 +321,7 @@ player 视图物理上占 union 前段（4 WORD 有定义，保留位原样导�
 | JSON 字段 | C 名 | 类型 | 说明 |
 |---|---|---|---|
 | `level` | `wLevel` | WORD | 达到该等级 |
-| `magicId` | `wMagic` | WORD | 习得的法术，指向 magic.json |
+| `magicId` | `wMagic` | WORD | 习得的法术对象，指向 object.json magic 视图（battle.c:1302-1309 经 `PAL_AddMagic` 存入 `rgwMagic` 对象槽，#82 核实），0 = 无 |
 
 真实数据核对：400 ÷ 20 = 20 条。
 

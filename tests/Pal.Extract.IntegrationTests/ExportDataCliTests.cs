@@ -20,7 +20,7 @@ public sealed class ExportDataCliTests : IDisposable
         // registered object union table (28 = 2 x 14 bytes, WIN95 variant; the all-zero
         // DATA fixture makes record 0 the player view via rgwName[0] = 0 and record 1
         // undetermined). The other chunks are placeholders until their tables are
-        // registered by #82-#91; DATA chunks 0/1/3 feed the object view evidence.
+        // registered by #82-#91; DATA chunks 0/1/2/3 feed the object view evidence.
         MkfFixture.Write(input, "SSS.MKF", new byte[64], new byte[16], new byte[28], Array.Empty<byte>(), new byte[24]);
         MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900]);
     }

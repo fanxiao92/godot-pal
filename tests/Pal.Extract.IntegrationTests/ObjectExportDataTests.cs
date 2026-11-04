@@ -1,12 +1,14 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Xunit;
 
 namespace Pal.Extract.Tests;
 
-// CLI-level proof of the object union table registration (#81): a miniature SSS.MKF
-// whose chunk 2 is hand-authored OBJECT records plus the DATA.MKF view-evidence
-// chunks (store/enemy/player-roles) must decode through `export-data` with one
+// CLI-level proof of the object union table registration (#81 player/item views,
+// #82 magic/enemy views): a miniature SSS.MKF whose chunk 2 is hand-authored
+// OBJECT records plus the DATA.MKF view-evidence chunks
+// (store/enemy/enemy-team/player-roles) must decode through `export-data` with one
 // declared view per record and the frozen index manifest.
 public sealed class ObjectExportDataTests : IDisposable
 {
@@ -29,10 +31,16 @@ public sealed class ObjectExportDataTests : IDisposable
 
     // Hand-authored WIN95 OBJECT records (same literals as the unit tests): a player
     // record (evidence: rgwName[0] = 0), an item record with flags 0 (store sells item
-    // 1), and an item record with flags 65535 (store sells item 2).
+    // 1), an item record with flags 65535 (store sells item 2), a magic record (real
+    // object[295], evidence: rgwMagic/enemy wMagic), and enemy records (real
+    // object[536]/object[539], evidence: the enemy team).
     private static byte[] PlayerRecord => Words(0, 0, 43445, 43374, 0x1234, 65535, 32768);
     private static byte[] ItemRecordFlagsZero => Words(197, 150, 43022, 39140, 0, 40661, 0);
     private static byte[] ItemRecordFlagsMax => Words(0xABCD, 2000, 39554, 0, 42890, 40524, 65535);
+    private static byte[] MagicRecord => Words(47, 0, 43028, 0, 0, 43308, 18);
+    private static byte[] EnemyRecord => Words(138, 0, 0, 42828, 0, 0, 0);
+    private static byte[] EnemyRecordWithResistance => Words(141, 10, 42394, 0, 0, 0, 0);
+    private static byte[] UndeterminedRecord => Words(1, 2, 3, 4, 5, 6, 7);
 
     private static byte[] Words(params int[] values)
     {
@@ -42,18 +50,16 @@ public sealed class ObjectExportDataTests : IDisposable
     }
 
     // The DATA.MKF view-evidence fixture: one store selling items 1 and 2, one empty
-    // enemy, a placeholder chunk 2, and PLAYERROLES whose rgwName[0] = 0 (a name word
+    // enemy, an empty enemy team, and PLAYERROLES whose rgwName[0] = 0 (a name word
     // of 0 is still player evidence; fight.c reads rgObject[rgwName[w]].player).
     private static void WriteDataFixture(string input) =>
         WriteDataFixture(input, Words(1, 2, 0, 0, 0, 0, 0, 0, 0));
 
-    private static void WriteDataFixture(string input, byte[] store)
-    {
-        byte[] enemy = new byte[70];
-        byte[] placeholder = new byte[10];
-        byte[] roles = new byte[900];
-        MkfFixture.Write(input, "DATA.MKF", store, enemy, placeholder, roles);
-    }
+    private static void WriteDataFixture(string input, byte[] store) =>
+        WriteDataFixture(input, store, new byte[70], new byte[10], new byte[900]);
+
+    private static void WriteDataFixture(string input, byte[] store, byte[] enemy, byte[] enemyTeam, byte[] roles) =>
+        MkfFixture.Write(input, "DATA.MKF", store, enemy, enemyTeam, roles);
 
     [Fact]
     public async Task Export_data_extracts_object_records_with_views_and_the_index_entry()
@@ -109,32 +115,132 @@ public sealed class ObjectExportDataTests : IDisposable
     }
 
     [Fact]
-    public async Task Export_data_extracts_dos_object_records_without_the_script_desc_slot()
+    public async Task Export_data_extracts_magic_and_enemy_view_records_from_the_data_evidence()
     {
-        byte[] dosPlayer = Words(0, 0, 5, 6, 0x1234, 0xABCD);
-        byte[] dosUndetermined = Words(9, 8, 7, 6, 5, 4);
+        // Records: 0 player, 1 item, 2 magic, 3/4 enemy (enemy-team evidence),
+        // 5/6 undetermined (no reference at all). Seven records keep the chunk length
+        // (98) a multiple of 14 but not of 12, so the WIN95 variant stays decidable.
         MkfFixture.Write(input, "SSS.MKF",
             [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2],
-            [.. dosPlayer, .. dosUndetermined], Array.Empty<byte>(), new byte[24]);
-        WriteDataFixture(input, new byte[18]); // empty store: record 1 stays undetermined
+            [.. PlayerRecord, .. ItemRecordFlagsZero, .. MagicRecord, .. EnemyRecord, .. EnemyRecordWithResistance, .. UndeterminedRecord, .. UndeterminedRecord],
+            Array.Empty<byte>(), new byte[24]);
+        // Evidence: the store sells item 1; the first ENEMY casts object 2 and the
+        // the second carries wMagic 0xFFFF (= no magic, not evidence - a surviving value
+        // would index outside the 7-record table and fail); the enemy team fields
+        // objects 3 and 4; PLAYERROLES names object 0 and has rgwMagic[0][0] = 2.
+        var enemyWords = new int[35];
+        enemyWords[15] = 2;
+        var noMagicWords = new int[35];
+        noMagicWords[15] = 0xFFFF;
+        var roleWords = new int[450];
+        roleWords[18] = 0;
+        roleWords[192] = 2;
+        WriteDataFixture(input, Words(1, 0, 0, 0, 0, 0, 0, 0, 0),
+            Words([.. enemyWords, .. noMagicWords]), Words(3, 4, 0xFFFF, 0, 0), Words(roleWords));
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "object.json")));
         var records = table.RootElement.GetProperty("records");
-        Assert.Equal(2, records.GetArrayLength());
+        Assert.Equal(7, records.GetArrayLength());
+
         Assert.Equal("player", records[0].GetProperty("view").GetString());
-        Assert.Equal(6, records[0].GetProperty("scriptOnDying").GetInt32());
-        Assert.Equal(2, records[0].GetProperty("padding").GetArrayLength()); // DOS: 2 padding words
-        Assert.Equal("undetermined", records[1].GetProperty("view").GetString());
-        Assert.Equal(6, records[1].GetProperty("data").GetArrayLength());
+        Assert.Equal("item", records[1].GetProperty("view").GetString());
+
+        var magic = records[2];
+        Assert.Equal("magic", magic.GetProperty("view").GetString());
+        Assert.Equal(47, magic.GetProperty("magicId").GetInt32());
+        Assert.Equal(0, magic.GetProperty("reserved1").GetInt32());
+        Assert.Equal(43028, magic.GetProperty("scriptOnSuccess").GetInt32());
+        Assert.Equal(0, magic.GetProperty("scriptOnUse").GetInt32());
+        Assert.Equal(0, magic.GetProperty("scriptDesc").GetInt32());
+        Assert.Equal(43308, magic.GetProperty("reserved2").GetInt32());
+        Assert.Equal(18, magic.GetProperty("flags").GetInt32());
+        Assert.False(magic.TryGetProperty("bitmap", out _)); // one view per record
+
+        var enemy = records[3];
+        Assert.Equal("enemy", enemy.GetProperty("view").GetString());
+        Assert.Equal(138, enemy.GetProperty("enemyId").GetInt32());
+        Assert.Equal(0, enemy.GetProperty("resistanceToSorcery").GetInt32());
+        Assert.Equal(42828, enemy.GetProperty("scriptOnBattleEnd").GetInt32());
+        Assert.Equal(0, enemy.GetProperty("scriptOnReady").GetInt32());
+        Assert.Equal(2, enemy.GetProperty("padding").GetArrayLength()); // WIN95: WORD 5/6 preserved
+
+        var resistant = records[4];
+        Assert.Equal("enemy", resistant.GetProperty("view").GetString());
+        Assert.Equal(141, resistant.GetProperty("enemyId").GetInt32());
+        Assert.Equal(10, resistant.GetProperty("resistanceToSorcery").GetInt32());
+        Assert.Equal(42394, resistant.GetProperty("scriptOnTurnStart").GetInt32());
+
+        var undetermined = records[5];
+        Assert.Equal("undetermined", undetermined.GetProperty("view").GetString());
+        Assert.Equal(7, undetermined.GetProperty("data").GetArrayLength());
+        Assert.Equal("undetermined", records[6].GetProperty("view").GetString());
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var entry = index.RootElement.GetProperty("tables").EnumerateArray()
             .Single(table => table.GetProperty("file").GetString() == "object.json");
-        Assert.Equal(2, entry.GetProperty("recordCount").GetInt32());
-        Assert.Equal(24, entry.GetProperty("byteLength").GetInt32());
+        Assert.Equal(7, entry.GetProperty("recordCount").GetInt32());
+        Assert.Equal(98, entry.GetProperty("byteLength").GetInt32());
+        // Independent expectation: hash of the 98 hand-authored bytes above.
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(
+                [.. PlayerRecord, .. ItemRecordFlagsZero, .. MagicRecord, .. EnemyRecord, .. EnemyRecordWithResistance, .. UndeterminedRecord, .. UndeterminedRecord])),
+            entry.GetProperty("sha256").GetString());
+    }
+
+    [Fact]
+    public async Task Export_data_extracts_dos_object_records_without_the_script_desc_slot()
+    {
+        byte[] dosPlayer = Words(0, 0, 5, 6, 0x1234, 0xABCD);
+        byte[] dosMagic = Words(47, 0, 43028, 0, 43308, 18);
+        byte[] dosEnemy = Words(138, 0, 0, 42828, 0, 0x55AA);
+        byte[] dosUndetermined = Words(9, 8, 7, 6, 5, 4);
+        MkfFixture.Write(input, "SSS.MKF",
+            [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2],
+            [.. dosPlayer, .. dosMagic, .. dosEnemy, .. dosUndetermined], Array.Empty<byte>(), new byte[24]);
+        // Evidence: PLAYERROLES names object 0 and learns magic 1 (rgwMagic[0][0] = 1);
+        // the ENEMY carries wMagic 0xFFFF (no magic: not evidence); the enemy team
+        // fields object 2; the empty store leaves nothing else.
+        var enemyWords = new int[35];
+        enemyWords[15] = 0xFFFF;
+        var roleWords = new int[450];
+        roleWords[18] = 0;
+        roleWords[192] = 1;
+        WriteDataFixture(input, new byte[18], Words(enemyWords), Words(2, 0xFFFF, 0, 0, 0), Words(roleWords));
+        string output = Path.Combine(root, "data");
+        var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
+        Assert.True(result.ExitCode == 0, result.Stderr);
+
+        using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "object.json")));
+        var records = table.RootElement.GetProperty("records");
+        Assert.Equal(4, records.GetArrayLength());
+        Assert.Equal("player", records[0].GetProperty("view").GetString());
+        Assert.Equal(6, records[0].GetProperty("scriptOnDying").GetInt32());
+        Assert.Equal(2, records[0].GetProperty("padding").GetArrayLength()); // DOS: 2 padding words
+
+        var magic = records[1];
+        Assert.Equal("magic", magic.GetProperty("view").GetString());
+        Assert.Equal(47, magic.GetProperty("magicId").GetInt32());
+        Assert.Equal(43028, magic.GetProperty("scriptOnSuccess").GetInt32());
+        Assert.Equal(43308, magic.GetProperty("reserved2").GetInt32()); // DOS layout: WORD 4
+        Assert.Equal(18, magic.GetProperty("flags").GetInt32());        // DOS layout: WORD 5
+        Assert.False(magic.TryGetProperty("scriptDesc", out _));        // DOS has no description slot
+
+        var enemy = records[2];
+        Assert.Equal("enemy", enemy.GetProperty("view").GetString());
+        Assert.Equal(138, enemy.GetProperty("enemyId").GetInt32());
+        Assert.Equal(42828, enemy.GetProperty("scriptOnBattleEnd").GetInt32());
+        Assert.Equal(1, enemy.GetProperty("padding").GetArrayLength()); // DOS: 1 padding word
+
+        Assert.Equal("undetermined", records[3].GetProperty("view").GetString());
+        Assert.Equal(6, records[3].GetProperty("data").GetArrayLength());
+
+        using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
+        var entry = index.RootElement.GetProperty("tables").EnumerateArray()
+            .Single(table => table.GetProperty("file").GetString() == "object.json");
+        Assert.Equal(4, entry.GetProperty("recordCount").GetInt32());
+        Assert.Equal(48, entry.GetProperty("byteLength").GetInt32());
     }
 
     [Fact]
@@ -159,12 +265,20 @@ public sealed class ObjectExportDataTests : IDisposable
         MkfFixture.Write(input, "SSS.MKF",
             [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2],
             new byte[28], Array.Empty<byte>(), new byte[24]);
-        MkfFixture.Write(input, "DATA.MKF", Words(1, 2, 0, 0, 0, 0, 0, 0, 0), new byte[70]); // no chunk 3
         string output = Path.Combine(root, "data");
-        var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("DATA.MKF", result.Stderr, StringComparison.Ordinal);
-        Assert.Contains("chunk 3", result.Stderr, StringComparison.Ordinal);
+
+        MkfFixture.Write(input, "DATA.MKF", Words(1, 2, 0, 0, 0, 0, 0, 0, 0), new byte[70]); // no chunk 2: enemy team missing
+        var noEnemyTeam = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
+        Assert.Equal(1, noEnemyTeam.ExitCode);
+        Assert.Contains("DATA.MKF", noEnemyTeam.Stderr, StringComparison.Ordinal);
+        Assert.Contains("chunk 2", noEnemyTeam.Stderr, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
+
+        MkfFixture.Write(input, "DATA.MKF", Words(1, 2, 0, 0, 0, 0, 0, 0, 0), new byte[70], new byte[10]); // no chunk 3
+        var noRoles = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
+        Assert.Equal(1, noRoles.ExitCode);
+        Assert.Contains("DATA.MKF", noRoles.Stderr, StringComparison.Ordinal);
+        Assert.Contains("chunk 3", noRoles.Stderr, StringComparison.Ordinal);
         Assert.False(Directory.Exists(output));
     }
 

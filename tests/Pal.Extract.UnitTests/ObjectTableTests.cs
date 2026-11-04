@@ -7,23 +7,30 @@ using Xunit;
 
 namespace Pal.Extract.Tests;
 
-// Object union table (SSS.MKF chunk 2, OBJECT, 14 bytes WIN95 / 12 bytes DOS) - #81.
-// Expected values are hand-computed from independently authored little-endian byte
-// literals; the per-view schema is the frozen table in docs/design/data-schema.md,
-// which mirrors reference/sdlpal/global.h (tagOBJECT_PLAYER / tagOBJECT_ITEM).
-// Boundary words: 0, 65535, 0x8000 (32768 unsigned), and real-data script entry
-// samples (43445 = object[36].wScriptOnFriendDeath, 40661 = object[61].wScriptDesc).
+// Object union table (SSS.MKF chunk 2, OBJECT, 14 bytes WIN95 / 12 bytes DOS) - #81
+// (player/item views) and #82 (magic/enemy/poison views). Expected values are
+// hand-computed from independently authored little-endian byte literals; the
+// per-view schema is the frozen table in docs/design/data-schema.md, which mirrors
+// reference/sdlpal/global.h (tagOBJECT_PLAYER / tagOBJECT_ITEM / tagOBJECT_MAGIC /
+// tagOBJECT_ENEMY / tagOBJECT_POISON). Boundary words: 0, 65535, 0x8000 (32768
+// unsigned), and real-data samples (43445 = object[36].wScriptOnFriendDeath,
+// 40661 = object[61].wScriptDesc, 43028 = object[295].wScriptOnSuccess,
+// 42828 = object[536].wScriptOnBattleEnd, 40862 = object[551].wPlayerScript).
 // A record never carries two views: the declared view fixes the exact field set.
 public sealed class ObjectTableTests
 {
-    // Hand-authored WIN95 records (7 WORDs each, little-endian).
+    // Hand-authored WIN95 records (7 WORDs each, little-endian). The magic/enemy/
+    // poison literals are the real object[295]/object[536]/object[551] WORD groups.
     private static byte[] PlayerRecord => Words(0, 0, 43445, 43374, 0x1234, 65535, 32768);
     private static byte[] ItemRecordFlagsZero => Words(197, 150, 43022, 39140, 0, 40661, 0);
     private static byte[] ItemRecordFlagsMax => Words(0xABCD, 2000, 39554, 0, 42890, 40524, 65535);
+    private static byte[] MagicRecordFlags18 => Words(47, 0, 43028, 0, 0, 43308, 18);
+    private static byte[] EnemyRecord536 => Words(138, 0, 0, 42828, 0, 0, 0);
+    private static byte[] PoisonRecord551 => Words(0, 16, 40862, 0, 40864, 0, 0);
     private static byte[] UndeterminedRecord => Words(1, 2, 3, 4, 5, 6, 7);
 
-    private static ObjectViewEvidence EvidenceFor(int[] players, int[] items) =>
-        new(new HashSet<int>(players), new HashSet<int>(items));
+    private static ObjectViewEvidence EvidenceFor(int[] players, int[] items, int[]? magic = null, int[]? enemies = null, int[]? poison = null) =>
+        new(new HashSet<int>(players), new HashSet<int>(items), new HashSet<int>(magic ?? []), new HashSet<int>(enemies ?? []), new HashSet<int>(poison ?? []));
 
     private static byte[] Words(params int[] values)
     {
@@ -156,6 +163,123 @@ public sealed class ObjectTableTests
     }
 
     [Fact]
+    public void Decode_reads_magic_view_records_with_flag_boundaries()
+    {
+        // Real object[295] (referenced by rgwMagic) and object[303] (referenced by an
+        // enemy wMagic), plus a synthetic every-bit-set flag boundary record.
+        byte[] flagsMax = Words(0xABCD, 65535, 43210, 0, 40524, 32768, 65535);
+        byte[] chunk = [.. MagicRecordFlags18, .. Words(66, 0, 43085, 0, 0, 43368, 10), .. flagsMax];
+        var document = ObjectUnionTable.DecodeTable(chunk, EvidenceFor([], [], magic: [0, 1, 2]));
+        var records = document["records"]!.AsArray();
+        Assert.Equal(3, records.Count);
+
+        var first = records[0]!.AsObject();
+        Assert.Equal("magic", (string)first["view"]!);
+        // Little-endian proof straight from the byte literals: wScriptOnSuccess = 43028
+        // (0xA814) is stored 14 a8 at WORD 2 (byte offset 4).
+        Assert.Equal(0x14, chunk[4]);
+        Assert.Equal(0xA8, chunk[5]);
+        Assert.Equal(47, (int)first["magicId"]!);                 // real object[295].wMagicNumber
+        Assert.Equal(0, (int)first["reserved1"]!);
+        Assert.Equal(43028, (int)first["scriptOnSuccess"]!);      // real object[295].wScriptOnSuccess
+        Assert.Equal(0, (int)first["scriptOnUse"]!);
+        Assert.Equal(0, (int)first["scriptDesc"]!);
+        Assert.Equal(43308, (int)first["reserved2"]!);            // real object[295] WORD 5 (description-script slot)
+        Assert.Equal(18, (int)first["flags"]!);                   // kMagicFlagUsableInBattle | kMagicFlagApplyToAll
+
+        var second = records[1]!.AsObject();
+        Assert.Equal(66, (int)second["magicId"]!);
+        Assert.Equal(10, (int)second["flags"]!);                  // kMagicFlagUsableInBattle only
+
+        var max = records[2]!.AsObject();
+        Assert.Equal(65535, (int)max["reserved1"]!);             // boundary: every WORD bit set
+        Assert.Equal(65535, (int)max["flags"]!);
+        Assert.Equal(32768, (int)max["reserved2"]!);
+        // Only the magic view's fields: no item/player/enemy/poison member is present.
+        foreach (string other in new[] { "bitmap", "price", "reserved", "scriptOnDying", "enemyId", "poisonLevel", "data" })
+            Assert.False(max.ContainsKey(other));
+    }
+
+    [Fact]
+    public void Decode_reads_enemy_view_records_with_padding_slots()
+    {
+        // Real object[536] and object[539] (referenced by the enemy teams): 5 defined
+        // WORDs, the undefined WIN95 WORD 5/6 slots are preserved as padding.
+        byte[] chunk = [.. EnemyRecord536, .. Words(141, 10, 42394, 0, 0, 0, 0)];
+        var document = ObjectUnionTable.DecodeTable(chunk, EvidenceFor([], [], enemies: [0, 1]));
+        var records = document["records"]!.AsArray();
+
+        var first = records[0]!.AsObject();
+        Assert.Equal("enemy", (string)first["view"]!);
+        Assert.Equal(138, (int)first["enemyId"]!);               // real object[536].wEnemyID -> enemy.json index
+        Assert.Equal(0, (int)first["resistanceToSorcery"]!);
+        Assert.Equal(0, (int)first["scriptOnTurnStart"]!);
+        Assert.Equal(42828, (int)first["scriptOnBattleEnd"]!);   // real object[536].wScriptOnBattleEnd
+        Assert.Equal(0, (int)first["scriptOnReady"]!);
+        Assert.Equal(new[] { 0, 0 }, first["padding"]!.AsArray().Select(node => (int)node!));
+
+        var second = records[1]!.AsObject();
+        Assert.Equal(10, (int)second["resistanceToSorcery"]!);   // documented sorcery-resistance maximum
+        Assert.Equal(42394, (int)second["scriptOnTurnStart"]!);
+        foreach (string other in new[] { "bitmap", "magicId", "scriptOnSuccess", "poisonLevel", "data" })
+            Assert.False(second.ContainsKey(other));
+    }
+
+    [Fact]
+    public void Decode_reads_poison_view_records_when_evidence_declares_them()
+    {
+        // Real object[551]/object[552] WORD groups. No DATA.MKF source populates the
+        // poison evidence (the reference indexes .poison only through run-time poison
+        // state), so the evidence record is constructed directly here; on real data
+        // these records stay undetermined until script-reference evidence exists.
+        byte[] chunk = [.. PoisonRecord551, .. Words(1, 64, 40866, 65535, 40868, 0, 32768)];
+        var document = ObjectUnionTable.DecodeTable(chunk, EvidenceFor([], [], poison: [0, 1]));
+        var records = document["records"]!.AsArray();
+
+        var first = records[0]!.AsObject();
+        Assert.Equal("poison", (string)first["view"]!);
+        Assert.Equal(0, (int)first["poisonLevel"]!);             // real object[551].wPoisonLevel
+        Assert.Equal(16, (int)first["color"]!);                  // real object[551].wColor
+        Assert.Equal(40862, (int)first["playerScript"]!);        // real object[551].wPlayerScript
+        Assert.Equal(0, (int)first["reserved"]!);
+        Assert.Equal(40864, (int)first["enemyScript"]!);         // real object[551].wEnemyScript
+        Assert.Equal(new[] { 0, 0 }, first["padding"]!.AsArray().Select(node => (int)node!));
+
+        var second = records[1]!.AsObject();
+        Assert.Equal(1, (int)second["poisonLevel"]!);
+        Assert.Equal(64, (int)second["color"]!);
+        Assert.Equal(65535, (int)second["reserved"]!);           // boundary word inside a defined slot
+        Assert.Equal(40868, (int)second["enemyScript"]!);
+        Assert.Equal(new[] { 0, 32768 }, second["padding"]!.AsArray().Select(node => (int)node!)); // boundary in padding
+        foreach (string other in new[] { "magicId", "enemyId", "bitmap", "scriptOnUse", "data" })
+            Assert.False(second.ContainsKey(other));
+    }
+
+    [Fact]
+    public void Decode_reads_dos_magic_and_enemy_records_with_the_dos_layout()
+    {
+        // DOS magic has no wScriptDesc slot (wReserved2 is WORD 4, wFlags WORD 5) and
+        // the enemy view keeps one padding WORD.
+        byte[] chunk = [.. Words(47, 0, 43028, 0, 43308, 18), .. Words(138, 0, 0, 42828, 0, 0x55AA)];
+        var document = ObjectUnionTable.DecodeTable(chunk, EvidenceFor([], [], magic: [0], enemies: [1]));
+        var records = document["records"]!.AsArray();
+
+        var magic = records[0]!.AsObject();
+        Assert.Equal("magic", (string)magic["view"]!);
+        Assert.Equal(47, (int)magic["magicId"]!);
+        Assert.Equal(43028, (int)magic["scriptOnSuccess"]!);
+        Assert.Equal(43308, (int)magic["reserved2"]!);          // DOS layout: WORD 4
+        Assert.Equal(18, (int)magic["flags"]!);                  // DOS layout: WORD 5
+        Assert.False(magic.ContainsKey("scriptDesc"));           // DOS has no description slot
+
+        var enemy = records[1]!.AsObject();
+        Assert.Equal("enemy", (string)enemy["view"]!);
+        Assert.Equal(138, (int)enemy["enemyId"]!);
+        Assert.Equal(42828, (int)enemy["scriptOnBattleEnd"]!);
+        Assert.Equal(new[] { 0x55AA }, enemy["padding"]!.AsArray().Select(node => (int)node!)); // DOS: 1 padding word
+    }
+
+    [Fact]
     public void ReadViewEvidence_collects_player_and_item_references_from_the_data_chunks()
     {
         // One store record (9 WORDs): slots hold items 10 and 11, zeros are empty slots.
@@ -171,11 +295,46 @@ public sealed class ObjectTableTests
         for (int role = 0; role < 6; role++) roleWords[18 + role] = role;
         roleWords[66] = 9;
         byte[] roles = Words(roleWords);
+        byte[] enemyTeam = new byte[10]; // one ENEMYTEAM record with only empty slots
 
-        var evidence = ObjectUnionTable.ReadViewEvidence(store, enemy, roles);
+        var evidence = ObjectUnionTable.ReadViewEvidence(store, enemy, enemyTeam, roles);
         Assert.Equal(new[] { 0, 1, 2, 3, 4, 5 }, evidence.PlayerObjectIndices.Order());
         Assert.Equal(new[] { 9, 10, 11, 13, 14 }, evidence.ItemObjectIndices.Order());
         Assert.Empty(evidence.PlayerObjectIndices.Intersect(evidence.ItemObjectIndices));
+        Assert.Empty(evidence.MagicObjectIndices); // the all-zero magic/coop slots learn nothing
+        Assert.Empty(evidence.EnemyObjectIndices); // the empty enemy team fields nobody
+        Assert.Empty(evidence.PoisonObjectIndices); // no extraction-time poison source exists
+    }
+
+    [Fact]
+    public void ReadViewEvidence_collects_magic_and_enemy_references_from_the_data_chunks()
+    {
+        byte[] store = Words(1, 0, 0, 0, 0, 0, 0, 0, 0);
+        // One ENEMY record (35 WORDs): wMagic = WORD 15 = 20 (0 and 0xFFFF mean no
+        // magic and are not evidence), wAttackEquivItem = WORD 17 = 13, wStealItem = WORD 19 = 14.
+        var enemyWords = new int[35];
+        enemyWords[15] = 20;
+        enemyWords[17] = 13;
+        enemyWords[19] = 14;
+        byte[] enemy = Words(enemyWords);
+        // One ENEMYTEAM record (5 WORDs): 0 and 0xFFFF are empty slots, not enemies.
+        byte[] enemyTeam = Words(21, 0xFFFF, 22, 0, 23);
+        // PLAYERROLES: rgwMagic slots hold 24, 0 (not learned), 25, 26; the cooperative
+        // slots hold 27 and 0 (no cooperative magic).
+        var roleWords = new int[450];
+        roleWords[192] = 24;
+        roleWords[193] = 0;
+        roleWords[194] = 25;
+        roleWords[200] = 26;
+        roleWords[390] = 27;
+        roleWords[391] = 0;
+        byte[] roles = Words(roleWords);
+
+        var evidence = ObjectUnionTable.ReadViewEvidence(store, enemy, enemyTeam, roles);
+        Assert.Equal(new[] { 0 }, evidence.PlayerObjectIndices.Order()); // the all-zero name words still name object 0
+        Assert.Equal(new[] { 1, 13, 14 }, evidence.ItemObjectIndices.Order());
+        Assert.Equal(new[] { 20, 24, 25, 26, 27 }, evidence.MagicObjectIndices.Order());
+        Assert.Equal(new[] { 21, 22, 23 }, evidence.EnemyObjectIndices.Order());
     }
 
     [Fact]
@@ -186,20 +345,26 @@ public sealed class ObjectTableTests
         byte[] enemy = Words(enemyWords);
         var roleWords = new int[450];
         byte[] roles = Words(roleWords);
-        var valid = () => ObjectUnionTable.ReadViewEvidence(store, enemy, roles);
+        byte[] enemyTeam = new byte[10];
+        var valid = () => ObjectUnionTable.ReadViewEvidence(store, enemy, enemyTeam, roles);
         valid(); // the well-formed fixture passes
 
-        var storeError = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(new byte[19], enemy, roles));
+        var storeError = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(new byte[19], enemy, enemyTeam, roles));
         Assert.Contains("DATA.MKF", storeError.Message);
         Assert.Contains("chunk 0", storeError.Message);
         Assert.Contains("18", storeError.Message);
 
-        var enemyError = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(store, new byte[69], roles));
+        var enemyError = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(store, new byte[69], enemyTeam, roles));
         Assert.Contains("DATA.MKF", enemyError.Message);
         Assert.Contains("chunk 1", enemyError.Message);
         Assert.Contains("70", enemyError.Message);
 
-        var rolesError = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(store, enemy, new byte[899]));
+        var enemyTeamError = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(store, enemy, new byte[11], roles));
+        Assert.Contains("DATA.MKF", enemyTeamError.Message);
+        Assert.Contains("chunk 2", enemyTeamError.Message);
+        Assert.Contains("10", enemyTeamError.Message);
+
+        var rolesError = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(store, enemy, enemyTeam, new byte[899]));
         Assert.Contains("DATA.MKF", rolesError.Message);
         Assert.Contains("chunk 3", rolesError.Message);
         Assert.Contains("900", rolesError.Message);
@@ -211,11 +376,12 @@ public sealed class ObjectTableTests
         // rgwName[0] = 5 makes object 5 player evidence while the store sells item 5.
         byte[] store = Words(5, 0, 0, 0, 0, 0, 0, 0, 0);
         byte[] enemy = Words(new int[35]);
+        byte[] enemyTeam = new byte[10];
         var roleWords = new int[450];
         roleWords[18] = 5;
         byte[] roles = Words(roleWords);
 
-        var error = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(store, enemy, roles));
+        var error = Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ReadViewEvidence(store, enemy, enemyTeam, roles));
         Assert.Contains("conflict", error.Message);
         Assert.Contains("5", error.Message);
         Assert.Contains("player", error.Message);
@@ -223,19 +389,61 @@ public sealed class ObjectTableTests
     }
 
     [Fact]
+    public void ReadViewEvidence_rejects_magic_and_enemy_view_conflicts()
+    {
+        byte[] store = Words(5, 0, 0, 0, 0, 0, 0, 0, 0);
+        byte[] enemy = Words(new int[35]);
+
+        // rgwMagic[0] = 5 while the store sells item 5: one object, two views.
+        var roleWords = new int[450];
+        roleWords[192] = 5;
+        var itemConflict = Assert.Throws<InvalidDataException>(
+            () => ObjectUnionTable.ReadViewEvidence(store, enemy, new byte[10], Words(roleWords)));
+        Assert.Contains("conflict", itemConflict.Message);
+        Assert.Contains("5", itemConflict.Message);
+        Assert.Contains("magic", itemConflict.Message);
+        Assert.Contains("item", itemConflict.Message);
+
+        // The enemy team fields object 6 while rgwName[0] = 6 makes it a player.
+        var playerRoleWords = new int[450];
+        playerRoleWords[18] = 6;
+        var enemyConflict = Assert.Throws<InvalidDataException>(
+            () => ObjectUnionTable.ReadViewEvidence(new byte[18], enemy, Words(6, 0xFFFF, 0, 0, 0), Words(playerRoleWords)));
+        Assert.Contains("conflict", enemyConflict.Message);
+        Assert.Contains("6", enemyConflict.Message);
+        Assert.Contains("enemy", enemyConflict.Message);
+        Assert.Contains("player", enemyConflict.Message);
+    }
+
+    [Fact]
     public void Decode_rejects_evidence_indices_outside_the_record_count()
     {
         byte[] chunk = [.. PlayerRecord, .. ItemRecordFlagsZero, .. UndeterminedRecord]; // 3 records
         var playerError = Assert.Throws<InvalidDataException>(
-            () => ObjectUnionTable.DecodeTable(chunk, new ObjectViewEvidence(new HashSet<int> { 3 }, new HashSet<int>())));
+            () => ObjectUnionTable.DecodeTable(chunk, EvidenceFor([3], [])));
         Assert.Contains("3", playerError.Message);
         Assert.Contains("player", playerError.Message);
         Assert.Contains("3-record", playerError.Message);
 
         var itemError = Assert.Throws<InvalidDataException>(
-            () => ObjectUnionTable.DecodeTable(chunk, new ObjectViewEvidence(new HashSet<int>(), new HashSet<int> { 600 })));
+            () => ObjectUnionTable.DecodeTable(chunk, EvidenceFor([], [600])));
         Assert.Contains("600", itemError.Message);
         Assert.Contains("item", itemError.Message);
+
+        var magicError = Assert.Throws<InvalidDataException>(
+            () => ObjectUnionTable.DecodeTable(chunk, EvidenceFor([], [], magic: [3])));
+        Assert.Contains("3", magicError.Message);
+        Assert.Contains("magic", magicError.Message);
+
+        var enemyError = Assert.Throws<InvalidDataException>(
+            () => ObjectUnionTable.DecodeTable(chunk, EvidenceFor([], [], enemies: [600])));
+        Assert.Contains("600", enemyError.Message);
+        Assert.Contains("enemy", enemyError.Message);
+
+        var poisonError = Assert.Throws<InvalidDataException>(
+            () => ObjectUnionTable.DecodeTable(chunk, EvidenceFor([], [], poison: [3])));
+        Assert.Contains("3", poisonError.Message);
+        Assert.Contains("poison", poisonError.Message);
     }
 
     [Fact]
@@ -256,15 +464,44 @@ public sealed class ObjectTableTests
         reverseCrossView["records"]![1]!["scriptOnDying"] = 1;
         Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(chunk.Length, reverseCrossView));
 
-        // Unregistered views are rejected (magic/enemy/poison belong to #82).
+        // Views outside the frozen union vocabulary are rejected.
         var wrongView = ObjectUnionTable.DecodeTable(chunk, evidence);
-        wrongView["records"]![2]!["view"] = "magic";
+        wrongView["records"]![2]!["view"] = "eventObject";
         Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(chunk.Length, wrongView));
 
         // The view declaration itself is mandatory.
         var missingView = ObjectUnionTable.DecodeTable(chunk, evidence);
         missingView["records"]![0]!.AsObject().Remove("view");
         Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(chunk.Length, missingView));
+    }
+
+    [Fact]
+    public void ValidateDocument_accepts_magic_enemy_poison_views_and_rejects_cross_view_fields()
+    {
+        byte[] chunk = [.. MagicRecordFlags18, .. EnemyRecord536, .. PoisonRecord551];
+        var evidence = EvidenceFor([], [], magic: [0], enemies: [1], poison: [2]);
+        var document = ObjectUnionTable.DecodeTable(chunk, evidence);
+        ObjectUnionTable.ValidateDocument(chunk.Length, document); // freshly decoded passes
+
+        // A magic-view record must not also carry item-view fields.
+        var magicWithBitmap = ObjectUnionTable.DecodeTable(chunk, evidence);
+        magicWithBitmap["records"]![0]!["bitmap"] = 1;
+        Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(chunk.Length, magicWithBitmap));
+
+        // An enemy-view record must not also carry magic-view fields.
+        var enemyWithMagic = ObjectUnionTable.DecodeTable(chunk, evidence);
+        enemyWithMagic["records"]![1]!["magicId"] = 1;
+        Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(chunk.Length, enemyWithMagic));
+
+        // A poison-view record must not also carry enemy-view fields.
+        var poisonWithEnemy = ObjectUnionTable.DecodeTable(chunk, evidence);
+        poisonWithEnemy["records"]![2]!["enemyId"] = 1;
+        Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(chunk.Length, poisonWithEnemy));
+
+        // A poison record without its padding array is incomplete.
+        var noPadding = ObjectUnionTable.DecodeTable(chunk, evidence);
+        noPadding["records"]![2]!.AsObject().Remove("padding");
+        Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(chunk.Length, noPadding));
     }
 
     [Fact]
@@ -291,12 +528,36 @@ public sealed class ObjectTableTests
         outOfRangeArray["records"]![0]!["padding"] = new JsonArray(0, 0, 65_536);
         Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(chunk.Length, outOfRangeArray));
 
+        // Magic/enemy scalars and the enemy padding follow the same WORD gate.
+        byte[] magicAndEnemy = [.. MagicRecordFlags18, .. EnemyRecord536];
+        var twoViewEvidence = EvidenceFor([], [], magic: [0], enemies: [1]);
+        foreach ((int record, string field, int value) in new[]
+        {
+            (0, "magicId", -1), (0, "flags", 65_536), (0, "reserved2", 65_536),
+            (1, "enemyId", -1), (1, "resistanceToSorcery", 65_536), (1, "scriptOnReady", -1),
+        })
+        {
+            var document = ObjectUnionTable.DecodeTable(magicAndEnemy, twoViewEvidence);
+            document["records"]![record]![field] = value;
+            Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(magicAndEnemy.Length, document));
+        }
+        var enemyPadding = ObjectUnionTable.DecodeTable(magicAndEnemy, twoViewEvidence);
+        enemyPadding["records"]![1]!["padding"] = new JsonArray(0, 65_536); // right length, one word out of range
+        Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(magicAndEnemy.Length, enemyPadding));
+
         // A DOS-length document (12-byte records) must not carry the WIN-only scriptDesc slot.
         var dosChunk = Words(10, 20, 30, 40, 50, 65535);
-        var dosDocument = ObjectUnionTable.DecodeTable(dosChunk, new ObjectViewEvidence(new HashSet<int>(), new HashSet<int> { 0 }));
+        var dosDocument = ObjectUnionTable.DecodeTable(dosChunk, EvidenceFor([], [0]));
         ObjectUnionTable.ValidateDocument(dosChunk.Length, dosDocument);
         dosDocument["records"]![0]!["scriptDesc"] = 1;
         Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(dosChunk.Length, dosDocument));
+
+        // The same gate applies to the magic view's DOS layout (no description slot).
+        byte[] dosMagic = Words(47, 0, 43028, 0, 43308, 18);
+        var dosMagicDocument = ObjectUnionTable.DecodeTable(dosMagic, EvidenceFor([], [], magic: [0]));
+        ObjectUnionTable.ValidateDocument(dosMagic.Length, dosMagicDocument);
+        dosMagicDocument["records"]![0]!["scriptDesc"] = 1;
+        Assert.Throws<InvalidDataException>(() => ObjectUnionTable.ValidateDocument(dosMagic.Length, dosMagicDocument));
     }
 
     [Fact]
