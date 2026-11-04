@@ -33,7 +33,6 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             Directory.CreateDirectory(Path.Combine(root, "Leaves/Dialogue"));
             foreach (var (relative, name) in new[] {
                 ("Static/Palette.tres", "Leaves/Palette.tres"),
-                ("Visual/Background.tres", "Leaves/Background.tres"), ("Visual/Enemy.tres", "Leaves/Enemy.tres"),
                 ("Dialogue/Font.tres", "Leaves/Dialogue/Font.tres"),
                 ("Dialogue/Language.zh-Hans.tres", "Leaves/Dialogue/Language.zh-Hans.tres"),
                 ("Dialogue/Language.en.tres", "Leaves/Dialogue/Language.en.tres"),
@@ -41,6 +40,19 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 ("Dialogue/Prompt-01.tres", "Leaves/Dialogue/Prompt-01.tres"),
                 ("Dialogue/Prompt-02.tres", "Leaves/Dialogue/Prompt-02.tres") })
                 File.Copy(Path.Combine(samples, relative), Path.Combine(root, name));
+            // Background and enemy leaves are relabeled copies: the closure cross-checks the
+            // declared FBP24 battlefield identity and the ABC bitmap number 97.
+            {
+                var background = (PalDialogueIndexedImage)ResourceLoader.Load(Path.Combine(samples, "Visual/Background.tres"),
+                    cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+                background.SourceIdentity = "FBP24";
+                NativeProfileFixture.SaveResource(background, Path.Combine(root, "Leaves/Background.tres"));
+                var enemy = (PalSprite)ResourceLoader.Load(Path.Combine(samples, "Visual/Enemy.tres"),
+                    cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+                enemy.SpriteId = 97;
+                enemy.Source["identity"] = "ABC97";
+                NativeProfileFixture.SaveResource(enemy, Path.Combine(root, "Leaves/Enemy.tres"));
+            }
             // Player battle sprites: two copies of the authored leader leaf, each carrying its
             // declared F0/F1 source identity (the closure cross-check reads Source["identity"]).
             foreach (string roleId in new[] { "F0", "F1" })
