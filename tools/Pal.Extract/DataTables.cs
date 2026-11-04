@@ -253,6 +253,63 @@ public static class DataTables
             ]),
         ]);
 
+    // battle-effect-index.json - DATA.MKF chunk 11, WORD[10][2], 40 bytes, one single
+    // record. global.c:301-302 loads the whole rgwBattleEffectIndex (global.h:444)
+    // from chunk 11; the row index is the player's battle sprite number
+    // (PAL_GetPlayerBattleSprite, global.c:1978: rgwSpriteNumInBattle, equipment-
+    // overridable). #78 deferred the column naming to this ticket's use-point check:
+    // neither column is a weight or count - [sprite][0] feeds
+    // PAL_BattleShowPlayerPreMagicAnim (fight.c:2387: index * 10 + 15, then ten
+    // consecutive g_Battle.lpEffectSprite frames) and [sprite][1] feeds
+    // PAL_BattleShowPlayerAttackAnim (fight.c:2055: index * 3, then three consecutive
+    // frames, fight.c:2130) - both are effect-sprite group indexes, so the frozen
+    // placeholder rows[10][2] was corrected to the semantically named sprites
+    // sub-record pair (data-schema.md battle-effect-index section). Both members are
+    // plain WORD, so nothing decodes as SignedWord.
+    public static readonly DataTableDescriptor BattleEffectIndex = new(
+        "battle-effect-index", "DATA.MKF", 11,
+        [
+            new DataField("sprites", null, [10],
+            [
+                new DataField("preMagicEffectIndex", DataFieldType.Word),
+                new DataField("attackEffectIndex", DataFieldType.Word),
+            ]),
+        ]);
+
+    // enemy-pos.json - DATA.MKF chunk 13, ENEMYPOS = PALPOS[5][5], 100 bytes, one
+    // single record. global.c:303-305 reads the fixed-size EnemyPos from chunk 13
+    // (global.h:401-404: pos[MAX_ENEMIES_IN_TEAM = 5 (palcommon.h:60)]
+    // [MAX_ENEMIES_IN_TEAM]; each PALPOS is a plain WORD x/y pair, global.h:395-399)
+    // and byteswaps all 100 bytes; battle.c:936-937 consumes
+    // pos[i][wMaxEnemyIndex].x/.y as the default battle position of enemy slot i -
+    // the second index is the team's highest occupied slot, so only the j >= i cells
+    // carry live coordinates in real data and the zeros in the unused lower cells
+    // export unchanged. The [5][5] grid nests like #86's elementalResistance[5][6];
+    // both PALPOS members are plain WORD, so nothing decodes as SignedWord.
+    public static readonly DataTableDescriptor EnemyPos = new(
+        "enemy-pos", "DATA.MKF", 13,
+        [
+            new DataField("positions", null, [5, 5],
+            [
+                new DataField("x", DataFieldType.Word),
+                new DataField("y", DataFieldType.Word),
+            ]),
+        ]);
+
+    // level-up-exp.json - DATA.MKF chunk 14, WORD[MAX_LEVELS + 1] = WORD[100], 200
+    // bytes, one single record. global.c:306-308 reads the fixed-size rgLevelUpExp
+    // from chunk 14 (global.h:442, typedef'd LEVELUPEXP at global.h:407;
+    // MAX_LEVELS = 99 per palcommon.h:82) and byteswaps all 200 bytes; battle.c:1106-
+    // 1112 consumes it as the level-up threshold table - while dwExp >=
+    // rgLevelUpExp[rgwLevel[w]] the role levels up - so the JSON index is the current
+    // level (index 0 unused, real data plateaus at 32000 from the mid levels). A flat
+    // plain-WORD array, so nothing decodes as SignedWord.
+    public static readonly DataTableDescriptor LevelUpExp = new(
+        "level-up-exp", "DATA.MKF", 14,
+        [
+            new DataField("levelUpExp", DataFieldType.Word, [100]),
+        ]);
+
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
     // DataTableDescriptor: every record declares one union view (player/item by #81,
     // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant

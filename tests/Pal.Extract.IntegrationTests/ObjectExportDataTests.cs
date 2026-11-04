@@ -54,9 +54,11 @@ public sealed class ObjectExportDataTests : IDisposable
     // word of 0 is still player evidence; fight.c reads rgObject[rgwName[w]].player);
     // the trailing 32 zero bytes are DATA chunk 4 as the registered magic table (#88,
     // its zero type exporting the layerOffset view), the 12 zero bytes DATA chunk 5
-    // as the registered battle-field table (#89, five signed zeros), and the 20 zero
+    // as the registered battle-field table (#89, five signed zeros), the 20 zero
     // bytes DATA chunk 6 as the registered level-up-magic table (#90, five level 0 /
-    // learns-nothing role pairs); none is view evidence.
+    // learns-nothing role pairs), and the 40/100/200 zero bytes chunks 11/13/14 as
+    // the registered battle-effect-index/enemy-pos/level-up-exp tables (#91); none
+    // is view evidence.
     private static void WriteDataFixture(string input) =>
         WriteDataFixture(input, Words(1, 2, 0, 0, 0, 0, 0, 0, 0));
 
@@ -64,7 +66,7 @@ public sealed class ObjectExportDataTests : IDisposable
         WriteDataFixture(input, store, new byte[70], new byte[10], new byte[900]);
 
     private static void WriteDataFixture(string input, byte[] store, byte[] enemy, byte[] enemyTeam, byte[] roles) =>
-        MkfFixture.Write(input, "DATA.MKF", store, enemy, enemyTeam, roles, new byte[32], new byte[12], new byte[20]);
+        MkfFixture.Write(input, "DATA.MKF", store, enemy, enemyTeam, roles, new byte[32], new byte[12], new byte[20], Array.Empty<byte>(), Array.Empty<byte>(), Array.Empty<byte>(), Array.Empty<byte>(), new byte[40], Array.Empty<byte>(), new byte[100], new byte[200]);
 
     [Fact]
     public async Task Export_data_extracts_object_records_with_views_and_the_index_entry()
@@ -76,7 +78,7 @@ public sealed class ObjectExportDataTests : IDisposable
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "battle-field.json"), Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "level-up-magic.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
+        Assert.Equal(new[] { Path.Combine(output, "battle-effect-index.json"), Path.Combine(output, "battle-field.json"), Path.Combine(output, "enemy-pos.json"), Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "level-up-exp.json"), Path.Combine(output, "level-up-magic.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "object.json")));
@@ -107,11 +109,11 @@ public sealed class ObjectExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(10, tables.Length);
-        Assert.Equal("battle-field.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
-        Assert.Equal("enemy-team.json", tables[1].GetProperty("file").GetString());
-        Assert.Equal("enemy.json", tables[2].GetProperty("file").GetString());
-        Assert.Equal("event-object.json", tables[3].GetProperty("file").GetString());
+        Assert.Equal(13, tables.Length);
+        Assert.Equal("battle-field.json", tables[1].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("enemy-team.json", tables[3].GetProperty("file").GetString());
+        Assert.Equal("enemy.json", tables[4].GetProperty("file").GetString());
+        Assert.Equal("event-object.json", tables[5].GetProperty("file").GetString());
         var entry = tables.Single(table => table.GetProperty("file").GetString() == "object.json");
         Assert.Equal("SSS.MKF", entry.GetProperty("archive").GetString());
         Assert.Equal(2, entry.GetProperty("chunk").GetInt32());
@@ -279,18 +281,18 @@ public sealed class ObjectExportDataTests : IDisposable
         var noEnemyTeam = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.Equal(1, noEnemyTeam.ExitCode);
         Assert.Contains("DATA.MKF", noEnemyTeam.Stderr, StringComparison.Ordinal);
-        // The registered battle-field table (DATA chunk 5, #89) sorts first among the
-        // DATA tables in file order and names the first missing DATA chunk.
-        Assert.Contains("chunk 5", noEnemyTeam.Stderr, StringComparison.Ordinal);
+        // The registered battle-effect-index table (DATA chunk 11, #91) sorts first
+        // among the DATA tables in file order and names the first missing DATA chunk.
+        Assert.Contains("chunk 11", noEnemyTeam.Stderr, StringComparison.Ordinal);
         Assert.False(Directory.Exists(output));
 
-        MkfFixture.Write(input, "DATA.MKF", Words(1, 2, 0, 0, 0, 0, 0, 0, 0), new byte[70], new byte[10]); // no chunk 3, so chunks 4, 5, and 6 are absent too
+        MkfFixture.Write(input, "DATA.MKF", Words(1, 2, 0, 0, 0, 0, 0, 0, 0), new byte[70], new byte[10]); // no chunk 3, so chunks 4-6 and 11/13/14 are absent too
         var noRoles = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.Equal(1, noRoles.ExitCode);
         Assert.Contains("DATA.MKF", noRoles.Stderr, StringComparison.Ordinal);
-        // Same first-named missing chunk as above: the registered battle-field table
-        // (chunk 5) is decoded before the roles evidence (chunk 3).
-        Assert.Contains("chunk 5", noRoles.Stderr, StringComparison.Ordinal);
+        // Same first-named missing chunk as above: the registered battle-effect-index
+        // table (chunk 11) is decoded before the roles evidence (chunk 3).
+        Assert.Contains("chunk 11", noRoles.Stderr, StringComparison.Ordinal);
         Assert.False(Directory.Exists(output));
     }
 

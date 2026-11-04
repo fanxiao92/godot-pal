@@ -13,8 +13,9 @@ internal static class DataGameData
 {
     private const int MaximumChunkBytes = 64 * 1024 * 1024;
 
-    // Registered tables in source order (SSS chunks first, then DATA chunks).
-    private static readonly DataTableDescriptor[] RegisteredTables = [DataTables.EventObject, DataTables.Scene, DataTables.Store, DataTables.Enemy, DataTables.EnemyTeam, DataTables.PlayerRoles, DataTables.Magic, DataTables.BattleField, DataTables.LevelUpMagic];
+    // Registered tables in source order (SSS chunks first, then DATA chunks). With
+    // #91's closing trio (chunks 11/13/14) all 13 frozen tables are registered.
+    private static readonly DataTableDescriptor[] RegisteredTables = [DataTables.EventObject, DataTables.Scene, DataTables.Store, DataTables.Enemy, DataTables.EnemyTeam, DataTables.PlayerRoles, DataTables.Magic, DataTables.BattleField, DataTables.LevelUpMagic, DataTables.BattleEffectIndex, DataTables.EnemyPos, DataTables.LevelUpExp];
 
     internal static void Export(string input, string output)
     {

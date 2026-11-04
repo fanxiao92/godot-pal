@@ -28,11 +28,15 @@ public sealed class ExportDataCliTests : IDisposable
         // view), DATA chunk 5 as the battle-field table (12 = 1 x 12 bytes; its
         // zero magicEffect exports five signed zeros), and DATA chunk 6 as the
         // level-up-magic table (20 = 1 x 20 bytes; its zero roles export five
-        // level 0 / learns-nothing pairs); the DATA chunks also feed
-        // the object view evidence besides; the other chunks are placeholders until
-        // their tables are registered by #91.
+        // level 0 / learns-nothing pairs), DATA chunk 11 as the battle-effect-index
+        // table (40 = 1 x 40 bytes; ten zero sprite pairs), DATA chunk 13 as the
+        // enemy-pos table (100 = 1 x 100 bytes; 25 zero {x,y} cells), and DATA
+        // chunk 14 as the level-up-exp table (200 = 1 x 200 bytes; 100 zero
+        // thresholds); the DATA chunks also feed the object view evidence besides;
+        // chunks 7-10 and 12 stay empty placeholders (no table is registered there)
+        // - with #91 all thirteen frozen tables are registered.
         MkfFixture.Write(input, "SSS.MKF", new byte[64], new byte[16], new byte[28], Array.Empty<byte>(), new byte[24]);
-        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900], new byte[32], new byte[12], new byte[20]);
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900], new byte[32], new byte[12], new byte[20], Array.Empty<byte>(), Array.Empty<byte>(), Array.Empty<byte>(), Array.Empty<byte>(), new byte[40], Array.Empty<byte>(), new byte[100], new byte[200]);
     }
 
     [Fact]
@@ -41,7 +45,7 @@ public sealed class ExportDataCliTests : IDisposable
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
         string[] files = [.. Directory.GetFiles(output).Order()];
-        Assert.Equal(new[] { Path.Combine(output, "battle-field.json"), Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "level-up-magic.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") }, files);
+        Assert.Equal(new[] { Path.Combine(output, "battle-effect-index.json"), Path.Combine(output, "battle-field.json"), Path.Combine(output, "enemy-pos.json"), Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "level-up-exp.json"), Path.Combine(output, "level-up-magic.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") }, files);
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var rootElement = index.RootElement;
         Assert.Equal(1, rootElement.GetProperty("formatVersion").GetInt32());
@@ -56,78 +60,102 @@ public sealed class ExportDataCliTests : IDisposable
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(input, "DATA.MKF")))),
             sources[1].GetProperty("sha256").GetString());
         var tables = rootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(10, tables.Length);
-        Assert.Equal("battle-field.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal(13, tables.Length);
+        Assert.Equal("battle-effect-index.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
         Assert.Equal("DATA.MKF", tables[0].GetProperty("archive").GetString());
-        Assert.Equal(5, tables[0].GetProperty("chunk").GetInt32());
-        Assert.Equal(1, tables[0].GetProperty("recordCount").GetInt32()); // 12 zero bytes = 1 empty record
-        Assert.Equal(12, tables[0].GetProperty("byteLength").GetInt32());
-        // Independent expectation: the fixture wrote all-zero chunk 5 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[12])), tables[0].GetProperty("sha256").GetString());
-        Assert.Equal("enemy-team.json", tables[1].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal(11, tables[0].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[0].GetProperty("recordCount").GetInt32()); // 40 zero bytes = 1 record, ten zero sprite pairs
+        Assert.Equal(40, tables[0].GetProperty("byteLength").GetInt32());
+        // Independent expectation: the fixture wrote all-zero chunk 11 bytes (same
+        // constant as the unit test, hand-verified by Python hashlib and PowerShell).
+        Assert.Equal("2c34ce1df23b838c5abf2a7f6437cca3d3067ed509ff25f11df6b11b582b51eb", tables[0].GetProperty("sha256").GetString());
+        Assert.Equal("battle-field.json", tables[1].GetProperty("file").GetString()); // lexicographic file order
         Assert.Equal("DATA.MKF", tables[1].GetProperty("archive").GetString());
-        Assert.Equal(2, tables[1].GetProperty("chunk").GetInt32());
-        Assert.Equal(1, tables[1].GetProperty("recordCount").GetInt32()); // 10 zero bytes = 1 empty team
-        Assert.Equal(10, tables[1].GetProperty("byteLength").GetInt32());
-        // Independent expectation: the fixture wrote all-zero chunk 2 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[10])), tables[1].GetProperty("sha256").GetString());
-        Assert.Equal("enemy.json", tables[2].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal(5, tables[1].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[1].GetProperty("recordCount").GetInt32()); // 12 zero bytes = 1 empty record
+        Assert.Equal(12, tables[1].GetProperty("byteLength").GetInt32());
+        // Independent expectation: the fixture wrote all-zero chunk 5 bytes.
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[12])), tables[1].GetProperty("sha256").GetString());
+        Assert.Equal("enemy-pos.json", tables[2].GetProperty("file").GetString()); // lexicographic file order
         Assert.Equal("DATA.MKF", tables[2].GetProperty("archive").GetString());
-        Assert.Equal(1, tables[2].GetProperty("chunk").GetInt32());
-        Assert.Equal(1, tables[2].GetProperty("recordCount").GetInt32()); // 70 zero bytes = 1 empty record
-        Assert.Equal(70, tables[2].GetProperty("byteLength").GetInt32());
-        // Independent expectation: the fixture wrote all-zero chunk 1 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[70])), tables[2].GetProperty("sha256").GetString());
-        Assert.Equal("event-object.json", tables[3].GetProperty("file").GetString());
-        Assert.Equal("SSS.MKF", tables[3].GetProperty("archive").GetString());
-        Assert.Equal(0, tables[3].GetProperty("chunk").GetInt32());
-        Assert.Equal(2, tables[3].GetProperty("recordCount").GetInt32()); // 64 zero bytes = 2 empty records
-        Assert.Equal(64, tables[3].GetProperty("byteLength").GetInt32());
-        // Independent expectation: the fixture wrote all-zero chunk 0 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[64])), tables[3].GetProperty("sha256").GetString());
-        Assert.Equal("level-up-magic.json", tables[4].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal(13, tables[2].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[2].GetProperty("recordCount").GetInt32()); // 100 zero bytes = 1 record, 25 zero cells
+        Assert.Equal(100, tables[2].GetProperty("byteLength").GetInt32());
+        // Independent expectation: the fixture wrote all-zero chunk 13 bytes (same
+        // constant as the unit test, hand-verified by Python hashlib and PowerShell).
+        Assert.Equal("cd00e292c5970d3c5e2f0ffa5171e555bc46bfc4faddfb4a418b6840b86e79a3", tables[2].GetProperty("sha256").GetString());
+        Assert.Equal("enemy-team.json", tables[3].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("DATA.MKF", tables[3].GetProperty("archive").GetString());
+        Assert.Equal(2, tables[3].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[3].GetProperty("recordCount").GetInt32()); // 10 zero bytes = 1 empty team
+        Assert.Equal(10, tables[3].GetProperty("byteLength").GetInt32());
+        // Independent expectation: the fixture wrote all-zero chunk 2 bytes.
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[10])), tables[3].GetProperty("sha256").GetString());
+        Assert.Equal("enemy.json", tables[4].GetProperty("file").GetString()); // lexicographic file order
         Assert.Equal("DATA.MKF", tables[4].GetProperty("archive").GetString());
-        Assert.Equal(6, tables[4].GetProperty("chunk").GetInt32());
-        Assert.Equal(1, tables[4].GetProperty("recordCount").GetInt32()); // 20 zero bytes = 1 record, five learns-nothing roles
-        Assert.Equal(20, tables[4].GetProperty("byteLength").GetInt32());
+        Assert.Equal(1, tables[4].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[4].GetProperty("recordCount").GetInt32()); // 70 zero bytes = 1 empty record
+        Assert.Equal(70, tables[4].GetProperty("byteLength").GetInt32());
+        // Independent expectation: the fixture wrote all-zero chunk 1 bytes.
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[70])), tables[4].GetProperty("sha256").GetString());
+        Assert.Equal("event-object.json", tables[5].GetProperty("file").GetString());
+        Assert.Equal("SSS.MKF", tables[5].GetProperty("archive").GetString());
+        Assert.Equal(0, tables[5].GetProperty("chunk").GetInt32());
+        Assert.Equal(2, tables[5].GetProperty("recordCount").GetInt32()); // 64 zero bytes = 2 empty records
+        Assert.Equal(64, tables[5].GetProperty("byteLength").GetInt32());
+        // Independent expectation: the fixture wrote all-zero chunk 0 bytes.
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[64])), tables[5].GetProperty("sha256").GetString());
+        Assert.Equal("level-up-exp.json", tables[6].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("DATA.MKF", tables[6].GetProperty("archive").GetString());
+        Assert.Equal(14, tables[6].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[6].GetProperty("recordCount").GetInt32()); // 200 zero bytes = 1 record, 100 zero thresholds
+        Assert.Equal(200, tables[6].GetProperty("byteLength").GetInt32());
+        // Independent expectation: the fixture wrote all-zero chunk 14 bytes (same
+        // constant as the unit test, hand-verified by Python hashlib and PowerShell).
+        Assert.Equal("6d9c54dee5660c46886f32d80e57e9dd0ffa57ee0cd2a762b036d9c8e0c3a33a", tables[6].GetProperty("sha256").GetString());
+        Assert.Equal("level-up-magic.json", tables[7].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("DATA.MKF", tables[7].GetProperty("archive").GetString());
+        Assert.Equal(6, tables[7].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[7].GetProperty("recordCount").GetInt32()); // 20 zero bytes = 1 record, five learns-nothing roles
+        Assert.Equal(20, tables[7].GetProperty("byteLength").GetInt32());
         // Independent expectation: the fixture wrote all-zero chunk 6 bytes (same
         // constant as the unit test, hand-verified by Python hashlib and PowerShell).
-        Assert.Equal("de47c9b27eb8d300dbb5f2c353e632c393262cf06340c4fa7f1b40c4cbd36f90", tables[4].GetProperty("sha256").GetString());
-        Assert.Equal("magic.json", tables[5].GetProperty("file").GetString()); // lexicographic file order
-        Assert.Equal("DATA.MKF", tables[5].GetProperty("archive").GetString());
-        Assert.Equal(4, tables[5].GetProperty("chunk").GetInt32());
-        Assert.Equal(1, tables[5].GetProperty("recordCount").GetInt32()); // 32 zero bytes = 1 empty record (type 0 -> layerOffset view)
-        Assert.Equal(32, tables[5].GetProperty("byteLength").GetInt32());
+        Assert.Equal("de47c9b27eb8d300dbb5f2c353e632c393262cf06340c4fa7f1b40c4cbd36f90", tables[7].GetProperty("sha256").GetString());
+        Assert.Equal("magic.json", tables[8].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("DATA.MKF", tables[8].GetProperty("archive").GetString());
+        Assert.Equal(4, tables[8].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[8].GetProperty("recordCount").GetInt32()); // 32 zero bytes = 1 empty record (type 0 -> layerOffset view)
+        Assert.Equal(32, tables[8].GetProperty("byteLength").GetInt32());
         // Independent expectation: the fixture wrote all-zero chunk 4 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[32])), tables[5].GetProperty("sha256").GetString());
-        Assert.Equal("object.json", tables[6].GetProperty("file").GetString()); // lexicographic file order
-        Assert.Equal("SSS.MKF", tables[6].GetProperty("archive").GetString());
-        Assert.Equal(2, tables[6].GetProperty("chunk").GetInt32());
-        Assert.Equal(2, tables[6].GetProperty("recordCount").GetInt32()); // 28 zero bytes = 2 empty WIN95 records
-        Assert.Equal(28, tables[6].GetProperty("byteLength").GetInt32());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[32])), tables[8].GetProperty("sha256").GetString());
+        Assert.Equal("object.json", tables[9].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("SSS.MKF", tables[9].GetProperty("archive").GetString());
+        Assert.Equal(2, tables[9].GetProperty("chunk").GetInt32());
+        Assert.Equal(2, tables[9].GetProperty("recordCount").GetInt32()); // 28 zero bytes = 2 empty WIN95 records
+        Assert.Equal(28, tables[9].GetProperty("byteLength").GetInt32());
         // Independent expectation: the fixture wrote all-zero chunk 2 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[28])), tables[6].GetProperty("sha256").GetString());
-        Assert.Equal("player-roles.json", tables[7].GetProperty("file").GetString()); // lexicographic file order
-        Assert.Equal("DATA.MKF", tables[7].GetProperty("archive").GetString());
-        Assert.Equal(3, tables[7].GetProperty("chunk").GetInt32());
-        Assert.Equal(1, tables[7].GetProperty("recordCount").GetInt32()); // 900 zero bytes = 1 empty record
-        Assert.Equal(900, tables[7].GetProperty("byteLength").GetInt32());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[28])), tables[9].GetProperty("sha256").GetString());
+        Assert.Equal("player-roles.json", tables[10].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("DATA.MKF", tables[10].GetProperty("archive").GetString());
+        Assert.Equal(3, tables[10].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[10].GetProperty("recordCount").GetInt32()); // 900 zero bytes = 1 empty record
+        Assert.Equal(900, tables[10].GetProperty("byteLength").GetInt32());
         // Independent expectation: the fixture wrote all-zero chunk 3 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[900])), tables[7].GetProperty("sha256").GetString());
-        Assert.Equal("scene.json", tables[8].GetProperty("file").GetString());
-        Assert.Equal("SSS.MKF", tables[8].GetProperty("archive").GetString());
-        Assert.Equal(1, tables[8].GetProperty("chunk").GetInt32());
-        Assert.Equal(2, tables[8].GetProperty("recordCount").GetInt32()); // 16 zero bytes = 2 empty records
-        Assert.Equal(16, tables[8].GetProperty("byteLength").GetInt32());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[900])), tables[10].GetProperty("sha256").GetString());
+        Assert.Equal("scene.json", tables[11].GetProperty("file").GetString());
+        Assert.Equal("SSS.MKF", tables[11].GetProperty("archive").GetString());
+        Assert.Equal(1, tables[11].GetProperty("chunk").GetInt32());
+        Assert.Equal(2, tables[11].GetProperty("recordCount").GetInt32()); // 16 zero bytes = 2 empty records
+        Assert.Equal(16, tables[11].GetProperty("byteLength").GetInt32());
         // Independent expectation: the fixture wrote all-zero chunk 1 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[16])), tables[8].GetProperty("sha256").GetString());
-        Assert.Equal("store.json", tables[9].GetProperty("file").GetString()); // lexicographic file order
-        Assert.Equal("DATA.MKF", tables[9].GetProperty("archive").GetString());
-        Assert.Equal(0, tables[9].GetProperty("chunk").GetInt32());
-        Assert.Equal(1, tables[9].GetProperty("recordCount").GetInt32()); // 18 zero bytes = 1 empty store
-        Assert.Equal(18, tables[9].GetProperty("byteLength").GetInt32());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[16])), tables[11].GetProperty("sha256").GetString());
+        Assert.Equal("store.json", tables[12].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("DATA.MKF", tables[12].GetProperty("archive").GetString());
+        Assert.Equal(0, tables[12].GetProperty("chunk").GetInt32());
+        Assert.Equal(1, tables[12].GetProperty("recordCount").GetInt32()); // 18 zero bytes = 1 empty store
+        Assert.Equal(18, tables[12].GetProperty("byteLength").GetInt32());
         // Independent expectation: the fixture wrote all-zero chunk 0 bytes.
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[18])), tables[9].GetProperty("sha256").GetString());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[18])), tables[12].GetProperty("sha256").GetString());
 
         using var objectTable = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "object.json")));
         var objectRecords = objectTable.RootElement.GetProperty("records");

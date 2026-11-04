@@ -329,9 +329,18 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 
 ### battle-effect-index.json — DATA 11，`WORD[10][2]`，40 字节（单条记录）
 
+行下标为战斗精灵编号（`PAL_GetPlayerBattleSprite`，[global.c](../../reference/sdlpal/global.c):1978：`rgwSpriteNumInBattle`，可被装备效果覆盖）。#78 冻结时占位命名 `rows`，列语义留本票核实：两列都不是权重/计数，而是效果精灵（`g_Battle.lpEffectSprite`）的帧组索引——[fight.c](../../reference/sdlpal/fight.c):2387 用 `[sprite][0]`（×10+15 后连播 10 帧，施法前摇动画 `PAL_BattleShowPlayerPreMagicAnim`，fight.c:2338）、[fight.c](../../reference/sdlpal/fight.c):2055 用 `[sprite][1]`（×3 后连播 3 帧，攻击动画 `PAL_BattleShowPlayerAttackAnim`，fight.c:2008）——故按参考语义修正为下表命名的子记录对（两列均普通 WORD）。
+
 | JSON 字段 | C 名 | 类型 | 说明 |
 |---|---|---|---|
-| `rows` | `rgwBattleEffectIndex[10][2]` | WORD[10][2] | 行下标为战斗精灵编号（`PAL_GetPlayerBattleSprite`，fight.c:2055 用 `[sprite][1]`、fight.c:2387 用 `[sprite][0]`）；语义归属由后续使用点核对，本表不猜名 |
+| `sprites` | `rgwBattleEffectIndex[10][2]` | 对象[10] | 每战斗精灵编号一项（`PAL_GetPlayerBattleSprite` 返回值 0..9），成员按 C 列序 |
+
+`sprites` 元素：
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `preMagicEffectIndex` | `rgwBattleEffectIndex[sprite][0]` | WORD | 施法前摇动画的效果精灵帧组索引（fight.c:2387：×10+15 后连播 10 帧 `g_Battle.lpEffectSprite`） |
+| `attackEffectIndex` | `rgwBattleEffectIndex[sprite][1]` | WORD | 攻击动画的效果精灵帧组索引（fight.c:2055：×3 后连播 3 帧，fight.c:2130） |
 
 真实数据核对：40 ÷ 40 = 1 条。
 
@@ -339,7 +348,7 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 
 | JSON 字段 | C 名 | 类型 | 说明 |
 |---|---|---|---|
-| `positions` | `pos[MAX_ENEMIES_IN_TEAM][MAX_ENEMIES_IN_TEAM]` | `{x,y}`[5][5] | 敌位坐标（battle.c:936 `EnemyPos.pos[i][wMaxEnemyIndex]`） |
+| `positions` | `pos[MAX_ENEMIES_IN_TEAM][MAX_ENEMIES_IN_TEAM]` | `{x,y}`[5][5] | 敌位坐标（battle.c:936 `EnemyPos.pos[i][wMaxEnemyIndex]`：敌槽 `i` 的默认战位，第二下标为队伍实际最高敌槽，故真实数据仅 `j ≥ i` 的格子有活坐标，未用格子的零值原样导出） |
 
 `positions` 元素：
 
@@ -354,7 +363,7 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 
 | JSON 字段 | C 名 | 类型 | 说明 |
 |---|---|---|---|
-| `levelUpExp` | `rgLevelUpExp[MAX_LEVELS+1]` | WORD[100] | 升级经验阈值表；下标为当前等级（battle.c:1106 `dwExp >= rgLevelUpExp[rgwLevel[w]]`） |
+| `levelUpExp` | `rgLevelUpExp[MAX_LEVELS+1]` | WORD[100] | 升级经验阈值表；下标为当前等级（battle.c:1106 `dwExp >= rgLevelUpExp[rgwLevel[w]]` 达阈即升级；下标 0 未用，真实数据中段起恒为 32000 封顶） |
 
 真实数据核对：200 ÷ 200 = 1 条。
 
