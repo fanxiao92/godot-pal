@@ -207,6 +207,10 @@ public partial class PalTriggerDialogue : Node
         catch (InvalidDataException error) { throw RequestError(request, error); }
     }
 
+    /// <summary>Host hook after advancing a world-wired call (transition/wait/movement
+    /// acknowledgements): bind the display the call newly parked on.</summary>
+    public void BindPendingDisplays() => BindPendingDisplay();
+
     private void BindPendingDisplay()
     {
         while (Session!.PendingDisplay is { } request)

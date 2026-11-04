@@ -332,7 +332,11 @@ public partial class Main : Node2D
             // advance one step per committed update tick (the same per-tick ownership the
             // dynamic host uses); the map only redraws when the exploration really changed.
             if (changed && firstBattleWorld is { } world && Dialogue?.Session is { Phase: Pal.Core.TriggerScriptPhase.WaitingForSceneWait or Pal.Core.TriggerScriptPhase.WaitingForMovement } trigger)
+            {
                 world.AdvanceTriggerTick(trigger);
+                // The acknowledged park may have advanced into a display; bind it now.
+                Dialogue!.BindPendingDisplays();
+            }
             if (changed) mapScene.UpdateScene(Exploration.Plan);
             // Presentation transitions (redraw/fadeScene/fadeOut) in the world-wired call:
             // redraw the retained scene, then receipt after the delay elapsed.
@@ -404,6 +408,8 @@ public partial class Main : Node2D
         if (unchecked((int)(now - firstBattleTransitionDeadline)) < 0) return;
         firstBattleTransitionDeadline = 0;
         _ = Dialogue.Session.AcknowledgeTransition(transition.Id);
+        // The call advanced past its transition; a newly parked display must be bound.
+        Dialogue.BindPendingDisplays();
     }
 
     private static PackedScene mapScenePackedScene(string staticResources) =>
