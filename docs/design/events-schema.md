@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（68 个 opcode 位、60 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二、批4 #99 对话表现，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（75 个 opcode 位、67 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二、批4 #99 对话表现、状态物品批1 #100，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -13,7 +13,7 @@ pal-extract rebuild-events --input <events目录> --output <新文件>
 
 `export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
 
-实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 68 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`itemShortageJump`（#97）、`playerLacksPoisonJump`（#97）、`enemyLacksPoisonJump`（#97）、`notPoisonedJump`（#97）、`enemyHpAboveJump`（#97）、`enemyTurnJump`（#97）、`partyHpNotFullJump`（#97）、`waitForAnyKey`（#97）、`roleInPartyJump`（#98）、`notFacingObjectJump`（#98）、`objectOutOfZoneJump`（#98）、`delay`（#98）、`itemNotEquippedJump`（#98）、`notFirstOfKindJump`（#98）、`stateMatchJump`（#98）、`sceneMatchJump`（#98）、`quitGame`（#98）、`randomBranch`（#98）、`restoreScreen`（#99）、`backupScreen`（#99）、`randomJump`、`startBattle`、`changeHp`、`changeMp`、`boostStat`、`setDialog` 四变体（#99 复核）、`showDialog`（#99 复核）、`redraw`（#99 复核修正）、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 75 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`itemShortageJump`（#97）、`playerLacksPoisonJump`（#97）、`enemyLacksPoisonJump`（#97）、`notPoisonedJump`（#97）、`enemyHpAboveJump`（#97）、`enemyTurnJump`（#97）、`partyHpNotFullJump`（#97）、`waitForAnyKey`（#97）、`roleInPartyJump`（#98）、`notFacingObjectJump`（#98）、`objectOutOfZoneJump`（#98）、`delay`（#98）、`itemNotEquippedJump`（#98）、`notFirstOfKindJump`（#98）、`stateMatchJump`（#98）、`sceneMatchJump`（#98）、`quitGame`（#98）、`randomBranch`（#98）、`restoreScreen`（#99）、`backupScreen`（#99）、`setExtraAttr`（#100）、`equipItem`（#100）、`incPlayerAttr`（#100）、`setPlayerStat`（#100）、`changeCash`（#100）、`addItem`（#100）、`removeItem`（#100）、`randomJump`、`startBattle`、`changeHp`（#100 复核）、`changeMp`（#100 复核）、`boostStat`、`setDialog` 四变体（#99 复核）、`showDialog`（#99 复核）、`redraw`（#99 复核修正）、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`（#100 复核）、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
 
 导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
@@ -176,10 +176,10 @@ data/extracted/events/
 | `0x00A0` | `quitGame` | 无操作数映射；三操作数保留；后继为 stop（进程经 PAL_Shutdown 退出，#98） |
 | `0x00A2` | `randomBranch` | `count` 为 WORD 映射 operand 0（分支数：实际执行到后续 count 条之一，无率无目标操作数）；operand 1、2 保留；后继声明为 randomBranch（#98） |
 | `0x0007` | `startBattle` | `enemyTeamId` 为 WORD 映射 operand 0；`lossTarget` 为可空引用映射 operand 1；`isBoss` 为布尔值，`fleeTarget` 为可空引用，二者共同映射 operand 2，规则见下文 |
-| `0x001F` | `giveItem` | `itemId` 为 WORD 映射 operand 0、`count` 为有符号整数映射 operand 1；operand 2 保留 |
+| `0x001F` | `addItem` | `itemId` 为 WORD 映射 operand 0、`count` 为有符号整数映射 operand 1（负值即从库存移除）；operand 2 保留。v1 契约占位名 `giveItem`，#100 起定名 `addItem`（script.c:974 `(SHORT)` 转型） |
 | `0x0006` | `randomJump` | `rate` 为 WORD 映射 operand 0、`to` 为引用映射 operand 1；operand 2 保留。执行时抽取 `RandomLong(1,100)`，**抽取值 ≥ rate 时跳转**，否则顺序后继；预检必须同时覆盖两个真实分支（#49） |
-| `0x001B` | `changeHp` | `scope` 为 WORD 映射 operand 0（0=调用者角色，非 0=全队）、`amount` 为有符号整数映射 operand 1；operand 2 保留。仅战中角色钩子执行语义已交付：PAL_IncreaseHPMP 只改活人并封顶（#49） |
-| `0x001C` | `changeMp` | 同 `changeHp`，作用于 MP；仅战中角色钩子执行语义已交付（#49） |
+| `0x001B` | `changeHp` | `scope` 为 WORD 映射 operand 0（0=调用者角色，非 0=全队）、`amount` 为有符号整数映射 operand 1；operand 2 保留。仅战中角色钩子执行语义已交付：PAL_IncreaseHPMP 只改活人并封顶（#49；#100 复核确认 scope 为整 WORD 非零即全队的布尔旗标，非位掩码/角色下标/名字 WORD） |
+| `0x001C` | `changeMp` | 同 `changeHp`，作用于 MP；仅战中角色钩子执行语义已交付（#49；#100 复核同上） |
 | `0x0030` | `boostStat` | `field` 为 WORD 映射 operand 0（PLAYERROLES WORD 块索引：17 攻击、18 灵力、19 防御、20 身法、21 逃跑）、`percent` 为有符号整数映射 operand 1、`roleOperand` 为 WORD 映射 operand 2（0=调用者）。执行按 `kBodyPartExtra` 寄存器写入 `基面板×percent/100`（WORD 截断、覆盖写），战后随寄存器清理（#49） |
 | `0x003B` | `setDialog` | `box: "center"`、`color` 为 `0..255` 映射 operand 0 低字节、`rngWord` 为 WORD 映射 operand 2；operand 1 保留（#99 复核） |
 | `0x003C` / `0x003D` | `setDialog` | `box: "upper"` / `"lower"`、`portraitId` 为 WORD 映射 operand 0、`color` 为 `0..255` 映射 operand 1 低字节、`rngWord` 为 WORD 映射 operand 2（#99 复核） |
@@ -236,7 +236,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x006D setSceneScripts | case 0x006D：`rgScene[operand0−1].wScriptOnEnter/wScriptOnTeleport = operand1/2` | scene 下标 → `sceneId`（1 基） |
 | 0x004A setBattlefield | case 0x004A：`gpGlobals->wNumBattleField = operand0` | 战场编号 → `battlefieldId` |
 
-#### 当前注册表（68 个 opcode 位，60 个动词）
+#### 当前注册表（75 个 opcode 位，67 个动词）
 
 | opcode | op | 字段（绑定） | 执行方式 | 后继 |
 |---|---|---|---|---|
@@ -256,9 +256,16 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0013 | `setObjectPosition` | `eventObjectId`(word,0)、`x`(word,1)、`y`(word,2) | shared | sequential |
 | 0x0014 | `setObjectGesture` | `frame`(word,0) | shared | sequential |
 | 0x0015 | `setPartyFacing` | `direction`(word,0)、`gesture`(word,1)、`memberIndex`(word,2) | shared | sequential |
-| 0x001B | `changeHp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential |
-| 0x001C | `changeMp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential |
-| 0x001D | `changeHpMp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential |
+| 0x0017 | `setExtraAttr` | `equipPartWord`(word,0)、`field`(word,1)、`value`(signedWord,2) | shared | sequential |
+| 0x0018 | `equipItem` | `equipPartWord`(word,0)、`itemId`(word,1) | shared | sequential |
+| 0x0019 | `incPlayerAttr` | `field`(word,0)、`delta`(signedWord,1)、`roleOperand`(word,2) | shared | sequential |
+| 0x001A | `setPlayerStat` | `field`(word,0)、`value`(signedWord,1)、`roleOperand`(word,2) | shared | sequential |
+| 0x001B | `changeHp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential（#100 复核） |
+| 0x001C | `changeMp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential（#100 复核） |
+| 0x001D | `changeHpMp` | `scope`(word,0)、`amount`(signedWord,1) | shared | sequential（#100 复核） |
+| 0x001E | `changeCash` | `amount`(signedWord,0)、`to`(reference,1) | shared | conditionalJump |
+| 0x001F | `addItem` | `itemId`(word,0)、`count`(signedWord,1) | shared | sequential |
+| 0x0020 | `removeItem` | `itemId`(word,0)、`count`(word,1)、`shortageTarget`(battleTarget,2) | shared | conditionalJump |
 | 0x0022 | `revivePlayer` | `scope`(word,0)、`healthTenths`(word,1) | shared | sequential |
 | 0x0024 | `setAutoEntry` | `eventObjectId`(word,0)、`entry`(word,1) | shared | sequential |
 | 0x0025 | `setTriggerEntry` | `eventObjectId`(word,0)、`entry`(word,1) | shared | sequential |
@@ -379,6 +386,25 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 
 真实数据核对：本批命中 redraw 2673 + setDialog 四变体 3415（112+1307+1544+452，与 #78 的 3415 总数吻合）+ restoreScreen 351 + backupScreen 0 + showDialog 13514，共 19953。raw 命中从 #98 的 7060 降至 6709（−351 = 0x008E 新具名命中；0x00A6 零命中；六个复核项本已具名，无 raw 变化）。export→rebuild SHA `f36cf853…b39e72a` 字节一致（0x0005 字段重绑不破坏往返：映射操作数 1/2 由字段重编码回原 WORD、operand0 保留源值）。本批无引用字段，无悬空拒绝面变化；`DecodeValidatesReferenceRange` 导出期预检不启用。
 
+#### M5 状态物品批1 条目（#100）
+
+本批核对结论：全部操作数仍为立即 WORD（同批1–4，`pScript->rgwOperand[n]` 直读，无变量寻址）；10 个 opcode 全部位于两执行器共享的 `PAL_InterpretInstruction`（trigger/auto 开关均无对应 case，executor 一律 `shared`），后继除 changeCash/removeItem 两跳转类为 conditionalJump 外一律 sequential（break 后函数尾 3085 `return wScriptEntry + 1`）。**「player/role」类操作数语义逐条核实**：0x0017/0x0018 的目标角色是 `wEventObjectID` 本身（装备脚本由 [uigame.c](../../reference/sdlpal/uigame.c):2048-2050 以 `PAL_RunTriggerScript(wScriptOnEquip, wPlayerRole)` 进入，事件对象参数即 0 基玩家角色下标，763/778 直接用作行内偏移、无 −1）；0x0019/0x001A 的 operand 2 是与 0x0030 boostStat 相同的 roleOperand 形状（822-826/855-859：0=调用者角色、非 0=operand−1 的 1 基角色下标，真实数据仅 0/2）；0x001B/0x001C/0x001D 的 operand 0 是整 WORD 非零即全队的布尔旗标（874/903/932 `if (pScript->rgwOperand[0])`，真实数据仅 0/1），**不是位掩码、角色 ID，也不是 #98 发现的 rgwName 名字 WORD**。属性编号语义：0x0017 operand 1 与 0x0019/0x001A operand 0 是 PLAYERROLES 展平 WORD 数组的**行号**（每行 MAX_PLAYER_ROLES=6 个 WORD，763/829/862 按 `field×6 + role` 寻址），字段名沿用 0x0030 的 `field` 表达索引语义、不硬编码枚举名；行号映射：0=avatar、1=battleSprite、2=sprite、3=name、4=attackAll、6=level、7=maxHP、8=maxMP、9=HP、10=MP、11–16=rgwEquipment 各装备部位行、17=attackStrength、18=magicStrength、19=defense、20=dexterity、21=fleeRate、22=poisonResistance、23–27=elementalResistance[0..4]、64=walkFrames、65=cooperativeMagic（真实数据：0x0017 用 17–27、0x0019 用 {6,7,8,17–21}、0x001A 用 {0,1,2,4,64,65}）。0x0017/0x0018 的 operand 0 是 `0x0B + 装备部位`（759/772 减 0x0B 后索引 rgEquipmentEffect[7]/rgwEquipment[6]，0x0B..0x11 覆盖 head/body/shoulder/hand/feet/wear/extra），定名 `equipPartWord` 表达原始 WORD 编码而非部位枚举值。行号与逐条语义如下。
+
+| opcode | 动词 | 字段映射与寻址 | 执行方式（script.c 行号） | 后继 | 反向编码 | 真实数据 |
+|---|---|---|---|---|---|---|
+| 0x0017 | `setExtraAttr` | `equipPartWord`=operand0（0x0B+装备部位：0x0B head…0x10 wear、0x11 extra；759 减 0x0B 选 `rgEquipmentEffect[part]`，extra 寄存器即 0x0030 boostStat 的写入目标）、`field`=operand1（PLAYERROLES 行号，763 `field×6 + wEventObjectID` 寻址——角色即调用者事件对象参数）、`value`=operand2（**有符号**：763-764 `(SHORT)` 赋值） | shared（752：纯赋值写入装备效果寄存器，break；3085 return+1） | sequential | 三字段重编码；无保留操作数 | 213（equipPartWord 全部 0x0B..0x11；field 17–27 即攻击/灵力/防御/身法/逃跑/抗毒/五行抗性行；value −20..200，如 65526=−10） |
+| 0x0018 | `equipItem` | `equipPartWord`=operand0（772 减 0x0B 选 `rgwEquipment[part]` 并 773 记 `g_iCurEquipPart` 供后续 0x001A）、`itemId`=operand1（object.json item 视图：777/781 与 rgwEquipment 及库存比对，含新旧各 1 件时直接换装不走库存尾插入）；目标角色=wEventObjectID（778，玩家角色下标） | shared（768：778 先 `PAL_RemoveEquipmentEffect` 清旧效果，781-810 换装并调库存与 `wLastUnequippedItem`；break） | sequential | 两字段重编码；operand2 保留（参考 case 未用） | 106（equipPartWord 0x0B..0x10；itemId 163..274 逐条互异；operand2 全 0） |
+| 0x0019 | `incPlayerAttr` | `field`=operand0（PLAYERROLES 行号，829 `field×6 + iPlayerRole`）、`delta`=operand1（**有符号**：829 `(SHORT)` 加）、`roleOperand`=operand2（822-826：0=调用者角色=wEventObjectID、非 0=operand−1 的 1 基角色下标；命名沿用 0x0030 同形状字段） | shared（813：829 `p[...] +=` 直接改基面板；break） | sequential | 三字段重编码；无保留操作数 | 17（field {6,7,8,17–21}=level/maxHP/maxMP/攻击/灵力/防御/身法/逃跑；delta 2..190；roleOperand 0×9、2×8） |
+| 0x001A | `setPlayerStat` | `field`=operand0（同 0x0019 行号语义）、`value`=operand1（**有符号**：862 `(SHORT)` 赋值）、`roleOperand`=operand2（855-859 同形状） | shared（834：844-846 **装备进行中**（`g_iCurEquipPart != -1`，由 0x0018 置位）时写入 `rgEquipmentEffect[part]` 寄存器而非 PlayerRoles 基面板——装备脚本先 0x0018 后 0x001A 的组合即装备效果来源；862 赋值 break） | sequential | 三字段重编码；无保留操作数 | 30（field {0,1,2,4,64,65}=avatar/battleSprite/sprite/attackAll/walkFrames/cooperativeMagic；value 1..512；roleOperand 0/2） |
+| 0x001B | `changeHp`（#78 已具名，复核） | `scope`=operand0（**布尔旗标**：非 0=全队 874-882、0=单人=wEventObjectID 玩家角色 889；非位掩码/角色下标/名字 WORD，真实数据仅 0/1）、`amount`=operand1（**有符号**：880/889 `(SHORT)`） | shared（867：`PAL_IncreaseHPMP(role, amount, 0)` 只改活人并按上限封顶；scope≠0 时任一队员实际变化才置脚本成功标记，不影响后继） | sequential | 两字段重编码；operand2 保留（映射复核无误） | 40（scope 0×38、1×2） |
+| 0x001C | `changeMp`（#78 已具名，复核） | 同 0x001B，作用于 MP（908/916） | shared（896） | sequential | 同 0x001B | 10（scope 0×9、1×1） |
+| 0x001D | `changeHpMp`（#78 已具名，复核） | 同 0x001B，operand1 同值同时施于 HP 与 MP（935-937/944-945） | shared（923） | sequential | 同 0x001B | 25（scope 0×9、1×16） |
+| 0x001E | `changeCash` | `amount`=operand0（**有符号**：957/966 `(SHORT)`，负值即扣钱）、`to`=operand1（现金不足时的跳转目标：962 `wScriptEntry = to − 1` 标准跳转惯用法 + 3085 return+1；目标 WORD 0 合法引用 L0000，与批2/批3 跳转族同口径） | shared（952：957 负数且 `dwCash < |amount|`（无符号比较）即 962 跳，否则 966 `dwCash += (SHORT)amount`；break） | conditionalJump（现金不足→to，否则 next） | 两字段重编码；operand2 保留（参考 case 未用） | 59（amount 负 19/非负 40；目标 0×42、非零 17 个（3742..43064）全在 43538 条内） |
+| 0x001F | `addItem`（v1 契约占位名 `giveItem`） | `itemId`=operand0（object.json item 视图）、`count`=operand1（**有符号**：974 `(SHORT)`，负值即从库存移除） | shared（970：974 `PAL_AddItemToInventory(itemId, count)`；break） | sequential | 两字段重编码；operand2 保留（参考 case 未用） | 425（itemId 61..344 共 233 种；count 0/2/3/5/7/9；operand2 全 0） |
+| 0x0020 | `removeItem` | `itemId`=operand0（object.json item 视图）、`count`=operand1（**无符号**：981 WORD 无 `(SHORT)` 转型；983-984 运行时把 0 归一为 1 仅改内存条目，编解码仍按 0——与 0x0086 同口径）、`shortageTarget`=operand2（**可空引用**复用 battleTarget 字段类型：null↔WORD 0；986 条件 `count <= 库存数 || operand2 == 0`——WORD 0 表示「不足也照删」，非 0 时库存+装备合计不足才 1023 `wScriptEntry = target − 1` 跳转；引用地址 0 拒绝、必须用 null） | shared（977：988 先删库存（部分删除时 y<0 余量回填 x），1003-1016 库存不够再卸全队装备槽凑数；break） | conditionalJump（不足且目标非空→shortageTarget，否则 next） | 三字段重编码（count 0 仍按 0 编码、shortageTarget null 编码 WORD 0） | 46（itemId 76..292；count 0/1/9/36；shortageTarget null×33、非空 13 个（6417..43078）全在范围内） |
+
+真实数据核对：本批命中合计 971（新具名 896 = 0x0017 213 + 0x0018 106 + 0x0019 17 + 0x001A 30 + 0x001E 59 + 0x001F 425 + 0x0020 46；复核 75 = 0x001B 40 + 0x001C 10 + 0x001D 25 本已具名）。raw 命中从 #99 的 6709 降至 5813（−896）。0x001E 的 17 个非零跳转目标与 0x0020 的 13 个非空 shortageTarget 全部落在 chunk 4（43538 条）内；两者的 WORD 0 目标编码语义不同——0x001E 按普通引用 L0000（跳到条目 0，与 randomJump 零目标同口径），0x0020 按 null（不跳转、照删），互不混用。export→rebuild SHA `f36cf853…b39e72a` 字节一致。框架零扩展：`equipPartWord`（0x0B+部位原始 WORD）与 `roleOperand` 沿用既有 word 类型；`shortageTarget` 是 battleTarget 可空引用绑定在跳转类 opcode 的首次复用（WORD 0=非跳转语义而非「跳到 0」，null↔0 编码与 startBattle 的 loss/flee target 同机制，字段类型描述本就是通用可空引用）；`DecodeValidatesReferenceRange` 导出期预检不启用（与批1–4 同口径，悬空拒绝仍在重建标签解析处）。
+
 #### raw 保底与反向编码规则
 
 - 未登记 opcode 一律 `raw`，仅携带公共字段；已登记 opcode 不得用 `raw`（唯一例外：兼容旧 M2/M3 包的 raw opcode 7 仍可无损重建，其操作数不按引用解释，见 startBattle 章节）。
@@ -403,7 +429,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 
 - `limit` 是对应空闲计数器的比较上限，**不是帧延迟**；0 的特殊语义保留。
 - `0x0002` 在计数条件成立时停止/改入口，条件失败会清零计数并继续 `next`。因此不能把所有 `end` 当成无条件终止。
-- `giveItem.count` 可以为负；不把原始 `65535` 错读成增加 65535 个。
+- `addItem.count`（v1 契约占位名 `giveItem`，#100 定名）可以为负；不把原始 `65535` 错读成增加 65535 个。`removeItem.count` 与之相反是无符号 WORD，且 0 在运行时按 1 处理（编码仍按 0）。
 - `setDialog` 与 `showDialog` 分开保留，不能把前者吞并进后一条文字命令。对话框、头像、颜色及 RNG 状态是执行上下文；`rngWord` 非零表示真，但编码仍保留完整 WORD。`rngWord` 非零且头像非零时 `PAL_StartDialog` 先备份屏幕再播放 RGM.MKF 动态头像（text.c:1271-1274），该屏幕由 redraw 的 RNG 分支（script.c:3275-3277）或 0x008E 恢复（#99 核）。
 - `showDialog.messageId` 是原始消息引用，不是某个语言包内部重新编号的字符串下标。同文不同 ID 仍是不同引用；反向编译使用 ID，而非按文字内容反查索引。正文及控制信息保存在语言包，保留原文、空行和转义，不 trim 或自行合并。
 - `descriptionLineWord` 在 trigger 中不参与消息显示，在 WIN95 物品/法术描述调用方中用于行号推进：值 1 不增加行号，其他值增加一行。该行为见 [itemmenu.c](../../reference/sdlpal/itemmenu.c)、[magicmenu.c](../../reference/sdlpal/magicmenu.c)，不能误当成始终未使用的操作数。
@@ -470,7 +496,7 @@ SLF 不保证一条原始文字指令对应一行翻译。参考 `text.c` 的 `P
     },
     {
       "label": "L0003",
-      "op": "giveItem",
+      "op": "addItem",
       "itemId": 123,
       "count": -1,
       "_item": "示例物品名",

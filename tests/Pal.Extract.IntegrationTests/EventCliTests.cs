@@ -579,6 +579,114 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Status_item_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 status-item batch 1 (#100): the seven new setExtraAttr / equipItem / incPlayerAttr /
+        // setPlayerStat / changeCash / addItem / removeItem verbs plus the re-verified changeHp /
+        // changeMp / changeHpMp. Hand-built stream, not retail data. The equip rows follow the
+        // PLAYERROLES WORD layout (17=attack .. 22=poisonResistance; 64=walkFrames), equip parts
+        // are 0x0B+body part, and removeItem's operand 2 is a nullable shortage target.
+        byte[] original = Words(
+            0x0017, 0x0B, 19, unchecked((int)0xFFF6),  // setExtraAttr: head part, defense row, -10
+            0x0018, 0x0D, 208, 0,                      // equipItem: shoulder part, item 208
+            0x0019, 7, 100, 2,                         // incPlayerAttr: maxHP row, +100, role operand 2
+            0x001A, 64, 3, 0,                          // setPlayerStat: walkFrames row, 3, caller role
+            0x001B, 0, 300, 0,                         // changeHp: one player +300
+            0x001C, 1, unchecked((int)0xFFF6), 0,      // changeMp: whole party -10
+            0x001D, 1, 25, 0,                          // changeHpMp: whole party +25 to both stats
+            0x001E, 65511, 8, 7,                        // changeCash: -25, fail target L0008
+            0x001F, 138, 9, 5,                         // addItem: item 138 x9
+            0x0020, 148, 1, 9,                         // removeItem: item 148 x1, shortage target L0009
+            0, 0, 0, 0);                               // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(11, commands.Count);
+        Assert.Equal("setExtraAttr", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(0x0B, commands[0]!["equipPartWord"]!.GetValue<int>());
+        Assert.Equal(19, commands[0]!["field"]!.GetValue<int>());
+        Assert.Equal(-10, commands[0]!["value"]!.GetValue<int>());
+        Assert.Equal("equipItem", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(0x0D, commands[1]!["equipPartWord"]!.GetValue<int>());
+        Assert.Equal(208, commands[1]!["itemId"]!.GetValue<int>());
+        Assert.Equal("incPlayerAttr", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(7, commands[2]!["field"]!.GetValue<int>());
+        Assert.Equal(100, commands[2]!["delta"]!.GetValue<int>());
+        Assert.Equal(2, commands[2]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("setPlayerStat", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(64, commands[3]!["field"]!.GetValue<int>());
+        Assert.Equal(0, commands[3]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("changeHp", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[4]!["scope"]!.GetValue<int>());
+        Assert.Equal(300, commands[4]!["amount"]!.GetValue<int>());
+        Assert.Equal("changeMp", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[5]!["scope"]!.GetValue<int>());
+        Assert.Equal(-10, commands[5]!["amount"]!.GetValue<int>());
+        Assert.Equal("changeHpMp", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(25, commands[6]!["amount"]!.GetValue<int>());
+        Assert.Equal("changeCash", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(-25, commands[7]!["amount"]!.GetValue<int>());
+        Assert.Equal("L0008", commands[7]!["to"]!.GetValue<string>());
+        Assert.Equal("addItem", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(138, commands[8]!["itemId"]!.GetValue<int>());
+        Assert.Equal(9, commands[8]!["count"]!.GetValue<int>());
+        Assert.Equal("removeItem", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(148, commands[9]!["itemId"]!.GetValue<int>());
+        Assert.Equal(1, commands[9]!["count"]!.GetValue<int>());
+        Assert.Equal("L0009", commands[9]!["shortageTarget"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the cash fail target moves to L0000 (zero-target
+        // rule), removeItem's shortage target becomes null (WORD 0, removal proceeds even when
+        // short) with count 0 kept as 0 (runtime normalizes to 1), and preserved operands stay.
+        commands[0]!["equipPartWord"] = 0x11; // extra part
+        commands[0]!["value"] = 5;
+        commands[1]!["itemId"] = 209;
+        commands[2]!["field"] = 6; // level row
+        commands[2]!["delta"] = -10;
+        commands[2]!["roleOperand"] = 0;
+        commands[3]!["value"] = 383;
+        commands[3]!["roleOperand"] = 2;
+        commands[4]!["scope"] = 1;
+        commands[5]!["scope"] = 0;
+        commands[6]!["amount"] = 30;
+        commands[7]!["amount"] = 500;
+        commands[7]!["to"] = "L0000";
+        commands[8]!["itemId"] = 139;
+        commands[8]!["count"] = -1;
+        commands[9]!["count"] = 0;
+        commands[9]!["shortageTarget"] = null;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0017, 0x11, 19, 5,
+            0x0018, 0x0D, 209, 0,
+            0x0019, 6, unchecked((int)0xFFF6), 0,
+            0x001A, 64, 383, 2,
+            0x001B, 1, 300, 0,
+            0x001C, 0, unchecked((int)0xFFF6), 0,
+            0x001D, 1, 30, 0,
+            0x001E, 500, 0, 7,
+            0x001F, 139, unchecked((int)0xFFFF), 5,
+            0x0020, 148, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A shortage target pointing at address zero must use null, not a label.
+        commands[9]!["shortageTarget"] = "L0000";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]

@@ -102,9 +102,19 @@ public static class OpcodeRegistry
         new(0x0013, "setObjectPosition", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("x", OpcodeFieldKind.Word, 1), new("y", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0014, "setObjectGesture", [new("frame", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0015, "setPartyFacing", [new("direction", OpcodeFieldKind.Word, 0), new("gesture", OpcodeFieldKind.Word, 1), new("memberIndex", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x0017, "setExtraAttr", [new("equipPartWord", OpcodeFieldKind.Word, 0), new("field", OpcodeFieldKind.Word, 1), new("value", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x0018, "equipItem", [new("equipPartWord", OpcodeFieldKind.Word, 0), new("itemId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x0019, "incPlayerAttr", [new("field", OpcodeFieldKind.Word, 0), new("delta", OpcodeFieldKind.SignedWord, 1), new("roleOperand", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x001A, "setPlayerStat", [new("field", OpcodeFieldKind.Word, 0), new("value", OpcodeFieldKind.SignedWord, 1), new("roleOperand", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x001B, "changeHp", [new("scope", OpcodeFieldKind.Word, 0), new("amount", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x001C, "changeMp", [new("scope", OpcodeFieldKind.Word, 0), new("amount", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x001D, "changeHpMp", [new("scope", OpcodeFieldKind.Word, 0), new("amount", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x001E, "changeCash", [new("amount", OpcodeFieldKind.SignedWord, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x001F, "addItem", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #100: removeItem's operand 2 is WORD 0 = no fail target (script.c:986 removes even when
+        // short), so it reuses the nullable-reference binding: null encodes WORD 0 and a reference
+        // to address 0 is rejected; non-zero words are chunk-4 jump targets (script.c:1023).
+        new(0x0020, "removeItem", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.Word, 1), new("shortageTarget", OpcodeFieldKind.BattleTarget, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0022, "revivePlayer", [new("scope", OpcodeFieldKind.Word, 0), new("healthTenths", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0024, "setAutoEntry", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("entry", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0025, "setTriggerEntry", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("entry", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
