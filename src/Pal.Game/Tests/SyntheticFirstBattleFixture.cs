@@ -237,8 +237,8 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         visual.Teams = [team];
         foreach (string uri in new[] { visual.PlayerSpriteUri, visual.PaletteUri, team.BackgroundUri, team.EnemySpriteUri })
             visual.ResourceSha256[uri] = Godot.FileAccess.GetSha256(uri);
-        string path = root + "/Visual.tres";
-        NativeProfileFixture.SaveResource(visual, path);
+        string path = Localize("Visual.tres");
+        NativeProfileFixture.SaveResource(visual, Path.Combine(root, "Visual.tres"));
         return path;
     }
 
@@ -250,8 +250,8 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             SourceIdentity = "Synthetic global event-object table; not retail data.",
             Objects = [new PalGlobalEventObject { OwnerId = 61, X = 100, Y = 100, SpriteId = 21 }],
         };
-        string path = root + "/GlobalEventObjects.tres";
-        NativeProfileFixture.SaveResource(table, path);
+        string path = Localize("GlobalEventObjects.tres");
+        NativeProfileFixture.SaveResource(table, Path.Combine(root, "GlobalEventObjects.tres"));
         return path;
     }
 
