@@ -4,10 +4,11 @@ using System.Text.Json.Nodes;
 namespace Pal.Extract;
 
 // export-data: opens SSS.MKF and DATA.MKF and extracts the registered read-only data
-// tables (data-schema v1). Each M5 ticket (#79-#91) registers its descriptor in
-// DataTables and appends it to RegisteredTables; index.json lists tables in
-// lexicographic file order regardless of registration order. Tables are read-only:
-// no re-encoder back to raw bytes (ADR-0004).
+// tables (data-schema v1). Each M5 ticket (#79–#91) registers its descriptor in
+// DataTables and appends it to RegisteredTables; the OBJECT union table (#81/#82) is
+// view-aware and exports through ObjectUnionTable instead of a flat descriptor.
+// index.json lists tables in lexicographic file order regardless of registration
+// order. Tables are read-only: no re-encoder back to raw bytes (ADR-0004).
 internal static class DataGameData
 {
     private const int MaximumChunkBytes = 64 * 1024 * 1024;
@@ -26,17 +27,34 @@ internal static class DataGameData
             foreach (MkfArchive archive in archives)
                 sources.Add(new JsonObject { ["archive"] = archive.Name, ["sha256"] = archive.Sha256 });
             // Decode and strictly validate every registered table before writing anything,
-            // so a failing table leaves no partial output.
+            // so a failing table leaves no partial output. Index entries are collected and
+            // emitted in lexicographic file order regardless of registration order.
             var tables = new JsonArray();
             var files = new List<(string Name, JsonObject Document)>();
+            var entries = new List<(string Name, JsonObject Entry)>();
             foreach (DataTableDescriptor descriptor in RegisteredTables.OrderBy(table => table.FileId, StringComparer.Ordinal))
             {
                 byte[] chunk = archiveByName[descriptor.Archive].ReadChunk(descriptor.Chunk, MaximumChunkBytes);
                 var document = DataTableSchema.DecodeTable(descriptor, chunk);
                 DataTableSchema.ValidateDocument(descriptor, document);
-                tables.Add(DataTableSchema.DescribeIndexEntry(descriptor, chunk));
+                entries.Add((descriptor.FileId + ".json", DataTableSchema.DescribeIndexEntry(descriptor, chunk)));
                 files.Add((descriptor.FileId + ".json", document));
             }
+            // object.json (#81): the OBJECT union table reads SSS.MKF chunk 2 plus the DATA.MKF
+            // view-evidence chunks (store/enemy/player-roles item and player references).
+            var dataArchive = archiveByName["DATA.MKF"];
+            {
+                byte[] chunk = archiveByName[ObjectUnionTable.Archive].ReadChunk(ObjectUnionTable.Chunk, MaximumChunkBytes);
+                var evidence = ObjectUnionTable.ReadViewEvidence(
+                    dataArchive.ReadChunk(ObjectUnionTable.StoreEvidenceChunk, MaximumChunkBytes),
+                    dataArchive.ReadChunk(ObjectUnionTable.EnemyEvidenceChunk, MaximumChunkBytes),
+                    dataArchive.ReadChunk(ObjectUnionTable.PlayerRolesEvidenceChunk, MaximumChunkBytes));
+                var document = ObjectUnionTable.DecodeTable(chunk, evidence);
+                ObjectUnionTable.ValidateDocument(chunk.Length, document);
+                entries.Add((ObjectUnionTable.FileId + ".json", ObjectUnionTable.DescribeIndexEntry(chunk)));
+                files.Add((ObjectUnionTable.FileId + ".json", document));
+            }
+            foreach (var (_, entry) in entries.OrderBy(entry => entry.Name, StringComparer.Ordinal)) tables.Add(entry);
             var indexDocument = new JsonObject
             {
                 ["formatVersion"] = 1,

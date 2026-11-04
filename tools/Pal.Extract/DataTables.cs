@@ -42,4 +42,10 @@ public static class DataTables
             new DataField("scriptOnTeleport", DataFieldType.Word),
             new DataField("eventObjectIndex", DataFieldType.Word),
         ]);
+
+    // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
+    // DataTableDescriptor: every record declares one union view (player/item by #81,
+    // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant
+    // detection, evidence reader, decode, validation, and index entry live in
+    // ObjectUnionTable and are registered alongside these descriptors by DataGameData.
 }

@@ -127,9 +127,18 @@ data/extracted/data/
 
 ### object.json — SSS 2，`OBJECT` union，14 字节（7 WORD，WIN95）/ 12 字节（6 WORD，DOS）
 
-union 表：**每条记录必须声明 `view`（`player` / `item` / `magic` / `enemy` / `poison`）之一，同一物理 WORD 组不得同时按多视图解释**；记录对象只含所声明视图的字段。视图判定依据独立证据（脚本引用、入口槽、语言包名称区间），由 object 表提取票（拆 2）核对固定；未确定视图的记录显式留待调查，不猜测、不默认。
+union 表：**每条记录必须声明 `view`（`player` / `item` / `magic` / `enemy` / `poison`，无判定证据时为 `undetermined`，见下「视图判定」）之一，同一物理 WORD 组不得同时按多视图解释**；记录对象只含所声明视图的字段（`undetermined` 记录只含 `data` 原始 WORD 数组）。视图判定依据独立证据（脚本引用、入口槽、语言包名称区间），由 object 表提取票（拆 2）核对固定；未确定视图的记录显式留待调查，不猜测、不默认。#81 已核对固定 player 与 item 两视图的证据来源（见「视图判定」）；magic/enemy/poison 三视图的证据由 #82 补齐。
 
-变体判定沿用参考 `PAL_IsWINVersion`：chunk 2 字节长度对 `sizeof(OBJECT)`（14）整除且对 12 不整除 ⇒ WIN95；反向 ⇒ DOS（结合压缩签名计分）。DOS 包加载时参考把 `rgwData[6]=rgwData[5]`（flags）、`rgwData[5]=0` 转成 WIN 布局（[global.c](../../reference/sdlpal/global.c) `PAL_LoadDefaultGame`）；提取按 chunk 内原始布局忠实导出，WIN/DOS 视图字段差异见下（`scriptDesc` 为 WIN95 新增槽）。真实数据核对：7910 ÷ 14 = 565 条（÷12 余 2）⇒ WIN95。
+**视图判定（#81 核对固定，player/item）**：union 本身无视图标签，参考按用途在不同代码路径读取。提取时的判定证据（均在 export-data 输入归档内）：
+
+| 视图 | 证据来源 | 参考读取点 |
+|---|---|---|
+| player | `DATA.MKF` chunk 3（PLAYERROLES）`rgwName[6]`（WORD 18..23）的全部 6 个值（含 0：名字文字下标为 0 时仍被按 player 视图读取） | [fight.c](../../reference/sdlpal/fight.c):800-813、848-876：`rgObject[PlayerRoles.rgwName[w]].player.wScriptOnFriendDeath/.wScriptOnDying`（参考中仅有的 `.player` 读取点） |
+| item | `DATA.MKF` chunk 0（STORE）`rgwItems`（每记录 WORD 0..8，0=空槽）、chunk 1（ENEMY）`wAttackEquivItem`（WORD 17）/`wStealItem`（WORD 19，0=无此物）、chunk 3（PLAYERROLES）`rgwEquipment`（WORD 66..101，0=未装备）中的非零引用 | itemmenu.c:148/171/202/269/363、play.c:273-316、fight.c:4361-4397/5135-5145、global.c:1364-1365、uibattle.c:653 等（含以 store/装备/敌表引用为下标的 `.item` 读取） |
+
+同一对象下标同时落在两类证据 ⇒ 数据不一致，明确失败定位（同一记录不得按多视图表达）；证据下标超出记录数 ⇒ 明确失败定位。其余记录（含法术/敌人/毒区间与未被引用的物品）一律 `view: "undetermined"`，以 `data` 数组原样导出整组 WORD（WIN95 7 个 / DOS 6 个，小端），不做任何视图解读——#78 冻结了「未确定视图的记录显式留待调查」但未定其表示法，`undetermined` + `data` 为 #81 的最小扩展。真实数据核对（#81，本机只读）：player 6 条（下标 36..41 = `rgwName` 实值 [36,37,38,40,39,41]）、item 159 条（引用并集落在 61..278）、undetermined 400 条；共 565。
+
+变体判定沿用参考 `PAL_IsWINVersion`：chunk 2 字节长度对 `sizeof(OBJECT)`（14）整除且对 12 不整除 ⇒ WIN95；反向 ⇒ DOS（参考另以 ABC/MAP/F/FBP/FIRE/MGO 的压缩签名计分）。长度同时整除 14 与 12（即 84 的倍数）时整除性不可判定，而压缩签名计分所需的归档不在 export-data 输入内 ⇒ 提取明确失败并定位 SSS.MKF chunk 2，不猜测。DOS 包加载时参考把 `rgwData[6]=rgwData[5]`（flags）、`rgwData[5]=0` 转成 WIN 布局（[global.c](../../reference/sdlpal/global.c) `PAL_LoadDefaultGame`）；提取按 chunk 内原始布局忠实导出，WIN/DOS 视图字段差异见下（`scriptDesc` 为 WIN95 新增槽）。真实数据核对：7910 ÷ 14 = 565 条（÷12 余 2）⇒ WIN95。
 
 | 视图 | JSON 字段 | C 名（WORD 序） | 类型 | 说明 |
 |---|---|---|---|---|
@@ -161,7 +170,7 @@ union 表：**每条记录必须声明 `view`（`player` / `item` / `magic` / `e
 | poison | `reserved` | `wReserved` | WORD | 参考注明恒零，原样导出 |
 | poison | `enemyScript` | `wEnemyScript` | WORD | 敌人中毒每回合脚本（入口槽 `poison.wEnemyScript`） |
 
-player 视图物理上占 union 前段（4 WORD 有定义，后 3 WORD 保留位原样导出为 `padding` 数组——win 布局 7 WORD 中未定义槽不丢弃）。
+player 视图物理上占 union 前段（4 WORD 有定义，保留位原样导出为 `padding` 数组：WIN95 布局 7 WORD 中未定义槽不丢弃，DOS 布局余 2 WORD）。DOS 布局（6 WORD）下 item 视图无 `scriptDesc` 槽（`flags` 落在 WORD 5）；WIN95 布局下 `scriptDesc` 在 WORD 5、`flags` 在 WORD 6。`undetermined` 记录：`{ "view": "undetermined", "data": [整组 WORD 原样] }`。
 
 ### store.json — DATA 0，`STORE`，18 字节（WORD[9]）
 

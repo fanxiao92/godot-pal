@@ -6,8 +6,8 @@ namespace Pal.Extract.Tests;
 
 // CLI-level proof of the scene table registration (#80): a miniature SSS.MKF whose
 // chunk 0 is hand-authored EVENTOBJECT records and whose chunk 1 is hand-authored
-// SCENE records, plus a minimal empty DATA.MKF, must decode through `export-data`
-// with the frozen field values and index manifest (both registered tables).
+// SCENE records, plus the DATA.MKF view-evidence chunks, must decode through
+// `export-data` with the frozen field values and index manifest (all registered tables).
 public sealed class SceneExportDataTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), $"pal-export-data-scene-{Guid.NewGuid():N}");
@@ -39,12 +39,12 @@ public sealed class SceneExportDataTests : IDisposable
     [Fact]
     public async Task Export_data_extracts_scene_records_and_the_index_entry()
     {
-        MkfFixture.Write(input, "SSS.MKF", [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2]);
-        MkfFixture.Write(input, "DATA.MKF"); // minimal legal empty archive (offset table only)
+        MkfFixture.Write(input, "SSS.MKF", [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2], new byte[28]);
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900]);
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "scene.json") },
+        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "scene.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "scene.json")));
@@ -58,7 +58,7 @@ public sealed class SceneExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(2, tables.Length);
+        Assert.Equal(3, tables.Length);
         Assert.Equal("event-object.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
         var entry = tables.Single(table => table.GetProperty("file").GetString() == "scene.json");
         Assert.Equal("SSS.MKF", entry.GetProperty("archive").GetString());
@@ -73,8 +73,8 @@ public sealed class SceneExportDataTests : IDisposable
     [Fact]
     public async Task Export_data_fails_when_chunk_1_is_not_a_multiple_of_8_bytes()
     {
-        MkfFixture.Write(input, "SSS.MKF", [.. EventObjectRecord1, .. EventObjectRecord2], new byte[9]);
-        MkfFixture.Write(input, "DATA.MKF");
+        MkfFixture.Write(input, "SSS.MKF", [.. EventObjectRecord1, .. EventObjectRecord2], new byte[9], new byte[28]);
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900]);
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.Equal(1, result.ExitCode);
