@@ -20,6 +20,12 @@ public class SyntheticFirstBattleClosureTests
         statics.SavePacked();
         string staticProfile = statics.ResourceRoot + "/Profile.tres";
         NativeProfileFixture.SaveResource(statics.Profile, staticProfile);
+        // VerifyRealClosure reads the active scene palette at <static>/Palettes/Palette.tres;
+        // the authored sample palette leaf (copy) fills that layout for the synthetic bundle.
+        System.IO.Directory.CreateDirectory(ProjectSettings.GlobalizePath(statics.ResourceRoot + "/Palettes"));
+        foreach (string file in new[] { "Palette.tres" })
+            System.IO.File.Copy(ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/" + file),
+                ProjectSettings.GlobalizePath(statics.ResourceRoot + "/Palettes/" + file));
         using var fixture = new SyntheticFirstBattleFixture(statics, statics.ResourceRoot, staticProfile, lost: false);
         var main = new Main();
         main.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
@@ -57,6 +63,12 @@ public class SyntheticFirstBattleClosureTests
         statics.SavePacked();
         string staticProfile = statics.ResourceRoot + "/Profile.tres";
         NativeProfileFixture.SaveResource(statics.Profile, staticProfile);
+        // VerifyRealClosure reads the active scene palette at <static>/Palettes/Palette.tres;
+        // the authored sample palette leaf (copy) fills that layout for the synthetic bundle.
+        System.IO.Directory.CreateDirectory(ProjectSettings.GlobalizePath(statics.ResourceRoot + "/Palettes"));
+        foreach (string file in new[] { "Palette.tres" })
+            System.IO.File.Copy(ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/" + file),
+                ProjectSettings.GlobalizePath(statics.ResourceRoot + "/Palettes/" + file));
         using var fixture = new SyntheticFirstBattleFixture(statics, statics.ResourceRoot, staticProfile, lost: true);
         var main = new Main();
         main.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
