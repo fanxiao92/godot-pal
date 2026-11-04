@@ -141,8 +141,8 @@ public sealed class OpcodeCounterexampleTests
     [Fact]
     public void Unregistered_opcode_decodes_raw_and_round_trips_source_operands()
     {
-        byte[] original = Words(0x0086, 0, 65_535, 8);
-        var command = Decode(0, 0x0086, 0, 65_535, 8);
+        byte[] original = Words(0x0011, 0, 65_535, 8);
+        var command = Decode(0, 0x0011, 0, 65_535, 8);
         Assert.Equal("raw", (string)command["op"]!);
         Assert.Equal(original, Reencode(command));
         Assert.Throws<InvalidDataException>(() => EditAndReencode(command, "mode", "keep")); // raw carries no semantic fields

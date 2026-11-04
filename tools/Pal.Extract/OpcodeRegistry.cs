@@ -59,6 +59,8 @@ public enum OpcodeSuccessor
     BattleResult,
     /// Sequential with the message-span advancement of dialog text.
     MessageSpan,
+    /// Random multi-way jump: one of the next `count` entries (entry+1 .. entry+count).
+    RandomBranch,
 }
 
 /// One named opcode: verb, operand field bindings, executor and successor declarations.
@@ -134,6 +136,16 @@ public static class OpcodeRegistry
         new(0x0074, "partyHpNotFullJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0075, "setParty", [new("roleId0", OpcodeFieldKind.Word, 0), new("roleId1", OpcodeFieldKind.Word, 1), new("roleId2", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0078, "noop", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x0079, "roleInPartyJump", [new("roleNameWord", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x0081, "notFacingObjectJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("zoneUnits", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x0083, "objectOutOfZoneJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("zoneUnits", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x0085, "delay", [new("delayUnits", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        new(0x0086, "itemNotEquippedJump", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x0091, "notFirstOfKindJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x0094, "stateMatchJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x0095, "sceneMatchJump", [new("sceneId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        new(0x00A0, "quitGame", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Stop),
+        new(0x00A2, "randomBranch", [new("count", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.RandomBranch),
         new(0x0090, "setObjectScript", [new("objectId", OpcodeFieldKind.Word, 0), new("value", OpcodeFieldKind.Word, 1), new("slotIndex", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x009A, "setStateRange", [new("fromEventObjectId", OpcodeFieldKind.Word, 0), new("toEventObjectId", OpcodeFieldKind.Word, 1), new("state", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0xFFFF, "showDialog", [new("messageId", OpcodeFieldKind.Word, 0), new("descriptionLineWord", OpcodeFieldKind.Word, 1)], OpcodeExecutor.BothSwitchesDiffer, OpcodeSuccessor.MessageSpan),

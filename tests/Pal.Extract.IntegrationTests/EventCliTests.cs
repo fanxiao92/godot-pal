@@ -22,13 +22,13 @@ public sealed class EventCliTests : IDisposable
             Words(12, 1, 0, 0, 0, 0, 0, 1),
             Words(0, 0, 0, 0, 0, 0, 0, 0),
             [],
-            Words(0x003c, 59, 79, 1, 0xffff, 61, 17, 7, 0, 0, 0, 0, 0x0086, 0, 65535, 7));
+            Words(0x003c, 59, 79, 1, 0xffff, 61, 17, 7, 0, 0, 0, 0, 0x0011, 0, 65535, 7));
     }
 
     [Fact]
     public async Task StartBattle_export_roundtrip_and_semantic_edits_use_resolved_targets_not_source_words()
     {
-        byte[] original = Words(7, 65535, 0, 0, 7, 18, 4, 3, 0x0086, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10);
+        byte[] original = Words(7, 65535, 0, 0, 7, 18, 4, 3, 0x0011, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10);
         WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
@@ -72,14 +72,14 @@ public sealed class EventCliTests : IDisposable
         var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
         Assert.True(edited.ExitCode == 0, edited.Stderr);
         Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
-        Assert.Equal(Words(7, 19, 4, 1, 7, 20, 0, 0, 0x0086, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+        Assert.Equal(Words(7, 19, 4, 1, 7, 20, 0, 0, 0x0011, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
     }
 
     [Fact]
     public async Task Legacy_raw7_package_rebuilds_without_a_named_mapping_migration()
     {
-        byte[] original = Words(0x0086, 0, 65535, 8, 7, 18, 65535, 0, 0, 7, 8, 9);
-        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0086, 0, 65535, 8, 0x0086, 18, 65535, 0, 0, 7, 8, 9));
+        byte[] original = Words(0x0011, 0, 65535, 8, 7, 18, 65535, 0, 0, 7, 8, 9);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0011, 0, 65535, 8, 0x0011, 18, 65535, 0, 0, 7, 8, 9));
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
         string path = Path.Combine(exported, "shared.json");
@@ -111,7 +111,7 @@ public sealed class EventCliTests : IDisposable
     [InlineData("duplicate-key")]
     public async Task StartBattle_at_true_chunk_end_rejects_invalid_fields_and_result_references_without_output(string fault)
     {
-        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0086, 0, 65535, 8, 7, 18, 0, 0));
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0011, 0, 65535, 8, 7, 18, 0, 0));
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
         string path = Path.Combine(exported, "shared.json");
@@ -393,6 +393,103 @@ public sealed class EventCliTests : IDisposable
 
         // A dangling jump target is rejected without producing output.
         commands[8]!["to"] = "L0100";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Conditional_jump_batch3_verbs_export_roundtrip_and_reencode_jump_targets_from_labels()
+    {
+        // M5 batch 3 (#98): conditional jumps part 2 plus delay, quitGame (stop-class successor)
+        // and randomBranch (multi-way: one of the next `count` entries). Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x0079, 3, 7, 0,     // roleInPartyJump: role name word 3 in party -> L0007
+            0x0081, 2, 1, 6,     // notFacingObjectJump: player not facing object 2 zone 1 -> L0006
+            0x0083, 5, 2, 4,     // objectOutOfZoneJump: object 5 outside caller zone 2 -> L0004
+            0x0085, 25, 0, 0,    // delay 25 units (2000 ms wall clock, no game updates)
+            0x0086, 87, 2, 9,    // itemNotEquippedJump: fewer than 2 of item 87 equipped -> L0009
+            0x0091, 3, 0, 0,     // notFirstOfKindJump: not first of same kind -> L0003
+            0x0094, 4, 1, 8,     // stateMatchJump: object 4 state 1 -> L0008
+            0x0095, 13, 5, 0,    // sceneMatchJump: current scene 13 -> L0005
+            0x00A0, 0, 0, 0,     // quitGame (stops the run, no operands)
+            0x00A2, 3, 0, 0);    // randomBranch: one of the next 3 entries
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(10, commands.Count);
+        Assert.Equal("roleInPartyJump", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[0]!["roleNameWord"]!.GetValue<int>());
+        Assert.Equal("L0007", commands[0]!["to"]!.GetValue<string>());
+        Assert.Equal("notFacingObjectJump", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[1]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(1, commands[1]!["zoneUnits"]!.GetValue<int>());
+        Assert.Equal("L0006", commands[1]!["to"]!.GetValue<string>());
+        Assert.Equal("objectOutOfZoneJump", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(5, commands[2]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[2]!["zoneUnits"]!.GetValue<int>());
+        Assert.Equal("L0004", commands[2]!["to"]!.GetValue<string>());
+        Assert.Equal("delay", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(25, commands[3]!["delayUnits"]!.GetValue<int>());
+        Assert.Equal("itemNotEquippedJump", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(87, commands[4]!["itemId"]!.GetValue<int>());
+        Assert.Equal(2, commands[4]!["count"]!.GetValue<int>());
+        Assert.Equal("L0009", commands[4]!["to"]!.GetValue<string>());
+        Assert.Equal("notFirstOfKindJump", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal("L0003", commands[5]!["to"]!.GetValue<string>());
+        Assert.Equal("stateMatchJump", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(4, commands[6]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(1, commands[6]!["state"]!.GetValue<int>());
+        Assert.Equal("L0008", commands[6]!["to"]!.GetValue<string>());
+        Assert.Equal("sceneMatchJump", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(13, commands[7]!["sceneId"]!.GetValue<int>());
+        Assert.Equal("L0005", commands[7]!["to"]!.GetValue<string>());
+        Assert.Equal("quitGame", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal("randomBranch", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[9]!["count"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode the signed state, the branch count, the role name word and
+        // the resolved jump WORDs; roleInPartyJump's target exercises the zero-target rule.
+        commands[0]!["roleNameWord"] = 6;
+        commands[0]!["to"] = "L0000"; // zero-target rule: references index 0, re-encodes as WORD 0
+        commands[1]!["eventObjectId"] = 9;
+        commands[1]!["zoneUnits"] = 2;
+        commands[2]!["to"] = "L0001";
+        commands[3]!["delayUnits"] = 30;
+        commands[4]!["itemId"] = 195;
+        commands[4]!["count"] = 1;
+        commands[4]!["to"] = "L0002";
+        commands[5]!["to"] = "L0004";
+        commands[6]!["eventObjectId"] = 0; // caller's own object
+        commands[6]!["state"] = -1; // signed: two's-complement WORD 0xFFFF
+        commands[7]!["sceneId"] = 20;
+        commands[7]!["to"] = "L0003";
+        commands[9]!["count"] = 5;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0079, 6, 0, 0,
+            0x0081, 9, 2, 6,
+            0x0083, 5, 2, 1,
+            0x0085, 30, 0, 0,
+            0x0086, 195, 1, 2,
+            0x0091, 4, 0, 0,
+            0x0094, 0, unchecked((int)0xFFFF), 8,
+            0x0095, 20, 3, 0,
+            0x00A0, 0, 0, 0,
+            0x00A2, 5, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A dangling jump target is rejected without producing output.
+        commands[5]!["to"] = "L0100";
         File.WriteAllText(path, events.ToJsonString());
         var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
         Assert.Equal(1, rejected.ExitCode);
@@ -799,7 +896,7 @@ public sealed class EventCliTests : IDisposable
     {
         byte[] fullScript = new byte[65536 * 8];
         for (int index = 0; index < 65536; index++)
-            BinaryPrimitives.WriteUInt16LittleEndian(fullScript.AsSpan(index * 8), 0x0086);
+            BinaryPrimitives.WriteUInt16LittleEndian(fullScript.AsSpan(index * 8), 0x0011);
         // Literal last instruction exercises both FFFF result addresses and WORD next wrap.
         Words(7, 65535, 65535, 65535).CopyTo(fullScript, 65535 * 8);
         WriteArchive("SSS.MKF", new byte[32], Words(0, 0, 0, 0), Words(0, 0, 0, 0), [], fullScript);
