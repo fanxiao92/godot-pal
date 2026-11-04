@@ -16,7 +16,8 @@ public class SyntheticFirstBattleClosureTests
     [TestCase(Timeout = 280000)]
     public async Task Synthetic_closure_full_flow_Won_continuation_and_changed_exploration()
     {
-        using var statics = new NativeProfileFixture();
+        using var battleFixture = new NativeBattleProfileFixture();
+        var statics = battleFixture.Static;
         statics.SavePacked();
         string staticProfile = statics.ResourceRoot + "/Profile.tres";
         NativeProfileFixture.SaveResource(statics.Profile, staticProfile);
@@ -59,7 +60,8 @@ public class SyntheticFirstBattleClosureTests
     [TestCase(Timeout = 280000)]
     public async Task Synthetic_closure_Lost_ends_in_the_real_reload_todo_terminal()
     {
-        using var statics = new NativeProfileFixture();
+        using var battleFixture = new NativeBattleProfileFixture();
+        var statics = battleFixture.Static;
         statics.SavePacked();
         string staticProfile = statics.ResourceRoot + "/Profile.tres";
         NativeProfileFixture.SaveResource(statics.Profile, staticProfile);
