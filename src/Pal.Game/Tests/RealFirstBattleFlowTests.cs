@@ -7,11 +7,13 @@ using static GdUnit4.Assertions;
 
 namespace Pal.Game.Tests;
 
-/// <summary>#53 unit 3b: the REAL first battle through the shipped Main — search → @09C3
-/// pre-battle dialogue (41 pages) → @09FE team18 battle (dual enemies, dual strike, hooks) →
-/// Won continuation → changed exploration; and the Lost → reload-TODO terminal. Uses the private
-/// prepared closure profile; the class lives in its own name-level batch with an explicit
-/// 300000ms session timeout.</summary>
+/// <summary>#53 unit 3b phased real assertions (parent ruling (b)): the retail profile's
+/// full campaign cannot finish inside an automated session (real wall-clock pacing: 2x350HP
+/// enemies vs the frozen party), so this committed case proves the real phases — search →
+/// pre-battle pages → @09FE engagement → real bounded damage trajectory — with the phases
+/// chained by trajectory assertions. The continuous full flow (Won/Lost end-to-end) is
+/// covered by the committed synthetic full-closure fixture case; retail full-campaign stays
+/// optional human-desktop acceptance for #54. Private real resources only.</summary>
 [TestSuite, RequireGodotRuntime]
 public class RealFirstBattleFlowTests
 {
@@ -21,7 +23,7 @@ public class RealFirstBattleFlowTests
     {
         var arguments = new[] { "--m4-first-battle-profile", ProfileUri, "--m4-first-battle-language", language };
         var selection = seed is { } value ? GameSceneConfiguration.FromArguments(
-            arguments[0], arguments[1], arguments[2], arguments[3], "--battle-seed", value.ToString()) 
+            arguments[0], arguments[1], arguments[2], arguments[3], "--battle-seed", value.ToString())
             : GameSceneConfiguration.FromArguments(arguments);
         var main = new Main();
         main.Configure(selection);
@@ -31,79 +33,73 @@ public class RealFirstBattleFlowTests
     }
 
     [TestCase(Timeout = 280000)]
-    public async Task Real_profile_search_dialogue_battle_Won_and_changed_exploration()
+    public async Task Real_phases_search_pages_engagement_and_bounded_damage_trajectory()
     {
         var (main, scene) = Start("zh-Hans");
         using (scene)
         {
             await scene.WaitFor(() => scene.Updates.Count > 0, "first update");
-            long displayTicks = 0;
-            main.Display!.UpdateCompleted += () => displayTicks++;
             scene.Press(Key.Enter); // search owner28 -> @09C3 opens through the verified closure
 
+            // Phase 1 — the real pre-battle performance advances through the production
+            // display; parked waits/movements advance on their own committed update ticks.
             int pages = 0; int frames = 0;
-            ulong deadline = Time.GetTicksMsec() + (System.Environment.GetEnvironmentVariable("REAL_TRACE_SHORT") is null ? 200000u : 30000u); // the parked waits/movements advance
+            ulong deadline = Time.GetTicksMsec() + 200000;
             while (main.StoryBattle is null && main.Dialogue?.Session?.PendingLostReload is null
                 && Time.GetTicksMsec() < deadline)
             {
-                // Press only when a display reached its advance boundary; parked waits and
-                // counted movements advance on their own committed update ticks.
-                var display = main.Dialogue?.Session?.PendingDisplay;
-                if (display is { } shown)
-                {
-                    // Enter accelerates typing and advances at the boundary alike (the display
-                    // consumes it by phase); the headless frame delta can be zero.
-                    if (shown.Display.Current.Phase is Pal.Core.DialogueDisplayPhase.Typing
-                        or Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 15) == 0 || (frames & 63) == 0)
-                    {
-                        if ((frames & 15) == 0) { scene.Press(Key.Enter); pages++; }
-                    }
-                    if (shown.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0)
-                    { scene.Press(Key.Enter); pages++; }
-                }
-                frames++;
-                if ((frames & 127) == 0)
-                    System.Console.WriteLine($"REAL_BMODE:frame={frames} mode={main.StoryBattleMode} phase={main.StoryBattle?.Current.Combat.Phase} sel={main.StoryBattle?.Current.Combat.SelectingPlayerIndex} hp0={main.StoryBattle?.Current.Combat.Players[0].Hp} eh0={main.StoryBattle?.Current.Combat.Enemies[0].Hp}");
-                if ((frames & 511) == 0)
-                    System.Console.WriteLine($"REAL_TRACE:frame={frames} phase={display?.Display.Current.Phase} text={display?.Display.Current.VisibleText?.Length} pos={main.Dialogue?.Session?.CurrentPosition} displayTicks={displayTicks} inTree={main.Display?.IsInsideTree()} canProc={main.Display?.CanProcess()} procIn={main.Display?.IsProcessingInput()} child={main.Display?.GetParent() is not null} vis={main.Display?.Visible}");
+                AdvanceDisplay(scene, main, ref pages, ref frames);
                 await scene.RunnerIdle();
             }
-            System.Console.WriteLine($"REAL_PARK:phase={main.Dialogue?.Session?.Phase} pos={main.Dialogue?.Session?.CurrentPosition} " +
-                $"display={main.Dialogue?.Session?.PendingDisplay is not null} pages={pages} failure={main.Failure} updates={scene.Updates.Count} " +
-                $"pending={main.Dialogue?.Session?.PendingBattle is not null} wait={main.Dialogue?.Session?.PendingSceneWait is not null} " +
-                $"move={main.Dialogue?.Session?.PendingMovement is not null} trans={main.Dialogue?.Session?.PendingTransition is not null}");
-            AssertThat(main.StoryBattle is not null).IsTrue(); // @09FE engaged through the facade
+            AssertThat(pages).IsGreater(0); // real dialogue pages advanced
 
+            // Phase 2 — @09FE engagement: the verified facade hands the real team18 request
+            // to the production battle host with both enemy slots alive.
+            AssertThat(main.StoryBattle is not null).IsTrue();
+            AssertThat(main.StoryBattle!.Current.Combat.Enemies.Count).IsEqual(2);
+            AssertThat(main.StoryBattle.Current.Combat.Enemies.All(enemy => enemy.Hp > 0)).IsTrue();
+
+            // Phase 3 — bounded real progression: fight a fixed number of presentation-paced
+            // rounds and assert the real damage trajectory (strictly more total damage than at
+            // engagement; enemies never heal above their engagement HP).
+            int engagementTotal = main.StoryBattle.Current.Combat.Enemies.Sum(enemy => enemy.Hp);
             int rounds = 0;
-            while (main.StoryBattle is not null && rounds++ < 900)
+            int lastTotal = engagementTotal;
+            while (main.StoryBattle is not null && rounds < 600)
             {
-                scene.Press(Key.Enter); // attack confirm + target confirm per round
+                scene.Press(Key.Enter);
                 await scene.RunnerIdle();
-                if ((rounds & 31) == 0)
-                    System.Console.WriteLine($"REAL_ROUND:round={rounds} mode={main.StoryBattleMode} phase={main.StoryBattle?.Current.Combat.Phase} sel={main.StoryBattle?.Current.Combat.SelectingPlayerIndex} hp0={main.StoryBattle?.Current.Combat.Players[0].Hp} eh0={main.StoryBattle?.Current.Combat.Enemies[0].Hp} eh1={main.StoryBattle?.Current.Combat.Enemies[1].Hp} failure={main.Failure}");
+                rounds++;
+                if ((rounds & 63) == 0 && main.StoryBattle is not null)
+                {
+                    int total = main.StoryBattle.Current.Combat.Enemies.Sum(enemy => enemy.Hp);
+                    AssertThat(total).IsLessEqual(lastTotal); // no healing
+                    lastTotal = total;
+                }
             }
-            System.Console.WriteLine($"REAL_FLOW:pages={pages} rounds={rounds} lost={main.StoryLostTerminal} " +
-                $"completed={main.Dialogue?.Session?.Phase} hp0={main.Battle?.State.Roles[0].Hp} hp1={main.Battle?.State.Roles[1].Hp} " +
-                $"exp0={main.Battle?.State.Roles[0].PrimaryExperience.Value} magics0={main.Battle?.State.Roles[0].Magics.Count(m => m != 0)}");
-            AssertThat(main.StoryLostTerminal || main.Dialogue?.Session?.Phase == Pal.Core.TriggerScriptPhase.Completed).IsTrue();
-            // The settled outcome changed the world: either the Won continuation completed and
-            // exploration resumed (entry rewrites / states), or the real Lost terminal holds.
-            if (main.StoryLostTerminal)
-            {
-                AssertThat(main.StoryLostReloadDiagnostics).IsEqual(1);
-            }
-            else
-            {
-                AssertThat(main.Battle is not null).IsTrue();
-                scene.Press(Key.Down); // post-battle exploration still owns committed updates
-                await scene.WaitFor(() => scene.Updates.Count > 0, "post-battle exploration update");
-            }
+            int finalTotal = main.StoryBattle is null ? 0 : main.StoryBattle.Current.Combat.Enemies.Sum(enemy => enemy.Hp);
+            AssertThat(finalTotal).IsLess(engagementTotal); // real damage landed
+            System.Console.WriteLine($"REAL_PHASES:pages={pages} rounds={rounds} engagementTotal={engagementTotal} finalTotal={finalTotal} lost={main.StoryLostTerminal}");
             scene.AssertHealthy();
         }
     }
 
-    /// <summary>The committed equivalent of MainSceneTests.EmbeddedScene for this batch: same
-    /// real input injection, healthy/release contract and window restore.</summary>
+    private static void AdvanceDisplay(RealFlowScene scene, Main main, ref int pages, ref int frames)
+    {
+        var display = main.Dialogue?.Session?.PendingDisplay;
+        if (display is not { } shown) return;
+        // Enter accelerates typing and advances at the boundary alike (the headless frame
+        // delta can be zero, so input-driven advancement is the reliable route).
+        if ((frames & 15) == 0 || shown.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0)
+        {
+            scene.Press(Key.Enter);
+            pages++;
+        }
+        frames++;
+    }
+
+    /// <summary>The committed equivalent of MainSceneTests.EmbeddedScene: real input injection,
+    /// healthy/release contract and window restore.</summary>
     internal sealed class RealFlowScene : IDisposable
     {
         private readonly ISceneRunner runner;
@@ -129,7 +125,6 @@ public class RealFirstBattleFlowTests
             try { runner = ISceneRunner.Load(main, autoFree: true); }
             catch
             {
-                main.Failed -= _ => { };
                 runner?.Dispose();
                 if (GodotObject.IsInstanceValid(main)) main.Free();
                 RestoreGlobals();
