@@ -54,6 +54,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 ["battleContentUri"] = numbers,
                 ["dialogueDirectory"] = "res://Samples/AuthoredBattle/Dialogue",
                 ["visualUri"] = visualUri,
+                ["globalObjectsUri"] = globalUri,
                 ["portraits"] = new JsonArray(),
                 ["playerSpriteUris"] = new JsonArray("res://Samples/AuthoredBattle/Visual/Player.tres",
                     "res://Samples/AuthoredBattle/Visual/Player.tres"),
