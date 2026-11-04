@@ -67,29 +67,62 @@ function Get-GameSourceInventory([string]$Directory) {
 function Get-GameBatchPlan([string]$Repository) {
     $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
     $definitions = @(
-        @{ name = 'process'; count = 66; classes = @('MainProcessTests', 'ExplorationProcessTests') }
-        @{ name = 'scene-dialogue'; count = 79; classes = @('ExplorationSceneTests', 'MainSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
-        @{ name = 'native-map'; count = 97; classes = @('NativeExplorationProfileTests', 'PalMapSceneTests', 'ViewportTests') }
+        @{ name = 'process'; count = 85; classes = @('StoryMainProcessTests', 'MainProcessTests', 'ExplorationProcessTests') }
+        @{ name = 'scene-dialogue'; count = 74; classes = @('ExplorationSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
+        @{ name = 'scene-dynamic'; count = 2; classes = @('DynamicSceneTests') }
+        @{ name = 'scene-battle-heavy-a'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.ActiveBattleExit', 'Pal.Game.Tests.StoryRoundtripSceneTests.DeadMember',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.DyingRoleHook', 'Pal.Game.Tests.StoryRoundtripSceneTests.EquipmentDualAttack') }
+        @{ name = 'scene-battle-heavy-b'; count = 6; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.BossFleeFails',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.EquipmentStatus', 'Pal.Game.Tests.StoryRoundtripSceneTests.FriendDeathHook',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.HookRandomBands', 'Pal.Game.Tests.StoryRoundtripSceneTests.HooklessCounterpart',
+            'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:0') }
+        @{ name = 'scene-battle-heavy-c'; count = 3; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:1',
+            'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:2',
+            'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:3') }
+        @{ name = 'scene-battle-heavy-d'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.PartyLoss', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwo',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.RemovingTheDual', 'Pal.Game.Tests.StoryRoundtripSceneTests.VictorySettlement') }
+        @{ name = 'scene-battle-light'; count = 28; classes = @('StoryRoundtripSceneTests', 'MainSceneTests'); matches = @(
+            'Pal.Game.Tests.MainSceneTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.BaseFormat', 'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyFeedback',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyIdleWord', 'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyPhysicalReference',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.FailedStoryPreload', 'Pal.Game.Tests.StoryRoundtripSceneTests.FloatingNumber',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.InclusiveGodotRandom', 'Pal.Game.Tests.StoryRoundtripSceneTests.NativeWordsRemain',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.NonterminalActions', 'Pal.Game.Tests.StoryRoundtripSceneTests.NormalStoryArguments',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.PlayerPhysical', 'Pal.Game.Tests.StoryRoundtripSceneTests.StoryBattlePoseClock',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects') }
+        @{ name = 'native-map'; count = 412; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
+        @{ name = 'scene-realfull'; count = 3; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.') }
     )
     $batches = foreach ($definition in $definitions) {
-        $names = @($inventory | Where-Object class -CIn $definition.classes | ForEach-Object name)
+        # Name-level partitions (matches) select their members by the same FullyQualifiedName
+        # substring the runtime filter uses; class-only batches keep the class membership rule.
+        # The Game partition assertion below still enforces exact, disjoint coverage.
+        $filter = if ($definition.matches) { ($definition.matches | ForEach-Object { "FullyQualifiedName~$_" }) -join '|' }
+            else { ($definition.classes | ForEach-Object { "FullyQualifiedName~Pal.Game.Tests.$_." }) -join '|' }
+        $names = if ($definition.matches) {
+            @($inventory | Where-Object { $name = $_.name; $definition.matches | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)
+        } else {
+            @($inventory | Where-Object class -CIn $definition.classes | ForEach-Object name)
+        }
         if ($names.Count -ne $definition.count) { throw "Batch $($definition.name) source count differs: $($names.Count)/$($definition.count)." }
-        [pscustomobject]@{ name = $definition.name; count = $definition.count; classes = $definition.classes; expected = $names
-            filter = ($definition.classes | ForEach-Object { "FullyQualifiedName~Pal.Game.Tests.$_." }) -join '|' }
+        [pscustomobject]@{ name = $definition.name; count = $definition.count; classes = $definition.classes; expected = $names; filter = $filter; sessionTimeoutMs = [int]($definition.sessionTimeoutMs ?? 120000) }
     }
     $controls = @($inventory | Where-Object class -CEQ 'FailureControlTests')
     $expectedControls = @('Pal.Game.Tests.FailureControlTests.IntentionalAssertionMismatchPropagates',
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object class -CNE 'FailureControlTests' | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 245) { throw "Game inventory differs: $($inventory.Count)/245." }
+    if ($inventory.Count -ne 626) { throw "Game inventory differs: $($inventory.Count)/626." }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
-        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 328; skipped = 0 }
+        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 914; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 142; skipped = 0 }
-        [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 188; skipped = 2 }
-        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 52; skipped = 0 }
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = 242; skipped = 0 }
+        [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 279; skipped = 2 }
+        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = 623; skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {
@@ -101,6 +134,28 @@ function Get-GameBatchPlan([string]$Repository) {
     Assert-ExactTestNames @($allProjects) @($projects.path + @('src/Pal.Core/Pal.Core.csproj', 'tools/Pal.Extract/Pal.Extract.csproj')) 'Solution project classification'
     Assert-ExactTestNames @($solutionProjects) @($projects.path) 'Solution test projects'
     [pscustomobject]@{ inventory = $inventory; batches = @($batches); controls = $controls; projects = $projects }
+}
+
+function Get-GatePassSummary($Plan) {
+    $projects = @{}
+    foreach ($name in @('core', 'cli-unit', 'cli-integration', 'prepare', 'game')) {
+        $project = @($Plan.projects | Where-Object name -CEQ $name)
+        if ($project.Count -ne 1) { throw "Gate PASS summary requires exactly one '$name' project." }
+        $projects[$name] = $project[0]
+    }
+    foreach ($name in @('core', 'cli-unit', 'prepare', 'game')) {
+        if ([int]$projects[$name].skipped -ne 0) { throw "Gate PASS summary cannot omit skips for '$name'." }
+    }
+    $batchCounts = @($Plan.batches | ForEach-Object { [int]$_.count })
+    $positiveCount = ($batchCounts | Measure-Object -Sum).Sum
+    if ($positiveCount -ne [int]$projects.game.passed) { throw 'Gate PASS summary Game project and batch counts differ.' }
+    if (@($Plan.inventory).Count -ne ($positiveCount + @($Plan.controls).Count)) { throw 'Gate PASS summary Game inventory and partition counts differ.' }
+
+    $cliPassed = [int]$projects['cli-integration'].passed
+    $cliSkipped = [int]$projects['cli-integration'].skipped
+    $roundCount = 3
+    $trxCount = @($Plan.projects | Where-Object name -CNE 'game').Count + ($batchCounts.Count * $roundCount) + @($Plan.controls).Count
+    "PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core $($projects.core.passed) passed; CLI unit $($projects['cli-unit'].passed) passed; CLI integration $cliPassed passed + $cliSkipped skipped ($($cliPassed + $cliSkipped) total); Prepare $($projects.prepare.passed) passed; Godot source/discovery $(@($Plan.inventory).Count); positives $positiveCount as serial $($batchCounts -join '/') in each of three complete rounds; $trxCount identity-verified TRX; $(@($Plan.controls).Count) separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity."
 }
 
 function Read-TestRunIdentity([string]$Path) {

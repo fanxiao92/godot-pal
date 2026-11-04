@@ -5,6 +5,7 @@ public sealed class StaticSceneRules
 {
     private const int AnchorX = 160, AnchorY = 112;
     private readonly SceneMap map;
+    public int MapId => map.MapId;
     public IReadOnlyList<SceneObject> Objects { get; }
 
     public StaticSceneRules(SceneMap map, IEnumerable<SceneObject>? objects = null)
@@ -46,7 +47,8 @@ public sealed class StaticSceneRules
         return null;
     }
 
-    internal StaticSceneRules WithObjects(IEnumerable<SceneObject> objects) => new(map, objects);
+    /// <summary>Replaces the object set (host world wiring); ids are the caller's contract.</summary>
+    public StaticSceneRules WithObjects(IEnumerable<SceneObject> objects) => new(map, objects);
 
     // Returns the complete draw order, including background and repeated cover tiles.
     // Missing required frames or more than 2048 sprite/cover entries fail, never substitute/truncate.

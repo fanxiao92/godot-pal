@@ -59,26 +59,62 @@ public class Fixture
         [IO.File]::WriteAllText((Join-Path $source 'Fixture.cs'), $text.Replace('public void Beta()', 'public ValueTask Beta()'))
         Fails { Get-GameSourceInventory $source } 'Unparsed Game test attributes'
     }
-    Case 'real source partitions 66/79/97, preserves controls and solution test projects' {
-        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '66,79,97') 'Wrong batch sizes/order.'
-        Assert ($plan.inventory.Count -eq 245 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+    Case 'real source partitions 85/74/2/5/6/3/5/28/412/3, preserves controls and solution test projects' {
+        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '85,74,2,5,6,3,5,28,412,3') 'Wrong batch sizes/order.'
+        Assert ($plan.inventory.Count -eq 626 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
         Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Wrong serial project identities/order.'
         Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj',
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
             'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
         $expectedProjects = @{
-            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 328, 0)
+            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 914, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
-            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 188, 2)
-            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 52, 0)
-            game = @('src/Pal.Game/Pal.Game.csproj', 242, 0)
+            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 279, 2)
+            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 89, 0)
+            game = @('src/Pal.Game/Pal.Game.csproj', 623, 0)
         }
         foreach ($project in $plan.projects) {
             $expectedProject = $expectedProjects[$project.name]
             Assert ($project.path -ceq $expectedProject[0] -and $project.passed -eq $expectedProject[1] -and $project.skipped -eq $expectedProject[2]) "Wrong binding for $($project.name)."
         }
-        Assert ($plan.batches[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.MainProcessTests.|FullyQualifiedName~Pal.Game.Tests.ExplorationProcessTests.') 'Filter boundary lost.'
+        Assert ($plan.batches[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.StoryMainProcessTests.|FullyQualifiedName~Pal.Game.Tests.MainProcessTests.|FullyQualifiedName~Pal.Game.Tests.ExplorationProcessTests.') 'Filter boundary lost.'
+        $longSessions = @($plan.batches | Where-Object { [int]$_.sessionTimeoutMs -gt 120000 } | ForEach-Object name)
+        Assert (($longSessions -join ',') -ceq 'native-map,scene-realfull') 'Only native-map and scene-realfull may pin sessions beyond the shared 120s wall.'
         Assert-ExactTestNames @($plan.batches.expected) @($plan.inventory | Where-Object class -NE 'FailureControlTests' | ForEach-Object name) 'all source positives'
+    }
+    Case 'typed native runtime source cannot regress to embedded JSON factory' {
+        $resource = [IO.File]::ReadAllText((Join-Path $repository 'src/Pal.Game/Scripts/Resources/PalFirstMandatoryBattleProfile.cs'))
+        $loader = [IO.File]::ReadAllText((Join-Path $repository 'src/Pal.Game/Scripts/Profiles/NativeFirstMandatoryBattleProfile.cs'))
+        $adapter = [IO.File]::ReadAllText((Join-Path $repository 'src/Pal.Game/Scripts/Profiles/NativeBattleEnvelopeAdapter.cs'))
+        Assert ($resource -notmatch 'IndexBytes|ContextBytes|Json') 'Native profile regained a JSON text/blob property.'
+        Assert (($loader + $adapter) -notmatch 'JsonDocument|FirstMandatoryBattleProfile\.Load\s*\(') 'Runtime native adapter regained the JSON factory/parser.'
+        Assert ($resource -match 'NativeEnvelopeSha256') 'Native profile lost its canonical typed-envelope hash.'
+    }
+    Case 'gate PASS summary exactly reports the verified plan metadata' {
+        $summary = Get-GatePassSummary $plan
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 914 passed; CLI unit 142 passed; CLI integration 279 passed + 2 skipped (281 total); Prepare 89 passed; Godot source/discovery 626; positives 623 as serial 85/74/2/5/6/3/5/28/412/3 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
+        Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
+    }
+    Case 'gate PASS summary follows changed plan counts instead of static CLI text' {
+        $cli = @($plan.projects | Where-Object name -CEQ 'cli-integration')[0]
+        $originalPassed = $cli.passed
+        $originalSkipped = $cli.skipped
+        try {
+            $cli.passed = 246
+            $cli.skipped = 3
+            $summary = Get-GatePassSummary $plan
+            Assert ($summary -match 'CLI integration 246 passed \+ 3 skipped \(249 total\)') 'Changed CLI plan counts were not rendered.'
+            Assert ($summary -notmatch 'CLI integration 279|CLI integration 188') 'Static CLI plan count remained in changed summary.'
+        } finally {
+            $cli.passed = $originalPassed
+            $cli.skipped = $originalSkipped
+        }
+    }
+    Case 'Test-M0 writes its PASS summary through the shared plan formatter' {
+        $gateSource = [IO.File]::ReadAllText((Join-Path $repository 'scripts/Test-M0.ps1'))
+        Assert ($gateSource -match '(?m)^\s*Get-GatePassSummary \$gamePlan \|\s*$') 'Test-M0 does not pipe the verified game plan through Get-GatePassSummary.'
+        Assert ($gateSource -notmatch 'CLI integration\s+\d') 'Test-M0 retains a static CLI integration count.'
     }
     Case 'unassigned source classes and new solution projects fail closed' {
         $fixtureRepo = Join-Path $temp 'repository'

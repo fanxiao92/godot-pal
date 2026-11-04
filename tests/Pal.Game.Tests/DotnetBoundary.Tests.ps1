@@ -69,6 +69,15 @@ if (-not $DriverDll) {
     $DriverDll = Join-Path (Split-Path $project) 'bin/Debug/net10.0/DotnetBoundary.dll'
 }
 $DriverDll = (Resolve-Path $DriverDll).Path
+# Deterministic locked publication regression at the actual owned-handle receiver.
+& dotnet exec $DriverDll handle-publication-check (Join-Path $root 'handle-publication-check') *> (Join-Path $root 'handle-publication-check.log')
+$handlePublicationExit = $LASTEXITCODE
+if ($EvidenceDirectory) {
+    Copy-Item (Join-Path $root 'handle-publication-check.log') (Join-Path (Split-Path $root) 'boundary-handle-publication-check.log')
+    $handlePublicationResult = Join-Path $root 'handle-publication-check/result.json'
+    if (Test-Path $handlePublicationResult) { Copy-Item $handlePublicationResult (Join-Path (Split-Path $root) 'boundary-handle-publication-check.json') }
+}
+if ($handlePublicationExit -ne 0) { throw "Boundary handle publication regression failed (exit=$handlePublicationExit); inspect $root/handle-publication-check.log" }
 # Deterministic file-sharing/partial-write regression at the actual journal reader.
 & dotnet exec $DriverDll journal-check (Join-Path $root 'journal-check') *> (Join-Path $root 'journal-check.log')
 $journalExit = $LASTEXITCODE

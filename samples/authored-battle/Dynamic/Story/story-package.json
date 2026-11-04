@@ -1,0 +1,27 @@
+{
+ "formatVersion": 1,
+ "sourceIdentity": "Original pixel art and bitmap lettering authored for godot-pal #52; no retail assets or extraction evidence. Dynamic no-combat scenario: two-object authored arena, trigger chain with scene-updating wait, event and auto counted movement, hide and retained rewrites; the battle/visual blocks are unused authored data, faithful SSS fields describe an original 176-byte author stream, not retail SSS.MKF.",
+ "staticResources": "res://Assets/RuntimeTests/dynamic-scene-placeholder",
+ "staticProfile": "res://Assets/RuntimeTests/dynamic-scene-placeholder/Static/Exploration.tres",
+ "bundleSha256": "be590379816bbd4b8ba9571dd3ecd965a4fb292388790132d5f04101b2bdb045",
+ "entryFileId": "scene",
+ "entryId": "npc",
+ "ownerId": 1,
+ "entryAddress": 1,
+ "battleContentUri": "res://Assets/RuntimeTests/dynamic-scene-placeholder/Numbers/BattleContent.tres",
+ "dialogueDirectory": "res://Samples/AuthoredBattle/Dialogue",
+ "portraits": [],
+ "visual": {
+  "roleId": 0,
+  "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",
+  "playerPosition": [
+   240,
+   170
+  ],
+  "paletteUri": "res://Samples/AuthoredBattle/Static/Palette.tres",
+  "teams": [],
+  "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
+  "attackEffectIndex": 0,
+  "numberSpriteUri": "res://Samples/AuthoredBattle/Visual/Numbers.tres"
+ }
+}

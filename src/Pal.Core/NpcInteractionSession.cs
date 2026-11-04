@@ -5,13 +5,16 @@ public enum NpcInteractionPhase { Exploring, Trigger, Returning }
 public sealed record NpcInteractionRequest(Guid Id, string FileId, string EntryId, int Caller,
     int SourceAddress, int SampleIndex);
 
-/// <summary>Independent owner-60 interaction context, not a normal scene event scheduler.
+/// <summary>Selected owner-trigger interaction context, not a general scene event scheduler.
 /// Owns exploration updates; the host alone starts and advances the requested trigger.</summary>
 public sealed class NpcInteractionSession
 {
     private readonly ExplorationSession exploration;
     private readonly ExplorationInput input;
     private readonly TriggerEventEntry entry;
+    private readonly bool selectedMode;
+    private TriggerScriptSession? boundTrigger;
+    private Guid boundCall;
     private bool searchPressed;
     private uint returnDeadline;
     public ExplorationState Current => exploration.Current;
@@ -21,13 +24,24 @@ public sealed class NpcInteractionSession
     public NpcInteractionRequest? PendingTrigger { get; private set; }
 
     public NpcInteractionSession(StaticSceneRules rules, StaticLeader leader, TriggerEventEntry selectedEntry)
+        : this(rules, leader, selectedEntry, false) { }
+
+    /// <summary>Uses the current trigger VM support domain: selected-entry calls end with keep.
+    /// The host must bind the actual successful Start before delivering completion.</summary>
+    public static NpcInteractionSession ForSelectedEntry(StaticSceneRules rules, StaticLeader leader, TriggerEventEntry entry)
+        => new(rules, leader, entry, true);
+
+    private NpcInteractionSession(StaticSceneRules rules, StaticLeader leader, TriggerEventEntry selectedEntry, bool selectedMode)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(selectedEntry);
-        if (selectedEntry is not { OwnerType: "eventObject", OwnerId: 60, Slot: "wTriggerScript", Kind: "trigger", SourceAddress: 0x0188 })
+        if (!selectedMode && selectedEntry is not { OwnerType: "eventObject", OwnerId: 60, Slot: "wTriggerScript", Kind: "trigger", SourceAddress: 0x0188 })
             throw new InvalidDataException("Independent NPC interaction requires owner 60 / wTriggerScript @0188.");
-        if (rules.Objects.SingleOrDefault(o => o.Id == 60)?.TriggerEntry != selectedEntry.SourceAddress)
-            throw new InvalidDataException("Owner 60 runtime trigger entry does not match the selected event entry @0188.");
+        if (selectedEntry is not { OwnerType: "eventObject", Slot: "wTriggerScript", Kind: "trigger", SourceAddress: > 0 and <= 65535 }
+            || rules.Objects.SingleOrDefault(o => o.Id == selectedEntry.OwnerId)?.TriggerEntry != selectedEntry.SourceAddress)
+            throw new InvalidDataException(selectedMode ? "Selected owner runtime trigger entry does not match the event entry."
+                : "Owner 60 runtime trigger entry does not match the selected event entry @0188.");
+        this.selectedMode = selectedMode;
         entry = selectedEntry;
         exploration = new(rules, leader);
         input = new(exploration);
@@ -40,14 +54,29 @@ public sealed class NpcInteractionSession
 
     /// <summary>Receipt from the host's same trigger after restoration and completion.
     /// Unfinished calls, stale request IDs and caller/entry mismatches do not release exploration.</summary>
+    public bool BindTrigger(Guid requestId, TriggerScriptSession trigger)
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        if (!selectedMode || boundTrigger is not null || PendingTrigger is not { } request || request.Id != requestId
+            || trigger.SourceRequestId != request.Id || trigger.CallId == Guid.Empty
+            || trigger.Caller != request.Caller || trigger.StartedEntry != entry) return false;
+        boundTrigger = trigger;
+        boundCall = trigger.CallId;
+        return true;
+    }
+
     public bool CompleteTrigger(Guid requestId, TriggerScriptSession trigger, uint ticksMilliseconds)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         if (PendingTrigger is not { } request || request.Id != requestId ||
             trigger.Phase != TriggerScriptPhase.Completed || trigger.Caller != request.Caller ||
-            trigger.ReturnEntry != request.SourceAddress) return false;
+            trigger.ReturnEntry != request.SourceAddress
+            || selectedMode && (trigger.SourceRequestId != request.Id || trigger.StartedEntry != entry
+                || !ReferenceEquals(trigger, boundTrigger) || trigger.CallId != boundCall)) return false;
         exploration.SaveTriggerEntry((ushort)request.Caller, (ushort)trigger.ReturnEntry);
         PendingTrigger = null;
+        boundTrigger = null;
+        boundCall = Guid.Empty;
         Phase = NpcInteractionPhase.Returning;
         returnDeadline = unchecked(ticksMilliseconds + 50);
         return true;
@@ -69,7 +98,7 @@ public sealed class NpcInteractionSession
         if (search && exploration.FindSearchTarget() is { } hit)
         {
             if (hit.ObjectId != entry.OwnerId)
-                throw new InvalidDataException($"Search hit owner {hit.ObjectId} at sample {hit.SampleIndex}; independent context only supports owner 60 @0188.");
+                throw new InvalidDataException($"Search hit owner {hit.ObjectId} at sample {hit.SampleIndex}; selected context only supports owner {entry.OwnerId} @{entry.SourceAddress:X4}.");
             exploration.PrepareSearch(hit.ObjectId);
             PendingTrigger = new(Guid.NewGuid(), entry.FileId, entry.Id, hit.ObjectId, entry.SourceAddress, hit.SampleIndex);
             Phase = NpcInteractionPhase.Trigger;

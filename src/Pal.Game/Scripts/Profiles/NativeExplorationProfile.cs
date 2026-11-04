@@ -77,7 +77,8 @@ public static class NativeExplorationProfile
                 Word(obj.WDirection, "WDirection"), Word(obj.WCurrentFrameNum, "WCurrentFrameNum"), sprite)
             {
                 TriggerMode = (ushort)obj.WTriggerMode,
-                TriggerEntry = (ushort)obj.WTriggerScript
+                TriggerEntry = (ushort)obj.WTriggerScript,
+                AutoEntry = (ushort)obj.WAutoScript,
             });
         }
         Require(required.SetEquals(sprites.Keys), "scene sprites must match complete static dependencies");

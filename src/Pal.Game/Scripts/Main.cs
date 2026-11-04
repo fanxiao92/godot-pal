@@ -18,8 +18,14 @@ public partial class Main : Node2D
     private static readonly Key[] DirectionKeys =
         [Key.Down, Key.S, Key.Left, Key.A, Key.Up, Key.W, Key.Right, Key.D];
     private ExplorationInput? input;
+    private FirstMandatoryBattleSession? battle;
     private PalMapScene? mapScene;
     private NpcInteractionRequest? activeTrigger;
+    private FirstMandatoryBattleTriggerRequest? firstBattleActiveTrigger;
+    private bool awaitingFirstBattleDraw;
+    private bool firstBattleRendererSubscribed;
+    private GodotBattleRandom? firstBattleRandom;
+    private DynamicEventWorld? firstBattleWorld;
     private bool awaitingSceneDraw;
     private bool rendererSubscribed;
     private GameSceneConfiguration? configuration;
@@ -27,6 +33,11 @@ public partial class Main : Node2D
     private bool exited;
     public string? Failure { get; private set; }
     public event Action<string>? Failed;
+    /// <summary>True once the 0x004E lost-reload boundary parked the story call: business
+    /// advancement stops for the rest of this run, distinct from an unexpected Failure.</summary>
+    public bool StoryLostTerminal { get; private set; }
+    /// <summary>How many lost-reload diagnostics this Main printed; the boundary prints exactly once.</summary>
+    public int StoryLostReloadDiagnostics { get; private set; }
 
     /// <summary>Configure once before entering the tree. The host owns this node, including on failure.
     /// Initialization occurs in _Ready; failed or removed scenes must be freed, not reused.</summary>
@@ -38,8 +49,10 @@ public partial class Main : Node2D
         configuration = selection;
     }
 
-    public ExplorationState? Exploration => Interaction?.Current ?? input?.Current;
+    public ExplorationState? Exploration => Battle?.Current ?? Interaction?.Current ?? dynamicSession?.Current ?? input?.Current;
     public NpcInteractionSession? Interaction { get; private set; }
+    public FirstMandatoryBattleSession? Battle => battle;
+    public string? SelectedLanguage { get; private set; }
     public PalTriggerDialogue? Dialogue { get; private set; }
     public PalDialogueDisplay? Display { get; private set; }
     // Actual Main callback completion; display completion has its own production boundary.
@@ -49,37 +62,56 @@ public partial class Main : Node2D
     {
         if (initializationAttempted || exited || Failure is not null) return;
         initializationAttempted = true;
-        string? scenePath = null, profilePath = null;
+        string? selectedProfilePath = null, scenePath = null, staticProfilePath = null;
         try
         {
             var selected = configuration ?? throw new InvalidOperationException("Configure the scene before entering the tree.");
+            selectedProfilePath = selected.DynamicProfile ?? selected.StoryProfile;
+            if (selected.DynamicProfile is not null) { InitializeDynamic(selected); return; }
+            if (selected.StoryProfile is not null) { InitializeStory(selected); return; }
             string root = selected.Root, profile = selected.Profile, language = selected.Language;
+            selectedProfilePath = selected.BattleProfile ?? selected.DialogueProfile ?? selected.Profile;
             bool staticAcceptance = selected.StaticAcceptance;
             string? dialogueProfile = selected.DialogueProfile;
+            string? battleProfile = selected.BattleProfile;
             PalNpcInteractionProfile? npc = null;
+            CheckedFirstMandatoryBattleProfile? firstBattle = null;
             if (dialogueProfile is not null)
             {
-                profilePath = dialogueProfile;
                 npc = NativeNpcInteractionProfile.Load(dialogueProfile);
                 root = npc.StaticResources; profile = npc.StaticProfile;
             }
+            else if (battleProfile is not null)
+            {
+                firstBattle = NativeFirstMandatoryBattleProfile.Load(battleProfile);
+                root = firstBattle.StaticResources; profile = firstBattle.StaticProfile;
+            }
             scenePath = root + "/Scenes/Scene.tscn";
-            profilePath = profile;
+            staticProfilePath = profile;
             var map = NativeSceneLoader.Load(root);
             CheckedExplorationProfile checkedProfile;
+            FirstMandatoryBattleSession? preparedBattle = null;
+            ExplorationInput? preparedInput = null;
             try
             {
-                checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
+                if (firstBattle is not null)
+                {
+                    (checkedProfile, preparedBattle) = NativeFirstMandatoryBattleProfile.ValidateStaticSelection(firstBattle, map);
+                }
+                else checkedProfile = NativeExplorationProfile.Load(profile, map.Data);
                 if (staticAcceptance || npc is not null) ValidateStaticAcceptance(map.Data, checkedProfile);
                 if (npc is not null)
                 {
                     ValidateDialogueScene(map.Data, npc);
                     checkedProfile.SetPalette(map.Data, Palette(map.Data));
                 }
-                if (npc is null) input = new ExplorationInput(new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader));
-                map.InitializeScene(checkedProfile.Plan, checkedProfile.TextureFor);
+                if (npc is null && preparedBattle is null) preparedInput = new ExplorationInput(new ExplorationSession(checkedProfile.Rules, checkedProfile.Leader));
+                map.InitializeScene(preparedBattle?.Current.Plan ?? checkedProfile.Plan, checkedProfile.TextureFor);
             }
             catch { map.Free(); throw; }
+            battle = preparedBattle;
+            input = preparedInput;
+            SelectedLanguage = language;
             mapScene = map;
             AddChild(map);
             if (npc is not null)
@@ -110,12 +142,76 @@ public partial class Main : Node2D
                 GD.Print($"PAL_M3_DIALOGUE_ACCEPTANCE:scene4/map10; owner60/0188; language={language}; not normal scene story/free exploration");
             }
             GD.Print($"PAL_MAP_LOADED:{root}/Scenes/Scene.tscn");
+            if (firstBattle is { Closure: not null, Resources: not null } real)
+            {
+                // #53 real host: the verified closure opens @09C3 through the production
+                // dialogue/battle executor; the search-trigger transition rides the same
+                // draw boundary as the story host.
+                Display = new PalDialogueDisplay();
+                Display.Failed += DisplayFailed;
+                AddChild(Display);
+                Dialogue = new PalTriggerDialogue(); AddChild(Dialogue);
+                Display.ActivePaletteChanged += colors =>
+                {
+                    if (Failure is not null || exited) return;
+                    checkedProfile.SetPalette(map.Data, colors);
+                    map.UpdateScene(Exploration!.Plan);
+                };
+                Display.BackgroundRestoreRequested += () =>
+                {
+                    if (Failure is null && !exited) map.UpdateScene(Exploration!.Plan);
+                };
+                Dialogue.PaletteFromScene = Palette(map.Data);
+                // The real call mutates one shared dynamic world (script verbs) while the battle
+                // half runs the same verified content; the world is bound before initialization.
+                // The @09C3 performance also mutates global objects outside the static bundle;
+                // the closure-bound table extends the world's object set (ids stay unique).
+                var staticIds = new System.Collections.Generic.HashSet<int>(Battle!.Rules.Objects.Select(o => (int)o.Id));
+                var extendedRules = Battle.Rules.WithObjects(Battle.Rules.Objects
+                    .Concat(real.Resources.GlobalObjects.Where(o => !staticIds.Contains(o.Id))));
+                var world = DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
+                    map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport);
+                for (int role = 0; role < real.Profile.Roles.Count; role++)
+                {
+                    var snapshot = real.Profile.Roles[role];
+                    world.InitializePartyVitals(role, snapshot.Hp, snapshot.MaxHp, snapshot.Mp, snapshot.MaxMp);
+                }
+                Dialogue.FirstBattleWorld = world;
+                firstBattleWorld = world;
+                var firstBattleSeedRandom = new GodotBattleRandom(selected.BattleSeed);
+                Dialogue.PreviewSessionFactory = () => new TriggerScriptSession(real.Resources.Events,
+                    language == "zh-Hans" ? real.Resources.Chinese : real.Resources.English,
+                    real.Resources.BattleContent, new GodotBattleRandom(selected.BattleSeed),
+                    DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
+                        map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport));
+                Dialogue.Initialize(Display, real.Resources, language, firstBattleSeedRandom, map.Data);
+                // The verified closure reuses the production story-battle machinery: the facade
+                // carries the same checked exploration, scene, palette and settlement words, so
+                // team18's real battle, hooks and settlement run through the identical host.
+                var res = real.Resources;
+                var triggerEntry = Dialogue.Session!.Entries.Single(e =>
+                    e is { OwnerType: "eventObject", OwnerId: 28, Slot: "wTriggerScript", Kind: "trigger" } && e.SourceAddress == real.Closure.TriggerEntryAddress);
+                story = new CheckedStoryProfile(real.StaticResources, real.StaticProfile, map.Data.BundleSha256,
+                    "first-mandatory-battle verified closure", triggerEntry, res.Events,
+                    language == "zh-Hans" ? res.Chinese : res.English, res.BattleContent, real.Closure.VerifiedRequirements,
+                    checkedProfile, res.Font, res.Prompts.ToArray(),
+                    res.Portraits.ToDictionary(x => x.Key, x => x.Value), Palette(map.Data),
+                    res.ResourceSha256.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal),
+                    mapScenePackedScene(real.StaticResources), language == "zh-Hans" ? res.ChineseWords : res.EnglishWords);
+                storyVisual = real.Visual;
+                Display.UpdateCompleted += CompleteFirstBattleTrigger;
+                RenderingServer.FramePostDraw += StartFirstBattleAfterSceneDraw;
+                firstBattleRendererSubscribed = true;
+                firstBattleRandom = new GodotBattleRandom(selected.BattleSeed);
+                GD.Print($"PAL_M4_FIRST_BATTLE_REAL:scene2/map12; owner28/09C3; language={language}; closure verified; teams=[{string.Join(",", real.Closure.VerifiedBattleTeamIds)}]");
+            }
+            else if (firstBattle is not null) GD.Print($"PAL_M4_FIRST_BATTLE_CONTEXT:scene2/map12; owner28/09C3; language={language}; trigger closure unavailable");
             if (staticAcceptance) GD.Print("PAL_M3_STATIC_ACCEPTANCE:scene4/map10; events are not scheduled");
             GD.Print($"PAL_GAME_READY:{Pal.Core.Startup.Status}");
         }
         catch (Exception e)
         {
-            Fail($"Static scene startup failed (scene={scenePath ?? "unselected"}, profile={profilePath ?? "unselected"}): {e.Message}");
+            Fail(StartupDiagnostics.Format(selectedProfilePath, scenePath, staticProfilePath, e.Message));
         }
     }
 
@@ -153,7 +249,29 @@ public partial class Main : Node2D
             for (int i = 0; i < DirectionKeys.Length; i++)
             {
                 if (key.Keycode != DirectionKeys[i] || !key.IsAction(DirectionActions[i / 2])) continue;
-                if (Interaction is { } interaction)
+                if (storyRequest is not null)
+                {
+                    // The active story battle owns direction keys: horizontal input cycles the
+                    // enemy-slot target highlight only and never bleeds into exploration.
+                    if (key.Pressed && !key.Echo && StoryBattleMode == StoryBattlePresentation.TargetMenu
+                        && i / 2 is 1 or 3)
+                    {
+                        storyCycle = i / 2 == 3 ? 1 : -1;
+                        GetViewport().SetInputAsHandled();
+                    }
+                    return;
+                }
+                if (dynamicSession is { } dynamic)
+                {
+                    if (key.Pressed) dynamic.Press((ExplorationKey)i, key.Echo);
+                    else dynamic.Release((ExplorationKey)i);
+                }
+                else if (battle is { } firstBattle)
+                {
+                    if (key.Pressed) firstBattle.Press((ExplorationKey)i, key.Echo);
+                    else firstBattle.Release((ExplorationKey)i);
+                }
+                else if (Interaction is { } interaction)
                 {
                     if (key.Pressed) interaction.Press((ExplorationKey)i, key.Echo);
                     else interaction.Release((ExplorationKey)i);
@@ -163,10 +281,27 @@ public partial class Main : Node2D
                 return;
             }
             // Windows reference EnableKeyRepeat=false; no held search repeater or fresh-press gate.
-            if (Interaction is { Phase: not NpcInteractionPhase.Trigger } npc && key.Pressed && !key.Echo
+            if (key.Pressed && !key.Echo
                 && (key.Keycode is Key.Enter or Key.Space or Key.KpEnter || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right))
             {
-                npc.PressSearch();
+                if (storyRequest is not null)
+                {
+                    // The paused role hook's dialogue display consumes input itself; a menu
+                    // confirm must not queue behind the script (fight.c 768-880 pause).
+                    if (StoryBattleMode != StoryBattlePresentation.HookDialogue) battleConfirm = true;
+                }
+                else if (dynamicSession is { Phase: DynamicEventPhase.Exploring } dynamic) dynamic.PressSearch();
+                else if (battle is not null) battle.PressSearch();
+                else if (Interaction is { Phase: not NpcInteractionPhase.Trigger } npc) npc.PressSearch();
+                else return;
+                GetViewport().SetInputAsHandled();
+            }
+            // input.c: 'q' is kKeyFlee. Only the story battle's action menu consumes it; the
+            // parked display never sees battle-frame input.
+            if (key.Pressed && !key.Echo && key.Keycode == Key.Q && storyRequest is not null
+                && StoryBattleMode == StoryBattlePresentation.AttackMenu)
+            {
+                storyFlee = true;
                 GetViewport().SetInputAsHandled();
             }
         }
@@ -178,19 +313,59 @@ public partial class Main : Node2D
         if (Failure is not null || exited || Exploration is null || mapScene is null) return;
         try
         {
+            ResumeStoryDisplay();
+            ObserveStoryLostTerminal();
+            if (StoryLostTerminal)
+            {
+                // The failure terminal only advances its presentation (red fade); no event,
+                // battle or exploration business runs and no reward path can trigger.
+                AdvanceStoryRedFade(unchecked((uint)Time.GetTicksMsec()));
+                UpdateCompleted?.Invoke();
+                return;
+            }
+            if (ProcessStoryBattle()) { UpdateCompleted?.Invoke(); return; }
+            if (dynamicSession is not null) { ProcessDynamicScene(); UpdateCompleted?.Invoke(); return; }
             // The headless dummy renderer has no presented frame. Preserve the command/redraw
             // submission boundary across actual callbacks; graphical runs wait for FramePostDraw.
             if (awaitingSceneDraw && DisplayServer.GetName() == "headless") StartAfterSceneDraw();
+            if (awaitingFirstBattleDraw && DisplayServer.GetName() == "headless") StartFirstBattleAfterSceneDraw();
             if (Failure is not null) return;
-            bool changed = Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
+            bool changed = battle?.Update(unchecked((uint)Time.GetTicksMsec()))
+                ?? Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? input!.Update(unchecked((uint)Time.GetTicksMsec()));
+            // World-wired first-battle call: the parked scene waits and counted movements
+            // advance one step per committed update tick (the same per-tick ownership the
+            // dynamic host uses); the map only redraws when the exploration really changed.
+            if (firstBattleWorld is { } world && Dialogue?.Session is { Phase: Pal.Core.TriggerScriptPhase.WaitingForSceneWait or Pal.Core.TriggerScriptPhase.WaitingForMovement } trigger)
+            {
+                // One world step per 100ms due tick (the dynamic host's cadence), independent
+                // of exploration movement commits; the acknowledged park may advance into a
+                // display, which is bound immediately.
+                uint now = unchecked((uint)Time.GetTicksMsec());
+                if (unchecked((int)(now - firstBattleWorldTick)) >= 100)
+                {
+                    firstBattleWorldTick = now;
+                    world.AdvanceTriggerTick(trigger);
+                    Dialogue!.BindPendingDisplays();
+                }
+            }
             if (changed) mapScene.UpdateScene(Exploration.Plan);
+            // Presentation transitions (redraw/fadeScene/fadeOut) in the world-wired call:
+            // redraw the retained scene, then receipt after the delay elapsed.
+            CompleteFirstBattleTransition();
             if (activeTrigger is null && Interaction?.PendingTrigger is { } request)
             {
                 activeTrigger = request;
                 awaitingSceneDraw = true;
             }
-            UpdateCompleted?.Invoke();
+            if (firstBattleActiveTrigger is null && Battle?.PendingTrigger is { } battleRequest)
+            {
+                firstBattleActiveTrigger = battleRequest;
+                awaitingFirstBattleDraw = true;
+            }
+            // Exploration/dialogue observers consume every real Main callback; first-battle
+            // observers only consume committed updates, leaving no-change/rejection unpublished.
+            if (battle is null || changed) UpdateCompleted?.Invoke();
         }
         catch (Exception e) { Fail($"Exploration update failed: {e.Message}"); }
     }
@@ -201,10 +376,79 @@ public partial class Main : Node2D
         awaitingSceneDraw = false;
         try
         {
-            Dialogue!.Start(request.FileId, request.EntryId, request.Caller);
+            if (story is not null) Dialogue!.Start(request.FileId, request.EntryId, request.Caller, request.Id);
+            else Dialogue!.Start(request.FileId, request.EntryId, request.Caller);
+            if (story is not null && !Interaction!.BindTrigger(request.Id, Dialogue.Session!))
+                throw new InvalidOperationException("Selected trigger call could not bind its search request.");
             CompleteTrigger(); // Also handles synchronous, no-wait completion.
         }
         catch (Exception e) { Fail($"NPC trigger failed: {e.Message}"); }
+    }
+
+    /// <summary>Starts the verified @09C3 call after the committed search update's draw.</summary>
+    private void StartFirstBattleAfterSceneDraw()
+    {
+        if (Failure is not null || exited || !awaitingFirstBattleDraw || Battle?.PendingTrigger is not { } request) return;
+        awaitingFirstBattleDraw = false;
+        try
+        {
+            var entry = Dialogue!.Session!.Entries.Single(e =>
+                e is { OwnerType: "eventObject", OwnerId: 28, Slot: "wTriggerScript", Kind: "trigger" } && e.SourceAddress == request.EntryAddress);
+            Dialogue.Start(entry.FileId, entry.Id, request.OwnerId);
+            CompleteFirstBattleTrigger(); // also handles synchronous, no-display completion
+        }
+        catch (Exception e) { Fail($"First battle trigger failed: {e.Message}"); }
+    }
+
+    private uint firstBattleTransitionDeadline;
+    private uint firstBattleWorldTick;
+
+    private void CompleteFirstBattleTransition()
+    {
+        if (firstBattleWorld is null || Dialogue?.Session?.PendingTransition is not { } transition)
+        {
+            firstBattleTransitionDeadline = 0;
+            return;
+        }
+        uint now = unchecked((uint)Time.GetTicksMsec());
+        if (firstBattleTransitionDeadline == 0)
+        {
+            int delay = transition.Kind == "redraw" ? Math.Max(60, transition.Parameter) : 60;
+            firstBattleTransitionDeadline = unchecked(now + (uint)delay);
+            mapScene!.UpdateScene(Exploration!.Plan);
+            return;
+        }
+        if (unchecked((int)(now - firstBattleTransitionDeadline)) < 0) return;
+        firstBattleTransitionDeadline = 0;
+        _ = Dialogue.Session.AcknowledgeTransition(transition.Id);
+        // The call advanced past its transition; a newly parked display must be bound.
+        Dialogue.BindPendingDisplays();
+    }
+
+    private static PackedScene mapScenePackedScene(string staticResources) =>
+        (PackedScene)ResourceLoader.Load(staticResources + "/Scenes/Scene.tscn", cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+
+    private void CompleteFirstBattleTrigger()
+    {
+        if (Failure is not null || exited || firstBattleActiveTrigger is not { } request
+            || Dialogue?.Session is not { Phase: TriggerScriptPhase.Completed } session) return;
+        // The completed pre-battle/Won/Lost call has done its world mutations; hand control
+        // back to the changed exploration. PendingBattle states are an error here because the
+        // battle request path is driven by the story-battle host wiring delivered with it.
+        firstBattleActiveTrigger = null;
+        // The completed call's world mutations become the changed exploration state: entry
+        // rewrites/states/positions flow back into the session's observable object words.
+        if (firstBattleWorld is { } changed)
+            foreach (var source in changed.Objects)
+            {
+                var target = Battle!.State.World.EventObjects.SingleOrDefault(item => item.OwnerId == source.Id);
+                if (target is null) continue;
+                target.X = source.X; target.Y = source.Y; target.Direction = source.Direction;
+                target.State = source.State; target.VanishTime = source.VanishTime;
+                target.TriggerMode = source.TriggerMode; target.TriggerEntry = source.TriggerEntry;
+                target.AutoEntry = source.AutoEntry; target.CurrentFrame = source.CurrentFrame;
+            }
+        mapScene!.UpdateScene(Exploration!.Plan);
     }
 
     private void CompleteTrigger()
@@ -219,6 +463,27 @@ public partial class Main : Node2D
 
     private void DisplayFailed(Exception error) => Fail($"Dialogue update failed: {error.Message}");
 
+    /// <summary>Observes the failure branch's formal state: starts the red fade when the
+    /// 0x004F transition lands, and enters the 0x004E failure terminal exactly once.</summary>
+    private void ObserveStoryLostTerminal()
+    {
+        if (story is not null && storyRedStep < 0 && Dialogue?.Session?.FadedToRed == true)
+        {
+            storyRedStep = 0;
+            storyRedStepAt = presentationNow;
+        }
+        if (StoryLostTerminal || Dialogue?.Session?.PendingLostReload is not { } request) return;
+        // TODO(#51): implement the real script.c 0x004E save-slot reload (PAL_FadeOut(1) then
+        // PAL_ReloadInNextTick): no save system exists yet, so this run stays in the lost
+        // terminal state (red screen, no business advancement) until the window closes.
+        StoryLostTerminal = true;
+        StoryLostReloadDiagnostics++;
+        string team = request.EnemyTeamId is { } enemyTeam ? enemyTeam.ToString(System.Globalization.CultureInfo.InvariantCulture) : "none";
+        string music = Dialogue.Session.Music is { } state ? state.MusicId.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unchanged";
+        GD.Print($"PAL_LOST_RELOAD_TODO:{request.Position}; team={team}; boss={request.IsBoss}; caller={Dialogue.Session.Caller}; music={music}; "
+            + "save-slot reload not implemented; lost terminal until window close");
+    }
+
     protected void Fail(string message)
     {
         if (Failure is not null || exited) return;
@@ -228,6 +493,8 @@ public partial class Main : Node2D
         SetProcess(false);
         SetProcessInput(false);
         DisconnectRuntime();
+        ReleaseStory();
+        ReleaseDynamic();
         Failed?.Invoke(message);
     }
 
@@ -249,5 +516,14 @@ public partial class Main : Node2D
     {
         exited = true;
         DisconnectRuntime();
+        ReleaseStory();
+        ReleaseDynamic();
+        activeTrigger = null; firstBattleActiveTrigger = null; Interaction = null; input = null; battle = null; mapScene = null;
+        if (firstBattleRendererSubscribed)
+        {
+            RenderingServer.FramePostDraw -= StartFirstBattleAfterSceneDraw;
+            firstBattleRendererSubscribed = false;
+        }
+        Display = null; Dialogue = null; SelectedLanguage = null;
     }
 }

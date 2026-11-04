@@ -39,6 +39,9 @@
 | [`Get-GdUnitPackages.ps1`](../../scripts/Get-GdUnitPackages.ps1) | 校验锁定四文件 bundle 并 bootstrap | M0、Range；GdUnitPackages 回归；[包说明](gdunit-source-packages.md) | 显式 Game 前置；保留，普通 Unit 无需调用 |
 | [`gdunit-packages.lock.json`](../../scripts/gdunit-packages.lock.json) | 固定包来源、recipe、文件长度/散列与地址 | Get-GdUnitPackages、Engineering、Range；GdUnitPackages 回归 | 资源身份数据，不可执行；保留 |
 | [`Prepare-GameScene.ps1`](../../scripts/Prepare-GameScene.ps1) | M1 包显式离线转换为 Godot native 场景/资源，拒绝覆盖 | `Test-GameStartup.ps1`；PreparePathSafety/PrepareProcess 回归；根 README | 显式资源准备；保留，不自动提取/同步、不创建探索 profile |
+| [`Prepare-StoryPackage.ps1`](../../scripts/Prepare-StoryPackage.ps1) | 外部完整现代事件+metadata与已准备native依赖→typed Story/Visual，严格回读、无覆盖 | StoryPackagePrepareProcessTests；[schema/前置资产/命令](../design/story-package-preparation.md) | 显式离线生产准备；输入非自包含，不接Main、不自动准备依赖 |
+| [`Prepare-BattleData.ps1`](../../scripts/Prepare-BattleData.ps1) | 外部单文件严格 UTF-8 现代数值→typed native 数值包，路径/lease/hash/回读、无覆盖发布 | BattleDataPrepareProcessTests；[数值契约](../design/modern-battle-data.md) | 显式离线生产准备；不接 Main |
+| [`Prepare-BattleContext.ps1`](../../scripts/Prepare-BattleContext.ps1) | 外部作者 battle-context 文档（可选 -BattleResources 绑定）→首战闭包回执与 Profile.tres | BattlePrepareProcessTests；[首战上下文](../design/first-story-battle-context.md) | 显式离线生产准备；真实原始/派生资源不提交 |
 | [`Prepare-DialoguePackage.ps1`](../../scripts/Prepare-DialoguePackage.ps1) | 显式转换现代对话包为 native 资源并 import | 搜索范围内无脚本运行调用；[对话文档](../design/dialogue-display.md)为手工入口；外部未知 | 显式资源准备；保留，复用已准备资源 |
 | [`Write-StaticScene4Profile.ps1`](../../scripts/Write-StaticScene4Profile.ps1) | 只读 DATA.MKF role0 WORD，author 固定 scene4 profile，拒绝覆盖 | 搜索范围内未查到运行调用或当前文档入口；外部未知 | 显式一次性 author 工具；保留，退役另核；不上传真实输入/输出 |
 
@@ -57,6 +60,8 @@
 | [`Test-GameStartup.ps1`](../../scripts/Test-GameStartup.ps1) | 人工资源真实 Godot import/Main 启动与指定拒绝控制 | `Test-M0.ps1` 直接调用，内部用 Prepare-GameScene | 显式验收子入口；保留，不证明 GPU/物理桌面 |
 | [`Test-GodotCompatibility.ps1`](../../scripts/Test-GodotCompatibility.ps1) | 外部人工项目、生成器/net10 构建/引擎兼容与负控制探针 | 搜索范围内未查到运行调用或当前文档入口；外部未知 | 特殊兼容调查；保留，不能从历史探针推断当前运行成功 |
 | [`Test-RealDialogueGpu.ps1`](../../scripts/Test-RealDialogueGpu.ps1) | 选定语言/可选真实 Main 的 GPU 回读及程序输入；保护真实资源身份 | 无仓内脚本运行调用；[对话](../design/dialogue-display.md)和[NPC 宿主](../design/npc-interaction-host.md)为显式入口；外部未知 | 显式 GPU 证据，不是物理/人工验收；保留，不自动 prepare/build/清理 |
+| [`Test-M4FirstBattleGpu.ps1`](../../scripts/Test-M4FirstBattleGpu.ps1) | M4 首战链 GPU 像素验收：真实 staged Profile.tres 双语或合成 Won/Lost 闭包，帧捕获+独立像素 oracle；保护私有资源树 | 无仓内脚本运行调用；`res://Tests/M4FirstBattleGpuFixture.tscn` 为显式本地入口；外部未知 | 显式 GPU 证据（程序输入），不是物理/人工验收；保留，不自动 prepare/build/清理 |
+| [`Test-M4PhysicalDesktop.ps1`](../../scripts/Test-M4PhysicalDesktop.ps1) | M4 物理桌面验收：真实窗口进程+SendInput 真实键盘走完合成全闭包（Won/Lost），✕/Alt+F4 正常关窗、退出码/生命周期/无残留 | 无仓内脚本运行调用；`res://Tests/M4PhysicalDesktopFixture.tscn` 为显式本地入口（夹具零进程内注入）；外部未知 | 显式物理验收证据；保留，不自动 prepare/build/清理 |
 
 ## 待核实退役项
 

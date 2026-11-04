@@ -41,6 +41,19 @@ public static class TriggerEventLoader
         }
     }
 
+    /// <summary>The index plus every event file it lists, for native dependency-hash closures.
+    /// The uri is already validated (forward slashes only) by the caller's profile validation.</summary>
+    public static IReadOnlyList<string> DependencyUris(string indexPath)
+    {
+        string indexText = ReadUtf8(indexPath);
+        using var index = JsonDocument.Parse(indexText);
+        string directory = indexPath[..(indexPath.LastIndexOf('/') + 1)];
+        var uris = new List<string> { indexPath };
+        foreach (JsonElement value in index.RootElement.GetProperty("files").EnumerateArray())
+            uris.Add(directory + value.GetString() + ".json");
+        return uris;
+    }
+
     private static string ReadUtf8(string path)
     {
         if (!Godot.FileAccess.FileExists(path)) throw new InvalidDataException($"Missing modern event file: {path}");

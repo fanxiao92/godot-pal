@@ -1,0 +1,43 @@
+{
+  "formatVersion": 1,
+  "sourceIdentity": "Original pixel art and bitmap lettering authored for godot-pal #46; no retail assets or extraction evidence. Loss numeric scenario; faithful SSS fields describe an original 80-byte author stream, not retail SSS.MKF.",
+  "staticResources": "res://Assets/AuthoredBattle/Static",
+  "staticProfile": "res://Samples/AuthoredBattle/Static/Exploration.tres",
+  "bundleSha256": "a6e7c2b10e379bfc6cd34898302d49ab8a9a81e5b91fd035f5a5b9b241d638fc",
+  "entryFileId": "arena",
+  "entryId": "challenge",
+  "ownerId": 1,
+  "entryAddress": 1,
+  "battleContentUri": "res://Assets/AuthoredBattle/Loss/Numbers/BattleContent.tres",
+  "dialogueDirectory": "res://Samples/AuthoredBattle/Dialogue",
+  "portraits": [],
+  "visual": {
+    "roleId": 0,
+    "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",
+    "playerPosition": [
+      240,
+      170
+    ],
+    "paletteUri": "res://Samples/AuthoredBattle/Static/Palette.tres",
+    "teams": [
+      {
+        "teamId": 18,
+        "targetId": 7,
+        "backgroundUri": "res://Samples/AuthoredBattle/Visual/Background.tres",
+        "enemySpriteUri": "res://Samples/AuthoredBattle/Visual/Enemy.tres",
+        "enemyPosition": [
+          100,
+          120
+        ],
+        "idleFrames": 1,
+        "magicFrames": 1,
+        "attackFrames": 1,
+        "actWaitFrames": 0,
+        "idleAnimSpeed": 2
+      }
+    ],
+    "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
+    "attackEffectIndex": 0,
+    "numberSpriteUri": "res://Samples/AuthoredBattle/Visual/Numbers.tres"
+  }
+}

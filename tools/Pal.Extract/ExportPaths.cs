@@ -6,12 +6,12 @@ internal static class ExportPaths
     {
         string source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(input));
         string destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(output));
-        RejectLinks(source, "Input");
-        RejectLinks(destination, "Output");
+        PathLinkGuard.RejectReparsePoints(source, "Input: links/reparse points in paths are not supported for safe export.");
+        PathLinkGuard.RejectReparsePoints(destination, "Output: links/reparse points in paths are not supported for safe export.");
         if (Directory.Exists(source))
             foreach (string path in Directory.EnumerateFileSystemEntries(source))
                 if (requiredNames.Contains(Path.GetFileName(path), StringComparer.OrdinalIgnoreCase))
-                    RejectLinks(path, "Input archive");
+                    PathLinkGuard.RejectReparsePoints(path, "Input archive: links/reparse points in paths are not supported for safe export.");
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (destination.Equals(source, comparison) || destination.StartsWith(
             Path.EndsInDirectorySeparator(source) ? source : source + Path.DirectorySeparatorChar, comparison))
@@ -22,17 +22,4 @@ internal static class ExportPaths
         return destination;
     }
 
-    private static void RejectLinks(string path, string resource)
-    {
-        for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
-        {
-            try
-            {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidDataException($"{resource}: links/reparse points in paths are not supported for safe export.");
-            }
-            catch (FileNotFoundException) { }
-            catch (DirectoryNotFoundException) { }
-        }
-    }
 }

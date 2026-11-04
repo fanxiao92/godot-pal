@@ -1,0 +1,223 @@
+[gd_resource type="Resource" script_class="PalDialogueLanguage" format=3]
+
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueMessageEntry.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueMessageRange.cs" id="2"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalDialogueLanguage.cs" id="3"]
+
+[sub_resource type="Resource" id="s0"]
+script = ExtResource("1")
+Text = "FIGHT"
+
+[sub_resource type="Resource" id="s1"]
+script = ExtResource("2")
+StartMessageId = 1
+EndMessageId = 1
+Entries = Array[ExtResource("1")]([SubResource("s0")])
+
+[sub_resource type="Resource" id="s2"]
+script = ExtResource("1")
+Text = "WIN"
+
+[sub_resource type="Resource" id="s3"]
+script = ExtResource("2")
+StartMessageId = 2
+EndMessageId = 2
+Entries = Array[ExtResource("1")]([SubResource("s2")])
+
+[sub_resource type="Resource" id="s4"]
+script = ExtResource("1")
+Text = "LOSE"
+
+[sub_resource type="Resource" id="s5"]
+script = ExtResource("2")
+StartMessageId = 3
+EndMessageId = 3
+Entries = Array[ExtResource("1")]([SubResource("s4")])
+
+[sub_resource type="Resource" id="m4e"]
+script = ExtResource("1")
+Text = "I CAN FIGHT"
+
+[sub_resource type="Resource" id="m5e"]
+script = ExtResource("1")
+Text = "LET ME GO"
+
+[sub_resource type="Resource" id="m6e"]
+script = ExtResource("1")
+Text = "ATTACK"
+
+[sub_resource type="Resource" id="m7e"]
+script = ExtResource("1")
+Text = "CAREFUL"
+
+[sub_resource type="Resource" id="m8e"]
+script = ExtResource("1")
+Text = "I LOST"
+
+[sub_resource type="Resource" id="m9e"]
+script = ExtResource("1")
+Text = "AVENGE"
+
+[sub_resource type="Resource" id="m10e"]
+script = ExtResource("1")
+Text = "NO TEARS"
+
+[sub_resource type="Resource" id="m11e"]
+script = ExtResource("1")
+Text = "PROTECT ALL"
+
+[sub_resource type="Resource" id="m12e"]
+script = ExtResource("1")
+Text = "THANKS"
+
+[sub_resource type="Resource" id="m13e"]
+script = ExtResource("1")
+Text = "WE WIN"
+
+[sub_resource type="Resource" id="m14e"]
+script = ExtResource("1")
+Text = "FOCUS"
+
+[sub_resource type="Resource" id="m15e"]
+script = ExtResource("1")
+Text = "CALM"
+
+[sub_resource type="Resource" id="m16e"]
+script = ExtResource("1")
+Text = "BROTHER"
+
+[sub_resource type="Resource" id="m17e"]
+script = ExtResource("1")
+Text = "REST NOW"
+
+[sub_resource type="Resource" id="m18e"]
+script = ExtResource("1")
+Text = "I WILL WIN"
+
+[sub_resource type="Resource" id="m19e"]
+script = ExtResource("1")
+Text = "GRIEF TO POWER"
+
+[sub_resource type="Resource" id="m20e"]
+script = ExtResource("1")
+Text = "DON'T FALL"
+
+[sub_resource type="Resource" id="m21e"]
+script = ExtResource("1")
+Text = "RISE UP"
+
+[sub_resource type="Resource" id="m22e"]
+script = ExtResource("1")
+Text = "HOME"
+
+[sub_resource type="Resource" id="m6_7r"]
+script = ExtResource("2")
+StartMessageId = 6
+EndMessageId = 7
+Entries = Array[ExtResource("1")]([SubResource("m6e"), SubResource("m7e")])
+
+[sub_resource type="Resource" id="m8_9r"]
+script = ExtResource("2")
+StartMessageId = 8
+EndMessageId = 9
+Entries = Array[ExtResource("1")]([SubResource("m8e"), SubResource("m9e")])
+
+[sub_resource type="Resource" id="m10_11r"]
+script = ExtResource("2")
+StartMessageId = 10
+EndMessageId = 11
+Entries = Array[ExtResource("1")]([SubResource("m10e"), SubResource("m11e")])
+
+[sub_resource type="Resource" id="m12_13r"]
+script = ExtResource("2")
+StartMessageId = 12
+EndMessageId = 13
+Entries = Array[ExtResource("1")]([SubResource("m12e"), SubResource("m13e")])
+
+[sub_resource type="Resource" id="m14_15r"]
+script = ExtResource("2")
+StartMessageId = 14
+EndMessageId = 15
+Entries = Array[ExtResource("1")]([SubResource("m14e"), SubResource("m15e")])
+
+[sub_resource type="Resource" id="m4_4r"]
+script = ExtResource("2")
+StartMessageId = 4
+EndMessageId = 4
+Entries = Array[ExtResource("1")]([SubResource("m4e")])
+
+[sub_resource type="Resource" id="m5_5r"]
+script = ExtResource("2")
+StartMessageId = 5
+EndMessageId = 5
+Entries = Array[ExtResource("1")]([SubResource("m5e")])
+
+[sub_resource type="Resource" id="m16_16r"]
+script = ExtResource("2")
+StartMessageId = 16
+EndMessageId = 16
+Entries = Array[ExtResource("1")]([SubResource("m16e")])
+
+[sub_resource type="Resource" id="m17_17r"]
+script = ExtResource("2")
+StartMessageId = 17
+EndMessageId = 17
+Entries = Array[ExtResource("1")]([SubResource("m17e")])
+
+[sub_resource type="Resource" id="m18_18r"]
+script = ExtResource("2")
+StartMessageId = 18
+EndMessageId = 18
+Entries = Array[ExtResource("1")]([SubResource("m18e")])
+
+[sub_resource type="Resource" id="m19_19r"]
+script = ExtResource("2")
+StartMessageId = 19
+EndMessageId = 19
+Entries = Array[ExtResource("1")]([SubResource("m19e")])
+
+[sub_resource type="Resource" id="m20_20r"]
+script = ExtResource("2")
+StartMessageId = 20
+EndMessageId = 20
+Entries = Array[ExtResource("1")]([SubResource("m20e")])
+
+[sub_resource type="Resource" id="m21_21r"]
+script = ExtResource("2")
+StartMessageId = 21
+EndMessageId = 21
+Entries = Array[ExtResource("1")]([SubResource("m21e")])
+
+[sub_resource type="Resource" id="m22_22r"]
+script = ExtResource("2")
+StartMessageId = 22
+EndMessageId = 22
+Entries = Array[ExtResource("1")]([SubResource("m22e")])
+
+[sub_resource type="Resource" id="m23e"]
+script = ExtResource("1")
+Text = "I WILL RETURN"
+
+[sub_resource type="Resource" id="m23_23r"]
+script = ExtResource("2")
+StartMessageId = 23
+EndMessageId = 23
+Entries = Array[ExtResource("1")]([SubResource("m23e")])
+
+[sub_resource type="Resource" id="m24e"]
+script = ExtResource("1")
+Text = "DEFEATED"
+
+[sub_resource type="Resource" id="m24_24r"]
+script = ExtResource("2")
+StartMessageId = 24
+EndMessageId = 24
+Entries = Array[ExtResource("1")]([SubResource("m24e")])
+
+[resource]
+script = ExtResource("3")
+Language = "en"
+SourceIdentity = "Original pixel art and bitmap lettering authored for godot-pal #46; no retail assets or extraction evidence."
+Messages = Array[ExtResource("2")]([SubResource("s1"), SubResource("s3"), SubResource("s5"), SubResource("m6_7r"), SubResource("m8_9r"), SubResource("m10_11r"), SubResource("m12_13r"), SubResource("m14_15r"), SubResource("m4_4r"), SubResource("m5_5r"), SubResource("m16_16r"), SubResource("m17_17r"), SubResource("m18_18r"), SubResource("m19_19r"), SubResource("m20_20r"), SubResource("m21_21r"), SubResource("m22_22r"), SubResource("m23_23r"), SubResource("m24_24r")])
+
+Words = Dictionary[int, String]({60000: "ATTACK", 60001: "TARGET", 60002: "MISS", 60003: "CRITICAL", 60004: "HP", 60005: "BOOST", 60006: "EXP", 60007: "CASH", 60008: "LEVEL UP", 60009: "LEARNED MAGIC", 60010: "ESCAPE FAILED"})

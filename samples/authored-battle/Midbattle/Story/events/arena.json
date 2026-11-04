@@ -1,0 +1,1084 @@
+{
+  "formatVersion": 1,
+  "profile": "faithful",
+  "fileId": "arena",
+  "entries": [
+    {
+      "id": "challenge",
+      "owner": {
+        "type": "eventObject",
+        "id": 1
+      },
+      "slot": "wTriggerScript",
+      "kind": "trigger",
+      "target": "L0001",
+      "sourceAddress": 1
+    }
+  ],
+  "commands": [
+    {
+      "label": "L0000",
+      "op": "raw",
+      "next": "L0001",
+      "source": {
+        "index": 0,
+        "opcode": 134,
+        "operands": [
+          0,
+          65535,
+          8
+        ]
+      }
+    },
+    {
+      "label": "L0001",
+      "op": "setDialog",
+      "next": "L0002",
+      "source": {
+        "index": 1,
+        "opcode": 60,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 0,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0002",
+      "op": "showDialog",
+      "next": "L0003",
+      "source": {
+        "index": 2,
+        "opcode": 65535,
+        "operands": [
+          1,
+          0,
+          0
+        ]
+      },
+      "messageId": 1,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0003",
+      "op": "startBattle",
+      "next": "L0004",
+      "source": {
+        "index": 3,
+        "opcode": 7,
+        "operands": [
+          18,
+          7,
+          0
+        ]
+      },
+      "teamId": 18,
+      "lossTarget": "L0007",
+      "isBoss": true,
+      "fleeTarget": null
+    },
+    {
+      "label": "L0004",
+      "op": "setDialog",
+      "next": "L0005",
+      "source": {
+        "index": 4,
+        "opcode": 60,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 0,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0005",
+      "op": "showDialog",
+      "next": "L0006",
+      "source": {
+        "index": 5,
+        "opcode": 65535,
+        "operands": [
+          2,
+          0,
+          0
+        ]
+      },
+      "messageId": 2,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0006",
+      "op": "end",
+      "next": "L0007",
+      "source": {
+        "index": 6,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0007",
+      "op": "setDialog",
+      "next": "L0008",
+      "source": {
+        "index": 7,
+        "opcode": 60,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 0,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0008",
+      "op": "showDialog",
+      "next": "L0009",
+      "source": {
+        "index": 8,
+        "opcode": 65535,
+        "operands": [
+          3,
+          0,
+          0
+        ]
+      },
+      "messageId": 3,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0009",
+      "op": "end",
+      "next": "L0010",
+      "source": {
+        "index": 9,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0010",
+      "op": "randomJump",
+      "next": "L0011",
+      "source": {
+        "index": 10,
+        "opcode": 6,
+        "operands": [
+          75,
+          16,
+          0
+        ]
+      },
+      "rate": 75,
+      "to": "L0016"
+    },
+    {
+      "label": "L0011",
+      "op": "randomJump",
+      "next": "L0012",
+      "source": {
+        "index": 11,
+        "opcode": 6,
+        "operands": [
+          66,
+          22,
+          0
+        ]
+      },
+      "rate": 66,
+      "to": "L0022"
+    },
+    {
+      "label": "L0012",
+      "op": "randomJump",
+      "next": "L0013",
+      "source": {
+        "index": 12,
+        "opcode": 6,
+        "operands": [
+          50,
+          29,
+          0
+        ]
+      },
+      "rate": 50,
+      "to": "L0029"
+    },
+    {
+      "label": "L0013",
+      "op": "setDialog",
+      "next": "L0014",
+      "source": {
+        "index": 13,
+        "opcode": 61,
+        "operands": [
+          15,
+          0,
+          0
+        ]
+      },
+      "box": "lower",
+      "portraitId": 15,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0014",
+      "op": "showDialog",
+      "next": "L0015",
+      "source": {
+        "index": 14,
+        "opcode": 65535,
+        "operands": [
+          4,
+          0,
+          0
+        ]
+      },
+      "messageId": 4,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0015",
+      "op": "end",
+      "next": "L0016",
+      "source": {
+        "index": 15,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0016",
+      "op": "setDialog",
+      "next": "L0017",
+      "source": {
+        "index": 16,
+        "opcode": 61,
+        "operands": [
+          2,
+          0,
+          0
+        ]
+      },
+      "box": "lower",
+      "portraitId": 2,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0017",
+      "op": "showDialog",
+      "next": "L0018",
+      "source": {
+        "index": 17,
+        "opcode": 65535,
+        "operands": [
+          5,
+          0,
+          0
+        ]
+      },
+      "messageId": 5,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0018",
+      "op": "setDialog",
+      "next": "L0019",
+      "source": {
+        "index": 18,
+        "opcode": 60,
+        "operands": [
+          15,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 15,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0019",
+      "op": "showDialog",
+      "next": "L0020",
+      "source": {
+        "index": 19,
+        "opcode": 65535,
+        "operands": [
+          6,
+          0,
+          0
+        ]
+      },
+      "messageId": 6,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0020",
+      "op": "showDialog",
+      "next": "L0021",
+      "source": {
+        "index": 20,
+        "opcode": 65535,
+        "operands": [
+          7,
+          0,
+          0
+        ]
+      },
+      "messageId": 7,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0021",
+      "op": "end",
+      "next": "L0022",
+      "source": {
+        "index": 21,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0022",
+      "op": "setDialog",
+      "next": "L0023",
+      "source": {
+        "index": 22,
+        "opcode": 61,
+        "operands": [
+          2,
+          0,
+          0
+        ]
+      },
+      "box": "lower",
+      "portraitId": 2,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0023",
+      "op": "showDialog",
+      "next": "L0024",
+      "source": {
+        "index": 23,
+        "opcode": 65535,
+        "operands": [
+          8,
+          0,
+          0
+        ]
+      },
+      "messageId": 8,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0024",
+      "op": "showDialog",
+      "next": "L0025",
+      "source": {
+        "index": 24,
+        "opcode": 65535,
+        "operands": [
+          9,
+          0,
+          0
+        ]
+      },
+      "messageId": 9,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0025",
+      "op": "setDialog",
+      "next": "L0026",
+      "source": {
+        "index": 25,
+        "opcode": 60,
+        "operands": [
+          15,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 15,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0026",
+      "op": "showDialog",
+      "next": "L0027",
+      "source": {
+        "index": 26,
+        "opcode": 65535,
+        "operands": [
+          10,
+          0,
+          0
+        ]
+      },
+      "messageId": 10,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0027",
+      "op": "showDialog",
+      "next": "L0028",
+      "source": {
+        "index": 27,
+        "opcode": 65535,
+        "operands": [
+          11,
+          0,
+          0
+        ]
+      },
+      "messageId": 11,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0028",
+      "op": "end",
+      "next": "L0029",
+      "source": {
+        "index": 28,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0029",
+      "op": "setDialog",
+      "next": "L0030",
+      "source": {
+        "index": 29,
+        "opcode": 60,
+        "operands": [
+          15,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 15,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0030",
+      "op": "showDialog",
+      "next": "L0031",
+      "source": {
+        "index": 30,
+        "opcode": 65535,
+        "operands": [
+          12,
+          0,
+          0
+        ]
+      },
+      "messageId": 12,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0031",
+      "op": "showDialog",
+      "next": "L0032",
+      "source": {
+        "index": 31,
+        "opcode": 65535,
+        "operands": [
+          13,
+          0,
+          0
+        ]
+      },
+      "messageId": 13,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0032",
+      "op": "setDialog",
+      "next": "L0033",
+      "source": {
+        "index": 32,
+        "opcode": 61,
+        "operands": [
+          2,
+          0,
+          0
+        ]
+      },
+      "box": "lower",
+      "portraitId": 2,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0033",
+      "op": "showDialog",
+      "next": "L0034",
+      "source": {
+        "index": 33,
+        "opcode": 65535,
+        "operands": [
+          14,
+          0,
+          0
+        ]
+      },
+      "messageId": 14,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0034",
+      "op": "showDialog",
+      "next": "L0035",
+      "source": {
+        "index": 34,
+        "opcode": 65535,
+        "operands": [
+          15,
+          0,
+          0
+        ]
+      },
+      "messageId": 15,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0035",
+      "op": "end",
+      "next": "L0036",
+      "source": {
+        "index": 35,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0036",
+      "op": "randomJump",
+      "next": "L0037",
+      "source": {
+        "index": 36,
+        "opcode": 6,
+        "operands": [
+          75,
+          46,
+          0
+        ]
+      },
+      "rate": 75,
+      "to": "L0046"
+    },
+    {
+      "label": "L0037",
+      "op": "randomJump",
+      "next": "L0038",
+      "source": {
+        "index": 37,
+        "opcode": 6,
+        "operands": [
+          66,
+          53,
+          0
+        ]
+      },
+      "rate": 66,
+      "to": "L0053"
+    },
+    {
+      "label": "L0038",
+      "op": "randomJump",
+      "next": "L0039",
+      "source": {
+        "index": 38,
+        "opcode": 6,
+        "operands": [
+          50,
+          60,
+          0
+        ]
+      },
+      "rate": 50,
+      "to": "L0060"
+    },
+    {
+      "label": "L0039",
+      "op": "setDialog",
+      "next": "L0040",
+      "source": {
+        "index": 39,
+        "opcode": 61,
+        "operands": [
+          5,
+          0,
+          0
+        ]
+      },
+      "box": "lower",
+      "portraitId": 5,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0040",
+      "op": "showDialog",
+      "next": "L0041",
+      "source": {
+        "index": 40,
+        "opcode": 65535,
+        "operands": [
+          16,
+          0,
+          0
+        ]
+      },
+      "messageId": 16,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0041",
+      "op": "setDialog",
+      "next": "L0042",
+      "source": {
+        "index": 41,
+        "opcode": 62,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "centerWindow",
+      "color": 0
+    },
+    {
+      "label": "L0042",
+      "op": "showDialog",
+      "next": "L0043",
+      "source": {
+        "index": 42,
+        "opcode": 65535,
+        "operands": [
+          17,
+          0,
+          0
+        ]
+      },
+      "messageId": 17,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0043",
+      "op": "changeHp",
+      "next": "L0044",
+      "source": {
+        "index": 43,
+        "opcode": 27,
+        "operands": [
+          0,
+          9999,
+          0
+        ]
+      },
+      "scope": 0,
+      "amount": 9999
+    },
+    {
+      "label": "L0044",
+      "op": "boostStat",
+      "next": "L0045",
+      "source": {
+        "index": 44,
+        "opcode": 48,
+        "operands": [
+          17,
+          5,
+          0
+        ]
+      },
+      "field": 17,
+      "percent": 5,
+      "roleOperand": 0
+    },
+    {
+      "label": "L0045",
+      "op": "end",
+      "next": "L0046",
+      "source": {
+        "index": 45,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0046",
+      "op": "setDialog",
+      "next": "L0047",
+      "source": {
+        "index": 46,
+        "opcode": 61,
+        "operands": [
+          5,
+          0,
+          0
+        ]
+      },
+      "box": "lower",
+      "portraitId": 5,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0047",
+      "op": "showDialog",
+      "next": "L0048",
+      "source": {
+        "index": 47,
+        "opcode": 65535,
+        "operands": [
+          18,
+          0,
+          0
+        ]
+      },
+      "messageId": 18,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0048",
+      "op": "setDialog",
+      "next": "L0049",
+      "source": {
+        "index": 48,
+        "opcode": 62,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "centerWindow",
+      "color": 0
+    },
+    {
+      "label": "L0049",
+      "op": "showDialog",
+      "next": "L0050",
+      "source": {
+        "index": 49,
+        "opcode": 65535,
+        "operands": [
+          19,
+          0,
+          0
+        ]
+      },
+      "messageId": 19,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0050",
+      "op": "changeMp",
+      "next": "L0051",
+      "source": {
+        "index": 50,
+        "opcode": 28,
+        "operands": [
+          0,
+          9999,
+          0
+        ]
+      },
+      "scope": 0,
+      "amount": 9999
+    },
+    {
+      "label": "L0051",
+      "op": "boostStat",
+      "next": "L0052",
+      "source": {
+        "index": 51,
+        "opcode": 48,
+        "operands": [
+          18,
+          10,
+          0
+        ]
+      },
+      "field": 18,
+      "percent": 10,
+      "roleOperand": 0
+    },
+    {
+      "label": "L0052",
+      "op": "end",
+      "next": "L0053",
+      "source": {
+        "index": 52,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0053",
+      "op": "setDialog",
+      "next": "L0054",
+      "source": {
+        "index": 53,
+        "opcode": 61,
+        "operands": [
+          5,
+          0,
+          0
+        ]
+      },
+      "box": "lower",
+      "portraitId": 5,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0054",
+      "op": "showDialog",
+      "next": "L0055",
+      "source": {
+        "index": 54,
+        "opcode": 65535,
+        "operands": [
+          20,
+          0,
+          0
+        ]
+      },
+      "messageId": 20,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0055",
+      "op": "setDialog",
+      "next": "L0056",
+      "source": {
+        "index": 55,
+        "opcode": 62,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "centerWindow",
+      "color": 0
+    },
+    {
+      "label": "L0056",
+      "op": "showDialog",
+      "next": "L0057",
+      "source": {
+        "index": 56,
+        "opcode": 65535,
+        "operands": [
+          21,
+          0,
+          0
+        ]
+      },
+      "messageId": 21,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0057",
+      "op": "boostStat",
+      "next": "L0058",
+      "source": {
+        "index": 57,
+        "opcode": 48,
+        "operands": [
+          17,
+          25,
+          0
+        ]
+      },
+      "field": 17,
+      "percent": 25,
+      "roleOperand": 0
+    },
+    {
+      "label": "L0058",
+      "op": "boostStat",
+      "next": "L0059",
+      "source": {
+        "index": 58,
+        "opcode": 48,
+        "operands": [
+          18,
+          25,
+          0
+        ]
+      },
+      "field": 18,
+      "percent": 25,
+      "roleOperand": 0
+    },
+    {
+      "label": "L0059",
+      "op": "end",
+      "next": "L0060",
+      "source": {
+        "index": 59,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0060",
+      "op": "setDialog",
+      "next": "L0061",
+      "source": {
+        "index": 60,
+        "opcode": 61,
+        "operands": [
+          5,
+          0,
+          0
+        ]
+      },
+      "box": "lower",
+      "portraitId": 5,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0061",
+      "op": "showDialog",
+      "next": "L0062",
+      "source": {
+        "index": 61,
+        "opcode": 65535,
+        "operands": [
+          22,
+          0,
+          0
+        ]
+      },
+      "messageId": 22,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0062",
+      "op": "boostStat",
+      "next": "L0063",
+      "source": {
+        "index": 62,
+        "opcode": 48,
+        "operands": [
+          20,
+          90,
+          0
+        ]
+      },
+      "field": 20,
+      "percent": 90,
+      "roleOperand": 0
+    },
+    {
+      "label": "L0063",
+      "op": "boostStat",
+      "next": "L0064",
+      "source": {
+        "index": 63,
+        "opcode": 48,
+        "operands": [
+          21,
+          90,
+          0
+        ]
+      },
+      "field": 21,
+      "percent": 90,
+      "roleOperand": 0
+    },
+    {
+      "label": "L0064",
+      "op": "end",
+      "next": null,
+      "source": {
+        "index": 64,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    }
+  ]
+}

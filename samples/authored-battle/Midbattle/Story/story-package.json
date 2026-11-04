@@ -1,0 +1,67 @@
+{
+  "formatVersion": 1,
+  "sourceIdentity": "Original pixel art, bitmap lettering and authored event stream for godot-pal #49; no retail assets or extraction evidence. Midbattle numeric scenario: two authored roles (role1 wearing the #48 five-object dual-attack closure, dying-prone and covered by role0) versus two strong enemy slots; the event file transcribes the retail role-hook script STRUCTURE of Sss.mkf object37 dying and object36 friend-death (three random bands over four dialogue blocks, per-WORD heal/mana/boost effects) with original authored text, portraits and glyphs. Faithful SSS fields describe an original author stream, not retail SSS.MKF.",
+  "staticResources": "res://Assets/AuthoredBattle/Static",
+  "staticProfile": "res://Samples/AuthoredBattle/Static/Exploration.tres",
+  "bundleSha256": "a6e7c2b10e379bfc6cd34898302d49ab8a9a81e5b91fd035f5a5b9b241d638fc",
+  "entryFileId": "arena",
+  "entryId": "challenge",
+  "ownerId": 1,
+  "entryAddress": 1,
+  "battleContentUri": "res://Assets/AuthoredBattle/Midbattle/Numbers/BattleContent.tres",
+  "dialogueDirectory": "res://Samples/AuthoredBattle/Dialogue",
+  "portraits": [
+    {
+      "id": 2,
+      "uri": "res://Samples/AuthoredBattle/Dialogue/Portrait-002.tres"
+    },
+    {
+      "id": 5,
+      "uri": "res://Samples/AuthoredBattle/Dialogue/Portrait-005.tres"
+    },
+    {
+      "id": 15,
+      "uri": "res://Samples/AuthoredBattle/Dialogue/Portrait-015.tres"
+    }
+  ],
+  "visual": {
+    "roleId": 0,
+    "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",
+    "playerPosition": [
+      200,
+      176
+    ],
+    "paletteUri": "res://Samples/AuthoredBattle/Static/Palette.tres",
+    "teams": [
+      {
+        "teamId": 18,
+        "backgroundUri": "res://Samples/AuthoredBattle/Visual/Background.tres",
+        "enemySpriteUri": "res://Samples/AuthoredBattle/Visual/Enemy.tres",
+        "enemies": [
+          {
+            "targetId": 7,
+            "enemyPosition": [
+              100,
+              120
+            ]
+          },
+          {
+            "targetId": 7,
+            "enemyPosition": [
+              128,
+              104
+            ]
+          }
+        ],
+        "idleFrames": 1,
+        "magicFrames": 1,
+        "attackFrames": 1,
+        "actWaitFrames": 0,
+        "idleAnimSpeed": 2
+      }
+    ],
+    "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
+    "attackEffectIndex": 0,
+    "numberSpriteUri": "res://Samples/AuthoredBattle/Visual/Numbers.tres"
+  }
+}

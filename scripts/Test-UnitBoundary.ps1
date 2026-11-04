@@ -17,6 +17,9 @@ $production = @{
 function Test-ProjectShape([string]$Path, [xml]$Xml) {
     $allowedProperties = @('TargetFramework', 'ImplicitUsings', 'Nullable', 'IsPackable', 'IsTestProject', 'OutputType')
     $allowedPackages = @('Microsoft.NET.Test.Sdk', 'xunit', 'xunit.runner.visualstudio')
+    # Only the InternalsVisibleToAttribute assembly attribute (friend assembly for Pal.Extract) is allowed;
+    # any other AssemblyAttribute keeps failing this allowlist.
+    $allowedAssemblyAttributes = @('System.Runtime.CompilerServices.InternalsVisibleToAttribute')
     if ($Xml.DocumentElement.Name -cne 'Project' -or $Xml.DocumentElement.NamespaceURI -or $Xml.Project.Sdk -cne 'Microsoft.NET.Sdk') {
         Fail 'project-shape' "$Path requires the ordinary Microsoft.NET.Sdk project shape"
     }
@@ -26,6 +29,7 @@ function Test-ProjectShape([string]$Path, [xml]$Xml) {
             ProjectReference { @('Include') }
             PackageReference { @('Include', 'Version') }
             Compile { @('Include', 'Link') }
+            AssemblyAttribute { @('Include') }
             default { @() }
         }
         foreach ($attribute in $node.Attributes) {
@@ -38,13 +42,17 @@ function Test-ProjectShape([string]$Path, [xml]$Xml) {
             '#document' { $node.Name -ceq 'Project' }
             Project { $node.Name -cin @('PropertyGroup', 'ItemGroup') }
             PropertyGroup { $node.Name -cin $allowedProperties -and -not [string]::IsNullOrWhiteSpace($node.InnerText) -and $node.InnerText -notmatch '[$@]' -and $node.SelectNodes('*').Count -eq 0 }
-            ItemGroup { $node.Name -cin @('ProjectReference', 'PackageReference', 'Compile') }
+            ItemGroup { $node.Name -cin @('ProjectReference', 'PackageReference', 'Compile', 'AssemblyAttribute') }
             PackageReference { $node.Name -cin @('PrivateAssets', 'IncludeAssets') -and $node.SelectNodes('*').Count -eq 0 -and $node.InnerText -notmatch '[$@]' }
+            AssemblyAttribute { $node.Name -ceq '_Parameter1' -and $node.SelectNodes('*').Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($node.InnerText) -and $node.InnerText -notmatch '[$@]' }
             default { $false }
         }
         if (-not $supported) { Fail 'project-shape' "$Path unsupported project element: $($node.Name)" }
         if ($node.Name -ceq 'PackageReference' -and ($node.Include -cnotin $allowedPackages -or $node.Version -notmatch '^\d[\w.+-]*$')) {
             Fail 'project-shape' "$Path unapproved package dependency: $($node.Include)"
+        }
+        if ($node.Name -ceq 'AssemblyAttribute' -and $node.Include -cnotin $allowedAssemblyAttributes) {
+            Fail 'project-shape' "$Path unapproved assembly attribute: $($node.Include)"
         }
     }
     $directory = Split-Path $Path -Parent
@@ -94,9 +102,15 @@ function Test-UnitSources([string]$Path, [xml]$Xml) {
         $include = $compile.GetAttribute('Include')
         if (-not $include -or $include -match '[$*?;]') { Fail 'source-selection' "$Path requires literal explicit Compile Include" }
         $linkedPath = [IO.Path]::GetFullPath((Join-Path $directory $include))
-        $allowedLink = [IO.Path]::GetFullPath((Join-Path $root 'tests/Pal.Extract.Tests/Fixtures/Yj2TestData.cs'))
-        if ($linkedPath -ne $allowedLink -or $compile.GetAttribute('Link') -ne 'Fixtures/Yj2TestData.cs') {
-            Fail 'source-selection' "$Path only permits the explicit pure Yj2TestData source link, not: $include"
+        # Allowed explicit Compile links are pure shared fixtures only; every linked file is still
+        # scanned by Test-Source below. Yj2TestData is the CLI chunk fixture; BattleContextTestFixture
+        # is the in-memory battle context author document shared by Core unit tests.
+        $allowedLinks = @(
+            @{ Path = [IO.Path]::GetFullPath((Join-Path $root 'tests/Pal.Extract.Tests/Fixtures/Yj2TestData.cs')); Link = 'Fixtures/Yj2TestData.cs' }
+            @{ Path = [IO.Path]::GetFullPath((Join-Path $root 'tests/Fixtures/BattleContextTestFixture.cs')); Link = 'BattleContextTestFixture.cs' }
+        )
+        if (-not (@($allowedLinks | Where-Object { $_.Path -ieq $linkedPath -and $_.Link -ceq $compile.GetAttribute('Link') }))) {
+            Fail 'source-selection' "$Path only permits the explicit pure shared fixture links, not: $include"
         }
         $sources += $linkedPath
     }
@@ -135,8 +149,20 @@ try {
         if ($references.Count -ne 1) { Fail 'project-reference' "$path must reference exactly $expected" }
         if (-not [IO.File]::Exists($expected)) { Fail 'project-missing' "Missing production project: $expected" }
         $productionXml = Read-Project $expected
-        if ($productionXml.SelectNodes('//ProjectReference').Count -ne 0) {
-            Fail 'project-reference' "$expected has an unapproved transitive project reference"
+        # Approved production-to-production references keep the unit closure pure .NET:
+        # Pal.Core must stay self-contained; the Pal.Extract CLI may reference only Pal.Core.
+        $approvedProductionReferences = @{
+            core = @()
+            'cli-unit' = @([IO.Path]::GetFullPath((Join-Path $root 'src/Pal.Core/Pal.Core.csproj')))
+        }
+        $approved = @($approvedProductionReferences[$name] | ForEach-Object { [string]$_ })
+        foreach ($reference in @($productionXml.SelectNodes('//ProjectReference'))) {
+            $include = $reference.GetAttribute('Include')
+            if ($include -match '[$*?;]') { Fail 'project-reference' "$expected has a nonliteral production reference: $include" }
+            $resolved = [IO.Path]::GetFullPath((Join-Path (Split-Path $expected -Parent) $include))
+            if ($resolved -cnotin $approved) {
+                Fail 'project-reference' "$expected has an unapproved transitive project reference: $include"
+            }
         }
         $sourceCount = Test-UnitSources $path $xml
         Write-Output "PASS unit-boundary: $name ($sourceCount sources inspected; explicit production reference checked)"

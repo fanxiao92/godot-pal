@@ -39,7 +39,7 @@ dotnet run --project tools/Pal.Extract -- extract-dialogue `
 
 首条正文出现前，以 `:`、`U+FF1A` 或 `U+2236` 结尾的消息按 `PAL_ShowDialogText` 识别为说话人名称：立即显示、不消耗正文行数或逐字时间，也不改变继承的正文颜色和速度。名称按 `PAL_UnescapeText` 处理：不含反斜线时原样保留；含反斜线时保留被转义的字符，同时移除未转义的 `- ' @ " $ ~ ) (`（只移除控制符本身，不消费其后数字）。这不是执行正文颜色/速度控制。有画像时名称锚点为(80,8)、固定颜色`0x8C`，正文起点仍为(96,26)；无画像时名称/正文起点分别为(12,8)/(44,26)。原始消息引用及条目数不变，不能把目标的“名称＋正文”当成两条正文。公开快照保留既有`VisibleText`/`VisibleRuns`当前文字语义，另以`TitleText`和不可变`VisibleLines`表达应持续呈现的名称与页面正文；等待提示使用末条可见正文的位置，而不是已递增的下一行计数。CLEAR/翻页恢复时清除正文页面并保留名称，完成时清除名称、正文和画像覆盖层。
 
-SDLPal `~NN` 在普通消息中先延时 `NN*80/7ms`，然后提前返回并重置当前行；这条带时序/返回状态的控制在本窄切片中明确拒绝，不声称支持。#23 目标 start61/span1 两语言消息中均未出现 `~` 控制（离线核对只读取控制计数，未输出消息内容）。Core 不访问文件、Godot 输入、纹理或节点。
+SDLPal `~NN` 在普通消息中先延时 `NN*80/7ms`，然后提前返回并重置当前行。M4 扩展（text.c:1542-1557）已实现 dialog 模式下该控制的忠实语义：跳过行内延时并提前结束当前行；其余模式语义不变。#23 目标 start61/span1 两语言消息中均未出现 `~` 控制（离线核对只读取控制计数，未输出消息内容）。Core 不访问文件、Godot 输入、纹理或节点。
 
 SDLPal 依据：`text.c` 的 `PAL_ReadMessageFile` / `PAL_GetMsgNum` 保留消息索引跨度和 CLEAR；`script.c` 的 `MESSAGE_GetSpan` 把相邻连续 `0xFFFF` 命令归入块；`PAL_ShowDialogText` 调用 `TEXT_DisplayText(..., FALSE)`，后者决定逐字、颜色控制、默认延迟、按键加速和翻页；等待状态每100ms轮转调色板索引 `0xF9..0xFE`，在该检查边界遇到任何参考映射逻辑键的新press后恢复原调色板。`font.c` 的字形取位、字宽/行高、阴影和 `PAL_StartDialogWithOffset` 的头像/文字锚点是显示层来源；`input.c` 将 Return/Space/keypad Enter/Left Ctrl 映射为搜索，Escape/Insert/Alt/keypad 0 映射为菜单。正文加速仅搜索/菜单；等待还包括方向及keypad对应键、PageUp/PageDown/Home/End及r/a/d/e/w/q/f/s。未映射键/echo/Right Ctrl不推进。不能用 `ui_accept` 替代此输入集合。
 

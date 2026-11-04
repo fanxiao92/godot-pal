@@ -122,7 +122,7 @@ try {
     if ($Filter -and ($Scope.Count -ne 1 -or $Scope[0] -ceq 'prepare')) { Fail 'filter-scope' 'Filter requires one CLI integration or Game scope; Prepare does not accept filters.' }
     $filterValue = if ($Filter) { $Filter.Substring($Filter.IndexOfAny([char[]]'=~') + 1) } else { '' }
     $batches = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($b in $GameBatch) { if ($b -cnotin @('process','scene-dialogue','native-map') -or -not $batches.Add($b)) { Fail 'selection' "Unknown/empty/duplicate GameBatch '$b'." } }
+    foreach ($b in $GameBatch) { if ($b -cnotin @('process','scene-dialogue','native-map','scene-realfull') -or -not $batches.Add($b)) { Fail 'selection' "Unknown/empty/duplicate GameBatch '$b'." } }
     if (('game' -cin $Scope) -ne ($GameBatch.Count -gt 0)) { Fail 'batch-scope' 'Game requires explicit positive GameBatch selection; other scopes do not accept batches.' }
     if (-not $RepositoryRoot -or -not [IO.Directory]::Exists($RepositoryRoot)) { Fail 'project-missing' 'RepositoryRoot must exist.' }
     $root = [IO.Path]::GetFullPath($RepositoryRoot); $report.repositoryRoot = $root
@@ -217,7 +217,7 @@ try {
             $snapshot = @{ all = $plan.inventory; selected = $selectedInventory; actualFilter = $actualFilter }
         } else {
             $discovery = Read-Version7Discovery -Name $s -DiagnosticPath $diag -Assembly $assembly
-            if ($s -ceq 'prepare' -and $discovery.total -ne 52) { Fail 'discovery' "Prepare must discover exactly the 52 approved cases, got $($discovery.total)." }
+            if ($s -ceq 'prepare' -and $discovery.total -ne 89) { Fail 'discovery' "Prepare must discover exactly the 89 approved cases, got $($discovery.total)." }
             $selected = @($discovery.cases | Where-Object { Match-Method $_.FullyQualifiedName })
             if (-not $selected.Count) { Fail 'filter-empty' 'No independent discovered cases match the selected filter.' }
             $expected = @($selected.Id)
@@ -228,6 +228,13 @@ try {
         $args = @('test', $project, '--configuration', 'Debug', '--no-build', '--no-restore', '--logger', 'trx;LogFileName=results.trx', '--results-directory', (Join-Path $out $s))
         if ($s -ceq 'game') { $args += @('--settings', (Join-Path $root 'tests/Pal.Game.Tests/game.runsettings')) }
         if ($actualFilter) { $args += @('--filter', $actualFilter) }
+        if ($s -ceq 'game') {
+            # Selected batches may pin a longer session timeout than the shared 120s default;
+            # the override rides the CLI runsettings argument tail, never a settings file, and
+            # stays after --filter so the filter remains a dotnet argument.
+            $sessionTimeout = [int](@($plan.batches | Where-Object { $batches.Contains($_.name) } | ForEach-Object { [int]$_.sessionTimeoutMs }) | Measure-Object -Maximum).Maximum
+            if ($sessionTimeout -gt 120000) { $args += @('--', "RunConfiguration.TestSessionTimeout=$sessionTimeout") }
+        }
         $runnerAdded = $false
         if ($s -ceq 'game') {
             $runner = Join-Path $root 'src/Pal.Game/gdunit4_testadapter_v5/GdUnit4TestRunnerScene.cs'

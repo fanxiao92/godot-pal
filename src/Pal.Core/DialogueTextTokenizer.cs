@@ -50,7 +50,11 @@ public static class DialogueTextTokenizer
                 case '"': color = Toggle(color, YellowColor); continue;
                 case ')':
                 case '(': continue;
-                case '~': throw new InvalidDataException("The '~' timed early-return control is not supported by this dialogue display slice.");
+                case '~':
+                    // text.c 1542-1557: in-dialog '~' ends the current line early ("don't go
+                    // further"); the following timing digits only delay non-dialog printing.
+                    while (index < text.Length && char.IsAsciiDigit(text[index])) index++;
+                    return new DialogueTextLine(Array.AsReadOnly(tokens.ToArray()), color, delay, GetPromptFrame(text));
                 case '$':
                     if (index + 1 >= text.Length || !char.IsAsciiDigit(text[index]) || !char.IsAsciiDigit(text[index + 1]))
                         throw new InvalidDataException("The '$' delay control requires exactly two decimal digits.");

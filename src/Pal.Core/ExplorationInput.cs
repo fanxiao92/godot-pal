@@ -43,6 +43,9 @@ public sealed class ExplorationInput
         if ((heldKeys & (3 << (direction * 2))) == 0) directionOrder.Remove(direction);
     }
 
+    /// <summary>Pure deadline preflight; does not advance the exploration session.</summary>
+    public bool IsUpdateDue(uint ticksMilliseconds) => session.IsUpdateDue(ticksMilliseconds);
+
     public bool Update(uint ticksMilliseconds) => session.Update(ticksMilliseconds,
         directionOrder.Count == 0 ? null : directionOrder[^1]);
 

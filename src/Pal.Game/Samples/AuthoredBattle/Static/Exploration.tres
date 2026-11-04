@@ -1,0 +1,37 @@
+[gd_resource type="Resource" script_class="PalExplorationProfile" format=3]
+
+[ext_resource type="Script" path="res://Scripts/Resources/PalExplorationStart.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalWalkFramesSource.cs" id="2"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalExplorationLeader.cs" id="3"]
+[ext_resource type="Script" path="res://Scripts/Resources/PalExplorationProfile.cs" id="4"]
+
+[sub_resource type="Resource" id="s0"]
+script = ExtResource("1")
+X = 320
+Y = 320
+Direction = 0
+Layer = 0
+StepPhase = 0
+
+[sub_resource type="Resource" id="s1"]
+script = ExtResource("2")
+Archive = "data.mkf"
+Sha256 = "d2de7a6df3fb0dc683e143fc57d8f305201766b384b5cebcf011953cfb220e9a"
+Chunk = 3
+ByteOffset = 768
+RoleId = 0
+Field = "rgwWalkFrames"
+
+[sub_resource type="Resource" id="s2"]
+script = ExtResource("3")
+RoleId = 0
+WalkFramesWord = 3
+WalkFramesSource = SubResource("s1")
+
+[resource]
+script = ExtResource("4")
+FormatVersion = 1
+SceneId = 1
+BundleSha256 = "a6e7c2b10e379bfc6cd34898302d49ab8a9a81e5b91fd035f5a5b9b241d638fc"
+Start = SubResource("s0")
+Leader = SubResource("s2")

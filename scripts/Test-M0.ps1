@@ -51,7 +51,9 @@ try {
 
     # Existing dotnet boundary now preserves numeric outcomes, timeout and raw output.
     . (Join-Path $PSScriptRoot 'DotnetCheckedDefinition.ps1')
-    function Assert-Trx([string]$Directory, [int[]]$Passed, [int[]]$Skipped, [int]$Failed = 0, [string]$FileName = '*.trx') {
+    # Definitions only: supplies the per-row xUnit TRX identity reader for non-Game projects.
+    . (Join-Path $PSScriptRoot 'TestRunDefinitions.ps1')
+    function Assert-Trx([string]$Directory, [int[]]$Passed, [int[]]$Skipped, [int]$Failed = 0, [string]$FileName = '*.trx', [string]$Assembly) {
         $files = @(Get-ChildItem -LiteralPath $Directory -Filter $FileName)
         if ($files.Count -ne $Passed.Count) { throw "Expected $($Passed.Count) TRX files, got $($files.Count) in $Directory" }
         $actual = @()
@@ -86,7 +88,10 @@ try {
                 'Pal.Extract.Tests.ExportMapCliTests.Export_map_rejects_case_ambiguous_archives',
                 'Pal.Extract.Tests.InspectCliTests.Inspect_rejects_ambiguous_case_insensitive_names'
             ))) { throw "Unexpected skipped tests: $($file.Name)" }
-            $identity = Read-TestRunIdentity $file.FullName
+            # Non-Game xUnit TRX uses the per-row identity reader: the pinned xUnit adapter
+            # may collapse a multi-case theory to one definition (per-case rows/entries),
+            # which the strict 1:1:1 graph cannot express. Game/GdUnit TRX keeps that strict graph.
+            $identity = if ($Assembly) { Read-XUnitTrxIdentity $file.FullName $Assembly } else { Read-TestRunIdentity $file.FullName }
             if (-not $runIds.Add($identity.runId)) { throw "Reused test run identity: $($file.Name)" }
             foreach ($id in $identity.executionIds) {
                 if (-not $executionIds.Add($id)) { throw "Reused execution identity: $($file.Name)" }
@@ -109,8 +114,15 @@ try {
         $roundResults = [Collections.Generic.List[object]]::new()
         foreach ($batch in $gamePlan.batches) {
             $fileName = "game-$($batch.name).trx"
-            $null = Invoke-DotnetChecked @('test', $gameProject.path, '--no-build', '--no-restore', '--filter', $batch.filter,
+            # A batch may pin a longer session timeout than the shared 120s wall; the override
+            # rides the CLI runsettings argument tail after --filter, never a settings file
+            # (same mechanism as Test-Range).
+            $arguments = @('test', $gameProject.path, '--no-build', '--no-restore', '--filter', $batch.filter,
                 '--logger', "trx;LogFileName=$fileName", '--results-directory', $Directory)
+            if ([int]$batch.sessionTimeoutMs -gt 120000) {
+                $arguments += @('--', "RunConfiguration.TestSessionTimeout=$($batch.sessionTimeoutMs)")
+            }
+            $null = Invoke-DotnetChecked $arguments
             Assert-Trx $Directory @($batch.count) @(0) -FileName $fileName
             $identity = Assert-GameBatch (Join-Path $Directory $fileName) $batch.expected
             $result = @{ round = $Round; name = $batch.name; tests = $identity.names; runId = $identity.runId; trx = Join-Path $Directory $fileName; filter = $batch.filter }
@@ -132,7 +144,11 @@ try {
     foreach ($project in $projects) {
         $fileName = "$($project.name).trx"
         $null = Invoke-DotnetChecked @('test', $project.path, '--no-build', '--no-restore', '--logger', "trx;LogFileName=$fileName", '--results-directory', $solutionResults)
-        Assert-Trx $solutionResults @($project.passed) @($project.skipped) -FileName $fileName
+        [xml]$projectFile = Get-Content -LiteralPath (Join-Path $repository $project.path) -Raw
+        $framework = @($projectFile.Project.PropertyGroup.TargetFramework | Where-Object { $_ })[0]
+        if (-not $framework) { throw "Missing TargetFramework for $($project.path)." }
+        $expectedAssembly = Join-Path $repository ((Split-Path $project.path -Parent) + "/bin/Debug/$framework/$([IO.Path]::GetFileNameWithoutExtension($project.path)).dll")
+        Assert-Trx $solutionResults @($project.passed) @($project.skipped) -FileName $fileName -Assembly $expectedAssembly
     }
     Invoke-GameRound 'solution' $solutionResults
     $list = Invoke-DotnetChecked @('test', $gameProject.path, '--no-build', '--no-restore', '--list-tests')
@@ -165,11 +181,11 @@ try {
     $trxFiles = foreach ($directory in @('solution', 'game', 'game-repeat', 'IntentionalAssertionMismatch', 'IntentionalTimeout', 'NativeReadyException')) {
         Get-ChildItem -LiteralPath (Join-Path $evidence $directory) -Filter '*.trx' | ForEach-Object FullName
     }
-    if ($checks.Count -ne 16 -or $completedBatches.Count -ne 9) { throw 'Incomplete gate: expected 16 TRX and 9 Game batches.' }
+    if ($checks.Count -ne 37 -or $completedBatches.Count -ne 30) { throw 'Incomplete gate: expected 37 TRX and 30 Game batch results.' }
     Assert-ExactTestNames @($trxFiles) @($checks.trx) 'Complete gate TRX files'
     & (Join-Path $PSScriptRoot 'Test-GameStartup.ps1') -GodotPath $GodotPath -LogDirectory (Join-Path $evidence 'godot')
     Save-ProcessSnapshot 'processes-final'
-    'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 328; CLI unit 142; CLI integration 188 + 2 existing platform skips; Prepare 52; Godot source/discovery 245; positives 242 as serial 66/79/97 in each of three complete rounds; 16 identity-verified TRX; three separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate.' |
+    Get-GatePassSummary $gamePlan |
         Set-Content (Join-Path $evidence 'PASS.txt')
     Write-Host 'PASS: automated M0/M2/M3 acceptance completed. Graphical/manual acceptance is separate.'
 } finally {

@@ -26,6 +26,308 @@ public sealed class EventCliTests : IDisposable
     }
 
     [Fact]
+    public async Task StartBattle_export_roundtrip_and_semantic_edits_use_resolved_targets_not_source_words()
+    {
+        byte[] original = Words(7, 65535, 0, 0, 7, 18, 4, 3, 0x0086, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(5, commands.Count);
+        Assert.Equal("startBattle", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(65535, commands[0]!["teamId"]!.GetValue<int>());
+        Assert.True(commands[0]!["isBoss"]!.GetValue<bool>());
+        Assert.Null(commands[0]!["lossTarget"]);
+        Assert.Null(commands[0]!["fleeTarget"]);
+        Assert.Equal("L0004", commands[1]!["lossTarget"]!.GetValue<string>());
+        Assert.Equal("L0003", commands[1]!["fleeTarget"]!.GetValue<string>());
+        Assert.False(commands[1]!["isBoss"]!.GetValue<bool>());
+        Assert.Equal("L0002", commands[1]!["next"]!.GetValue<string>());
+        Assert.Equal(new[] { 18, 4, 3 }, commands[1]!["source"]!["operands"]!.AsArray().Select(n => n!.GetValue<int>()));
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt));
+
+        // Split the target into another file, preserving the complete address array and source.
+        var last = commands[4]!.DeepClone();
+        commands.RemoveAt(4);
+        commands[3]!["next"] = "targets#L0004";
+        commands[0]!["teamId"] = 19;
+        commands[0]!["lossTarget"] = "targets#L0004";
+        commands[0]!["isBoss"] = false;
+        commands[0]!["fleeTarget"] = "L0001";
+        commands[1]!["teamId"] = 20;
+        commands[1]!["lossTarget"] = null;
+        commands[1]!["isBoss"] = true;
+        commands[1]!["fleeTarget"] = null;
+        var targets = new System.Text.Json.Nodes.JsonObject { ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "targets",
+            ["entries"] = new System.Text.Json.Nodes.JsonArray(), ["commands"] = new System.Text.Json.Nodes.JsonArray(last) };
+        var index = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(exported, "index.json")))!;
+        index["files"] = new System.Text.Json.Nodes.JsonArray("shared", "targets");
+        File.WriteAllText(Path.Combine(exported, "index.json"), index.ToJsonString());
+        File.WriteAllText(Path.Combine(exported, "targets.json"), targets.ToJsonString());
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(7, 19, 4, 1, 7, 20, 0, 0, 0x0086, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+    }
+
+    [Fact]
+    public async Task Legacy_raw7_package_rebuilds_without_a_named_mapping_migration()
+    {
+        byte[] original = Words(0x0086, 0, 65535, 8, 7, 18, 65535, 0, 0, 7, 8, 9);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0086, 0, 65535, 8, 0x0086, 18, 65535, 0, 0, 7, 8, 9));
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        events["commands"]![1]!["source"]!["opcode"] = 7;
+        File.WriteAllText(path, events.ToJsonString());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // Legacy raw operands are not interpreted as references.
+    }
+
+    [Theory]
+    [InlineData("team-negative")]
+    [InlineData("team-overflow")]
+    [InlineData("team-type")]
+    [InlineData("boss-type")]
+    [InlineData("boss-flee")]
+    [InlineData("nonboss-null")]
+    [InlineData("loss-zero")]
+    [InlineData("flee-zero")]
+    [InlineData("loss-dangling")]
+    [InlineData("flee-dangling")]
+    [InlineData("loss-malformed")]
+    [InlineData("flee-type")]
+    [InlineData("unknown-field")]
+    [InlineData("missing-field")]
+    [InlineData("opcode")]
+    [InlineData("ffff-outside")]
+    [InlineData("duplicate-key")]
+    public async Task StartBattle_at_true_chunk_end_rejects_invalid_fields_and_result_references_without_output(string fault)
+    {
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0086, 0, 65535, 8, 7, 18, 0, 0));
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var command = events["commands"]![1]!.AsObject();
+        switch (fault)
+        {
+            case "team-negative": command["teamId"] = -1; break;
+            case "team-overflow": command["teamId"] = 65536; break;
+            case "team-type": command["teamId"] = "18"; break;
+            case "boss-type": command["isBoss"] = 1; break;
+            case "boss-flee": command["fleeTarget"] = "L0001"; break;
+            case "nonboss-null": command["isBoss"] = false; break;
+            case "loss-zero": command["lossTarget"] = "L0000"; break;
+            case "flee-zero": command["isBoss"] = false; command["fleeTarget"] = "shared#L0000"; break;
+            case "loss-dangling": command["lossTarget"] = "missing#L0001"; break;
+            case "flee-dangling": command["isBoss"] = false; command["fleeTarget"] = "missing"; break;
+            case "loss-malformed": command["lossTarget"] = "shared##L0001"; break;
+            case "flee-type": command["fleeTarget"] = 1; break;
+            case "unknown-field": command["limit"] = 0; break;
+            case "missing-field": command.Remove("lossTarget"); break;
+            case "opcode": command["source"]!["opcode"] = 8; break;
+            case "ffff-outside": command["lossTarget"] = "LFFFF"; break;
+        }
+        string text = events.ToJsonString();
+        if (fault == "duplicate-key") text = text.Replace("\"teamId\":18", "\"teamId\":18,\"teamId\":19");
+        File.WriteAllText(path, text);
+        var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(1, result.ExitCode);
+        Assert.NotEmpty(result.Stderr);
+        Assert.False(File.Exists(rebuilt));
+    }
+
+    [Fact]
+    public async Task Role_hook_verbs_export_decode_semantic_edit_and_rebuild_roundtrip()
+    {
+        // Original authored stream in the #49 role-hook shape: random bands, dialog contexts and
+        // per-WORD effects; not retail data. Four-WORD rows are little-endian.
+        byte[] original = Words(
+            6, 75, 2, 0,        // randomJump rate 75 -> @2
+            61, 0, 5, 0,        // setDialog lower, no portrait, color 5
+            0xffff, 101, 0, 0,  // showDialog 101
+            27, 0, 9999, 0,     // changeHp caller +9999
+            48, 17, 5, 0,       // boostStat attack +5% of the caller
+            62, 15, 0, 0,       // setDialog centerWindow color 15
+            0xffff, 102, 0, 0,
+            28, 0, 9999, 0,     // changeMp caller +9999
+            0, 0, 0, 0);        // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal("randomJump", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(75, commands[0]!["rate"]!.GetValue<int>());
+        Assert.Equal("L0002", commands[0]!["to"]!.GetValue<string>());
+        Assert.Equal("setDialog", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("lower", commands[1]!["box"]!.GetValue<string>());
+        Assert.Equal(5, commands[1]!["color"]!.GetValue<int>());
+        Assert.Equal("changeHp", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(9999, commands[3]!["amount"]!.GetValue<int>());
+        Assert.Equal("boostStat", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(17, commands[4]!["field"]!.GetValue<int>());
+        Assert.Equal(5, commands[4]!["percent"]!.GetValue<int>());
+        Assert.Equal(0, commands[4]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("setDialog", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal("centerWindow", commands[5]!["box"]!.GetValue<string>());
+        Assert.Equal("changeMp", commands[7]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt));
+
+        // Semantic edits re-encode from fields, not source words: a new band rate, a larger heal,
+        // a negative percent and a re-targeted jump all rewrite their WORDs.
+        commands[0]!["rate"] = 50;
+        commands[0]!["to"] = "L0006";
+        commands[3]!["amount"] = -300;
+        commands[4]!["percent"] = -25;
+        commands[4]!["field"] = 20;
+        commands[7]!["scope"] = 1;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Equal(Words(
+            6, 50, 6, 0,
+            61, 0, 5, 0,
+            0xffff, 101, 0, 0,
+            27, 0, 65236, 0,
+            48, 20, 65511, 0,
+            62, 15, 0, 0,
+            0xffff, 102, 0, 0,
+            28, 1, 9999, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+    }
+
+    [Theory]
+    [InlineData("rate-overflow")]
+    [InlineData("rate-type")]
+    [InlineData("to-dangling")]
+    [InlineData("amount-overflow")]
+    [InlineData("percent-type")]
+    [InlineData("field-missing")]
+    [InlineData("raw-registered")]
+    [InlineData("wrong-opcode")]
+    [InlineData("unknown-field")]
+    public async Task Role_hook_verbs_validate_strictly_on_rebuild(string fault)
+    {
+        byte[] original = Words(6, 75, 2, 0, 27, 0, 9999, 0);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var command = events["commands"]![0]!.AsObject();
+        switch (fault)
+        {
+            case "rate-overflow": command["rate"] = 65536; break;
+            case "rate-type": command["rate"] = "75"; break;
+            case "to-dangling": command["to"] = "L0009"; break;
+            case "amount-overflow": events["commands"]![1]!["amount"] = 32768; break;
+            case "percent-type": events["commands"]![1] = null; break;
+            case "field-missing": events["commands"]![1]!.AsObject().Remove("amount"); break;
+            case "raw-registered": events["commands"]![1] = new System.Text.Json.Nodes.JsonObject { ["label"] = "L0001", ["op"] = "raw", ["next"] = "L0002", ["source"] = new System.Text.Json.Nodes.JsonObject { ["index"] = 1, ["opcode"] = 27, ["operands"] = new System.Text.Json.Nodes.JsonArray(0, 9999, 0) } }; break;
+            case "wrong-opcode": command["source"]!["opcode"] = 28; break;
+            case "unknown-field": command["limit"] = 0; break;
+        }
+        File.WriteAllText(path, events.ToJsonString());
+        var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.Equal(1, result.ExitCode);
+        Assert.NotEmpty(result.Stderr);
+        Assert.False(File.Exists(rebuilt));
+    }
+
+    [Theory]
+    [InlineData(65535, 0)]
+    [InlineData(0, 65535)]
+    public async Task StartBattle_export_rejects_result_targets_outside_the_actual_chunk(int loss, int flee)
+    {
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 0, 0, 0), [], [], Words(7, 18, loss, flee));
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.Equal(1, export.ExitCode);
+        Assert.Contains("startBattle @0000 result target is outside chunk 4", export.Stderr);
+        Assert.False(Directory.Exists(exported));
+    }
+
+    [Fact]
+    public async Task Export_names_runtime_registered_verbs_and_rebuilds_original_chunk4_exactly()
+    {
+        // One row per runtime-registered verb family, including the retail waitUpdate shape
+        // whose truthy operands are 0/0xFFFF and a negative setState SHORT.
+        byte[] original = Words(
+            0x43, 34, 0, 0,
+            9, 12, 0, 65535,
+            0x0f, 2, 0, 0,
+            0x0b, 0, 0, 0,
+            0x10, 9, 21, 0,
+            0x46, 10, 20, 0,
+            0x15, 3, 0, 0,
+            0x49, 2, unchecked((int)0xff85), 0,
+            0x52, 15, 0, 0,
+            0x40, 1, 0, 0,
+            0x6d, 1, 0, 18,
+            0x90, 777, 18, 4,
+            0x73, 1, 0, 0,
+            5, 1, 0, 0,
+            0x41, 0, 0, 0,
+            0x4f, 0, 0, 0,
+            0x4e, 0, 0, 0,
+            0x13, 28, 1280, 256,
+            0x14, 3, 0, 0,
+            0x1d, 1, 9999, 0,
+            0x22, 1, 10, 0,
+            0x24, 28, 4242, 0,
+            0x25, 28, 2500, 0,
+            0x4a, 24, 0, 0,
+            0x50, 0, 0, 0,
+            0x75, 1, 2, 0,
+            0x78, 0, 0, 0,
+            0x9a, 1, 5, 2,
+            0, 0, 0, 0);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        using var events = JsonDocument.Parse(File.ReadAllText(Path.Combine(exported, "shared.json")));
+        var commands = events.RootElement.GetProperty("commands");
+        string[] ops = commands.EnumerateArray().Select(c => c.GetProperty("op").GetString()).ToArray();
+        Assert.Equal(new[] { "setMusic", "waitUpdate", "face", "walkStep", "walkTo", "setPartyPos", "setPartyFacing",
+            "setState", "hide", "setTriggerMode", "setSceneScripts", "setObjectScript", "fadeScene", "redraw",
+            "markFailed", "fadeToRed", "requestReload",
+            "setObjectPosition", "setObjectGesture", "changeHpMp", "revivePlayer", "setAutoEntry", "setTriggerEntry",
+            "setBattlefield", "fadeOut", "setParty", "noop", "setStateRange", "end" }, ops);
+        var wait = commands[1];
+        Assert.Equal(12, wait.GetProperty("frames").GetInt32());
+        Assert.Equal(0, wait.GetProperty("runTriggers").GetInt32());
+        Assert.Equal(65535, wait.GetProperty("updateGestures").GetInt32());
+        Assert.Equal(2, commands[2].GetProperty("direction").GetInt32());
+        Assert.Equal(0, commands[3].GetProperty("direction").GetInt32());
+        Assert.Equal(-123, commands[7].GetProperty("state").GetInt32());
+        Assert.Equal(4, commands[11].GetProperty("slotIndex").GetInt32());
+        Assert.Equal(1, commands[12].GetProperty("mode").GetInt32());
+        Assert.Equal(1, commands[13].GetProperty("delayUnits").GetInt32());
+        Assert.Equal(new[] { 28, 1280, 256 }, commands[17].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
+        Assert.Equal(4242, commands[21].GetProperty("entry").GetInt32());
+        Assert.Equal(28, commands[22].GetProperty("objectId").GetInt32());
+        Assert.Equal(2500, commands[22].GetProperty("entry").GetInt32());
+        Assert.Equal(24, commands[23].GetProperty("battlefieldId").GetInt32());
+        Assert.Equal(new[] { 1, 2, 0 }, commands[25].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
+        Assert.Equal(2, commands[27].GetProperty("state").GetInt32());
+
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt));
+    }
+
+    [Fact]
     public async Task Export_events_preserves_complete_script_and_rebuilds_original_chunk4()
     {
         byte[] original = ReadChunk4();
@@ -345,6 +647,8 @@ public sealed class EventCliTests : IDisposable
         byte[] fullScript = new byte[65536 * 8];
         for (int index = 0; index < 65536; index++)
             BinaryPrimitives.WriteUInt16LittleEndian(fullScript.AsSpan(index * 8), 0x0086);
+        // Literal last instruction exercises both FFFF result addresses and WORD next wrap.
+        Words(7, 65535, 65535, 65535).CopyTo(fullScript, 65535 * 8);
         WriteArchive("SSS.MKF", new byte[32], Words(0, 0, 0, 0), Words(0, 0, 0, 0), [], fullScript);
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
@@ -353,6 +657,10 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(65536, commands.GetArrayLength());
         Assert.Equal("L0000", commands[65535].GetProperty("next").GetString());
         Assert.Equal("LFFFF", commands[65534].GetProperty("next").GetString());
+        Assert.Equal("startBattle", commands[65535].GetProperty("op").GetString());
+        Assert.Equal("LFFFF", commands[65535].GetProperty("lossTarget").GetString());
+        Assert.Equal("LFFFF", commands[65535].GetProperty("fleeTarget").GetString());
+        Assert.False(commands[65535].GetProperty("isBoss").GetBoolean());
 
         var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
         Assert.Equal(0, rebuild.ExitCode);

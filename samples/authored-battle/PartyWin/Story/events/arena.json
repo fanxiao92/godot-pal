@@ -1,0 +1,184 @@
+{
+  "formatVersion": 1,
+  "profile": "faithful",
+  "fileId": "arena",
+  "entries": [
+    {
+      "id": "challenge",
+      "owner": {
+        "type": "eventObject",
+        "id": 1
+      },
+      "slot": "wTriggerScript",
+      "kind": "trigger",
+      "target": "L0001",
+      "sourceAddress": 1
+    }
+  ],
+  "commands": [
+    {
+      "label": "L0000",
+      "op": "raw",
+      "next": "L0001",
+      "source": {
+        "index": 0,
+        "opcode": 134,
+        "operands": [
+          0,
+          65535,
+          8
+        ]
+      }
+    },
+    {
+      "label": "L0001",
+      "op": "setDialog",
+      "next": "L0002",
+      "source": {
+        "index": 1,
+        "opcode": 60,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 0,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0002",
+      "op": "showDialog",
+      "next": "L0003",
+      "source": {
+        "index": 2,
+        "opcode": 65535,
+        "operands": [
+          1,
+          0,
+          0
+        ]
+      },
+      "messageId": 1,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0003",
+      "op": "startBattle",
+      "next": "L0004",
+      "source": {
+        "index": 3,
+        "opcode": 7,
+        "operands": [
+          18,
+          7,
+          0
+        ]
+      },
+      "teamId": 18,
+      "lossTarget": "L0007",
+      "isBoss": true,
+      "fleeTarget": null
+    },
+    {
+      "label": "L0004",
+      "op": "setDialog",
+      "next": "L0005",
+      "source": {
+        "index": 4,
+        "opcode": 60,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 0,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0005",
+      "op": "showDialog",
+      "next": "L0006",
+      "source": {
+        "index": 5,
+        "opcode": 65535,
+        "operands": [
+          2,
+          0,
+          0
+        ]
+      },
+      "messageId": 2,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0006",
+      "op": "end",
+      "next": "L0007",
+      "source": {
+        "index": 6,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    },
+    {
+      "label": "L0007",
+      "op": "setDialog",
+      "next": "L0008",
+      "source": {
+        "index": 7,
+        "opcode": 60,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "box": "upper",
+      "portraitId": 0,
+      "color": 0,
+      "rngWord": 0
+    },
+    {
+      "label": "L0008",
+      "op": "showDialog",
+      "next": "L0009",
+      "source": {
+        "index": 8,
+        "opcode": 65535,
+        "operands": [
+          3,
+          0,
+          0
+        ]
+      },
+      "messageId": 3,
+      "descriptionLineWord": 0
+    },
+    {
+      "label": "L0009",
+      "op": "end",
+      "next": null,
+      "source": {
+        "index": 9,
+        "opcode": 0,
+        "operands": [
+          0,
+          0,
+          0
+        ]
+      },
+      "mode": "keep"
+    }
+  ]
+}

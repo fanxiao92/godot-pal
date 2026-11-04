@@ -16,10 +16,20 @@ public partial class PalDialogueLanguage : Resource
     [Export] public string SourceIdentity { get; set; } = "";
     [Export] public Array<PalDialogueMessageRange> Messages { get; set; } = new();
 
+    [Export] public Godot.Collections.Dictionary<int, string> Words { get; set; } = new();
+
+    public IReadOnlyDictionary<int, string> CopyWords()
+    {
+        if (Words is null || Words.Any(x => x.Key is < 0 or > 65535 || x.Value is null))
+            throw new InvalidDataException("Language Words requires WORD IDs and non-null text.");
+        return new System.Collections.ObjectModel.ReadOnlyDictionary<int, string>(Words.ToDictionary(x => x.Key, x => x.Value));
+    }
+
     public DialogueLanguagePackage ToCorePackage()
     {
         if (FormatVersion != 1 || Language is not ("zh-Hans" or "en"))
             throw new InvalidDataException("Dialogue language resource has an unsupported version or identity.");
+        _ = CopyWords();
         var blocks = new List<DialogueMessageBlock>();
         foreach (PalDialogueMessageRange message in Messages)
         {

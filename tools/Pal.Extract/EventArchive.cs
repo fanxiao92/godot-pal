@@ -131,7 +131,7 @@ internal static class EventArchive
                 throw new InvalidDataException($"{String(entry, "id")}: target does not resolve to sourceAddress {sourceAddress:X4}.");
         }
         var bytes = new byte[length];
-        foreach (var pair in allCommands) Encode(pair.Value.Command, bytes.AsSpan(pair.Key * 8, 8));
+        foreach (var pair in allCommands) Encode(pair.Value.Command, pair.Value.FileId, labelsByFile, bytes.AsSpan(pair.Key * 8, 8));
         string expectedHash = String(source, "sha256");
         if (!Regex.IsMatch(expectedHash, @"^[0-9a-f]{64}\z", RegexOptions.CultureInvariant)) throw new InvalidDataException("index.json: sha256 must be lowercase hexadecimal.");
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -147,10 +147,46 @@ internal static class EventArchive
         ushort a = Read(script, offset + 2), b = Read(script, offset + 4), c = Read(script, offset + 6);
         string label = LabelAt(index);
         var result = new JsonObject { ["label"] = label };
-        if (opcode == 0x003c)
+        if (opcode == 0x003b)
+        {
+            result["op"] = "setDialog"; result["box"] = "center";
+            result["color"] = a & 255; result["rngWord"] = c;
+        }
+        else if (opcode == 0x003c)
         {
             result["op"] = "setDialog"; result["box"] = "upper"; result["portraitId"] = a;
             result["color"] = b & 255; result["rngWord"] = c;
+        }
+        else if (opcode == 0x003d)
+        {
+            result["op"] = "setDialog"; result["box"] = "lower"; result["portraitId"] = a;
+            result["color"] = b & 255; result["rngWord"] = c;
+        }
+        else if (opcode == 0x003e)
+        {
+            result["op"] = "setDialog"; result["box"] = "centerWindow";
+            result["color"] = a & 255;
+        }
+        else if (opcode == 6)
+        {
+            result["op"] = "randomJump"; result["rate"] = a; result["to"] = LabelAt(b);
+        }
+        else if (opcode == 27 || opcode == 28)
+        {
+            result["op"] = opcode == 27 ? "changeHp" : "changeMp";
+            result["scope"] = a; result["amount"] = (short)b;
+        }
+        else if (opcode == 48)
+        {
+            result["op"] = "boostStat"; result["field"] = a; result["percent"] = (short)b; result["roleOperand"] = c;
+        }
+        else if (opcode == 7)
+        {
+            if (b != 0 && b >= count || c != 0 && c >= count)
+                throw new InvalidDataException($"SSS.MKF: startBattle @{index:X4} result target is outside chunk 4.");
+            result["op"] = "startBattle"; result["teamId"] = a;
+            result["lossTarget"] = b == 0 ? null : LabelAt(b);
+            result["isBoss"] = c == 0; result["fleeTarget"] = c == 0 ? null : LabelAt(c);
         }
         else if (opcode == 0xffff)
         {
@@ -160,6 +196,37 @@ internal static class EventArchive
         {
             result["op"] = "end"; result["mode"] = "keep";
         }
+        // #51/#52 runtime-registered verbs: retail chunk-4 rows use them heavily, so the faithful
+        // export names them exactly as the runtime strict collection requires.
+        else if (opcode == 0x43) { result["op"] = "setMusic"; result["musicId"] = a; result["mode"] = b; }
+        else if (opcode == 0x4e) { result["op"] = "requestReload"; }
+        else if (opcode == 0x4f) { result["op"] = "fadeToRed"; }
+        else if (opcode == 0x41) { result["op"] = "markFailed"; }
+        else if (opcode >= 0x0b && opcode <= 0x0e) { result["op"] = "walkStep"; result["direction"] = opcode - 0x0b; }
+        else if (opcode == 0x0f) { result["op"] = "face"; result["direction"] = a; result["frame"] = b; }
+        else if (opcode == 0x10) { result["op"] = "walkTo"; result["x"] = a; result["y"] = b; result["h"] = c; }
+        else if (opcode == 0x15) { result["op"] = "setPartyFacing"; result["direction"] = a; result["gesture"] = b; result["memberIndex"] = c; }
+        else if (opcode == 0x40) { result["op"] = "setTriggerMode"; result["objectId"] = a; result["mode"] = b; }
+        else if (opcode == 0x46) { result["op"] = "setPartyPos"; result["x"] = a; result["y"] = b; result["h"] = c; }
+        else if (opcode == 0x49) { result["op"] = "setState"; result["objectId"] = a; result["state"] = (short)b; }
+        else if (opcode == 0x52) { result["op"] = "hide"; result["frames"] = a; }
+        else if (opcode == 0x6d) { result["op"] = "setSceneScripts"; result["sceneId"] = a; result["onEnter"] = b; result["onTeleport"] = c; }
+        else if (opcode == 0x73) { result["op"] = "fadeScene"; result["mode"] = a; }
+        else if (opcode == 0x90) { result["op"] = "setObjectScript"; result["objectId"] = a; result["value"] = b; result["slotIndex"] = c; }
+        else if (opcode == 9) { result["op"] = "waitUpdate"; result["frames"] = a; result["runTriggers"] = b; result["updateGestures"] = c; }
+        else if (opcode == 5) { result["op"] = "redraw"; result["delayUnits"] = a; }
+        // #53 retail verbs (script.c).
+        else if (opcode == 0x13) { result["op"] = "setObjectPosition"; result["objectId"] = a; result["x"] = b; result["y"] = c; }
+        else if (opcode == 0x14) { result["op"] = "setObjectGesture"; result["frame"] = a; }
+        else if (opcode == 0x1d) { result["op"] = "changeHpMp"; result["scope"] = a; result["amount"] = (short)b; }
+        else if (opcode == 0x22) { result["op"] = "revivePlayer"; result["scope"] = a; result["healthTenths"] = b; }
+        else if (opcode == 0x24) { result["op"] = "setAutoEntry"; result["objectId"] = a; result["entry"] = b; }
+        else if (opcode == 0x25) { result["op"] = "setTriggerEntry"; result["objectId"] = a; result["entry"] = b; }
+        else if (opcode == 0x4a) { result["op"] = "setBattlefield"; result["battlefieldId"] = a; }
+        else if (opcode == 0x50) { result["op"] = "fadeOut"; result["frames"] = a; }
+        else if (opcode == 0x75) { result["op"] = "setParty"; result["roleId0"] = a; result["roleId1"] = b; result["roleId2"] = c; }
+        else if (opcode == 0x78) { result["op"] = "noop"; }
+        else if (opcode == 0x9a) { result["op"] = "setStateRange"; result["fromObjectId"] = a; result["toObjectId"] = b; result["state"] = (short)c; }
         else result["op"] = "raw";
         result["next"] = (index + 1 < count || count == 65536) ? LabelAt((index + 1) & 0xffff) : null;
         result["source"] = new JsonObject
@@ -198,7 +265,7 @@ internal static class EventArchive
         });
     }
 
-    private static void Encode(JsonObject command, Span<byte> destination)
+    private static void Encode(JsonObject command, string fileId, IReadOnlyDictionary<string, Dictionary<string, int>> labelsByFile, Span<byte> destination)
     {
         var source = Required(command, "source");
         ushort opcode = checked((ushort)Int(source, "opcode"));
@@ -207,21 +274,183 @@ internal static class EventArchive
         string op = String(command, "op");
         if (op == "raw") { }
         else if (opcode == 0 && op == "end" && String(command, "mode") == "keep") { }
+        else if (opcode == 0x003b && op == "setDialog" && String(command, "box") == "center")
+        {
+            WriteDialogColor(command, ref a);
+            c = checked((ushort)Int(command, "rngWord"));
+        }
         else if (opcode == 0x003c && op == "setDialog" && String(command, "box") == "upper")
         {
             a = checked((ushort)Int(command, "portraitId"));
-            int color = Int(command, "color");
-            if (color is < 0 or > 255) throw new InvalidDataException("setDialog.color must be 0..255.");
-            b = (ushort)((b & 0xff00) | color);
-            _ = checked((ushort)Int(command, "rngWord"));
-            c = (ushort)Int(command, "rngWord");
+            b = EncodeDialogColor(command, b);
+            c = checked((ushort)Int(command, "rngWord"));
+        }
+        else if (opcode == 0x003d && op == "setDialog" && String(command, "box") == "lower")
+        {
+            a = checked((ushort)Int(command, "portraitId"));
+            b = EncodeDialogColor(command, b);
+            c = checked((ushort)Int(command, "rngWord"));
+        }
+        else if (opcode == 0x003e && op == "setDialog" && String(command, "box") == "centerWindow")
+        {
+            WriteDialogColor(command, ref a);
+        }
+        else if (opcode == 6 && op == "randomJump")
+        {
+            a = checked((ushort)Int(command, "rate"));
+            b = EncodeReference(command, "to", fileId, labelsByFile);
+        }
+        else if ((opcode == 27 && op == "changeHp") || (opcode == 28 && op == "changeMp"))
+        {
+            a = checked((ushort)Int(command, "scope"));
+            b = unchecked((ushort)CheckedSigned(command, "amount"));
+        }
+        else if (opcode == 48 && op == "boostStat")
+        {
+            a = checked((ushort)Int(command, "field"));
+            b = unchecked((ushort)CheckedSigned(command, "percent"));
+            c = checked((ushort)Int(command, "roleOperand"));
+        }
+        else if (opcode == 7 && op == "startBattle")
+        {
+            a = checked((ushort)Int(command, "teamId"));
+            b = EncodeBattleTarget(command, "lossTarget", fileId, labelsByFile);
+            c = EncodeBattleTarget(command, "fleeTarget", fileId, labelsByFile);
         }
         else if (opcode == 0xffff && op == "showDialog")
         {
             a = checked((ushort)Int(command, "messageId")); b = checked((ushort)Int(command, "descriptionLineWord"));
         }
+        else if (opcode == 0x43 && op == "setMusic")
+        {
+            a = checked((ushort)Int(command, "musicId")); b = checked((ushort)Int(command, "mode"));
+        }
+        else if (opcode == 0x4e && op == "requestReload") { }
+        else if (opcode == 0x4f && op == "fadeToRed") { }
+        else if (opcode == 0x41 && op == "markFailed") { }
+        else if (opcode >= 0x0b && opcode <= 0x0e && op == "walkStep")
+        {
+            if (opcode != 0x0b + Int(command, "direction")) throw new InvalidDataException($"{String(command, "label")}: walkStep direction does not match its opcode.");
+        }
+        else if (opcode == 0x0f && op == "face")
+        {
+            a = checked((ushort)Int(command, "direction")); b = checked((ushort)Int(command, "frame"));
+        }
+        else if ((opcode == 0x10 && op == "walkTo") || (opcode == 0x46 && op == "setPartyPos"))
+        {
+            a = checked((ushort)Int(command, "x")); b = checked((ushort)Int(command, "y")); c = checked((ushort)Int(command, "h"));
+        }
+        else if (opcode == 0x15 && op == "setPartyFacing")
+        {
+            a = checked((ushort)Int(command, "direction")); b = checked((ushort)Int(command, "gesture")); c = checked((ushort)Int(command, "memberIndex"));
+        }
+        else if (opcode == 0x40 && op == "setTriggerMode")
+        {
+            a = checked((ushort)Int(command, "objectId")); b = checked((ushort)Int(command, "mode"));
+        }
+        else if (opcode == 0x49 && op == "setState")
+        {
+            a = checked((ushort)Int(command, "objectId")); b = unchecked((ushort)CheckedSigned(command, "state"));
+        }
+        else if (opcode == 0x52 && op == "hide")
+        {
+            a = checked((ushort)Int(command, "frames"));
+        }
+        else if (opcode == 0x6d && op == "setSceneScripts")
+        {
+            a = checked((ushort)Int(command, "sceneId")); b = checked((ushort)Int(command, "onEnter")); c = checked((ushort)Int(command, "onTeleport"));
+        }
+        else if (opcode == 0x73 && op == "fadeScene")
+        {
+            a = checked((ushort)Int(command, "mode"));
+        }
+        else if (opcode == 0x90 && op == "setObjectScript")
+        {
+            a = checked((ushort)Int(command, "objectId")); b = checked((ushort)Int(command, "value")); c = checked((ushort)Int(command, "slotIndex"));
+        }
+        else if (opcode == 9 && op == "waitUpdate")
+        {
+            a = checked((ushort)Int(command, "frames")); b = checked((ushort)Int(command, "runTriggers")); c = checked((ushort)Int(command, "updateGestures"));
+        }
+        else if (opcode == 5 && op == "redraw")
+        {
+            a = checked((ushort)Int(command, "delayUnits"));
+        }
+        else if (opcode == 0x13 && op == "setObjectPosition")
+        {
+            a = checked((ushort)Int(command, "objectId")); b = checked((ushort)Int(command, "x")); c = checked((ushort)Int(command, "y"));
+        }
+        else if (opcode == 0x14 && op == "setObjectGesture")
+        {
+            a = checked((ushort)Int(command, "frame"));
+        }
+        else if (opcode == 0x1d && op == "changeHpMp")
+        {
+            a = checked((ushort)Int(command, "scope")); b = unchecked((ushort)CheckedSigned(command, "amount"));
+        }
+        else if (opcode == 0x22 && op == "revivePlayer")
+        {
+            a = checked((ushort)Int(command, "scope")); b = checked((ushort)Int(command, "healthTenths"));
+        }
+        else if ((opcode == 0x24 && op == "setAutoEntry") || (opcode == 0x25 && op == "setTriggerEntry"))
+        {
+            a = checked((ushort)Int(command, "objectId")); b = checked((ushort)Int(command, "entry"));
+        }
+        else if (opcode == 0x4a && op == "setBattlefield")
+        {
+            a = checked((ushort)Int(command, "battlefieldId"));
+        }
+        else if (opcode == 0x50 && op == "fadeOut")
+        {
+            a = checked((ushort)Int(command, "frames"));
+        }
+        else if (opcode == 0x75 && op == "setParty")
+        {
+            a = checked((ushort)Int(command, "roleId0")); b = checked((ushort)Int(command, "roleId1")); c = checked((ushort)Int(command, "roleId2"));
+        }
+        else if (opcode == 0x78 && op == "noop") { }
+        else if (opcode == 0x9a && op == "setStateRange")
+        {
+            a = checked((ushort)Int(command, "fromObjectId")); b = checked((ushort)Int(command, "toObjectId")); c = unchecked((ushort)CheckedSigned(command, "state"));
+        }
         else throw new InvalidDataException($"{String(command, "label")}: op does not match registered source opcode.");
         Write(destination, opcode); Write(destination[2..], a); Write(destination[4..], b); Write(destination[6..], c);
+    }
+
+    private static void WriteDialogColor(JsonObject command, ref ushort word)
+    {
+        int color = Int(command, "color");
+        if (color is < 0 or > 255) throw new InvalidDataException("setDialog.color must be 0..255.");
+        word = (ushort)((word & 0xff00) | color);
+    }
+
+    private static ushort EncodeDialogColor(JsonObject command, ushort word)
+    {
+        WriteDialogColor(command, ref word);
+        return word;
+    }
+
+    private static int CheckedSigned(JsonObject command, string field)
+    {
+        int value = Int(command, field);
+        return value is >= -32768 and <= 32767 ? value : throw new InvalidDataException($"{String(command, "label")}.{field} must be a signed WORD.");
+    }
+
+    private static ushort EncodeReference(JsonObject command, string field, string fileId, IReadOnlyDictionary<string, Dictionary<string, int>> labelsByFile)
+    {
+        string reference = NullableString(command, field) ?? throw new InvalidDataException($"{String(command, "label")}.{field} must be a reference.");
+        string context = $"{fileId}.json#{String(command, "label")} @{Int(Required(command, "source"), "index"):X4}.{field}";
+        return checked((ushort)ResolveReference(reference, fileId, labelsByFile, context));
+    }
+
+    private static ushort EncodeBattleTarget(JsonObject command, string field, string fileId, IReadOnlyDictionary<string, Dictionary<string, int>> labelsByFile)
+    {
+        string? reference = NullableString(command, field);
+        if (reference is null) return 0;
+        string context = $"{fileId}.json#{String(command, "label")} @{Int(Required(command, "source"), "index"):X4}.{field}";
+        int address = ResolveReference(reference, fileId, labelsByFile, context);
+        if (address == 0) throw new InvalidDataException($"{context}: address zero must use null, not a reference.");
+        return checked((ushort)address);
     }
 
     private static void ValidateCommand(JsonObject command, string fileId, int count)
@@ -229,7 +458,11 @@ internal static class EventArchive
         string label = String(command, "label");
         if (!Identifier.IsMatch(label)) throw new InvalidDataException($"{fileId}.json: invalid command label.");
         string op = String(command, "op");
-        if (op is not ("raw" or "end" or "setDialog" or "showDialog")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
+        if (op is not ("raw" or "end" or "setDialog" or "showDialog" or "startBattle" or "randomJump" or "changeHp" or "changeMp" or "boostStat"
+            or "setMusic" or "fadeToRed" or "requestReload" or "markFailed" or "walkStep" or "face" or "walkTo" or "setPartyFacing"
+            or "setTriggerMode" or "setPartyPos" or "setState" or "hide" or "setSceneScripts" or "fadeScene" or "setObjectScript"
+            or "waitUpdate" or "redraw" or "setObjectPosition" or "setObjectGesture" or "changeHpMp" or "revivePlayer"
+            or "setAutoEntry" or "setTriggerEntry" or "setBattlefield" or "fadeOut" or "setParty" or "noop" or "setStateRange")) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
         string? next = NullableString(command, "next");
         if (next is not null) ValidateReferenceSyntax(next, $"{label}.next");
         var source = Required(command, "source");
@@ -243,14 +476,71 @@ internal static class EventArchive
         {
             "raw" => new[] { "label", "op", "next", "source" },
             "end" => new[] { "label", "op", "mode", "next", "source" },
-            "setDialog" => new[] { "label", "op", "box", "portraitId", "color", "rngWord", "next", "source" },
+            "setDialog" => String(command, "box") switch
+            {
+                "upper" or "lower" => new[] { "label", "op", "box", "portraitId", "color", "rngWord", "next", "source" },
+                "center" => new[] { "label", "op", "box", "color", "rngWord", "next", "source" },
+                "centerWindow" => new[] { "label", "op", "box", "color", "next", "source" },
+                _ => throw new InvalidDataException($"{label}: unknown dialogue box.")
+            },
+            "randomJump" => new[] { "label", "op", "rate", "to", "next", "source" },
+            "changeHp" or "changeMp" => new[] { "label", "op", "scope", "amount", "next", "source" },
+            "boostStat" => new[] { "label", "op", "field", "percent", "roleOperand", "next", "source" },
+            "startBattle" => new[] { "label", "op", "teamId", "lossTarget", "isBoss", "fleeTarget", "next", "source" },
+            "setMusic" => new[] { "label", "op", "musicId", "mode", "next", "source" },
+            "fadeToRed" or "requestReload" or "markFailed" => new[] { "label", "op", "next", "source" },
+            "walkStep" => new[] { "label", "op", "direction", "next", "source" },
+            "face" => new[] { "label", "op", "direction", "frame", "next", "source" },
+            "walkTo" or "setPartyPos" => new[] { "label", "op", "x", "y", "h", "next", "source" },
+            "setPartyFacing" => new[] { "label", "op", "direction", "gesture", "memberIndex", "next", "source" },
+            "setTriggerMode" => new[] { "label", "op", "objectId", "mode", "next", "source" },
+            "setState" => new[] { "label", "op", "objectId", "state", "next", "source" },
+            "hide" => new[] { "label", "op", "frames", "next", "source" },
+            "setSceneScripts" => new[] { "label", "op", "sceneId", "onEnter", "onTeleport", "next", "source" },
+            "fadeScene" => new[] { "label", "op", "mode", "next", "source" },
+            "setObjectScript" => new[] { "label", "op", "objectId", "value", "slotIndex", "next", "source" },
+            "waitUpdate" => new[] { "label", "op", "frames", "runTriggers", "updateGestures", "next", "source" },
+            "redraw" => new[] { "label", "op", "delayUnits", "next", "source" },
+            "setObjectPosition" => new[] { "label", "op", "objectId", "x", "y", "next", "source" },
+            "setObjectGesture" => new[] { "label", "op", "frame", "next", "source" },
+            "changeHpMp" => new[] { "label", "op", "scope", "amount", "next", "source" },
+            "revivePlayer" => new[] { "label", "op", "scope", "healthTenths", "next", "source" },
+            "setAutoEntry" or "setTriggerEntry" => new[] { "label", "op", "objectId", "entry", "next", "source" },
+            "setBattlefield" => new[] { "label", "op", "battlefieldId", "next", "source" },
+            "fadeOut" => new[] { "label", "op", "frames", "next", "source" },
+            "setParty" => new[] { "label", "op", "roleId0", "roleId1", "roleId2", "next", "source" },
+            "noop" => new[] { "label", "op", "next", "source" },
+            "setStateRange" => new[] { "label", "op", "fromObjectId", "toObjectId", "state", "next", "source" },
             _ => new[] { "label", "op", "messageId", "descriptionLineWord", "next", "source" }
         };
         ValidateKeys(command, label, allowed);
+        if (op == "startBattle")
+        {
+            string context = $"{fileId}.json#{label} @{index:X4}";
+            if (opcodeValue != 7) throw new InvalidDataException($"{context}: invalid startBattle mapping.");
+            _ = Word(command["teamId"]);
+            if (command["isBoss"] is not JsonValue value || !value.TryGetValue<bool>(out bool isBoss))
+                throw new InvalidDataException($"{context}: startBattle.isBoss must be a boolean.");
+            string? loss = NullableString(command, "lossTarget"), flee = NullableString(command, "fleeTarget");
+            if (isBoss != (flee is null)) throw new InvalidDataException($"{context}: startBattle.isBoss must equal fleeTarget being null.");
+            if (loss is not null) ValidateReferenceSyntax(loss, context + ".lossTarget");
+            if (flee is not null) ValidateReferenceSyntax(flee, context + ".fleeTarget");
+        }
         if (op == "end" && (opcodeValue != 0 || String(command, "mode") != "keep")) throw new InvalidDataException($"{label}: invalid end mapping.");
-        if (op == "setDialog" && (opcodeValue != 0x003c || String(command, "box") != "upper")) throw new InvalidDataException($"{label}: invalid setDialog mapping.");
+        if (op == "setDialog" && (opcodeValue != (String(command, "box") switch { "center" => 0x003b, "upper" => 0x003c, "lower" => 0x003d, "centerWindow" => 0x003e, _ => -1 })
+            || String(command, "box") is not ("upper" or "lower" or "center" or "centerWindow"))) throw new InvalidDataException($"{label}: invalid setDialog mapping.");
         if (op == "showDialog" && opcodeValue != 0xffff) throw new InvalidDataException($"{label}: invalid showDialog mapping.");
-        if (op == "raw" && opcodeValue is 0 or 0x003c or 0xffff) throw new InvalidDataException($"{label}: registered opcode must use its named mapping.");
+        if (op == "randomJump")
+        {
+            if (opcodeValue != 6) throw new InvalidDataException($"{label}: invalid randomJump mapping.");
+            _ = Word(command["rate"]);
+            ValidateReferenceSyntax(String(command, "to"), $"{label}.to");
+        }
+        if (op is "changeHp" or "changeMp" && opcodeValue != (op == "changeHp" ? 27 : 28)) throw new InvalidDataException($"{label}: invalid {op} mapping.");
+        if (op == "boostStat" && opcodeValue != 48) throw new InvalidDataException($"{label}: invalid boostStat mapping.");
+        if (op == "raw" && opcodeValue is 0 or 0x003b or 0x003c or 0x003d or 0x003e or 0xffff or 6 or 27 or 28 or 48
+            or 0x43 or 0x4e or 0x4f or 0x41 or (>= 0x0b and <= 0x10) or 0x15 or 0x40 or 0x46 or 0x49 or 0x52 or 0x6d or 0x73 or 0x90 or 9 or 5
+            or 0x13 or 0x14 or 0x1d or 0x22 or 0x24 or 0x25 or 0x4a or 0x50 or 0x75 or 0x78 or 0x9a) throw new InvalidDataException($"{label}: registered opcode must use its named mapping.");
         if (op == "raw" && (command.ContainsKey("mode") || command.ContainsKey("text"))) throw new InvalidDataException($"{label}: raw command cannot carry semantic fields.");
     }
 
@@ -352,18 +642,8 @@ internal static class EventArchive
             if (!obj.ContainsKey(key)) throw new InvalidDataException($"{context}: missing field '{key}'.");
     }
 
-    private static void RejectLinks(string path, string resource)
-    {
-        for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
-        {
-            try
-            {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException($"{resource}: links/reparse points are not supported.");
-            }
-            catch (FileNotFoundException) { }
-            catch (DirectoryNotFoundException) { }
-        }
-    }
+    private static void RejectLinks(string path, string resource) =>
+        PathLinkGuard.RejectReparsePoints(path, $"{resource}: links/reparse points are not supported.");
 
     private static void RejectEventLinks(string path)
     {

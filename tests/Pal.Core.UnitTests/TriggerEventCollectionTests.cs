@@ -6,6 +6,123 @@ namespace Pal.Core.Tests;
 
 public class TriggerEventCollectionTests
 {
+    [Fact]
+    public void Named_startBattle_loads_without_enabling_execution_or_changing_source()
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[1] = JsonNode.Parse("""
+            {"label":"L0001","op":"startBattle","teamId":18,"lossTarget":"L0004","isBoss":true,"fleeTarget":null,
+             "next":"L0002","source":{"index":1,"opcode":7,"operands":[99,3,2]}}
+            """);
+        var collection = fixture.Load();
+        Assert.Equal(new[] { 99, 3, 2 }, collection.GetSource(1).Operands);
+        var script = new TriggerScriptSession(collection, TriggerScriptSessionTests.Language());
+        var before = script.Context;
+        var error = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 60));
+        Assert.Contains("startBattle", error.Message);
+        Assert.Contains("@0001", error.Message);
+        Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+        Assert.Equal(before, script.Context);
+        Assert.Null(script.CurrentPosition);
+        Assert.Null(script.PendingDisplay);
+        Assert.Equal(0, script.Caller);
+        Assert.Equal(0, script.ReturnEntry);
+    }
+
+    [Theory]
+    [InlineData(0, null, true, null)]
+    [InlineData(65535, "L0004", false, "L0001")]
+    [InlineData(18, null, false, "L0004")]
+    public void StartBattle_WORDs_and_zero_sentinels_load_as_named_semantics(int teamId, string? loss, bool boss, string? flee)
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[1] = BattleCommand(1, teamId, loss, boss, flee);
+        Assert.Equal(5, fixture.Load().InstructionCount);
+    }
+
+    [Theory]
+    [InlineData("team-negative")]
+    [InlineData("team-overflow")]
+    [InlineData("team-type")]
+    [InlineData("boss-type")]
+    [InlineData("boss-flee")]
+    [InlineData("nonboss-null")]
+    [InlineData("loss-zero")]
+    [InlineData("flee-zero")]
+    [InlineData("loss-dangling")]
+    [InlineData("flee-dangling")]
+    [InlineData("loss-malformed")]
+    [InlineData("flee-type")]
+    [InlineData("unknown-field")]
+    [InlineData("missing-field")]
+    [InlineData("opcode")]
+    [InlineData("ffff-outside")]
+    [InlineData("duplicate-key")]
+    public void StartBattle_at_true_chunk_end_still_strictly_validates_semantics_and_references(string fault)
+    {
+        var fixture = new EventFixture();
+        var command = BattleCommand(4, 18, null, true, null);
+        fixture.Commands[4] = command;
+        switch (fault)
+        {
+            case "team-negative": command["teamId"] = -1; break;
+            case "team-overflow": command["teamId"] = 65536; break;
+            case "team-type": command["teamId"] = "18"; break;
+            case "boss-type": command["isBoss"] = 1; break;
+            case "boss-flee": command["fleeTarget"] = "L0001"; break;
+            case "nonboss-null": command["isBoss"] = false; break;
+            case "loss-zero": command["lossTarget"] = "L0000"; break;
+            case "flee-zero": command["isBoss"] = false; command["fleeTarget"] = "shared#L0000"; break;
+            case "loss-dangling": command["lossTarget"] = "missing#L0001"; break;
+            case "flee-dangling": command["isBoss"] = false; command["fleeTarget"] = "missing"; break;
+            case "loss-malformed": command["lossTarget"] = "shared##L0001"; break;
+            case "flee-type": command["fleeTarget"] = 1; break;
+            case "unknown-field": command["limit"] = 0; break;
+            case "missing-field": command.Remove("lossTarget"); break;
+            case "opcode": command["source"]!["opcode"] = 8; break;
+            case "ffff-outside": command["lossTarget"] = "LFFFF"; break;
+        }
+        var texts = fixture.Files.ToDictionary(p => p.Key, p => p.Value.ToJsonString());
+        if (fault == "duplicate-key") texts["shared"] = texts["shared"].Replace("\"teamId\":18", "\"teamId\":18,\"teamId\":19");
+        var error = Assert.Throws<InvalidDataException>(() => TriggerEventCollection.Parse(fixture.Index.ToJsonString(), texts));
+        Assert.Contains("shared.json", error.Message);
+        if (fault != "duplicate-key") Assert.Contains("@0004", error.Message);
+    }
+
+    [Fact]
+    public void StartBattle_cross_file_result_targets_resolve_and_legacy_raw7_stays_non_executable()
+    {
+        var fixture = new EventFixture();
+        fixture.Index["files"] = new JsonArray("shared", "targets");
+        var last = fixture.Commands[4]!.DeepClone();
+        fixture.Commands.RemoveAt(4);
+        fixture.Commands[3]!["next"] = "targets#L0004";
+        fixture.Files["targets"] = new JsonObject { ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "targets",
+            ["entries"] = new JsonArray(), ["commands"] = new JsonArray(last) };
+        fixture.Commands[2] = BattleCommand(2, 18, "targets#L0004", false, "shared#L0001");
+        Assert.Equal(5, fixture.Load().InstructionCount);
+        fixture.Commands[2] = JsonNode.Parse("""
+            {"label":"L0002","op":"raw","next":"L0003","source":{"index":2,"opcode":7,"operands":[18,4,0]}}
+            """);
+        var script = new TriggerScriptSession(fixture.Load(), TriggerScriptSessionTests.Language());
+        var before = script.Context;
+        var error = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 60));
+        Assert.Contains("'raw'", error.Message);
+        Assert.Contains("@0002", error.Message);
+        Assert.Equal(before, script.Context); // Earlier setDialog must not run before rejection.
+        Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+        Assert.Null(script.PendingDisplay);
+        Assert.Equal(0, script.Caller);
+    }
+
+    private static JsonObject BattleCommand(int address, int teamId, string? loss, bool boss, string? flee) => new()
+    {
+        ["label"] = $"L{address:X4}", ["op"] = "startBattle", ["teamId"] = teamId,
+        ["lossTarget"] = loss, ["isBoss"] = boss, ["fleeTarget"] = flee,
+        ["next"] = address == 4 ? null : $"L{address + 1:X4}",
+        ["source"] = new JsonObject { ["index"] = address, ["opcode"] = 7, ["operands"] = new JsonArray(18, 0, 0) }
+    };
+
     [Theory]
     [InlineData("version")]
     [InlineData("profile")]
@@ -117,6 +234,9 @@ public class TriggerEventCollectionTests
     [InlineData("{\"op\":\"setDialog\",\"box\":\"center\",\"color\":0,\"rngWord\":1}", 59)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"lower\",\"portraitId\":0,\"color\":255,\"rngWord\":0}", 61)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"centerWindow\",\"color\":79}", 62)]
+    [InlineData("{\"op\":\"setMusic\",\"musicId\":65535,\"mode\":3}", 0x43)]
+    [InlineData("{\"op\":\"fadeToRed\"}", 0x4f)]
+    [InlineData("{\"op\":\"requestReload\"}", 0x4e)]
     public void Faithful_base_mappings_can_be_archived_without_claiming_execution_support(string semanticJson, int opcode)
     {
         var fixture = new EventFixture();
@@ -203,6 +323,9 @@ public class TriggerEventCollectionTests
         Assert.Equal(65535, script.ReturnEntry);
         fixture.Commands[65535]!["next"] = null;
         Assert.Contains("FFFF", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+        fixture.Commands[65535] = BattleCommand(65535, 65535, "LFFFF", false, "LFFFF");
+        fixture.Commands[65535]!["next"] = "L0000";
+        Assert.Equal(65536, fixture.Load().InstructionCount); // FFFF is a real result target, never a sentinel.
     }
 
     [Fact]
@@ -248,6 +371,36 @@ public class TriggerEventCollectionTests
         Assert.Equal("trigger", entry.Kind);
         Assert.Equal("wTriggerScript", entry.Slot);
     }
+
+    [Fact]
+    public void Retail_pose_words_parse_beyond_the_authored_small_domains()
+    {
+        // Retail rows use gesture poses far beyond the authored 0..2/0..3 sample space
+        // (script.c 0x0015/0x000F words are plain WORDs; 0xFFFF stays the keep value).
+        var events = new EventFixture();
+        events.Commands[1] = JsonNode.Parse("""
+          {"label":"L0001","op":"setPartyFacing","direction":0,"gesture":26,"memberIndex":0,
+           "next":"L0002","source":{"index":1,"opcode":21,"operands":[0,26,0]}}
+          """);
+        events.Commands[2] = JsonNode.Parse("""
+          {"label":"L0002","op":"face","direction":0,"frame":11,
+           "next":"L0003","source":{"index":2,"opcode":15,"operands":[0,11,0]}}
+          """);
+        Assert.NotNull(events.Load());
+    }
+
+    [Fact]
+    public void WaitUpdate_accepts_the_retail_truthy_operand_words_not_only_zero_and_one()
+    {
+        // Retail chunk-4 rows carry 0xFFFF for the gesture flag; script.c tests it for truthiness only.
+        var events = new EventFixture();
+        events.Commands[3] = JsonNode.Parse("""
+          {"label":"L0003","op":"waitUpdate","frames":12,"runTriggers":0,"updateGestures":65535,
+           "next":"L0004","source":{"index":3,"opcode":9,"operands":[12,0,65535]}}
+          """);
+        Assert.NotNull(events.Load()); // strict parse accepts the full WORD domain
+    }
+
 }
 
 internal sealed class EventFixture
