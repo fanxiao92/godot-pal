@@ -107,11 +107,11 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             rows[address] = command;
         }
         Put(0x09C3, "setDialog", 60, 0, 0, 0, ("box", "upper"), ("portraitId", 0), ("color", 0), ("rngWord", 0));
-        Put(0x09C4, "showDialog", 65535, 10, 0, 0, ("messageId", 10), ("descriptionLineWord", 0));
+        Put(0x09C4, "showDialog", 65535, 1, 0, 0, ("messageId", 1), ("descriptionLineWord", 0));
         for (int address = 0x09C5; address < 0x09FE; address++)
             Put(address, "face", 15, 0, 0, 0, ("direction", 0), ("frame", 0));
         Put(0x09FE, "startBattle", 7, 0x0012, 0xA073, 0, ("teamId", 18), ("lossTarget", $"L{0xA073:X4}"), ("isBoss", true), ("fleeTarget", null));
-        Put(0x09FF, "showDialog", 65535, 11, 0, 0, ("messageId", 11), ("descriptionLineWord", 0));
+        Put(0x09FF, "showDialog", 65535, 2, 0, 0, ("messageId", 2), ("descriptionLineWord", 0));
         for (int address = 0x0A00; address < 0x0A32; address++)
             Put(address, "face", 15, 0, 0, 0, ("direction", 0), ("frame", 0));
         Put(0x0A32, "end", 0, 0, 0, 0, ("mode", "keep"));
@@ -120,11 +120,11 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         Put(0x0A3B, "face", 15, 0, 0, 0, ("direction", 0), ("frame", 0));
         Put(0x0A3C, "end", 0, 0, 0, 0, ("mode", "keep"));
         Put(0xA073, "setDialog", 61, 0, 0, 0, ("box", "lower"), ("portraitId", 0), ("color", 0), ("rngWord", 0));
-        Put(0xA074, "showDialog", 65535, 12, 0, 0, ("messageId", 12), ("descriptionLineWord", 0));
+        Put(0xA074, "showDialog", 65535, 3, 0, 0, ("messageId", 3), ("descriptionLineWord", 0));
         Put(0xA075, "fadeToRed", 0x4f, 0, 0, 0);
         Put(0xA076, "requestReload", 0x4e, 0, 0, 0);
-        Hook(Put, 0xA96E, 13);
-        Hook(Put, 0xA9B5, 17);
+        Hook(Put, 0xA96E, 4);
+        Hook(Put, 0xA9B5, 8);
         var commands = new JsonArray();
         for (int address = 0; address < count; address++)
         {
