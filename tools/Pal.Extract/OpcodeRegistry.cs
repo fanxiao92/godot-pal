@@ -153,13 +153,13 @@ public static class OpcodeRegistry
                 switch (field.Kind)
                 {
                     case OpcodeFieldKind.Word:
-                        result[field.Name] = operands[field.Operand];
+                        result[field.Name] = (int)operands[field.Operand];
                         break;
                     case OpcodeFieldKind.SignedWord:
-                        result[field.Name] = (short)operands[field.Operand];
+                        result[field.Name] = (int)(short)operands[field.Operand];
                         break;
                     case OpcodeFieldKind.LowByte:
-                        result[field.Name] = operands[field.Operand] & 255;
+                        result[field.Name] = (int)(operands[field.Operand] & 255);
                         break;
                     case OpcodeFieldKind.Reference:
                         result[field.Name] = LabelAt(operands[field.Operand]);
@@ -185,8 +185,8 @@ public static class OpcodeRegistry
         result["next"] = (index + 1 < count || count == 65536) ? LabelAt((index + 1) & 0xffff) : null;
         result["source"] = new JsonObject
         {
-            ["index"] = index, ["opcode"] = opcode,
-            ["operands"] = new JsonArray(a, b, c),
+            ["index"] = index, ["opcode"] = (int)opcode,
+            ["operands"] = new JsonArray((int)a, (int)b, (int)c),
         };
         return result;
     }
