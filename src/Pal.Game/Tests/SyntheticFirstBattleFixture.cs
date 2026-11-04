@@ -15,7 +15,7 @@ namespace Pal.Game.Tests;
 internal sealed class SyntheticFirstBattleFixture : IDisposable
 {
     private readonly string input = Path.Combine(Path.GetTempPath(), "pal-synth-closure-" + Guid.NewGuid().ToString("N"));
-    private readonly string root = ProjectSettings.GlobalizePath("res://Tests/SyntheticFirstBattle-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = ProjectSettings.GlobalizePath("res://Assets/RuntimeTests/SyntheticFirstBattle-" + Guid.NewGuid().ToString("N"));
     internal string ProfileUri { get; }
 
     internal SyntheticFirstBattleFixture(NativeProfileFixture staticFixture, string staticRoot, string staticProfile, bool lost)
