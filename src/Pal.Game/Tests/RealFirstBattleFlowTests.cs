@@ -79,6 +79,8 @@ public class RealFirstBattleFlowTests
             {
                 scene.Press(Key.Enter); // attack confirm + target confirm per round
                 await scene.RunnerIdle();
+                if ((rounds & 31) == 0)
+                    System.Console.WriteLine($"REAL_ROUND:round={rounds} mode={main.StoryBattleMode} phase={main.StoryBattle?.Current.Combat.Phase} sel={main.StoryBattle?.Current.Combat.SelectingPlayerIndex} hp0={main.StoryBattle?.Current.Combat.Players[0].Hp} eh0={main.StoryBattle?.Current.Combat.Enemies[0].Hp} eh1={main.StoryBattle?.Current.Combat.Enemies[1].Hp} failure={main.Failure}");
             }
             System.Console.WriteLine($"REAL_FLOW:pages={pages} rounds={rounds} lost={main.StoryLostTerminal} " +
                 $"completed={main.Dialogue?.Session?.Phase} hp0={main.Battle?.State.Roles[0].Hp} hp1={main.Battle?.State.Roles[1].Hp} " +
