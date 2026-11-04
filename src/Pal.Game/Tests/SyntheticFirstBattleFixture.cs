@@ -176,7 +176,6 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         roleSnapshot["coveredByRoleId"] = 0; roleSnapshot["equipment"] = new JsonArray(0, 0, 0, 0, 0, 0);
         roleSnapshot["magics"] = new JsonArray(Enumerable.Range(0, 32).Select(_ => (JsonNode?)0).ToArray());
         roles.Add(roleSnapshot);
-        roles[0]!["friendDeathScript"] = null;
         var growth = data["growth"]!.AsArray();
         var growthOne = (JsonNode)growth[0]!.DeepClone();
         growthOne["roleId"] = 1;
