@@ -159,18 +159,18 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         var team = data["teams"]!.AsArray().Single(t => (int)t!["teamId"]! == 18)!;
         var enemy = team["enemies"]!.AsArray()[0]!;
         enemy["hp"] = lost ? 500 : 1;
-        var second = enemy.DeepClone();
+        var second = (JsonNode)enemy.DeepClone();
         second["id"] = 8;
         team["enemies"]!.AsArray().Add(second);
         var players = data["players"]!.AsArray();
         players[0]!["friendDeathScript"] = 0xA9B5;
-        var roleOne = players[0]!.DeepClone();
+        var roleOne = (JsonNode)players[0]!.DeepClone();
         roleOne["roleId"] = 1; roleOne["hp"] = lost ? 1 : 100; roleOne["maxHp"] = lost ? 1 : 100;
         roleOne["dyingScript"] = 0xA96E; roleOne["friendDeathScript"] = 0;
         roleOne["equipment"] = new JsonArray(0, 0, 0, 0, 0, 0); roleOne["coveredByRoleId"] = 0;
         players.Add(roleOne);
         var roles = data["roles"]!.AsArray();
-        var roleSnapshot = roles[0]!.DeepClone();
+        var roleSnapshot = (JsonNode)roles[0]!.DeepClone();
         roleSnapshot["roleId"] = 1; roleSnapshot["hp"] = lost ? 1 : 100; roleSnapshot["maxHp"] = lost ? 1 : 100;
         roleSnapshot["mp"] = 5; roleSnapshot["maxMp"] = 5; roleSnapshot["level"] = 2;
         roleSnapshot["coveredByRoleId"] = 0; roleSnapshot["equipment"] = new JsonArray(0, 0, 0, 0, 0, 0);
@@ -178,7 +178,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         roles.Add(roleSnapshot);
         roles[0]!["friendDeathScript"] = null;
         var growth = data["growth"]!.AsArray();
-        var growthOne = growth[0]!.DeepClone();
+        var growthOne = (JsonNode)growth[0]!.DeepClone();
         growthOne["roleId"] = 1;
         growth.Add(growthOne);
         // Six-role equipment grid with the dual-attack object the closure pins.
