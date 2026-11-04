@@ -48,6 +48,7 @@ public class SyntheticFirstBattleClosureTests
             frames++;
             await scene.RunnerIdle();
         }
+        System.Console.WriteLine($"SYN_PARK:pages={pages} phase={main.Dialogue?.Session?.Phase} pos={main.Dialogue?.Session?.CurrentPosition} pending={main.Dialogue?.Session?.PendingBattle is not null} display={main.Dialogue?.Session?.PendingDisplay is not null} failure={main.Failure}");
         AssertThat(main.StoryBattle is not null).IsTrue();
         AssertThat(main.StoryBattle!.Current.Combat.Enemies.Count).IsEqual(2);
         int rounds = 0;
