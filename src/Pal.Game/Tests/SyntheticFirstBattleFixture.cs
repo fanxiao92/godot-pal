@@ -61,8 +61,13 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             foreach (var node in context.Document["closure"]!["entries"]!.AsArray()) node!["status"] = "prepared";
             string authored = Path.Combine(input, "authored");
             Directory.CreateDirectory(authored);
-            File.WriteAllBytes(Path.Combine(authored, "battle-context.json"), context.ContextBytes);
-            File.WriteAllBytes(Path.Combine(authored, "index.json"), context.IndexBytes);
+            // The record's stored bytes predate the prepared-status rewrite; re-serialize.
+            byte[] contextBytes = System.Text.Encoding.UTF8.GetBytes(context.Document.ToJsonString());
+            string contextHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(contextBytes));
+            byte[] indexBytes = System.Text.Encoding.UTF8.GetBytes(
+                "{\"formatVersion\":1,\"profile\":\"first-mandatory-battle-pre-trigger-v1\",\"contextFile\":\"battle-context.json\",\"contextSha256\":\"" + contextHash + "\"}");
+            File.WriteAllBytes(Path.Combine(authored, "battle-context.json"), contextBytes);
+            File.WriteAllBytes(Path.Combine(authored, "index.json"), indexBytes);
             // 6. Binding JSON -> production prepare with -BattleResources semantics.
             var binding = new JsonObject
             {
