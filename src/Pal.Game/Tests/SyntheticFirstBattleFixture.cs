@@ -24,6 +24,21 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         Directory.CreateDirectory(root);
         try
         {
+            // Single approach: the committed authored leaves are self-contained (embedded
+            // textures; only Script refs outside), so the fixture copies them into its own
+            // Assets root; every binding seed then lives under res://Assets as required.
+            string samples = ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle");
+            Directory.CreateDirectory(Path.Combine(root, "Leaves/Dialogue"));
+            foreach (var (relative, name) in new[] {
+                ("Static/Leader.tres", "Leaves/Leader.tres"), ("Static/Palette.tres", "Leaves/Palette.tres"),
+                ("Visual/Background.tres", "Leaves/Background.tres"), ("Visual/Enemy.tres", "Leaves/Enemy.tres"),
+                ("Dialogue/Font.tres", "Leaves/Dialogue/Font.tres"),
+                ("Dialogue/Language.zh-Hans.tres", "Leaves/Dialogue/Language.zh-Hans.tres"),
+                ("Dialogue/Language.en.tres", "Leaves/Dialogue/Language.en.tres"),
+                ("Dialogue/Prompt-00.tres", "Leaves/Dialogue/Prompt-00.tres"),
+                ("Dialogue/Prompt-01.tres", "Leaves/Dialogue/Prompt-01.tres"),
+                ("Dialogue/Prompt-02.tres", "Leaves/Dialogue/Prompt-02.tres") })
+                File.Copy(Path.Combine(samples, relative), Path.Combine(root, name));
             // 1. Synthetic modern events at the frozen addresses (fast battle, hooks, Won
             //    continuation with dynamic verbs, Lost reload boundary, dynamic autos).
             string eventsUri = WriteEvents(lost);
@@ -52,12 +67,11 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 ["formatVersion"] = 1,
                 ["eventsIndex"] = eventsUri,
                 ["battleContentUri"] = numbers,
-                ["dialogueDirectory"] = "res://Samples/AuthoredBattle/Dialogue",
+                ["dialogueDirectory"] = Localize("Leaves/Dialogue"),
                 ["visualUri"] = visualUri,
                 ["globalObjectsUri"] = globalUri,
                 ["portraits"] = new JsonArray(),
-                ["playerSpriteUris"] = new JsonArray("res://Samples/AuthoredBattle/Visual/Player.tres",
-                    "res://Samples/AuthoredBattle/Visual/Player.tres"),
+                ["playerSpriteUris"] = new JsonArray(Localize("Leaves/Leader.tres"), Localize("Leaves/Leader.tres")),
                 ["enemySpriteId"] = 97, ["enemyArchiveEntry"] = "ABC97",
                 ["roleSpriteIds"] = new JsonArray("F0", "F1"),
                 ["battlefieldId"] = 24, ["battlefieldArchiveEntry"] = "FBP24",
@@ -201,15 +215,15 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             FormatVersion = 1,
             SourceIdentity = "Synthetic first-battle closure visual over authored leaves; not retail data.",
             RoleId = 0,
-            PlayerSpriteUri = "res://Samples/AuthoredBattle/Visual/Player.tres",
+            PlayerSpriteUri = Localize("Leaves/Leader.tres"),
             PlayerPosition = new Vector2I(200, 176),
-            PaletteUri = "res://Samples/AuthoredBattle/Static/Palette.tres",
+            PaletteUri = Localize("Leaves/Palette.tres"),
         };
         var team = new PalBattleVisualTeam
         {
             TeamId = 18, TargetId = -1,
-            BackgroundUri = "res://Samples/AuthoredBattle/Visual/Background.tres",
-            EnemySpriteUri = "res://Samples/AuthoredBattle/Visual/Enemy.tres",
+            BackgroundUri = Localize("Leaves/Background.tres"),
+            EnemySpriteUri = Localize("Leaves/Enemy.tres"),
             EnemyPosition = new Vector2I(int.MinValue, int.MinValue),
             EnemySlots =
             [
@@ -238,6 +252,9 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         NativeProfileFixture.SaveResource(table, path);
         return path;
     }
+
+    private string Localize(string relative) =>
+        ProjectSettings.LocalizePath(Path.Combine(root, relative)).TrimEnd('/');
 
     public void Dispose()
     {
