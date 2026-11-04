@@ -336,11 +336,18 @@ public partial class Main : Node2D
             // World-wired first-battle call: the parked scene waits and counted movements
             // advance one step per committed update tick (the same per-tick ownership the
             // dynamic host uses); the map only redraws when the exploration really changed.
-            if (changed && firstBattleWorld is { } world && Dialogue?.Session is { Phase: Pal.Core.TriggerScriptPhase.WaitingForSceneWait or Pal.Core.TriggerScriptPhase.WaitingForMovement } trigger)
+            if (firstBattleWorld is { } world && Dialogue?.Session is { Phase: Pal.Core.TriggerScriptPhase.WaitingForSceneWait or Pal.Core.TriggerScriptPhase.WaitingForMovement } trigger)
             {
-                world.AdvanceTriggerTick(trigger);
-                // The acknowledged park may have advanced into a display; bind it now.
-                Dialogue!.BindPendingDisplays();
+                // One world step per 100ms due tick (the dynamic host's cadence), independent
+                // of exploration movement commits; the acknowledged park may advance into a
+                // display, which is bound immediately.
+                uint now = unchecked((uint)Time.GetTicksMsec());
+                if (unchecked((int)(now - firstBattleWorldTick)) >= 100)
+                {
+                    firstBattleWorldTick = now;
+                    world.AdvanceTriggerTick(trigger);
+                    Dialogue!.BindPendingDisplays();
+                }
             }
             if (changed) mapScene.UpdateScene(Exploration.Plan);
             // Presentation transitions (redraw/fadeScene/fadeOut) in the world-wired call:
@@ -394,6 +401,7 @@ public partial class Main : Node2D
     }
 
     private uint firstBattleTransitionDeadline;
+    private uint firstBattleWorldTick;
 
     private void CompleteFirstBattleTransition()
     {
