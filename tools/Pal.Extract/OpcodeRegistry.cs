@@ -79,12 +79,18 @@ public static class OpcodeRegistry
     private static readonly OpcodeDescriptor[] Registry =
     [
         new(0x0000, "end", [new("mode", OpcodeFieldKind.ConstantString, ConstantString: "keep")], OpcodeExecutor.BothSwitches, OpcodeSuccessor.Stop),
+        new(0x0001, "end", [new("mode", OpcodeFieldKind.ConstantString, ConstantString: "advance")], OpcodeExecutor.BothSwitches, OpcodeSuccessor.Stop),
+        new(0x0002, "end", [new("mode", OpcodeFieldKind.ConstantString, ConstantString: "redirect"), new("to", OpcodeFieldKind.Reference, 0), new("limit", OpcodeFieldKind.Word, 1)], OpcodeExecutor.BothSwitches, OpcodeSuccessor.ConditionalJump),
+        new(0x0003, "goto", [new("to", OpcodeFieldKind.Reference, 0), new("limit", OpcodeFieldKind.Word, 1)], OpcodeExecutor.BothSwitches, OpcodeSuccessor.ConditionalJump),
+        new(0x0004, "call", [new("to", OpcodeFieldKind.Reference, 0), new("eventObjectId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.BothSwitches, OpcodeSuccessor.Sequential),
         new(0x0006, "randomJump", [new("rate", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.BothSwitches, OpcodeSuccessor.ConditionalJump),
         new(0x0007, "startBattle",
             [new("enemyTeamId", OpcodeFieldKind.Word, 0), new("lossTarget", OpcodeFieldKind.BattleTarget, 1),
              new("isBoss", OpcodeFieldKind.BossFlag, 2, CoupledTarget: "fleeTarget"), new("fleeTarget", OpcodeFieldKind.BattleTarget, 2)],
             OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.BattleResult, AllowLegacyRaw: true, DecodeValidatesReferenceRange: true),
+        new(0x0008, "advanceEntry", NoFields, OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x0009, "waitUpdate", [new("frames", OpcodeFieldKind.Word, 0), new("runTriggers", OpcodeFieldKind.Word, 1), new("updateGestures", OpcodeFieldKind.Word, 2)], OpcodeExecutor.BothSwitchesDiffer, OpcodeSuccessor.Sequential),
+        new(0x000A, "confirmNoJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.ConditionalJump),
         new(0x000B, "walkStep", [new("direction", OpcodeFieldKind.OpcodeOffset, Base: 0x000B)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x000C, "walkStep", [new("direction", OpcodeFieldKind.OpcodeOffset, Base: 0x000B)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x000D, "walkStep", [new("direction", OpcodeFieldKind.OpcodeOffset, Base: 0x000B)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),

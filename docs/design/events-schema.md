@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（36 个 opcode 位，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（48 个 opcode 位、40 个动词：M5 批1 #96 新增基础控制流，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -13,7 +13,7 @@ pal-extract rebuild-events --input <events目录> --output <新文件>
 
 `export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
 
-实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 36 条描述符承载（`end(keep)`、`randomJump`、`startBattle`、`changeHp`、`changeMp`、`boostStat`、`setDialog` 四变体、`showDialog`、`redraw`、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 48 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`randomJump`、`startBattle`、`changeHp`、`changeMp`、`boostStat`、`setDialog` 四变体、`showDialog`、`redraw`、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
 
 导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
@@ -153,6 +153,9 @@ data/extracted/events/
 | `0x0001` | `end` | `mode: "advance"`；保留三个原操作数，推进到 `next` |
 | `0x0002` | `end` | `mode: "redirect"`、`to` 为引用映射 operand 0、`limit` 为 WORD 映射 operand 1；operand 2 保留 |
 | `0x0003` | `goto` | `to` 为引用映射 operand 0、`limit` 为 WORD 映射 operand 1；operand 2 保留 |
+| `0x0004` | `call` | `to` 为引用映射 operand 0（被调 trigger 脚本入口）、`eventObjectId` 为 WORD 映射 operand 1（0=继承调用者的对象 id）；operand 2 保留（#96） |
+| `0x0008` | `advanceEntry` | 无操作数映射；三个原操作数保留（#96） |
+| `0x000A` | `confirmNoJump` | `to` 为引用映射 operand 0（玩家选否时跳转）；operand 1、2 保留（#96） |
 | `0x0007` | `startBattle` | `enemyTeamId` 为 WORD 映射 operand 0；`lossTarget` 为可空引用映射 operand 1；`isBoss` 为布尔值，`fleeTarget` 为可空引用，二者共同映射 operand 2，规则见下文 |
 | `0x001F` | `giveItem` | `itemId` 为 WORD 映射 operand 0、`count` 为有符号整数映射 operand 1；operand 2 保留 |
 | `0x0006` | `randomJump` | `rate` 为 WORD 映射 operand 0、`to` 为引用映射 operand 1；operand 2 保留。执行时抽取 `RandomLong(1,100)`，**抽取值 ≥ rate 时跳转**，否则顺序后继；预检必须同时覆盖两个真实分支（#49） |
@@ -212,14 +215,20 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x006D setSceneScripts | case 0x006D：`rgScene[operand0−1].wScriptOnEnter/wScriptOnTeleport = operand1/2` | scene 下标 → `sceneId`（1 基） |
 | 0x004A setBattlefield | case 0x004A：`gpGlobals->wNumBattleField = operand0` | 战场编号 → `battlefieldId` |
 
-#### 当前注册表（36 个 opcode 位）
+#### 当前注册表（48 个 opcode 位，40 个动词）
 
 | opcode | op | 字段（绑定） | 执行方式 | 后继 |
 |---|---|---|---|---|
 | 0x0000 | `end` | `mode`="keep"（常量） | bothSwitches | stop |
+| 0x0001 | `end` | `mode`="advance"（常量） | bothSwitches | stop |
+| 0x0002 | `end` | `mode`="redirect"（常量）、`to`(reference,0)、`limit`(word,1) | bothSwitches | conditionalJump |
+| 0x0003 | `goto` | `to`(reference,0)、`limit`(word,1) | bothSwitches | conditionalJump |
+| 0x0004 | `call` | `to`(reference,0)、`eventObjectId`(word,1) | bothSwitches | sequential |
 | 0x0006 | `randomJump` | `rate`(word,0)、`to`(reference,1) | bothSwitches | conditionalJump |
 | 0x0007 | `startBattle` | `enemyTeamId`(word,0)、`lossTarget`(battleTarget,1)、`isBoss`(bossFlag,2⟺fleeTarget)、`fleeTarget`(battleTarget,2) | triggerSwitchOnly | battleResult |
+| 0x0008 | `advanceEntry` | — | triggerSwitchOnly | sequential |
 | 0x0009 | `waitUpdate` | `frames`(word,0)、`runTriggers`(word,1)、`updateGestures`(word,2) | bothSwitchesDiffer | sequential |
+| 0x000A | `confirmNoJump` | `to`(reference,0) | triggerSwitchOnly | conditionalJump |
 | 0x000B–0x000E | `walkStep` | `direction`(opcodeOffset, base 0x000B) | shared | sequential |
 | 0x000F | `face` | `direction`(word,0)、`frame`(word,1) | shared | sequential |
 | 0x0010 | `walkTo` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
@@ -255,6 +264,24 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0090 | `setObjectScript` | `objectId`(word,0)、`value`(word,1)、`slotIndex`(word,2) | shared | sequential |
 | 0x009A | `setStateRange` | `fromEventObjectId`(word,0)、`toEventObjectId`(word,1)、`state`(signedWord,2) | shared | sequential |
 | 0xFFFF | `showDialog` | `messageId`(word,0)、`descriptionLineWord`(word,1) | bothSwitchesDiffer | messageSpan |
+
+#### M5 批1 条目：基础控制流（#96，后续批次条目格式样板）
+
+每批新增的具名 opcode 在此登记逐条语义。条目固定包含：动词、字段映射（含操作数寻址语义）、执行方式（对照 `script.c` switch 拓扑与行号）、后继声明、反向编码规则、真实数据命中计数（SSS.MKF chunk 4，43538 条指令）。本批核对结论：**全部操作数为立即 WORD**（`pScript->rgwOperand[n]` 直读，[script.c](../../reference/sdlpal/script.c) 无 wOperaxx 变量寻址），故无 variable 类字段；两个 switch 的控制流 case 逐行核对，行号如下。
+
+| opcode | 动词 | 字段映射与寻址 | 执行方式（script.c 行号） | 后继 | 反向编码 | 真实数据 |
+|---|---|---|---|---|---|---|
+| 0x0000 | `end` keep | 无操作数映射 | bothSwitches（trigger 3206：`fEnded=TRUE`，保存入口不变；auto 3522：返回原地址） | stop | 无映射字段，三操作数保留源 WORD | 3882 |
+| 0x0001 | `end` advance | 无操作数映射 | bothSwitches（trigger 3213：`fEnded`+保存入口=next；auto 3528：`wScriptEntry++`） | stop | 同上 | 1188 |
+| 0x0002 | `end` redirect | `to`=operand0（立即 WORD 地址→标签）、`limit`=operand1（空闲阈值 WORD） | bothSwitches（trigger 3221：空闲计数守卫通过则 `fEnded`+保存入口=`to`，否则 reset 计数走 next；auto 3535：同守卫，返回 `to`；两执行器各用 `nScriptIdleFrame`/`wScriptIdleFrameCountAuto` 计数，逻辑形状一致） | conditionalJump（`to` 或 next） | `to` 解析标签重编码、`limit` 由字段值重编码；operand2 保留 | 513（目标全部在范围内） |
+| 0x0003 | `goto` | `to`=operand0、`limit`=operand1 | bothSwitches（trigger 3241：`wScriptEntry=to` 后循环内立即执行；auto 3551：同赋值后 `goto begin` 同帧执行；空闲守卫同 0x0002，失败时 reset 计数走 next） | conditionalJump（`to` 或 next） | 同 0x0002 | 493（目标全部非零且在范围内） |
+| 0x0004 | `call` | `to`=operand0（被调 trigger 脚本入口地址）、`eventObjectId`=operand1（1 基 event object 表下标，0=继承调用者） | bothSwitches（trigger 3260 / auto 3568：均递归调 `PAL_RunTriggerScript(operand0, operand1?operand1:wEventObjectID)`——**被调脚本一律按 trigger 语义执行**；返回后 `wScriptEntry++`） | sequential | `to` 解析重编码、`eventObjectId` 重编码；operand2 保留 | 327（315 个 `eventObjectId`=0） |
+| 0x0006 | `randomJump`（#78 已具名，本批复核） | `rate`=operand0（1..100，`RandomLong(1,100) >= rate` 时跳转）、`to`=operand1 | bothSwitches（trigger 3301：判定通过即 `wScriptEntry=to; continue`；auto 3577：判定通过且 **operand1≠0** 才跳，目标 0 在 auto 是「不跳」、在 trigger 是「跳到 0=停止」——零目标边缘差异记录在案，不改变声明口径） | conditionalJump（`to` 或 next） | `rate`/`to` 均重编码（#78 已定） | 235（96 个目标为 0，合法引用 L0000） |
+| 0x0008 | `advanceEntry` | 无操作数映射 | triggerSwitchOnly（trigger 3337：`wScriptEntry++` 且 `wNextScriptEntry=新值`——推进保存入口但**不停止**本次运行；auto 无 case，default→`PAL_InterpretInstruction`→`TerminateOnError`(3078)） | sequential | 无映射字段，三操作数保留源 WORD | 36 |
+| 0x0009 | `waitUpdate`（#78 已具名，本批复核） | `frames`=operand0、`runTriggers`=operand1、`updateGestures`=operand2 | bothSwitchesDiffer（trigger 3345：同步忙等 `frames`（0→1）帧，每帧 `PAL_GameUpdate(runTriggers?TRUE:FALSE)`、`updateGestures` 时 `PAL_UpdatePartyGestures`；auto 3595：每帧一次 `++wScriptIdleFrameCountAuto >= frames` 才推进，**仅 operand0 有效**） | sequential | 三字段均重编码（#78 已定） | 1999 |
+| 0x000A | `confirmNoJump` | `to`=operand0（选否跳转目标） | triggerSwitchOnly（trigger 3375：`PAL_ConfirmMenu()` 选否→`wScriptEntry=to`，否则 next；auto 无 case→TerminateOnError） | conditionalJump（`to` 或 next） | `to` 解析重编码；operand1、2 保留 | 26（目标全部在范围内） |
+
+真实数据核对：五个跳转类 opcode（0x0002/0x0003/0x0004/0x0006/0x000A）的全部目标操作数要么为 0（引用 L0000，合法）要么落在 chunk 4 内，无越界；export→rebuild 字节一致回归见 #96 回执。目标引用的悬空拒绝发生在重建的标签解析处（与 `randomJump` 同口径）；`startBattle` 式的导出期范围预检（`DecodeValidatesReferenceRange`）本批不启用。
 
 #### raw 保底与反向编码规则
 

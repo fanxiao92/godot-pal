@@ -246,6 +246,77 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(rebuilt));
     }
 
+    [Fact]
+    public async Task Control_flow_batch1_verbs_export_roundtrip_and_reencode_jump_targets_from_labels()
+    {
+        // M5 batch 1 (#96): end advance/redirect, goto, call, advanceEntry, confirmNoJump plus the
+        // re-verified end keep / randomJump / waitUpdate family. Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x0002, 2, 3, 7,   // end redirect: resume at L0002 unless the idle limit 3 trips
+            0x0003, 5, 2, 0,   // goto L0005
+            0x0004, 4, 9, 1,   // call L0004 with event object 9 as the script context
+            0x0008, 0, 0, 0,   // advanceEntry
+            0x000a, 3, 0, 0,   // confirmNoJump L0003 when the player selects No
+            0x0009, 30, 1, 1,  // waitUpdate 30 frames with game updates and gestures
+            0x0001, 0, 0, 0,   // end advance
+            0x0000, 0, 0, 0);  // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(8, commands.Count);
+        Assert.Equal("end", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal("redirect", commands[0]!["mode"]!.GetValue<string>());
+        Assert.Equal("L0002", commands[0]!["to"]!.GetValue<string>());
+        Assert.Equal(3, commands[0]!["limit"]!.GetValue<int>());
+        Assert.Equal("goto", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("L0005", commands[1]!["to"]!.GetValue<string>());
+        Assert.Equal("call", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal("L0004", commands[2]!["to"]!.GetValue<string>());
+        Assert.Equal(9, commands[2]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal("advanceEntry", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("confirmNoJump", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal("L0003", commands[4]!["to"]!.GetValue<string>());
+        Assert.Equal("waitUpdate", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(30, commands[5]!["frames"]!.GetValue<int>());
+        Assert.Equal("end", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("advance", commands[6]!["mode"]!.GetValue<string>());
+        Assert.Equal("end", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal("keep", commands[7]!["mode"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode jump WORDs from resolved labels: goto to L0000 exercises the
+        // zero-target rule (target 0 references the label at index 0 and re-encodes as WORD 0).
+        commands[0]!["limit"] = 0; // always take the branch
+        commands[1]!["to"] = "L0000";
+        commands[2]!["eventObjectId"] = 0; // inherit the caller's event object id
+        commands[4]!["to"] = "L0001";
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0002, 2, 0, 7,
+            0x0003, 0, 2, 0,
+            0x0004, 4, 0, 1,
+            0x0008, 0, 0, 0,
+            0x000a, 1, 0, 0,
+            0x0009, 30, 1, 1,
+            0x0001, 0, 0, 0,
+            0x0000, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A dangling jump target is rejected without producing output.
+        commands[1]!["to"] = "L0100";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
