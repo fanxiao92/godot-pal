@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace Pal.Extract;
 
-/// <summary>Complete decoded frame set of one battle image chunk (#92 abc.mkf and #94 f.mkf Windows YJ2 battle sprites, #93 ball.mkf raw item bitmap).</summary>
+/// <summary>Complete decoded frame set of one battle image chunk (#92 abc.mkf and #94 f.mkf Windows YJ2 battle sprites, #93 ball.mkf raw item bitmap, #95 fbp.mkf raw 320x200 background).</summary>
 public sealed record DecodedBattleSprite(int DecodedByteLength, int FrameCount, IndexedImage[] Frames);
 
 /// <summary>

@@ -5,9 +5,10 @@ using Xunit;
 
 namespace Pal.Extract.Tests;
 
-// export-battle-images CLI (#92 abc, #93 ball, #94 f): micro abc.mkf/ball.mkf/f.mkf
-// + pat.mkf fixtures through the real process. Expected manifest identities (SHA-256,
-// totals, file sets) are computed independently in the test, not echoed from tool output.
+// export-battle-images CLI (#92 abc, #93 ball, #94 f, #95 fbp): micro
+// abc.mkf/ball.mkf/f.mkf/fbp.mkf + pat.mkf fixtures through the real process. Expected
+// manifest identities (SHA-256, totals, file sets) are computed independently in the
+// test, not echoed from tool output.
 public sealed class ExportBattleImagesCliTests : IDisposable
 {
     private readonly string directory = Path.Combine(Path.GetTempPath(), $"pal-battle-images-{Guid.NewGuid():N}");
@@ -45,6 +46,31 @@ public sealed class ExportBattleImagesCliTests : IDisposable
     private static byte[] SentinelSprite => [3, 0, 7, 0, 0, 0,
         2, 0, 1, 0, 1, 5, 0x81, 0,
         1, 0, 1, 0, 1, 6];
+
+    // fbp.mkf screens (#95), compressed with YJ2 like every real fbp chunk: each chunk
+    // decompresses to exactly the 64000 raw palette indices of one 320x200 screen
+    // (PAL_FBPBlitToSurface linear copy). Row y repeats index (y + base) & 0xff; the
+    // encoder emits one literal plus distance-1 matches per row. The real archive has
+    // empty chunks 5 and 58, so chunk 1 of the fixture is empty.
+    private static byte[] CompressScreen(byte baseIndex)
+    {
+        var encoder = new Yj2TestData(320 * 200);
+        for (int y = 0; y < 200; y++)
+        {
+            encoder.Literal((byte)(y + baseIndex));
+            encoder.Match(67, 1).Match(67, 1).Match(67, 1).Match(67, 1).Match(51, 1);
+        }
+        return encoder.End();
+    }
+
+    private static byte[] ExpectedScreen(byte baseIndex)
+    {
+        var plane = new byte[320 * 200];
+        for (int y = 0; y < 200; y++)
+            for (int x = 0; x < 320; x++)
+                plane[y * 320 + x] = (byte)(y + baseIndex);
+        return plane;
+    }
 
     public ExportBattleImagesCliTests()
     {
@@ -274,6 +300,96 @@ public sealed class ExportBattleImagesCliTests : IDisposable
         Assert.False(Directory.Exists(output));
     }
 
+    [Fact]
+    public async Task Export_battle_images_decodes_fbp_chunks_as_fullscreen_screens()
+    {
+        WriteArchive("Fbp.mkf", CompressScreen(0), [], CompressScreen(160));
+        var result = await ExportFbp();
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.Stdout);
+        Assert.Empty(result.Stderr);
+        string[] files = [.. Directory.GetFiles(output, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(output, path).Replace('\\', '/')).Order()];
+        Assert.Equal(new[]
+        {
+            "index.json",
+            "sprites/0.json", "sprites/0/0.png",
+            "sprites/2.json", "sprites/2/0.png",
+        }, files);
+        using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
+        var root = index.RootElement;
+        Assert.Equal("fbp", root.GetProperty("parameters").GetProperty("archive").GetString());
+        var sources = root.GetProperty("sources").EnumerateArray().ToArray();
+        Assert.Equal(2, sources.Length);
+        Assert.Equal("fbp.mkf", sources[0].GetProperty("name").GetString());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(input, "Fbp.mkf")))),
+            sources[0].GetProperty("sha256").GetString());
+        var chunks = root.GetProperty("chunks").EnumerateArray().ToArray();
+        Assert.Equal(3, chunks.Length);
+        // fbp chunks are YJ2 screens (PAL_MKFDecompressChunk, fixed 320x200 buffer).
+        Assert.Equal("yj2", chunks[0].GetProperty("compression").GetString());
+        Assert.Equal(64000, chunks[0].GetProperty("decodedByteLength").GetInt32());
+        Assert.Equal(1, chunks[0].GetProperty("frameCount").GetInt32());
+        Assert.Equal(1, chunks[0].GetProperty("decodedFrameCount").GetInt32());
+        Assert.Equal("sprites/0.json", chunks[0].GetProperty("sprite").GetString());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(ChunkBytes(input, "Fbp.mkf", 0))),
+            chunks[0].GetProperty("sha256").GetString());
+        // Real fbp.mkf carries empty chunks 5 and 58; they stay bare entries.
+        Assert.Equal("empty", chunks[1].GetProperty("compression").GetString());
+        Assert.Throws<KeyNotFoundException>(() => chunks[1].GetProperty("frameCount"));
+        Assert.Equal("yj2", chunks[2].GetProperty("compression").GetString());
+        Assert.Equal(64000, chunks[2].GetProperty("decodedByteLength").GetInt32());
+        var totals = root.GetProperty("totals");
+        Assert.Equal(3, totals.GetProperty("chunks").GetInt32());
+        Assert.Equal(2, totals.GetProperty("decodedChunks").GetInt32());
+        Assert.Equal(1, totals.GetProperty("emptyChunks").GetInt32());
+        Assert.Equal(2, totals.GetProperty("frames").GetInt32());
+        Assert.Equal(4, totals.GetProperty("files").GetInt32());
+        using var sprite = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "sprites", "0.json")));
+        var document = sprite.RootElement;
+        Assert.Equal("fbp.mkf", document.GetProperty("source").GetProperty("archive").GetString());
+        Assert.Equal("Windows YJ2", document.GetProperty("source").GetProperty("encoding").GetString());
+        Assert.Equal("single raw 320x200 indexed bitmap, linear row-major (no RLE, no offset table)",
+            document.GetProperty("source").GetProperty("frameLayout").GetString());
+        var frame = Assert.Single(document.GetProperty("frames").EnumerateArray());
+        Assert.Equal(0, frame.GetProperty("index").GetInt32());
+        Assert.Equal(320, frame.GetProperty("width").GetInt32());
+        Assert.Equal(200, frame.GetProperty("height").GetInt32());
+        Assert.Equal(0, frame.GetProperty("sourceOffset").GetInt32());
+        Assert.Equal(ExpectedScreen(0), frame.GetProperty("indices").GetBytesFromBase64());
+        Assert.All(frame.GetProperty("alpha").GetBytesFromBase64(), a => Assert.Equal(255, a));
+        Assert.Equal("sprites/0/0.png", frame.GetProperty("png").GetString());
+        ValidatePng(Path.Combine(output, "sprites", "0", "0.png"), 320, 200);
+        using var second = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "sprites", "2.json")));
+        var secondFrame = Assert.Single(second.RootElement.GetProperty("frames").EnumerateArray());
+        Assert.Equal(ExpectedScreen(160), secondFrame.GetProperty("indices").GetBytesFromBase64());
+        ValidatePng(Path.Combine(output, "sprites", "2", "0.png"), 320, 200);
+        Assert.DoesNotContain(directory, File.ReadAllText(Path.Combine(output, "index.json")));
+    }
+
+    [Theory]
+    [InlineData("yj1")]
+    [InlineData("truncated-yj2")]
+    [InlineData("not-a-screen")]
+    public async Task Export_battle_images_rejects_damaged_fbp_chunks_before_creating_output(string kind)
+    {
+        byte[] damaged = kind switch
+        {
+            "yj1" => "YJ_1"u8.ToArray(),
+            "truncated-yj2" => [1, 0, 0, 0],
+            _ => Compress(new byte[8]),
+        };
+        WriteArchive("Fbp.mkf", damaged);
+        var result = await ExportFbp();
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(result.Stdout);
+        Assert.Contains("fbp.mkf", result.Stderr);
+        Assert.Contains(kind == "yj1" ? "YJ1" : kind == "truncated-yj2" ? "YJ2" : "320x200", result.Stderr);
+        Assert.DoesNotContain(directory, result.Stderr);
+        Assert.DoesNotContain("   at ", result.Stderr);
+        Assert.False(Directory.Exists(output));
+    }
+
     [Theory]
     [InlineData("truncated-bitmap")]
     [InlineData("zero-width")]
@@ -375,7 +491,7 @@ public sealed class ExportBattleImagesCliTests : IDisposable
         string[] args = kind switch
         {
             "missing" => ["export-battle-images", "--input", input, "--output", output],
-            "unknown-archive" => ["export-battle-images", "--input", input, "--archive", "fbp", "--output", output],
+            "unknown-archive" => ["export-battle-images", "--input", input, "--archive", "fire", "--output", output],
             "wrong-order" => ["export-battle-images", "--archive", "abc", "--input", input, "--output", output],
             "empty-input" => ["export-battle-images", "--input", "", "--archive", "abc", "--output", output],
             _ => ["export-battle-images", "--input", input, "--archive", "", "--output", output],
@@ -435,7 +551,7 @@ public sealed class ExportBattleImagesCliTests : IDisposable
     {
         var result = await CliProcess.Run(directory, "--help");
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("export-battle-images --input <directory> --archive <abc|ball|f> --output <new-or-empty-directory>", result.Stdout);
+        Assert.Contains("export-battle-images --input <directory> --archive <abc|ball|f|fbp> --output <new-or-empty-directory>", result.Stdout);
     }
 
     private Task<(int ExitCode, string Stdout, string Stderr)> Export(string? destination = null, string? source = null) =>
@@ -448,6 +564,10 @@ public sealed class ExportBattleImagesCliTests : IDisposable
 
     private Task<(int ExitCode, string Stdout, string Stderr)> ExportF(string? destination = null) =>
         CliProcess.Run(directory, "export-battle-images", "--input", input, "--archive", "f",
+            "--output", destination ?? output);
+
+    private Task<(int ExitCode, string Stdout, string Stderr)> ExportFbp(string? destination = null) =>
+        CliProcess.Run(directory, "export-battle-images", "--input", input, "--archive", "fbp",
             "--output", destination ?? output);
 
     private void WriteArchive(string name, params byte[][] chunks) => MkfFixture.Write(input, name, chunks);

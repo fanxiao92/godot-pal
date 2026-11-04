@@ -1,6 +1,6 @@
 # 战斗图像包契约（battle-image-schema）v1
 
-状态：**abc 形状已冻结并交付（#92）；ball 按同形交付（#93）；f 按同形交付（#94）**；`fbp`（#95）沿用同一 CLI 动词与 `index.json` 清单形状，按各自参考事实扩展 `compression`/帧布局。忠实还原以 `reference/sdlpal/` 为权威（[ADR-0001](../adr/0001-faithful-event-transcription.md)、[ADR-0004](../adr/0004-data-and-script-layers.md)）；通用 JSON 规则与 [data-schema](data-schema.md) 一致（camelCase、严格校验、只读提取）。
+状态：**abc 形状已冻结并交付（#92）；ball 按同形交付（#93）；f 按同形交付（#94）；fbp 按同形交付（#95，MKF 四票收官）**。忠实还原以 `reference/sdlpal/` 为权威（[ADR-0001](../adr/0001-faithful-event-transcription.md)、[ADR-0004](../adr/0004-data-and-script-layers.md)）；通用 JSON 规则与 [data-schema](data-schema.md) 一致（camelCase、严格校验、只读提取）。
 
 ## 参考事实（abc.mkf）
 
@@ -26,21 +26,29 @@
 - `compression`：非空 chunk 标 `"yj2"`，空 chunk `"empty"`（真实数据无空 chunk，夹具仍保留该路径）；精灵文档 `source.encoding` = `"Windows YJ2"`，`frameLayout` = PAL 精灵 WORD 偏移表 + RLE 帧（与 abc 相同，`archive` 字段 = `f.mkf`）。
 - PNG 着色与 abc 同源：`pat.mkf` chunk 0 日间色，仅作可视化。
 
+## 参考事实（fbp.mkf）
+
+- **消费点与语义（战场背景 + UI/剧情画面）**：`global.c:175` 打开 `fbp.mkf`（`fpFBP`，注释 "battlefield background images"）。战斗背景：`battle.c:949` `PAL_LoadBattleBackground` 用 `PAL_MKFDecompressChunk(buf, 320*200, gpGlobals->wNumBattleField, fpFBP)` 读入——**chunk 下标 = wNumBattleField**（`script.c` opcode `0x004A` 设置；DATA chunk 5 战场表 58 行（#89 已导出 battle-field）对应 chunk 0..57）。同档还供非战斗画面：`uigame.c` 状态栏背景 chunk 0、装备菜单 chunk 1、主菜单 WIN95 chunk 2；`main.c` 启动画面 chunk 3/4（WIN95）；`ending.c` `PAL_ShowFBP`/`PAL_ScrollFBP` 结局画面 chunk 59..77（WIN95 上下半 69/70）。
+- **压缩与解码结构**：消费统一走 `PAL_MKFDecompressChunk`（WIN 基线 = YJ2；fbp 是 `PAL_IsWINVersion` 六探测档之一 `global.c:55`，DOS 形态 YJ_1 拒绝，同 abc/f）；但解压结果**不是精灵也不是 RLE 位图**：`palcommon.c` `PAL_FBPBlitToSurface` 把 64000 字节线性拷贝到 320×200 8-bit 表面，即每非空 chunk 的 YJ2 载荷必须解压为**恰 64000 个调色板索引**（整幅屏幕，行主序，无 WORD 偏移表、无游程、无尺寸头），全不透明（index 0 是颜色不是透明键）。参考以固定 320×200 缓冲调用，声明长度超限在解压器层失败，不为部分/超长帧放宽。
+- **帧语义**：无名义/额外帧，每非空 chunk `frameCount = decodedFrameCount = 1`，唯一帧 320×200、`sourceOffset` 0、alpha 全 255；失败模式就是位图非屏幕（解压长度 ≠ 64000）或 YJ2 自身损坏。#95 真实数据核对：78 chunk，chunk 5、58 空（`PAL_MKFDecompressChunk` 返回 ≤0，消费端不检查，导出标 `"empty"`）；其余 76 chunk 全部 YJ2 且解压恰 64000 字节。
+- `compression`：非空 chunk 标 `"yj2"`（容器压缩与 abc/f 同），空 chunk `"empty"`；精灵文档 `source.encoding` = `"Windows YJ2"`，`frameLayout` = 单幅原始 320×200 索引位图、线性行主序。
+- PNG 着色与 abc 同源：`pat.mkf` chunk 0 日间色，仅作可视化。
+
 ## 范围与边界
 
-- 只读提取：`abc.mkf`（+ `pat.mkf` 供 PNG 着色）→ 完整图像包；无重编码、无 rebuild。`ball.mkf` 同理（`ball.mkf` + `pat.mkf`），`f.mkf` 同理（`f.mkf` + `pat.mkf`）。
+- 只读提取：`abc.mkf`（+ `pat.mkf` 供 PNG 着色）→ 完整图像包；无重编码、无 rebuild。`ball.mkf` 同理（`ball.mkf` + `pat.mkf`），`f.mkf` 同理（`f.mkf` + `pat.mkf`），`fbp.mkf` 同理（`fbp.mkf` + `pat.mkf`）。
 - 输出目录必须新建或为空、不在输入内、拒绝链接（与其他 export 一致）；清单最后发布。
 - PNG 着色固定用 `pat.mkf` chunk 0 日间色，仅作可视化；原版战斗实际按当前场景调色板绘制（`battle.c` `PAL_FadeIn(wNumPalette, ...)`），消费方应以索引平面 + 运行时调色板着色。
-- 资源上限：单 chunk 原始 ≤8 MiB、解压 ≤8 MiB；整包解压合计 ≤256 MiB、像素合计 ≤128M（真实 abc：解压约 1.9 MB、像素约 6.4M；真实 ball 无解压，chunk 原始字节即解压字节，合计约 0.14 MB；真实 f：解压合计 329,624 B、像素约 1.32M，最大单 chunk 解压 58,116 B）。
+- 资源上限：单 chunk 原始 ≤8 MiB、解压 ≤8 MiB；整包解压合计 ≤256 MiB、像素合计 ≤128M（真实 abc：解压约 1.9 MB、像素约 6.4M；真实 ball 无解压，chunk 原始字节即解压字节，合计约 0.14 MB；真实 f：解压合计 329,624 B、像素约 1.32M，最大单 chunk 解压 58,116 B；真实 fbp：解压合计 4,864,000 B = 76 屏 × 64000，像素合计同 4.87M，最大单 chunk 解压恒 64,000 B）。
 
 ## CLI 动词（四票冻结形状）
 
 ```
-pal-extract export-battle-images --input <目录> --archive <abc|ball|f> --output <新建或空目录>
+pal-extract export-battle-images --input <目录> --archive <abc|ball|f|fbp> --output <新建或空目录>
 ```
 
-- `--archive` 接受 `abc`（#92）、`ball`（#93）与 `f`（#94）；未实现值（`fbp` 等）按参数错误退出 2。
-- 必需归档按 profile 声明：abc → `abc.mkf`、`pat.mkf`；ball → `ball.mkf`、`pat.mkf`；f → `f.mkf`、`pat.mkf`（大小写不敏感，唯一匹配）。
+- `--archive` 接受 `abc`（#92）、`ball`（#93）、`f`（#94）与 `fbp`（#95）；其他值按参数错误退出 2。
+- 必需归档按 profile 声明：abc → `abc.mkf`、`pat.mkf`；ball → `ball.mkf`、`pat.mkf`；f → `f.mkf`、`pat.mkf`；fbp → `fbp.mkf`、`pat.mkf`（大小写不敏感，唯一匹配）。
 
 ## 输出布局
 
@@ -58,10 +66,10 @@ pal-extract export-battle-images --input <目录> --archive <abc|ball|f> --outpu
 | `formatVersion` | 整数 `1` |
 | `profile` | `"faithful"` |
 | `command` | `"export-battle-images"` |
-| `parameters.archive` | `"abc"`、`"ball"` 或 `"f"` |
-| `sources` | 数组：`name`（按 profile：abc.mkf/ball.mkf/f.mkf 与 pat.mkf）、`byteLength`、`sha256`（整档） |
+| `parameters.archive` | `"abc"`、`"ball"`、`"f"` 或 `"fbp"` |
+| `sources` | 数组：`name`（按 profile：abc.mkf/ball.mkf/f.mkf/fbp.mkf 与 pat.mkf）、`byteLength`、`sha256`（整档） |
 | `palette` | `archive`/`chunk`/`lighting` 与 `usage` 说明（PNG 着色专用，权威平面在精灵文档） |
-| `chunks` | 每 chunk 一项，按 index 升序：`index`、`byteLength`（原始 chunk 字节）、`sha256`（原始 chunk）、`compression`（abc/f：`"yj2"`；ball：`"rle"`；空 chunk `"empty"`）；非空另有 `decodedByteLength`（abc/f 为 YJ2 解压后字节数，ball 无解压即 chunk 字节数）、`frameCount`（abc/f 名义 `PAL_SpriteGetNumFrames`；ball 恒 1）、`decodedFrameCount`（含真实额外帧；ball 恒 1）、`sprite`（`sprites/<n>.json`） |
+| `chunks` | 每 chunk 一项，按 index 升序：`index`、`byteLength`（原始 chunk 字节）、`sha256`（原始 chunk）、`compression`（abc/f/fbp：`"yj2"`；ball：`"rle"`；空 chunk `"empty"`）；非空另有 `decodedByteLength`（abc/f/fbp 为 YJ2 解压后字节数，fbp 恒 64000；ball 无解压即 chunk 字节数）、`frameCount`（abc/f 名义 `PAL_SpriteGetNumFrames`；ball/fbp 恒 1）、`decodedFrameCount`（含真实额外帧；ball/fbp 恒 1）、`sprite`（`sprites/<n>.json`） |
 | `totals` | `chunks`/`decodedChunks`/`emptyChunks`/`frames`/`files`（不含 index.json 自身） |
 
 ### sprites/&lt;chunk&gt;.json 字段（v1）
@@ -70,14 +78,15 @@ pal-extract export-battle-images --input <目录> --archive <abc|ball|f> --outpu
 |---|---|
 | `formatVersion` / `profile` | `1` / `"faithful"` |
 | `chunk` | chunk 号 |
-| `source` | `archive`、`chunk`、`encoding`（abc/f：`"Windows YJ2"`；ball：`"uncompressed PAL RLE bitmap"`）、`frameLayout`（abc/f：PAL 精灵 WORD 偏移表 + RLE 帧；ball：单幅 RLE 位图，可选 `0x00000002` 头 + WORD 宽/高 + RLE 游程） |
-| `decodedByteLength` | abc/f 为 YJ2 解压后字节数；ball 无解压，即 chunk 原始字节数 |
-| `frameCount` | abc/f 名义帧数（`PAL_SpriteGetNumFrames`）；ball 恒 1 |
-| `frames` | 数组，每帧 `index`（abc/f 0..名义−1，可含额外下标；ball 恒 [0]）、`sourceOffset`、`width`、`height`、`png`（相对路径）、`indices`/`alpha`（base64，行长 width×height） |
+| `source` | `archive`、`chunk`、`encoding`（abc/f/fbp：`"Windows YJ2"`；ball：`"uncompressed PAL RLE bitmap"`）、`frameLayout`（abc/f：PAL 精灵 WORD 偏移表 + RLE 帧；ball：单幅 RLE 位图，可选 `0x00000002` 头 + WORD 宽/高 + RLE 游程；fbp：单幅原始 320×200 索引位图，线性行主序） |
+| `decodedByteLength` | abc/f/fbp 为 YJ2 解压后字节数（fbp 恒 64000）；ball 无解压，即 chunk 原始字节数 |
+| `frameCount` | abc/f 名义帧数（`PAL_SpriteGetNumFrames`）；ball/fbp 恒 1 |
+| `frames` | 数组，每帧 `index`（abc/f 0..名义−1，可含额外下标；ball/fbp 恒 [0]）、`sourceOffset`、`width`、`height`（fbp 恒 320×200）、`png`（相对路径）、`indices`/`alpha`（base64，行长 width×height；fbp alpha 全 255） |
 
 ## 与后续里程碑的衔接
 
 - M6 战斗 Prepare 按 `enemyId` → chunk 下标消费：idle/magic/attack 分段与帧寻址以本包 `frames` 为准；额外帧下标＝`frameCount` 时必须核对 `decodedFrameCount`。
 - M6 物品 UI 按 #78 物品对象的 `wBitmap` → ball chunk 下标消费；每个非空 chunk 恰一帧（`frames[0]`）。
 - M6 玩家战斗精灵按 player-roles `battleSprite`（含装备覆盖与 `battle-effect-index` 行下标）→ f chunk 下标消费，姿态按下标 0..9 分段；召唤神按魔法表 `summonEffect + 10` → f chunk 10..18 消费，动画播放到 `frameCount - 1`（不含末帧）。
+- M6 战斗 Prepare 按 `wNumBattleField`（battle-field 表行下标，即 fbp chunk 下标）消费整幅 320×200 背景帧；UI/结局画面同档固定 chunk（0/1/2/3/4、59..77）。
 - 真实原始/派生资源不入库：本契约产物只落临时目录，仓库仅保留代码、测试与人工微型夹具。
