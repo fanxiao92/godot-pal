@@ -3,44 +3,52 @@ using static Pal.Extract.ExportSupport;
 
 namespace Pal.Extract;
 
-// export-battle-images (#92): decodes every abc.mkf chunk - the enemy battle sprites
-// battle.c PAL_LoadBattleSprites reads by enemy definition ID - into a complete image
-// package: index.json manifest, one sprite document per chunk with authoritative
-// indices/alpha planes, and PNG frames colorized with pat.mkf chunk 0 day colors.
-// The verb and manifest shape are frozen for #93-#95 (ball/f/fbp).
+// export-battle-images (#92 abc, #93 ball): decodes every chunk of the selected battle
+// image MKF into a complete image package: index.json manifest, one sprite document per
+// chunk with authoritative indices/alpha planes, and PNG frames colorized with pat.mkf
+// chunk 0 day colors. abc chunks are the Windows YJ2 enemy sprites battle.c
+// PAL_LoadBattleSprites reads by enemy definition ID; ball chunks are the raw item
+// bitmaps itemmenu.c reads un-decompressed through item.wBitmap. The verb and manifest
+// shape stay frozen for #94-#95 (f/fbp).
 internal static class BattleImageExporter
 {
-    internal const string Archive = "abc";
     private const int MaximumChunkBytes = 8 * 1024 * 1024;
     private const int MaximumDecodedChunkBytes = 8 * 1024 * 1024;
     private const int MaximumAggregateDecodedBytes = 256 * 1024 * 1024;
     private const int MaximumAggregatePixels = 128 * 1024 * 1024;
-    private static readonly string[] RequiredNames = ["abc.mkf", "pat.mkf"];
-
-    internal static void Export(string input, string output)
+    internal static void Export(string input, string output, string archive)
     {
-        output = ExportPaths.Validate(input, output, RequiredNames);
-        var archives = MkfArchive.OpenRequired(input, RequiredNames, 65536);
+        string[] requiredNames = archive switch
+        {
+            "abc" => ["abc.mkf", "pat.mkf"],
+            "ball" => ["ball.mkf", "pat.mkf"],
+            _ => throw new InvalidOperationException($"Unknown battle image archive '{archive}'."),
+        };
+        output = ExportPaths.Validate(input, output, requiredNames);
+        var archives = MkfArchive.OpenRequired(input, requiredNames, 65536);
         string staging = Path.Combine(Path.GetTempPath(), $"pal-battle-{Guid.NewGuid():N}");
         try
         {
-            var abc = archives[0];
+            var source = archives[0];
             var palette = DecodeResource("pat.mkf", 0, () => PaletteDecoder.Decode(archives[1].ReadChunk(0, 1536), night: false));
             Directory.CreateDirectory(staging);
             var entries = new List<JsonObject>();
             int decodedChunks = 0, emptyChunks = 0, frameTotal = 0, fileTotal = 0;
             int remainingDecoded = MaximumAggregateDecodedBytes, remainingPixels = MaximumAggregatePixels;
-            foreach (var chunk in abc.Chunks)
+            foreach (var chunk in source.Chunks)
             {
-                byte[] raw = abc.ReadChunk(chunk.Index, MaximumChunkBytes);
+                byte[] raw = source.ReadChunk(chunk.Index, MaximumChunkBytes);
                 if (raw.Length == 0)
                 {
-                    entries.Add(BattleImageDecoder.DescribeChunk(chunk.Index, raw, null));
+                    entries.Add(archive == "abc"
+                        ? BattleImageDecoder.DescribeChunk(chunk.Index, raw, null)
+                        : BallImageDecoder.DescribeChunk(chunk.Index, raw, null));
                     emptyChunks++;
                     continue;
                 }
-                var sprite = DecodeResource("abc.mkf", chunk.Index,
-                    () => BattleImageDecoder.Decode(raw, Math.Min(remainingDecoded, MaximumDecodedChunkBytes), remainingPixels));
+                var sprite = DecodeResource(requiredNames[0], chunk.Index, () => archive == "abc"
+                    ? BattleImageDecoder.Decode(raw, Math.Min(remainingDecoded, MaximumDecodedChunkBytes), remainingPixels)
+                    : BallImageDecoder.Decode(raw, remainingPixels));
                 remainingDecoded -= sprite.DecodedByteLength;
                 remainingPixels -= sprite.Frames.Sum(frame => frame.Pixels.Length);
                 Directory.CreateDirectory(Path.Combine(staging, "sprites", $"{chunk.Index}"));
@@ -51,9 +59,13 @@ internal static class BattleImageExporter
                     fileTotal++;
                 }
                 WriteJson(Path.Combine(staging, "sprites"), $"{chunk.Index}.json",
-                    BattleImageDecoder.DescribeSprite(chunk.Index, abc.Name, sprite));
+                    archive == "abc"
+                        ? BattleImageDecoder.DescribeSprite(chunk.Index, source.Name, sprite)
+                        : BallImageDecoder.DescribeSprite(chunk.Index, source.Name, sprite));
                 fileTotal++;
-                entries.Add(BattleImageDecoder.DescribeChunk(chunk.Index, raw, sprite));
+                entries.Add(archive == "abc"
+                    ? BattleImageDecoder.DescribeChunk(chunk.Index, raw, sprite)
+                    : BallImageDecoder.DescribeChunk(chunk.Index, raw, sprite));
                 decodedChunks++;
                 frameTotal += sprite.Frames.Length;
             }
@@ -62,10 +74,10 @@ internal static class BattleImageExporter
                 ["formatVersion"] = 1,
                 ["profile"] = "faithful",
                 ["command"] = "export-battle-images",
-                ["parameters"] = new JsonObject { ["archive"] = Archive },
-                ["sources"] = new JsonArray(archives.Select(archive => new JsonObject
+                ["parameters"] = new JsonObject { ["archive"] = archive },
+                ["sources"] = new JsonArray(archives.Select(a => new JsonObject
                 {
-                    ["name"] = archive.Name, ["byteLength"] = archive.ByteLength, ["sha256"] = archive.Sha256,
+                    ["name"] = a.Name, ["byteLength"] = a.ByteLength, ["sha256"] = a.Sha256,
                 }).ToArray()),
                 ["palette"] = new JsonObject
                 {
@@ -77,7 +89,7 @@ internal static class BattleImageExporter
                 ["chunks"] = new JsonArray(entries.ToArray()),
                 ["totals"] = new JsonObject
                 {
-                    ["chunks"] = abc.Chunks.Count,
+                    ["chunks"] = source.Chunks.Count,
                     ["decodedChunks"] = decodedChunks,
                     ["emptyChunks"] = emptyChunks,
                     ["frames"] = frameTotal,
@@ -85,14 +97,14 @@ internal static class BattleImageExporter
                 },
             };
             // Detect source changes on platforms that do not enforce FileShare.Read against writers.
-            var after = MkfArchive.OpenRequired(input, RequiredNames, 65536);
+            var after = MkfArchive.OpenRequired(input, requiredNames, 65536);
             try
             {
                 if (!archives.Select(a => (a.Name, a.ByteLength, a.Sha256)).SequenceEqual(after.Select(a => (a.Name, a.ByteLength, a.Sha256))))
                     throw new InvalidDataException("Input archives changed during export.");
             }
-            finally { foreach (var archive in after) archive.Dispose(); }
-            ExportPaths.Validate(input, output, RequiredNames);
+            finally { foreach (var reopened in after) reopened.Dispose(); }
+            ExportPaths.Validate(input, output, requiredNames);
             Directory.CreateDirectory(output);
             foreach (string path in Directory.GetFiles(staging, "*", SearchOption.AllDirectories))
             {
@@ -105,7 +117,7 @@ internal static class BattleImageExporter
         }
         finally
         {
-            foreach (var archive in archives) archive.Dispose();
+            foreach (var opened in archives) opened.Dispose();
             if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
         }
     }
