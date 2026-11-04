@@ -177,7 +177,7 @@ Console.WriteLine("""
       rebuild-events Reconstruct SSS.MKF chunk 4 from a complete faithful event set.
                      Writes a new file only; edited semantic fields are re-encoded.
 
-      export-data Lay out the data/extracted/data index skeleton for the 13 read-only data tables.
+      export-data Extract the registered read-only data tables (event-object) and their index manifest.
                   Requires SSS.MKF and DATA.MKF in the input; writes a new or empty output directory.
                   Tables are registered incrementally by the M5 data tickets; this command never re-encodes tables.
 
