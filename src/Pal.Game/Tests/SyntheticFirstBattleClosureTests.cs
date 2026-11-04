@@ -68,6 +68,19 @@ public class SyntheticFirstBattleClosureTests
         int rounds = 0;
         while (main.StoryBattle is not null && rounds++ < 3000)
         { scene.Press(Key.Enter); await scene.RunnerIdle(); }
+        // The Won continuation parks on @09FF displays after the battle view releases;
+        // keep advancing until the call completes (same cadence as the pre-battle phase).
+        ulong wonDeadline = Time.GetTicksMsec() + 60000;
+        while (main.Dialogue?.Session is { Phase: not Pal.Core.TriggerScriptPhase.Completed } session
+            && main.Dialogue.Session.PendingLostReload is null && Time.GetTicksMsec() < wonDeadline)
+        {
+            var wonDisplay = session.PendingDisplay;
+            if (wonDisplay is not null && ((frames & 15) == 0
+                || wonDisplay.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
+                scene.Press(Key.Enter);
+            frames++;
+            await scene.RunnerIdle();
+        }
         System.Console.WriteLine($"SYN_WON:pages={pages} rounds={rounds} completed={main.Dialogue?.Session?.Phase} lost={main.StoryLostTerminal}");
         AssertThat(main.StoryLostTerminal).IsFalse();
         AssertThat(main.Dialogue?.Session?.Phase).IsEqual(Pal.Core.TriggerScriptPhase.Completed);
