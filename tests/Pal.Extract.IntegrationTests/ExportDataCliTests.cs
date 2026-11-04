@@ -15,19 +15,20 @@ public sealed class ExportDataCliTests : IDisposable
         input = Path.Combine(root, "input");
         output = Path.Combine(root, "data");
         Directory.CreateDirectory(input);
-        // Chunk 0 must decode as the registered event-object table (64 = 2 x 32 bytes);
-        // the other chunks are placeholders until their tables are registered by #80-#91.
+        // Chunk 0 must decode as the registered event-object table (64 = 2 x 32 bytes) and
+        // chunk 1 as the registered scene table (16 = 2 x 8 bytes); the other chunks are
+        // placeholders until their tables are registered by #81-#91.
         MkfFixture.Write(input, "SSS.MKF", new byte[64], new byte[16], new byte[28], Array.Empty<byte>(), new byte[24]);
         MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70]);
     }
 
     [Fact]
-    public async Task Export_data_writes_the_index_manifest_with_the_registered_event_object_table()
+    public async Task Export_data_writes_the_index_manifest_with_the_registered_tables()
     {
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
         string[] files = [.. Directory.GetFiles(output).Order()];
-        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json") }, files);
+        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "scene.json") }, files);
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var rootElement = index.RootElement;
         Assert.Equal(1, rootElement.GetProperty("formatVersion").GetInt32());
@@ -42,7 +43,7 @@ public sealed class ExportDataCliTests : IDisposable
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(input, "DATA.MKF")))),
             sources[1].GetProperty("sha256").GetString());
         var tables = rootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Single(tables);
+        Assert.Equal(2, tables.Length);
         Assert.Equal("event-object.json", tables[0].GetProperty("file").GetString());
         Assert.Equal("SSS.MKF", tables[0].GetProperty("archive").GetString());
         Assert.Equal(0, tables[0].GetProperty("chunk").GetInt32());
@@ -50,6 +51,13 @@ public sealed class ExportDataCliTests : IDisposable
         Assert.Equal(64, tables[0].GetProperty("byteLength").GetInt32());
         // Independent expectation: the fixture wrote all-zero chunk 0 bytes.
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[64])), tables[0].GetProperty("sha256").GetString());
+        Assert.Equal("scene.json", tables[1].GetProperty("file").GetString());
+        Assert.Equal("SSS.MKF", tables[1].GetProperty("archive").GetString());
+        Assert.Equal(1, tables[1].GetProperty("chunk").GetInt32());
+        Assert.Equal(2, tables[1].GetProperty("recordCount").GetInt32()); // 16 zero bytes = 2 empty records
+        Assert.Equal(16, tables[1].GetProperty("byteLength").GetInt32());
+        // Independent expectation: the fixture wrote all-zero chunk 1 bytes.
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[16])), tables[1].GetProperty("sha256").GetString());
     }
 
     [Theory]

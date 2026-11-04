@@ -19,7 +19,8 @@ public sealed class EventObjectExportDataTests : IDisposable
     }
 
     // Hand-authored little-endian records (same literals as the unit tests): boundaries
-    // 0, 65535, 0x8000/-32768, 32767, -1, and the script.c -15 vanish time.
+    // 0, 65535, 0x8000/-32768, 32767, -1, and the script.c -15 vanish time. Chunk 1 is a
+    // minimal all-zero SCENE record so the fixture stays valid now that #80 registers it.
     private static byte[] Record1 => Words(-32768, 0x1234, 0, -1, 0x8000, 65535, unchecked((short)0x8000), 8, 0xABCD, 0, 3, 32767, 1, 65535, 2, 32768);
     private static byte[] Record2 => Words(-15, 1840, 1200, 2, 10000, 0, 32767, 5, 0x1234, 65535, 0, 0, 0, 0, 4660, 0);
 
@@ -33,12 +34,12 @@ public sealed class EventObjectExportDataTests : IDisposable
     [Fact]
     public async Task Export_data_extracts_event_object_records_and_the_index_entry()
     {
-        MkfFixture.Write(input, "SSS.MKF", [.. Record1, .. Record2]);
+        MkfFixture.Write(input, "SSS.MKF", [.. Record1, .. Record2], new byte[8]);
         MkfFixture.Write(input, "DATA.MKF"); // minimal legal empty archive (offset table only)
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json") },
+        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "scene.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "event-object.json")));
@@ -51,8 +52,10 @@ public sealed class EventObjectExportDataTests : IDisposable
         AssertAllFields(records[1], -15, 1840, 1200, 2, 10000, 0, 32767, 5, 0x1234, 65535, 0, 0, 0, 0, 4660, 0);
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
-        var entry = index.RootElement.GetProperty("tables").EnumerateArray().Single();
-        Assert.Equal("event-object.json", entry.GetProperty("file").GetString());
+        var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
+        Assert.Equal(2, tables.Length); // scene.json registered by #80; its own tests cover that entry
+        Assert.Equal("scene.json", tables[1].GetProperty("file").GetString());
+        var entry = tables.Single(table => table.GetProperty("file").GetString() == "event-object.json");
         Assert.Equal("SSS.MKF", entry.GetProperty("archive").GetString());
         Assert.Equal(0, entry.GetProperty("chunk").GetInt32());
         Assert.Equal(2, entry.GetProperty("recordCount").GetInt32());
@@ -65,7 +68,7 @@ public sealed class EventObjectExportDataTests : IDisposable
     [Fact]
     public async Task Export_data_fails_when_chunk_0_is_not_a_multiple_of_32_bytes()
     {
-        MkfFixture.Write(input, "SSS.MKF", new byte[33]);
+        MkfFixture.Write(input, "SSS.MKF", new byte[33], new byte[8]); // chunk 0 defect only
         MkfFixture.Write(input, "DATA.MKF");
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);

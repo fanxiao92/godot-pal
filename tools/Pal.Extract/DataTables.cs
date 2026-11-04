@@ -30,4 +30,16 @@ public static class DataTables
             new DataField("spriteFramesAuto", DataFieldType.Word),
             new DataField("scriptIdleFrameCountAuto", DataFieldType.Word),
         ]);
+
+    // scene.json - SSS.MKF chunk 1, SCENE, 4 WORD (8 bytes) per record. Record count =
+    // chunk byte length / 8; global.h declares all four members as plain WORD, so no
+    // field decodes as SignedWord (unlike the SHORT members of EVENTOBJECT).
+    public static readonly DataTableDescriptor Scene = new(
+        "scene", "SSS.MKF", 1,
+        [
+            new DataField("mapNum", DataFieldType.Word),
+            new DataField("scriptOnEnter", DataFieldType.Word),
+            new DataField("scriptOnTeleport", DataFieldType.Word),
+            new DataField("eventObjectIndex", DataFieldType.Word),
+        ]);
 }
