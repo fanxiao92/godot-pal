@@ -83,6 +83,9 @@ public class NativeFirstMandatoryBattleProfileTests
         fixture.Native.BattleContentUri = "res://Tests/FirstBattle/BattleContent.tres";
         fixture.Native.DialogueDirectory = "res://Tests/FirstBattle/Dialogue";
         fixture.Native.VisualUri = "res://Tests/FirstBattle/Visual.tres";
+        // GlobalObjectsUri completes the aea456d five-together binding so the rejection still
+        // surfaces the missing-resource diagnostic for the bound real resources below.
+        fixture.Native.GlobalObjectsUri = "res://Tests/FirstBattle/GlobalObjects.tres";
         fixture.Native.ImageEnemyId = 97;
         fixture.Native.ImageEnemyArchiveEntry = "ABC97";
         fixture.Native.ImageRoleSpriteIds = ["F0", "F1"];
