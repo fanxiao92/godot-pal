@@ -4,14 +4,15 @@ using System.Text.Json.Nodes;
 
 namespace Pal.Extract;
 
-/// <summary>Complete decoded frame set of one battle image chunk (#92 abc.mkf Windows YJ2 enemy sprite, #93 ball.mkf raw item bitmap).</summary>
+/// <summary>Complete decoded frame set of one battle image chunk (#92 abc.mkf and #94 f.mkf Windows YJ2 battle sprites, #93 ball.mkf raw item bitmap).</summary>
 public sealed record DecodedBattleSprite(int DecodedByteLength, int FrameCount, IndexedImage[] Frames);
 
 /// <summary>
-/// Decodes one abc.mkf chunk (Windows YJ2 enemy battle sprite) into its complete frame
-/// set (#92). The YJ2 payload decompresses to a PAL sprite (WORD offset table + RLE
-/// frames). PAL_SpriteGetFrame addresses frame f through table word f for f &lt; the raw
-/// first word, one index beyond PAL_SpriteGetNumFrames' count: that final table word is
+/// Decodes one Windows YJ2 battle image chunk (abc.mkf enemy sprites #92, f.mkf player
+/// and summoned-god sprites #94) into its complete frame set. The YJ2 payload
+/// decompresses to a PAL sprite (WORD offset table + RLE frames). PAL_SpriteGetFrame
+/// addresses frame f through table word f for f &lt; the raw first word, one index beyond
+/// PAL_SpriteGetNumFrames' count: that final table word is
 /// a real follow-on frame for some sprites and a zero sentinel or a dangling pointer
 /// into an earlier frame's data for others, so it is exported only when the whole
 /// sprite decodes with it as a frame boundary.

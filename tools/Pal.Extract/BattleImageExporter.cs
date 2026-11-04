@@ -3,13 +3,15 @@ using static Pal.Extract.ExportSupport;
 
 namespace Pal.Extract;
 
-// export-battle-images (#92 abc, #93 ball): decodes every chunk of the selected battle
-// image MKF into a complete image package: index.json manifest, one sprite document per
-// chunk with authoritative indices/alpha planes, and PNG frames colorized with pat.mkf
-// chunk 0 day colors. abc chunks are the Windows YJ2 enemy sprites battle.c
-// PAL_LoadBattleSprites reads by enemy definition ID; ball chunks are the raw item
-// bitmaps itemmenu.c reads un-decompressed through item.wBitmap. The verb and manifest
-// shape stay frozen for #94-#95 (f/fbp).
+// export-battle-images (#92 abc, #93 ball, #94 f): decodes every chunk of the
+// selected battle image MKF into a complete image package: index.json manifest, one
+// sprite document per chunk with authoritative indices/alpha planes, and PNG frames
+// colorized with pat.mkf chunk 0 day colors. abc and f chunks are the Windows YJ2
+// enemy/player battle sprites read through PAL_MKFDecompressChunk (battle.c
+// PAL_LoadBattleSprites by enemyId; battle.c/fight.c by rgwSpriteNumInBattle and
+// wSummonEffect+10); ball chunks are the raw item bitmaps itemmenu.c reads
+// un-decompressed through item.wBitmap. The verb and manifest shape stay frozen for
+// #95 (fbp).
 internal static class BattleImageExporter
 {
     private const int MaximumChunkBytes = 8 * 1024 * 1024;
@@ -22,6 +24,7 @@ internal static class BattleImageExporter
         {
             "abc" => ["abc.mkf", "pat.mkf"],
             "ball" => ["ball.mkf", "pat.mkf"],
+            "f" => ["f.mkf", "pat.mkf"],
             _ => throw new InvalidOperationException($"Unknown battle image archive '{archive}'."),
         };
         output = ExportPaths.Validate(input, output, requiredNames);
@@ -31,6 +34,10 @@ internal static class BattleImageExporter
         {
             var source = archives[0];
             var palette = DecodeResource("pat.mkf", 0, () => PaletteDecoder.Decode(archives[1].ReadChunk(0, 1536), night: false));
+            // f.mkf is read with PAL_MKFDecompressChunk exactly like abc.mkf (battle.c
+            // PAL_LoadBattleSprites, fight.c summon animation), so both take the Windows
+            // YJ2 sprite path; only ball.mkf stores its bitmaps uncompressed.
+            bool compressedSprites = archive is "abc" or "f";
             Directory.CreateDirectory(staging);
             var entries = new List<JsonObject>();
             int decodedChunks = 0, emptyChunks = 0, frameTotal = 0, fileTotal = 0;
@@ -40,13 +47,13 @@ internal static class BattleImageExporter
                 byte[] raw = source.ReadChunk(chunk.Index, MaximumChunkBytes);
                 if (raw.Length == 0)
                 {
-                    entries.Add(archive == "abc"
+                    entries.Add(compressedSprites
                         ? BattleImageDecoder.DescribeChunk(chunk.Index, raw, null)
                         : BallImageDecoder.DescribeChunk(chunk.Index, raw, null));
                     emptyChunks++;
                     continue;
                 }
-                var sprite = DecodeResource(requiredNames[0], chunk.Index, () => archive == "abc"
+                var sprite = DecodeResource(requiredNames[0], chunk.Index, () => compressedSprites
                     ? BattleImageDecoder.Decode(raw, Math.Min(remainingDecoded, MaximumDecodedChunkBytes), remainingPixels)
                     : BallImageDecoder.Decode(raw, remainingPixels));
                 remainingDecoded -= sprite.DecodedByteLength;
@@ -59,11 +66,11 @@ internal static class BattleImageExporter
                     fileTotal++;
                 }
                 WriteJson(Path.Combine(staging, "sprites"), $"{chunk.Index}.json",
-                    archive == "abc"
+                    compressedSprites
                         ? BattleImageDecoder.DescribeSprite(chunk.Index, source.Name, sprite)
                         : BallImageDecoder.DescribeSprite(chunk.Index, source.Name, sprite));
                 fileTotal++;
-                entries.Add(archive == "abc"
+                entries.Add(compressedSprites
                     ? BattleImageDecoder.DescribeChunk(chunk.Index, raw, sprite)
                     : BallImageDecoder.DescribeChunk(chunk.Index, raw, sprite));
                 decodedChunks++;

@@ -5,9 +5,9 @@ using Xunit;
 
 namespace Pal.Extract.Tests;
 
-// export-battle-images CLI (#92 abc, #93 ball): micro abc.mkf/ball.mkf + pat.mkf
-// fixtures through the real process. Expected manifest identities (SHA-256, totals,
-// file sets) are computed independently in the test, not echoed from tool output.
+// export-battle-images CLI (#92 abc, #93 ball, #94 f): micro abc.mkf/ball.mkf/f.mkf
+// + pat.mkf fixtures through the real process. Expected manifest identities (SHA-256,
+// totals, file sets) are computed independently in the test, not echoed from tool output.
 public sealed class ExportBattleImagesCliTests : IDisposable
 {
     private readonly string directory = Path.Combine(Path.GetTempPath(), $"pal-battle-images-{Guid.NewGuid():N}");
@@ -32,6 +32,19 @@ public sealed class ExportBattleImagesCliTests : IDisposable
 
     // ball.mkf 1x1 bitmap: a single opaque pixel (index 5).
     private static byte[] OnePixelBitmap => [2, 0, 0, 0, 1, 0, 1, 0, 1, 5];
+
+    // f.mkf sprite shapes (#94), compressed with YJ2 like every real f chunk: the
+    // real archive has no empty chunk and every final table word is the zero
+    // sentinel, so chunk 0 is a full player-shaped sprite whose extra entry decodes
+    // (table [3, 7, 10]) and chunk 1 carries the sentinel (table [3, 7, 0]).
+    private static byte[] ExtraEntrySprite => [3, 0, 7, 0, 10, 0,
+        2, 0, 1, 0, 1, 5, 0x81, 0,
+        1, 0, 1, 0, 1, 6,
+        1, 0, 1, 0, 1, 7];
+
+    private static byte[] SentinelSprite => [3, 0, 7, 0, 0, 0,
+        2, 0, 1, 0, 1, 5, 0x81, 0,
+        1, 0, 1, 0, 1, 6];
 
     public ExportBattleImagesCliTests()
     {
@@ -177,6 +190,90 @@ public sealed class ExportBattleImagesCliTests : IDisposable
         ValidatePng(Path.Combine(output, "sprites", "2", "0.png"), 1, 1);
     }
 
+    [Fact]
+    public async Task Export_battle_images_decodes_f_chunks_as_yj2_sprites()
+    {
+        WriteArchive("F.mkf", Compress(ExtraEntrySprite), Compress(SentinelSprite));
+        var result = await ExportF();
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.Stdout);
+        Assert.Empty(result.Stderr);
+        string[] files = [.. Directory.GetFiles(output, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(output, path).Replace('\\', '/')).Order()];
+        Assert.Equal(new[]
+        {
+            "index.json",
+            "sprites/0.json", "sprites/0/0.png", "sprites/0/1.png", "sprites/0/2.png",
+            "sprites/1.json", "sprites/1/0.png", "sprites/1/1.png",
+        }, files);
+        using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
+        var root = index.RootElement;
+        Assert.Equal("f", root.GetProperty("parameters").GetProperty("archive").GetString());
+        var sources = root.GetProperty("sources").EnumerateArray().ToArray();
+        Assert.Equal(2, sources.Length);
+        Assert.Equal("f.mkf", sources[0].GetProperty("name").GetString());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(input, "F.mkf")))),
+            sources[0].GetProperty("sha256").GetString());
+        var chunks = root.GetProperty("chunks").EnumerateArray().ToArray();
+        Assert.Equal(2, chunks.Length);
+        // f chunks are YJ2-compressed sprites (PAL_MKFDecompressChunk, like abc).
+        Assert.Equal("yj2", chunks[0].GetProperty("compression").GetString());
+        Assert.Equal(26, chunks[0].GetProperty("decodedByteLength").GetInt32());
+        Assert.Equal(2, chunks[0].GetProperty("frameCount").GetInt32());
+        Assert.Equal(3, chunks[0].GetProperty("decodedFrameCount").GetInt32());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(ChunkBytes(input, "F.mkf", 0))),
+            chunks[0].GetProperty("sha256").GetString());
+        // The real archive's every chunk ends in the zero sentinel; decoded == nominal.
+        Assert.Equal("yj2", chunks[1].GetProperty("compression").GetString());
+        Assert.Equal(20, chunks[1].GetProperty("decodedByteLength").GetInt32());
+        Assert.Equal(2, chunks[1].GetProperty("frameCount").GetInt32());
+        Assert.Equal(2, chunks[1].GetProperty("decodedFrameCount").GetInt32());
+        var totals = root.GetProperty("totals");
+        Assert.Equal(2, totals.GetProperty("chunks").GetInt32());
+        Assert.Equal(2, totals.GetProperty("decodedChunks").GetInt32());
+        Assert.Equal(0, totals.GetProperty("emptyChunks").GetInt32());
+        Assert.Equal(5, totals.GetProperty("frames").GetInt32());
+        Assert.Equal(7, totals.GetProperty("files").GetInt32());
+        using var sprite = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "sprites", "0.json")));
+        var document = sprite.RootElement;
+        Assert.Equal("f.mkf", document.GetProperty("source").GetProperty("archive").GetString());
+        Assert.Equal("Windows YJ2", document.GetProperty("source").GetProperty("encoding").GetString());
+        Assert.Equal("PAL sprite WORD offset table + RLE frames",
+            document.GetProperty("source").GetProperty("frameLayout").GetString());
+        var frames = document.GetProperty("frames").EnumerateArray().ToArray();
+        Assert.Equal(3, frames.Length);
+        Assert.Equal(6, frames[0].GetProperty("sourceOffset").GetInt32());
+        Assert.Equal(new byte[] { 5, 0 }, frames[0].GetProperty("indices").GetBytesFromBase64());
+        Assert.Equal(new byte[] { 255, 0 }, frames[0].GetProperty("alpha").GetBytesFromBase64());
+        foreach ((int frame, int width, int height) in new[] { (0, 2, 1), (1, 1, 1), (2, 1, 1) })
+        {
+            Assert.Equal($"sprites/0/{frame}.png", frames[frame].GetProperty("png").GetString());
+            ValidatePng(Path.Combine(output, "sprites", "0", $"{frame}.png"), width, height);
+        }
+        Assert.DoesNotContain(directory, File.ReadAllText(Path.Combine(output, "index.json")));
+    }
+
+    [Theory]
+    [InlineData("yj1")]
+    [InlineData("bad-table")]
+    public async Task Export_battle_images_rejects_damaged_f_chunks_before_creating_output(string kind)
+    {
+        byte[] damaged = kind switch
+        {
+            "yj1" => "YJ_1"u8.ToArray(),
+            _ => Compress([4, 0, 8, 0]),
+        };
+        WriteArchive("F.mkf", Compress(SentinelSprite), damaged);
+        var result = await ExportF();
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(result.Stdout);
+        Assert.Contains("f.mkf", result.Stderr);
+        Assert.Contains(kind == "yj1" ? "YJ1" : "chunk 1", result.Stderr);
+        Assert.DoesNotContain(directory, result.Stderr);
+        Assert.DoesNotContain("   at ", result.Stderr);
+        Assert.False(Directory.Exists(output));
+    }
+
     [Theory]
     [InlineData("truncated-bitmap")]
     [InlineData("zero-width")]
@@ -278,7 +375,7 @@ public sealed class ExportBattleImagesCliTests : IDisposable
         string[] args = kind switch
         {
             "missing" => ["export-battle-images", "--input", input, "--output", output],
-            "unknown-archive" => ["export-battle-images", "--input", input, "--archive", "f", "--output", output],
+            "unknown-archive" => ["export-battle-images", "--input", input, "--archive", "fbp", "--output", output],
             "wrong-order" => ["export-battle-images", "--archive", "abc", "--input", input, "--output", output],
             "empty-input" => ["export-battle-images", "--input", "", "--archive", "abc", "--output", output],
             _ => ["export-battle-images", "--input", input, "--archive", "", "--output", output],
@@ -338,7 +435,7 @@ public sealed class ExportBattleImagesCliTests : IDisposable
     {
         var result = await CliProcess.Run(directory, "--help");
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("export-battle-images --input <directory> --archive <abc|ball> --output <new-or-empty-directory>", result.Stdout);
+        Assert.Contains("export-battle-images --input <directory> --archive <abc|ball|f> --output <new-or-empty-directory>", result.Stdout);
     }
 
     private Task<(int ExitCode, string Stdout, string Stderr)> Export(string? destination = null, string? source = null) =>
@@ -347,6 +444,10 @@ public sealed class ExportBattleImagesCliTests : IDisposable
 
     private Task<(int ExitCode, string Stdout, string Stderr)> ExportBall(string? destination = null) =>
         CliProcess.Run(directory, "export-battle-images", "--input", input, "--archive", "ball",
+            "--output", destination ?? output);
+
+    private Task<(int ExitCode, string Stdout, string Stderr)> ExportF(string? destination = null) =>
+        CliProcess.Run(directory, "export-battle-images", "--input", input, "--archive", "f",
             "--output", destination ?? output);
 
     private void WriteArchive(string name, params byte[][] chunks) => MkfFixture.Write(input, name, chunks);

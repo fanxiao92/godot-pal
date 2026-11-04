@@ -107,7 +107,7 @@ if (args.Length == 7 && args[0] == "export-battle-images" && args[1] == "--input
     && !string.IsNullOrWhiteSpace(args[2]) && !args[2].StartsWith("--", StringComparison.Ordinal)
     && !string.IsNullOrWhiteSpace(args[4]) && !args[4].StartsWith("--", StringComparison.Ordinal)
     && !string.IsNullOrWhiteSpace(args[6]) && !args[6].StartsWith("--", StringComparison.Ordinal)
-    && args[4] is "abc" or "ball")
+    && args[4] is "abc" or "ball" or "f")
 {
     try
     {
@@ -173,7 +173,7 @@ Console.WriteLine("""
            pal-extract export-events --input <directory> --output <directory>
            pal-extract rebuild-events --input <events-directory> --output <file>
            pal-extract export-data --input <directory> --output <new-or-empty-directory>
-           pal-extract export-battle-images --input <directory> --archive <abc|ball> --output <new-or-empty-directory>
+           pal-extract export-battle-images --input <directory> --archive <abc|ball|f> --output <new-or-empty-directory>
            pal-extract author-battle-context --input <author.json> --output <new-or-empty-directory>
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
@@ -201,9 +201,10 @@ Console.WriteLine("""
                   Requires SSS.MKF and DATA.MKF in the input; writes a new or empty output directory.
                   Tables are registered incrementally by the M5 data tickets; this command never re-encodes tables.
 
-      export-battle-images Decode a battle image MKF (abc or ball) into a complete image package and an index.json manifest.
+      export-battle-images Decode a battle image MKF (abc, ball or f) into a complete image package and an index.json manifest.
                             Every chunk becomes a sprite document with authoritative indices/alpha planes, source hashes
-                            and PNG frames; empty chunks stay empty entries. abc chunks are Windows YJ2 enemy sprites;
+                            and PNG frames; empty chunks stay empty entries. abc and f chunks are Windows YJ2 battle sprites
+                            (abc: enemy sprites by enemyId; f: player battle sprites by battleSprite/summon effect);
                             ball chunks are raw item bitmaps read without decompression. Requires the selected archive
                             and pat.mkf; PNG frames use pat.mkf chunk 0 day colors. Writes a new or empty directory;
                             links are rejected.
