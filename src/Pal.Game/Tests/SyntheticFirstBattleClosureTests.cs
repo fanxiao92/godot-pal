@@ -18,6 +18,10 @@ public class SyntheticFirstBattleClosureTests
     {
         using var battleFixture = new NativeBattleProfileFixture();
         var statics = battleFixture.Static;
+        // The bound branch reads the active scene palette; the synthetic scene data starts
+        // without one, so the authored palette leaf fills it before the scene is packed.
+        statics.MapScene.Data.Palette = (Pal.Game.Resources.PalPalette)ResourceLoader.Load(
+            "res://Samples/AuthoredBattle/Static/Palette.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
         statics.SavePacked();
         string staticProfile = statics.ResourceRoot + "/Profile.tres";
         NativeProfileFixture.SaveResource(statics.Profile, staticProfile);
@@ -62,6 +66,10 @@ public class SyntheticFirstBattleClosureTests
     {
         using var battleFixture = new NativeBattleProfileFixture();
         var statics = battleFixture.Static;
+        // The bound branch reads the active scene palette; the synthetic scene data starts
+        // without one, so the authored palette leaf fills it before the scene is packed.
+        statics.MapScene.Data.Palette = (Pal.Game.Resources.PalPalette)ResourceLoader.Load(
+            "res://Samples/AuthoredBattle/Static/Palette.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
         statics.SavePacked();
         string staticProfile = statics.ResourceRoot + "/Profile.tres";
         NativeProfileFixture.SaveResource(statics.Profile, staticProfile);
