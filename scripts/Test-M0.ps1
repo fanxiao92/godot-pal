@@ -136,7 +136,15 @@ try {
     $null = & (Join-Path $PSScriptRoot 'Get-GdUnitPackages.ps1')
     $null = Invoke-DotnetChecked @('--info')
     $null = Invoke-DotnetChecked @('restore', 'GodotPal.sln', '--no-http-cache')
-    $null = Invoke-DotnetChecked @('build', 'GodotPal.sln', '--no-restore')
+    # Authoritative warning baseline: the gate always builds from empty caches, so compiler
+    # warnings are deterministic here (Test-Range's incremental per-project builds can only
+    # under-report). The total covers every project, including the plain-dotnet core/cli-unit.
+    $solutionBuild = Invoke-DotnetChecked @('build', 'GodotPal.sln', '--no-restore')
+    $warningBaselinePath = Join-Path $PSScriptRoot 'warning-baseline.json'
+    try { $baselineTotal = 0; foreach ($entry in (Get-Content -LiteralPath $warningBaselinePath -Raw | ConvertFrom-Json -AsHashtable).GetEnumerator()) { if ($entry.Key -cne '_comment') { $baselineTotal += [int]$entry.Value } } } catch { throw "warning-baseline: cannot read $warningBaselinePath : $($_.Exception.Message)" }
+    $solutionWarnings = [regex]::Matches($solutionBuild, 'warning CS\d+:').Count
+    if ($solutionWarnings -gt $baselineTotal) { throw "[gate:warning-delta] Solution build emitted $solutionWarnings compiler warnings (baseline $baselineTotal). Fix the new warning or intentionally update scripts/warning-baseline.json in its own commit." }
+    elseif ($solutionWarnings -lt $baselineTotal) { Write-Output "NOTICE: solution warnings $solutionWarnings below baseline $baselineTotal; shrink scripts/warning-baseline.json intentionally." }
     # Prepare builds/imports Game. Explicit serial projects finish it before any adapter runner.
     # Keep solution restore/build, but never reintroduce an unbatched solution test here.
     $solutionResults = Join-Path $evidence 'solution'

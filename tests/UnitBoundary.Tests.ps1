@@ -45,6 +45,12 @@ function Check([string]$Name, [int]$Exit, [string]$Diagnostic, [string[]]$Select
 try {
     Reset-Fixture
     Check 'pure projects / Chinese and spaces / foreign cwd / production Exe I/O allowed' 0 'PASS unit-boundary: cli-unit'
+    Put '_pb2.py' '# one-off patch helper accidentally committed at the fixture root'
+    Check 'unexpected root file rejected (stray helper script)' 1 "[boundary:root-files] Unexpected root file: _pb2.py"
+    Reset-Fixture
+    [IO.Directory]::CreateDirectory((Join-Path $root 'scratch')) | Out-Null
+    Check 'unexpected root directory rejected' 1 '[boundary:root-files] Unexpected root directory: scratch'
+    Reset-Fixture
     $caseFailures = [Collections.Generic.List[string]]::new()
     Put 'tests/forbidden.cs' 'class Forbidden { static string Leak = File.ReadAllText("outside unit sources"); }'
     Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /><compile Include="../forbidden.cs" Link="Leak.cs" /></ItemGroup></Project>'
@@ -111,6 +117,9 @@ try {
     }
     Reset-Fixture
     Put 'Directory.Build.targets' '<Project><Target Name="Hidden"><Exec Command="echo deployment" /></Target></Project>'
+    Check 'root-level build import rejected by the root allowlist' 1 '[boundary:root-files] Unexpected root file: Directory.Build.targets'
+    Reset-Fixture
+    Put 'src/Directory.Build.targets' '<Project><Target Name="Hidden"><Exec Command="echo deployment" /></Target></Project>'
     Check 'implicit repository build import rejected' 1 '[boundary:project-shape]'
     Reset-Fixture
     Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /></ItemGroup></Project>'

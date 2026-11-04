@@ -7,7 +7,8 @@ param(
     [AllowEmptyString()][string]$Filter,
     [string]$OutputDirectory,
     [string]$GodotPath,
-    [string]$FixedPackageDirectory
+    [string]$FixedPackageDirectory,
+    [switch]$SkipAffectedBatchGuard
 )
 $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false)
@@ -15,6 +16,9 @@ $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
 . (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
+# Warning baseline: strict shape; a missing scope key is a guard malfunction, not a pass.
+$warningBaselinePath = Join-Path $PSScriptRoot 'warning-baseline.json'
+try { $warningBaseline = [Collections.Generic.Dictionary[string, int]]::new(); foreach ($p in (Get-Content -LiteralPath $warningBaselinePath -Raw | ConvertFrom-Json -AsHashtable).GetEnumerator()) { if ($p.Key -cne '_comment') { $warningBaseline[$p.Key] = [int]$p.Value } } } catch { throw "warning-baseline: cannot read $warningBaselinePath : $($_.Exception.Message)" }
 . (Join-Path $PSScriptRoot 'TestRunDefinitions.ps1')
 . (Join-Path $PSScriptRoot 'DotnetCheckedDefinition.ps1')
 $paths = [ordered]@{ 'cli-integration' = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; prepare = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; game = 'src/Pal.Game/Pal.Game.csproj' }
@@ -185,6 +189,16 @@ try {
     foreach ($s in $Scope) {
         $project = Join-Path $root $paths[$s]
         $build = Invoke-RangeCommand "$s.build" @('build', $project, '--configuration', 'Debug', '--nologo')
+        # Warning baseline: a freshly compiled project must not gain compiler warnings beyond the
+        # committed baseline (scripts/warning-baseline.json). Incremental no-op builds emit no
+        # warnings, so this reliably bites exactly when a changed file introduces a new warning.
+        $warningCount = [regex]::Matches($build, 'warning CS\d+:').Count
+        if ($warningCount -gt $warningBaseline[$s]) {
+            Fail 'warning-delta' "$s build emitted $warningCount compiler warnings (baseline $($warningBaseline[$s])). Fix the new warning or intentionally update scripts/warning-baseline.json in its own commit."
+        }
+        elseif ($warningCount -lt $warningBaseline[$s]) {
+            Write-Output "NOTICE: $s emitted $warningCount warnings, below the baseline $($warningBaseline[$s]); shrink scripts/warning-baseline.json intentionally when convenient."
+        }
         $assemblyName = [IO.Path]::GetFileNameWithoutExtension($project)
         $matches = [regex]::Matches($build, ('(?m)^\s*' + [regex]::Escape($assemblyName) + ' -> (.+\.dll)\s*\r?$'))
         if ($matches.Count -ne 1) { Fail 'artifact' "Build did not identify exactly one $assemblyName assembly." }
@@ -199,6 +213,12 @@ try {
         if ($s -ceq 'game') {
             $plan = Get-GameBatchPlan $root
             $null = Assert-GameDiscovery $listed $plan
+            # Affected-batch guard: the guarded native content fingerprint must match the last
+            # verified native-map run unless this selection verifies it itself (see GameTestBatches.ps1).
+            $guard = Test-NativeMapAffectedBatchGuard -RepositoryRoot $root -Head $report.head -GameBatches $batches
+            if ($SkipAffectedBatchGuard) { $guard = @{ status = 'skipped'; bypass = $true; fingerprint = $guard.fingerprint } }
+            $report.nativeMapGuard = $guard
+            if ($guard.status -ceq 'required') { Fail 'affected-batches' $guard.message }
             $selectedBatches = @($plan.batches | Where-Object { $batches.Contains($_.name) })
             $expected = @($selectedBatches.expected)
             $selectedInventory = @($plan.inventory | Where-Object { $_.name -cin $expected })
@@ -286,6 +306,9 @@ try {
     foreach ($tool in $report.toolIdentity) { if ((Hash-File $tool.path) -cne $tool.sha256) { Fail 'source-changed' "Entry/helper changed during the run: $($tool.path)" } }
     if ($recordingError) { Fail 'evidence' 'Cannot finalize an incomplete journal.' }
     $report.status = 'completed'; $exitCode = 0
+    if ($Scope -ccontains 'game' -and $batches -ccontains 'native-map' -and -not $SkipAffectedBatchGuard) {
+        Write-NativeMapVerification -RepositoryRoot $root -Head $report.head
+    }
 } catch {
     $report.failure = $_.Exception.Message
     $report.status = if ($exitCode -eq 2) { 'incomplete' } else { 'failed' }

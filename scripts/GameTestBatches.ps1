@@ -246,6 +246,56 @@ function Assert-GameDiscovery([string]$Text, $Plan) {
     return $actual
 }
 
+# --- native-map affected-batch guard -------------------------------------------------
+# Twice during M4 (#49/#50 authored content, #53 aea456d binding Require) a change under the
+# guarded roots below shipped without rerunning the native-map batch and only the full gate
+# caught it. Writing the rule down did not prevent recurrence, so Test-Range now enforces it:
+# a Game run whose selection does not include native-map requires a recorded native-map
+# verification whose guarded-content fingerprint still matches.
+$script:NativeMapGuardedRoots = @('src/Pal.Game/Scripts/Profiles', 'src/Pal.Game/Scripts/Resources', 'src/Pal.Game/Editor', 'samples/authored-battle', 'src/Pal.Game/Samples')
+function Get-NativeMapGuardFingerprint([string]$RepositoryRoot) {
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($relative in $script:NativeMapGuardedRoots) {
+        $directory = Join-Path $RepositoryRoot ($relative.Replace('/', [IO.Path]::DirectorySeparatorChar))
+        if (-not [IO.Directory]::Exists($directory)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $directory -Recurse -File)) {
+            $path = [IO.Path]::GetRelativePath($RepositoryRoot, $file.FullName).Replace([IO.Path]::DirectorySeparatorChar, '/')
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $hash = ([Convert]::ToHexString($sha.ComputeHash([IO.File]::ReadAllBytes($file.FullName)))).ToLowerInvariant() } finally { $sha.Dispose() }
+            $parts.Add("$path`:$hash")
+        }
+    }
+    if (-not $parts.Count) { return $null }
+    $joined = (($parts | Sort-Object) -join "`n")
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try { return ([Convert]::ToHexString($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($joined)))).ToLowerInvariant() } finally { $sha256.Dispose() }
+}
+function Get-NativeMapVerificationPath([string]$RepositoryRoot) { Join-Path (Join-Path $RepositoryRoot 'TestResults') 'native-map-verified.json' }
+function Read-NativeMapVerification([string]$RepositoryRoot) {
+    $path = Get-NativeMapVerificationPath $RepositoryRoot
+    if (-not [IO.File]::Exists($path)) { return $null }
+    try { return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable) } catch { return @{ invalid = $true } }
+}
+function Write-NativeMapVerification([string]$RepositoryRoot, [string]$Head) {
+    $directory = Join-Path $RepositoryRoot 'TestResults'
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $record = @{ recordedUtc = [DateTime]::UtcNow.ToString('o'); head = $Head; fingerprint = (Get-NativeMapGuardFingerprint $RepositoryRoot) }
+    [IO.File]::WriteAllText((Get-NativeMapVerificationPath $RepositoryRoot), ($record | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+}
+function Test-NativeMapAffectedBatchGuard([string]$RepositoryRoot, [string]$Head, [string[]]$GameBatches) {
+    $fingerprint = Get-NativeMapGuardFingerprint $RepositoryRoot
+    if ($null -eq $fingerprint) { return @{ status = 'none' } }
+    if ($GameBatches -ccontains 'native-map') { return @{ status = 'self-verifying'; fingerprint = $fingerprint } }
+    $record = Read-NativeMapVerification $RepositoryRoot
+    if ($record -is [hashtable] -and -not $record.invalid -and $record.fingerprint -ceq $fingerprint) {
+        return @{ status = 'satisfied'; fingerprint = $fingerprint; verifiedHead = $record.head }
+    }
+    $reason = if ($record -is [hashtable] -and $record.invalid) { 'the recorded verification is unreadable' }
+    elseif ($null -eq $record) { 'no native-map verification has been recorded yet' }
+    else { "guarded content changed since the last verified native-map run (verified at head $($record.head))" }
+    return @{ status = 'required'; fingerprint = $fingerprint; message = "Guarded native content (Profiles/Resources/Editor/authored samples) differs from the last verified native-map run: $reason. Run -GameBatch native-map first, or pass -SkipAffectedBatchGuard to record an explicit bypass." }
+}
+# ---------------------------------------------------------------------------------------
 function Assert-GameRound($BatchResults, $Plan, [string]$Round) {
     if (@($BatchResults).Count -ne $Plan.batches.Count) { throw "Incomplete Game round ${Round}." }
     Assert-ExactTestNames @($BatchResults.name) @($Plan.batches.name) "Game round $Round batches"

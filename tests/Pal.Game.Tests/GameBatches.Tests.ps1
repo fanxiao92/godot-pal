@@ -205,5 +205,35 @@ public class Fixture
         Fails { Assert-GameRound @($round[0], $round[0]) $smallPlan 'synthetic' } 'duplicate'
         Fails { Assert-GameRound @(@{ name = 'a'; tests = @('Alpha') }, @{ name = 'b'; tests = @('Alpha') }) $smallPlan 'synthetic' } 'set mismatch'
     }
+    Case 'native-map affected-batch guard fingerprints guarded content and demands verification' {
+        $guardRoot = Join-Path $temp ('guard-' + [guid]::NewGuid().ToString('N'))
+        [IO.Directory]::CreateDirectory((Join-Path $guardRoot 'src/Pal.Game/Scripts/Profiles')) | Out-Null
+        [IO.Directory]::CreateDirectory((Join-Path $guardRoot 'src/Pal.Core')) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $guardRoot 'src/Pal.Game/Scripts/Profiles/One.cs'), 'class One { }')
+        Assert ((Get-NativeMapGuardFingerprint $guardRoot) -match '^[0-9a-f]{64}$') 'fingerprint must be a sha256 hex'
+        $required = Test-NativeMapAffectedBatchGuard -RepositoryRoot $guardRoot -Head 'aaa' -GameBatches @('scene-dialogue')
+        Assert ($required.status -ceq 'required') 'unverified guarded content must require native-map'
+        Assert ($required.message -match 'native-map') 'requirement message must name the batch'
+        $selfVerify = Test-NativeMapAffectedBatchGuard -RepositoryRoot $guardRoot -Head 'aaa' -GameBatches @('native-map')
+        Assert ($selfVerify.status -ceq 'self-verifying') 'selecting native-map self-verifies'
+        Write-NativeMapVerification -RepositoryRoot $guardRoot -Head 'aaa'
+        $satisfied = Test-NativeMapAffectedBatchGuard -RepositoryRoot $guardRoot -Head 'bbb' -GameBatches @('scene-dialogue')
+        Assert ($satisfied.status -ceq 'satisfied') 'matching fingerprint satisfies even after unrelated commits'
+        Assert ($satisfied.verifiedHead -ceq 'aaa') 'verified head is diagnostic'
+        [IO.File]::WriteAllText((Join-Path $guardRoot 'src/Pal.Game/Scripts/Profiles/One.cs'), 'class One { int Changed; }')
+        $changed = Test-NativeMapAffectedBatchGuard -RepositoryRoot $guardRoot -Head 'bbb' -GameBatches @('scene-dialogue')
+        Assert ($changed.status -ceq 'required') 'guarded content change must invalidate the record'
+        # Unguarded content does not participate in the fingerprint.
+        [IO.File]::WriteAllText((Join-Path $guardRoot 'src/Pal.Core/Unrelated.cs'), 'class Unrelated { }')
+        $unchanged = Test-NativeMapAffectedBatchGuard -RepositoryRoot $guardRoot -Head 'bbb' -GameBatches @('scene-dialogue')
+        Assert ($unchanged.status -ceq 'required') 'guard still required until native-map reruns'
+        Write-NativeMapVerification -RepositoryRoot $guardRoot -Head 'bbb'
+        $afterUnrelated = Test-NativeMapAffectedBatchGuard -RepositoryRoot $guardRoot -Head 'ccc' -GameBatches @('scene-dialogue')
+        Assert ($afterUnrelated.status -ceq 'satisfied') 'unguarded change keeps the record satisfied'
+        $emptyRoot = Join-Path $temp ('empty-' + [guid]::NewGuid().ToString('N')); [IO.Directory]::CreateDirectory($emptyRoot) | Out-Null
+        Assert ((Test-NativeMapAffectedBatchGuard -RepositoryRoot $emptyRoot -Head 'x' -GameBatches @('scene-dialogue')).status -ceq 'none') 'no guarded content means no guard'
+        $neverRoot = Join-Path $temp ('never-' + [guid]::NewGuid().ToString('N')); [IO.Directory]::CreateDirectory($neverRoot) | Out-Null
+        Assert ($null -eq (Read-NativeMapVerification $neverRoot)) 'missing record reads as null'
+    }
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
 Write-Host "PASS: $($results.Count) offline batch metadata groups; no SDK/engine/CIM/network; synthetic TRX are not runtime passes."

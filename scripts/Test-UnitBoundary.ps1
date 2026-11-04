@@ -6,6 +6,21 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 function Fail([string]$Code, [string]$Message) { throw "[boundary:$Code] $Message" }
+# Root-level entries are allowlisted: one-off helper scripts accidentally committed at the repository
+# root (e.g. _fix_loader.py in #53, _pb2.py caught by the M4 dual review) must fail here instead of
+# riding along in delivery diffs. Missing entries are fine; unexpected entries are not.
+$script:AllowedRootFiles = @('.gitattributes', '.gitignore', 'AGENTS.md', 'GLOSSARY.md', 'GodotPal.sln', 'NuGet.Config', 'README.md', 'global.json')
+$script:AllowedRootDirectories = @('.github', 'data', 'docs', 'reference', 'samples', 'scripts', 'src', 'tests', 'tools')
+function Test-RootFiles([string]$Root) {
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Root -Force | Where-Object Name -ne '.git')) {
+        if ($entry.PSIsContainer) {
+            if ($entry.Name -cnotin $script:AllowedRootDirectories) { Fail 'root-files' "Unexpected root directory: $($entry.Name); allowed: $($script:AllowedRootDirectories -join ', ')" }
+        }
+        elseif ($entry.Name -cnotin $script:AllowedRootFiles) {
+            Fail 'root-files' "Unexpected root file: $($entry.Name); one-off helper scripts do not belong at the repository root (allowed: $($script:AllowedRootFiles -join ', '))"
+        }
+    }
+}
 $identities = @{
     core = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'
     'cli-unit' = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'
@@ -132,6 +147,7 @@ try {
     }
     if (-not $RepositoryRoot -or -not [IO.Directory]::Exists($RepositoryRoot)) { Fail 'project-missing' "Repository root not found: $RepositoryRoot" }
     $root = [IO.Path]::GetFullPath($RepositoryRoot)
+    Test-RootFiles $root
     foreach ($name in $Project) {
         $path = Join-Path $root $identities[$name]
         if (-not [IO.File]::Exists($path)) { Fail 'project-missing' "Missing applicable unit project: $path" }
