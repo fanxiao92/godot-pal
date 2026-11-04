@@ -14,7 +14,7 @@ internal static class DataGameData
     private const int MaximumChunkBytes = 64 * 1024 * 1024;
 
     // Registered tables in source order (SSS chunks first, then DATA chunks).
-    private static readonly DataTableDescriptor[] RegisteredTables = [DataTables.EventObject, DataTables.Scene, DataTables.Store, DataTables.Enemy, DataTables.EnemyTeam];
+    private static readonly DataTableDescriptor[] RegisteredTables = [DataTables.EventObject, DataTables.Scene, DataTables.Store, DataTables.Enemy, DataTables.EnemyTeam, DataTables.PlayerRoles];
 
     internal static void Export(string input, string output)
     {
@@ -44,15 +44,20 @@ internal static class DataGameData
             // DATA.MKF view-evidence chunks (store/enemy/enemy-team/player-roles item,
             // player, magic and enemy references; the poison view has no extraction-time
             // source and stays undetermined until script-reference evidence exists).
-            // DATA chunks 0, 1, and 2 are each read twice by design - chunk 0 once as the
-            // registered store table above and once here as the item-view evidence
+            // DATA chunks 0, 1, 2, and 3 are each read twice by design - chunk 0 once as
+            // the registered store table above and once here as the item-view evidence
             // source, chunk 1 once as the registered enemy table above and once here
             // as the item- and magic-view evidence source (wAttackEquivItem/wStealItem/
             // wMagic), chunk 2 once as the registered enemy-team table above and once
-            // here as the enemy-view evidence source (rgwEnemy, 0/0xFFFF skipped); both
-            // paths use the same archive read and the same 18-byte STORE / 70-byte
-            // ENEMY / 10-byte ENEMYTEAM record semantics, so the exported store.json/
-            // enemy.json/enemy-team.json and the evidence stay consistent.
+            // here as the enemy-view evidence source (rgwEnemy, 0/0xFFFF skipped), and
+            // chunk 3 once as the registered player-roles table above (#86 attribute
+            // group structured, #87 equipment/magic/sound/cover group as raw placeholders)
+            // and once here as the player-view evidence source (rgwName, all six words)
+            // plus the item-view (rgwEquipment) and magic-view (rgwMagic/
+            // rgwCooperativeMagic) evidence source; all paths use the same archive read
+            // and the same 18-byte STORE / 70-byte ENEMY / 10-byte ENEMYTEAM / 900-byte
+            // PLAYERROLES record semantics, so the exported store.json/enemy.json/
+            // enemy-team.json/player-roles.json and the evidence stay consistent.
             var dataArchive = archiveByName["DATA.MKF"];
             {
                 byte[] chunk = archiveByName[ObjectUnionTable.Archive].ReadChunk(ObjectUnionTable.Chunk, MaximumChunkBytes);

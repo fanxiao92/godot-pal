@@ -110,6 +110,63 @@ public static class DataTables
             new DataField("enemies", DataFieldType.Word, [5]),
         ]);
 
+    // player-roles.json - DATA.MKF chunk 3, PLAYERROLES, 450 WORD (900 bytes), one
+    // single record. #86/#87 deliver this table in two ticket halves over the same
+    // document (the split is frozen in data-schema.md's player-roles section): #86
+    // structures the attribute group (avatar/sprites/name/attackAll/level/HP/MP and
+    // the strength/defense/dexterity/flee/poison-resistance/elemental-resistance
+    // members plus the unknown/walk-frame attribute slots), while the #87
+    // equipment/magic/sound/cover members are exported as raw WORD-array placeholders
+    // (equipmentRaw[6][6], coveredByRaw[6], magicRaw[32][6], cooperativeMagicRaw[6],
+    // and seven sound placeholders, each [6]) that keep the C layout dimensions and
+    // every WORD verbatim; #87 replaces them losslessly with the structured names.
+    // global.h declares every member as a plain WORD array (PLAYERS = WORD[6]) - the
+    // PLAYERROLES sounds are WORD, unlike the ENEMY SHORT sounds - so nothing here
+    // decodes as SignedWord. rgwName (WORD 18..23) doubles as the object.json
+    // player-view evidence source that ObjectUnionTable reads from this same chunk
+    // (fight.c:800-813/848-876); rgwEquipment (WORD 66), rgwMagic (WORD 192), and
+    // rgwCooperativeMagic (WORD 390) feed the item/magic evidence besides (DATA
+    // chunk 3 is deliberately read twice; see DataGameData).
+    public static readonly DataTableDescriptor PlayerRoles = new(
+        "player-roles", "DATA.MKF", 3,
+        [
+            new DataField("avatar", DataFieldType.Word, [6]),
+            new DataField("battleSprite", DataFieldType.Word, [6]),
+            new DataField("spriteNum", DataFieldType.Word, [6]),
+            new DataField("name", DataFieldType.Word, [6]),
+            new DataField("attackAll", DataFieldType.Word, [6]),
+            new DataField("unknown1", DataFieldType.Word, [6]),
+            new DataField("level", DataFieldType.Word, [6]),
+            new DataField("maxHp", DataFieldType.Word, [6]),
+            new DataField("maxMp", DataFieldType.Word, [6]),
+            new DataField("hp", DataFieldType.Word, [6]),
+            new DataField("mp", DataFieldType.Word, [6]),
+            new DataField("equipmentRaw", DataFieldType.Word, [6, 6]),
+            new DataField("attackStrength", DataFieldType.Word, [6]),
+            new DataField("magicStrength", DataFieldType.Word, [6]),
+            new DataField("defense", DataFieldType.Word, [6]),
+            new DataField("dexterity", DataFieldType.Word, [6]),
+            new DataField("fleeRate", DataFieldType.Word, [6]),
+            new DataField("poisonResistance", DataFieldType.Word, [6]),
+            new DataField("elementalResistance", DataFieldType.Word, [5, 6]),
+            new DataField("unknown2", DataFieldType.Word, [6]),
+            new DataField("unknown3", DataFieldType.Word, [6]),
+            new DataField("unknown4", DataFieldType.Word, [6]),
+            new DataField("coveredByRaw", DataFieldType.Word, [6]),
+            new DataField("magicRaw", DataFieldType.Word, [32, 6]),
+            new DataField("walkFrames", DataFieldType.Word, [6]),
+            new DataField("cooperativeMagicRaw", DataFieldType.Word, [6]),
+            new DataField("unknown5", DataFieldType.Word, [6]),
+            new DataField("unknown6", DataFieldType.Word, [6]),
+            new DataField("deathSoundRaw", DataFieldType.Word, [6]),
+            new DataField("attackSoundRaw", DataFieldType.Word, [6]),
+            new DataField("weaponSoundRaw", DataFieldType.Word, [6]),
+            new DataField("criticalSoundRaw", DataFieldType.Word, [6]),
+            new DataField("magicSoundRaw", DataFieldType.Word, [6]),
+            new DataField("coverSoundRaw", DataFieldType.Word, [6]),
+            new DataField("dyingSoundRaw", DataFieldType.Word, [6]),
+        ]);
+
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
     // DataTableDescriptor: every record declares one union view (player/item by #81,
     // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant

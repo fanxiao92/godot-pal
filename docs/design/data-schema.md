@@ -235,43 +235,45 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 
 数组维度均为 `[MAX_PLAYER_ROLES]=6`（角色维）；多维数组外层为第一维。
 
-| JSON 字段 | C 名 | 类型 | 说明 |
-|---|---|---|---|
-| `avatar` | `rgwAvatar` | WORD[6] | 状态界面头像（RGM.MKF） |
-| `battleSprite` | `rgwSpriteNumInBattle` | WORD[6] | 战斗精灵（F.MKF）；`rgwBattleEffectIndex` 按此编号索引（fight.c:2055） |
-| `spriteNum` | `rgwSpriteNum` | WORD[6] | 场景精灵（MGO.MKF） |
-| `name` | `rgwName` | WORD[6] | 角色名（WORD.DAT 文字索引） |
-| `attackAll` | `rgwAttackAll` | WORD[6] | 是否全体攻击 |
-| `unknown1` | `rgwUnknown1` | WORD[6] | 参考标注 FIXME，原样导出 |
-| `level` | `rgwLevel` | WORD[6] | 等级 |
-| `maxHp` | `rgwMaxHP` | WORD[6] | HP 上限 |
-| `maxMp` | `rgwMaxMP` | WORD[6] | MP 上限 |
-| `hp` | `rgwHP` | WORD[6] | 初始 HP |
-| `mp` | `rgwMP` | WORD[6] | 初始 MP |
-| `equipment` | `rgwEquipment[MAX_PLAYER_EQUIPMENTS][MAX_PLAYER_ROLES]` | WORD[6][6] | 装备（部位×角色）；元素为 `itemId`，0 = 未装备 |
-| `attackStrength` | `rgwAttackStrength` | WORD[6] | 攻击力基值 |
-| `magicStrength` | `rgwMagicStrength` | WORD[6] | 灵力基值 |
-| `defense` | `rgwDefense` | WORD[6] | 防御基值 |
-| `dexterity` | `rgwDexterity` | WORD[6] | 身法基值 |
-| `fleeRate` | `rgwFleeRate` | WORD[6] | 逃跑率 |
-| `poisonResistance` | `rgwPoisonResistance` | WORD[6] | 毒抗性 |
-| `elementalResistance` | `rgwElementalResistance[NUM_MAGIC_ELEMENTAL][MAX_PLAYER_ROLES]` | WORD[5][6] | 五系元素抗性（系×角色） |
-| `unknown2` | `rgwUnknown2` | WORD[6] | 参考标注 FIXME |
-| `unknown3` | `rgwUnknown3` | WORD[6] | 参考标注 FIXME |
-| `unknown4` | `rgwUnknown4` | WORD[6] | 参考标注 FIXME |
-| `coveredBy` | `rgwCoveredBy` | WORD[6] | 低 HP/异常时代为承受的角色 |
-| `magic` | `rgwMagic[MAX_PLAYER_MAGICS][MAX_PLAYER_ROLES]` | WORD[32][6] | 法术表（槽×角色）；元素为 `objectId`（object.json magic 视图，magicmenu.c:339-354/uibattle.c:753-759 经 `rgObject[w].magic` 读取，#82 核实），0 = 未习得 |
-| `walkFrames` | `rgwWalkFrames` | WORD[6] | 行走帧（参考标注 ???） |
-| `cooperativeMagic` | `rgwCooperativeMagic` | WORD[6] | 合击法术对象，指向 object.json magic 视图（fight.c:3859-3861/uibattle.c:1120-1125，#82 核实），0 = 无合击 |
-| `unknown5` | `rgwUnknown5` | WORD[6] | 参考标注 FIXME |
-| `unknown6` | `rgwUnknown6` | WORD[6] | 参考标注 FIXME |
-| `deathSound` | `rgwDeathSound` | WORD[6] | 死亡音效 |
-| `attackSound` | `rgwAttackSound` | WORD[6] | 攻击音效 |
-| `weaponSound` | `rgwWeaponSound` | WORD[6] | 武器音效 |
-| `criticalSound` | `rgwCriticalSound` | WORD[6] | 会心音效 |
-| `magicSound` | `rgwMagicSound` | WORD[6] | 施法音效 |
-| `coverSound` | `rgwCoverSound` | WORD[6] | 掩护音效 |
-| `dyingSound` | `rgwDyingSound` | WORD[6] | 濒死音效 |
+**分票交付（#86/#87，本节冻结）**：本表由两票共同产出同一份单记录文档（字段并集）。#86 交付属性组（下表标注 `#86` 的行：属性/HP/MP/等级、状态抗性（毒抗）、元素抗性、名字 rgwName，及头像/精灵/行走帧与 unknown 类属性槽）的结构化导出；#87 范围字段（装备 rgwEquipment、法术 rgwMagic/rgwCooperativeMagic、掩护 rgwCoveredBy、七个音效，下表标注 `#87` 的行）在 #86 交付物中以**原始 WORD 数组占位字段**导出：`equipmentRaw`（WORD[6][6]）、`coveredByRaw`（WORD[6]）、`magicRaw`（WORD[32][6]）、`cooperativeMagicRaw`（WORD[6]）、`deathSoundRaw`/`attackSoundRaw`/`weaponSoundRaw`/`criticalSoundRaw`/`magicSoundRaw`/`coverSoundRaw`/`dyingSoundRaw`（各 WORD[6]）。占位字段沿用对应 C 成员的布局维度与顺序（多维数组外层仍为第一维），与其他字段同样严格校验（定长、WORD 域、未知/缺失字段拒绝）且逐 WORD 无损——不改写、不舍弃、不并入其他字段；#87 落地时把占位字段无损替换为下表最终字段（占位名去掉 `Raw` 后缀即最终名），替换前后每 WORD 值不变。#86 交付期间，记录对象 = `#86` 结构化字段 + 上述占位字段（各恰好出现一次），**不含** `#87` 最终字段名（以最终名出现的字段会被严格校验拒绝）。
+
+| 组 | JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|---|
+| #86 | `avatar` | `rgwAvatar` | WORD[6] | 状态界面头像（RGM.MKF） |
+| #86 | `battleSprite` | `rgwSpriteNumInBattle` | WORD[6] | 战斗精灵（F.MKF）；`rgwBattleEffectIndex` 按此编号索引（fight.c:2055） |
+| #86 | `spriteNum` | `rgwSpriteNum` | WORD[6] | 场景精灵（MGO.MKF） |
+| #86 | `name` | `rgwName` | WORD[6] | 角色名（WORD.DAT 文字索引）；同时是 object.json player 视图证据源（fight.c:800-813/848-876，见 object 表视图判定） |
+| #86 | `attackAll` | `rgwAttackAll` | WORD[6] | 是否全体攻击 |
+| #86 | `unknown1` | `rgwUnknown1` | WORD[6] | 参考标注 FIXME，原样导出 |
+| #86 | `level` | `rgwLevel` | WORD[6] | 等级 |
+| #86 | `maxHp` | `rgwMaxHP` | WORD[6] | HP 上限 |
+| #86 | `maxMp` | `rgwMaxMP` | WORD[6] | MP 上限 |
+| #86 | `hp` | `rgwHP` | WORD[6] | 初始 HP |
+| #86 | `mp` | `rgwMP` | WORD[6] | 初始 MP |
+| #87 | `equipment` | `rgwEquipment[MAX_PLAYER_EQUIPMENTS][MAX_PLAYER_ROLES]` | WORD[6][6] | 装备（部位×角色）；元素为 `itemId`，0 = 未装备；#86 交付期间以 `equipmentRaw` 占位 |
+| #86 | `attackStrength` | `rgwAttackStrength` | WORD[6] | 攻击力基值 |
+| #86 | `magicStrength` | `rgwMagicStrength` | WORD[6] | 灵力基值 |
+| #86 | `defense` | `rgwDefense` | WORD[6] | 防御基值 |
+| #86 | `dexterity` | `rgwDexterity` | WORD[6] | 身法基值 |
+| #86 | `fleeRate` | `rgwFleeRate` | WORD[6] | 逃跑率 |
+| #86 | `poisonResistance` | `rgwPoisonResistance` | WORD[6] | 毒抗性 |
+| #86 | `elementalResistance` | `rgwElementalResistance[NUM_MAGIC_ELEMENTAL][MAX_PLAYER_ROLES]` | WORD[5][6] | 五系元素抗性（系×角色） |
+| #86 | `unknown2` | `rgwUnknown2` | WORD[6] | 参考标注 FIXME |
+| #86 | `unknown3` | `rgwUnknown3` | WORD[6] | 参考标注 FIXME |
+| #86 | `unknown4` | `rgwUnknown4` | WORD[6] | 参考标注 FIXME |
+| #87 | `coveredBy` | `rgwCoveredBy` | WORD[6] | 低 HP/异常时代为承受的角色；值为角色下标（0..5）；#86 交付期间以 `coveredByRaw` 占位 |
+| #87 | `magic` | `rgwMagic[MAX_PLAYER_MAGICS][MAX_PLAYER_ROLES]` | WORD[32][6] | 法术表（槽×角色）；元素为 `objectId`（object.json magic 视图，magicmenu.c:339-354/uibattle.c:753-759 经 `rgObject[w].magic` 读取，#82 核实），0 = 未习得；#86 交付期间以 `magicRaw` 占位 |
+| #86 | `walkFrames` | `rgwWalkFrames` | WORD[6] | 行走帧（参考标注 ???） |
+| #87 | `cooperativeMagic` | `rgwCooperativeMagic` | WORD[6] | 合击法术对象，指向 object.json magic 视图（fight.c:3859-3861/uibattle.c:1120-1125，#82 核实），0 = 无合击；#86 交付期间以 `cooperativeMagicRaw` 占位 |
+| #86 | `unknown5` | `rgwUnknown5` | WORD[6] | 参考标注 FIXME |
+| #86 | `unknown6` | `rgwUnknown6` | WORD[6] | 参考标注 FIXME |
+| #87 | `deathSound` | `rgwDeathSound` | WORD[6] | 死亡音效；#86 交付期间以 `deathSoundRaw` 占位 |
+| #87 | `attackSound` | `rgwAttackSound` | WORD[6] | 攻击音效；#86 交付期间以 `attackSoundRaw` 占位 |
+| #87 | `weaponSound` | `rgwWeaponSound` | WORD[6] | 武器音效；#86 交付期间以 `weaponSoundRaw` 占位 |
+| #87 | `criticalSound` | `rgwCriticalSound` | WORD[6] | 会心音效；#86 交付期间以 `criticalSoundRaw` 占位 |
+| #87 | `magicSound` | `rgwMagicSound` | WORD[6] | 施法音效；#86 交付期间以 `magicSoundRaw` 占位 |
+| #87 | `coverSound` | `rgwCoverSound` | WORD[6] | 掩护音效；#86 交付期间以 `coverSoundRaw` 占位 |
+| #87 | `dyingSound` | `rgwDyingSound` | WORD[6] | 濒死音效；#86 交付期间以 `dyingSoundRaw` 占位 |
 
 真实数据核对：900 ÷ 900 = 1 条。音效字段在 PLAYERROLES 中是 `WORD` 数组（不同于 ENEMY 的 SHORT 音效），按无符号导出。
 

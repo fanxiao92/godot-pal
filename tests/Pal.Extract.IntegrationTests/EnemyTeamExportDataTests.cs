@@ -56,7 +56,7 @@ public sealed class EnemyTeamExportDataTests : IDisposable
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
+        Assert.Equal(new[] { Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "enemy-team.json")));
@@ -81,7 +81,7 @@ public sealed class EnemyTeamExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(6, tables.Length);
+        Assert.Equal(7, tables.Length);
         Assert.Equal("enemy-team.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
         var entry = tables.Single(table => table.GetProperty("file").GetString() == "enemy-team.json");
         Assert.Equal("DATA.MKF", entry.GetProperty("archive").GetString());
