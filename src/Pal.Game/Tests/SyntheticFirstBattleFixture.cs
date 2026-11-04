@@ -174,7 +174,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         roleSnapshot["roleId"] = 1; roleSnapshot["hp"] = lost ? 1 : 100; roleSnapshot["maxHp"] = lost ? 1 : 100;
         roleSnapshot["mp"] = 5; roleSnapshot["maxMp"] = 5; roleSnapshot["level"] = 2;
         roleSnapshot["coveredByRoleId"] = 0; roleSnapshot["equipment"] = new JsonArray(0, 0, 0, 0, 0, 0);
-        roleSnapshot["magics"] = new JsonArray(Enumerable.Repeat<JsonNode?>(0, 32).ToArray());
+        roleSnapshot["magics"] = new JsonArray(Enumerable.Range(0, 32).Select(_ => (JsonNode?)0).ToArray());
         roles.Add(roleSnapshot);
         roles[0]!["friendDeathScript"] = null;
         var growth = data["growth"]!.AsArray();
