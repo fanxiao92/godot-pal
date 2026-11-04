@@ -62,6 +62,8 @@ public class RealFirstBattleFlowTests
                     { scene.Press(Key.Enter); pages++; }
                 }
                 frames++;
+                if ((frames & 127) == 0)
+                    System.Console.WriteLine($"REAL_BMODE:frame={frames} mode={main.StoryBattleMode} phase={main.StoryBattle?.Current.Combat.Phase} sel={main.StoryBattle?.Current.Combat.SelectingPlayerIndex} hp0={main.StoryBattle?.Current.Combat.Players[0].Hp} eh0={main.StoryBattle?.Current.Combat.Enemies[0].Hp}");
                 if ((frames & 511) == 0)
                     System.Console.WriteLine($"REAL_TRACE:frame={frames} phase={display?.Display.Current.Phase} text={display?.Display.Current.VisibleText?.Length} pos={main.Dialogue?.Session?.CurrentPosition} displayTicks={displayTicks} inTree={main.Display?.IsInsideTree()} canProc={main.Display?.CanProcess()} procIn={main.Display?.IsProcessingInput()} child={main.Display?.GetParent() is not null} vis={main.Display?.Visible}");
                 await scene.RunnerIdle();
