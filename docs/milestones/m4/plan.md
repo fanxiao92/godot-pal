@@ -40,7 +40,7 @@ Lost 进入原失败剧情至 `0x004E` 重载请求，输出一次可定位诊�
 | [#50](https://github.com/fanxiao92/godot-pal/issues/50) | 胜利成长、奖励、法术列表及清理/恢复顺序 | #48 | 已本地整票验收 `780a587`（批拆分至8批）；远端收尾随最终交付 |
 | [#51](https://github.com/fanxiao92/godot-pal/issues/51) | boss 逃跑失败、Lost 分支及重载 TODO 终态 | #46 | 已本地整票验收 `0a27d20`；native-map 2既有失败转小修复；远端收尾随最终交付 |
 | [#52](https://github.com/fanxiao92/godot-pal/issues/52) | 局部动态剧情、等待、入口回写和真实 auto 移动 | #45 | 已本地整票验收 `8089851`（含退出期崩溃诊断修复）；远端收尾随最终交付 |
-| [#53](https://github.com/fanxiao92/godot-pal/issues/53) | 真实完整事件、战斗/图像/双语资源与全部已支持闭包组合 | #49、#50、#51、#52 |
+| [#53](https://github.com/fanxiao92/godot-pal/issues/53) | 真实完整事件、战斗/图像/双语资源与全部已支持闭包组合 | #49、#50、#51、#52 | 已本地整票验收 `6d03da9`（分相真实+连续合成；零售整役自动不可行边界入档）；远端收尾随最终交付 |
 | [#54](https://github.com/fanxiao92/godot-pal/issues/54) | 分层完整验收、独立复核和最终交付 | #53 |
 
 优先串行实施 45→46→47→48→49→50→51→52→53→54；每票可分短上下文的内部实现检查点，不能把一个检查点、静态调查或发布动作当作整票完成。每个工作树只有一个源码写入者，集成分支由协调者维护；所有实际 Godot/GdUnit/Prepare/含引擎的 solution 执行全局串行。
