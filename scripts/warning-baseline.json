@@ -1,0 +1,8 @@
+{
+  "_comment": "Compiler-warning baseline per Test-Range scope. Test-Range fails a build whose 'warning CS' count EXCEEDS its scope's baseline (going below baseline only prints a notice to shrink it). Update intentionally via a dedicated commit that explains the new warning or the fix.",
+  "core": 0,
+  "cli-unit": 0,
+  "cli-integration": 2,
+  "prepare": 0,
+  "game": 14
+}
