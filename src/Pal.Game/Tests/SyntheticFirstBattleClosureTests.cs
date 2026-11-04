@@ -18,7 +18,7 @@ public class SyntheticFirstBattleClosureTests
     {
         using var statics = new NativeProfileFixture();
         using var fixture = new SyntheticFirstBattleFixture(statics, statics.ResourceRoot,
-            PathCombine(statics.ResourceRoot, "Profile.tres"), lost: false);
+            statics.Uri, lost: false);
         var main = new Main();
         main.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
         using var scene = new RealFirstBattleFlowTests.RealFlowScene(main);
@@ -53,7 +53,7 @@ public class SyntheticFirstBattleClosureTests
     {
         using var statics = new NativeProfileFixture();
         using var fixture = new SyntheticFirstBattleFixture(statics, statics.ResourceRoot,
-            PathCombine(statics.ResourceRoot, "Profile.tres"), lost: true);
+            statics.Uri, lost: true);
         var main = new Main();
         main.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
         using var scene = new RealFirstBattleFlowTests.RealFlowScene(main);
