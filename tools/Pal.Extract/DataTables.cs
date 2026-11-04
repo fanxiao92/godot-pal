@@ -214,6 +214,22 @@ public static class DataTables
             new DispatchedWordOption("layerOffset", DataFieldType.SignedWord),
         ]));
 
+    // battle-field.json - DATA.MKF chunk 5, BATTLEFIELD, 6 WORD (12 bytes) per record.
+    // Record count = chunk byte length / 12; global.h declares wScreenWave as a plain
+    // WORD (battle.c:1563 copies it into gpGlobals->wScreenWave) and rgsMagicEffect as
+    // a SHORT array of NUM_MAGIC_ELEMENTAL = 5 (palcommon.h:57) elements, so exactly
+    // the five-element array decodes as SignedWord and nothing else does. The
+    // signedness matters at the single read point fight.c:244 (PAL_CalcMagicDamage):
+    // sDamage *= 10 + rgsMagicEffect[wElem - 1] - a value below -10 flips the
+    // multiplier's sign, so decoding the array as WORD would change real damage
+    // results for negative multipliers.
+    public static readonly DataTableDescriptor BattleField = new(
+        "battle-field", "DATA.MKF", 5,
+        [
+            new DataField("screenWave", DataFieldType.Word),
+            new DataField("magicEffect", DataFieldType.SignedWord, [5]),
+        ]);
+
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
     // DataTableDescriptor: every record declares one union view (player/item by #81,
     // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant

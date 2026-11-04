@@ -305,8 +305,8 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 
 | JSON 字段 | C 名 | 类型 | 说明 |
 |---|---|---|---|
-| `screenWave` | `wScreenWave` | WORD | 屏幕波动等级 |
-| `magicEffect` | `rgsMagicEffect[NUM_MAGIC_ELEMENTAL]` | SHORT[5] | 五系法术效果倍率；声明 SHORT（fight.c:244 `sDamage *= 10 + rgsMagicEffect[...]`，可负） |
+| `screenWave` | `wScreenWave` | WORD | 屏幕波动等级（battle.c:1563 复制入 `gpGlobals->wScreenWave`，WORD→WORD 无符号读写） |
+| `magicEffect` | `rgsMagicEffect[NUM_MAGIC_ELEMENTAL]` | SHORT[5] | 五系法术效果倍率；声明 SHORT（fight.c:244 `sDamage *= 10 + rgsMagicEffect[...]`，可负；元素数 NUM_MAGIC_ELEMENTAL = 5 见 palcommon.h:57，无显式 `(SHORT)` 转换点——符号性由结构体声明承担，值 < −10 使倍率变负） |
 
 真实数据核对：696 ÷ 12 = 58 条。
 
