@@ -57,7 +57,9 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 NativeProfileFixture.SaveResource(language, path);
             }
             // Background and enemy leaves are relabeled copies: the closure cross-checks the
-            // declared FBP24 battlefield identity and the ABC bitmap number 97.
+            // declared FBP24 battlefield identity and the ABC bitmap number 97. The number and
+            // attack-effect leaves are authored stand-ins (their Source dicts say so); binding
+            // them keeps the battle view's damage digits/effect frames drawable on GPU (#54 F2).
             {
                 var background = (PalDialogueIndexedImage)ResourceLoader.Load(Path.Combine(samples, "Visual/Background.tres"),
                     cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
@@ -68,6 +70,8 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 enemy.SpriteId = 97;
                 enemy.Source["identity"] = "ABC97";
                 NativeProfileFixture.SaveResource(enemy, Path.Combine(root, "Leaves/Enemy.tres"));
+                File.Copy(Path.Combine(samples, "Visual/Numbers.tres"), Path.Combine(root, "Leaves/Numbers.tres"));
+                File.Copy(Path.Combine(samples, "Visual/AttackEffect.tres"), Path.Combine(root, "Leaves/AttackEffect.tres"));
             }
             // Player battle sprites: two copies of the authored leader leaf, each carrying its
             // declared F0/F1 source identity (the closure cross-check reads Source["identity"]).
@@ -220,6 +224,10 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         var team = data["teams"]!.AsArray().Single(t => (int)t!["teamId"]! == 18)!;
         var enemy = team["enemies"]!.AsArray()[0]!;
         enemy["hp"] = lost ? 500 : 1;
+        // Retail-parity settlement values (team18 retail binding: experience 26/cash 48 per
+        // enemy) so the Won flow presents the battle.c 1022-1031 exp/cash settlement box.
+        enemy["experience"] = 26;
+        enemy["cash"] = 48;
         var second = (JsonNode)enemy.DeepClone();
         second["id"] = 8;
         team["enemies"]!.AsArray().Add(second);
@@ -264,6 +272,9 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             PlayerSpriteUri = Localize("Leaves/F0.tres"),
             PlayerPosition = new Vector2I(200, 176),
             PaletteUri = Localize("Leaves/Palette.tres"),
+            AttackEffectSpriteUri = Localize("Leaves/AttackEffect.tres"),
+            AttackEffectIndex = 0,
+            NumberSpriteUri = Localize("Leaves/Numbers.tres"),
         };
         var team = new PalBattleVisualTeam
         {
@@ -279,7 +290,8 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             IdleFrames = 1, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 1, IdleAnimSpeed = 2,
         };
         visual.Teams = [team];
-        foreach (string uri in new[] { visual.PlayerSpriteUri, visual.PaletteUri, team.BackgroundUri, team.EnemySpriteUri })
+        foreach (string uri in new[] { visual.PlayerSpriteUri, visual.PaletteUri, team.BackgroundUri, team.EnemySpriteUri,
+            visual.AttackEffectSpriteUri, visual.NumberSpriteUri })
             visual.ResourceSha256[uri] = Godot.FileAccess.GetSha256(uri);
         string path = Localize("Visual.tres");
         NativeProfileFixture.SaveResource(visual, Path.Combine(root, "Visual.tres"));

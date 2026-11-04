@@ -58,7 +58,8 @@ $p = Start-Process -FilePath $godot -ArgumentList $arguments -WorkingDirectory $
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 foreach ($key in @($environment.Keys)) { Remove-Item -Path "Env:$key" -ErrorAction SilentlyContinue }
 $ownedPid = $p.Id
-$timedOut = -not $p.WaitForExit(360000)
+$waitMs = if ($Mode -eq 'synthetic-won') { 660000 } else { 360000 }
+$timedOut = -not $p.WaitForExit($waitMs)
 if ($timedOut) { $p.Kill($true); $p.WaitForExit() }
 $code = $p.ExitCode
 $after = Snapshot $protectedRoots

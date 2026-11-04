@@ -43,6 +43,7 @@ public partial class M4FirstBattleGpuFixture : Node
     private bool searchPressed;
     private int downBefore = -1;
     private int downHeldFrames;
+    private int framesSinceDown;
     private PalPalette? palette;
     private Color textColor; // dialogue glyph color: index 0x4F of the active palette
     private Color hudColor;  // battle HUD/settlement text: palette index 79
@@ -101,6 +102,7 @@ public partial class M4FirstBattleGpuFixture : Node
             AddChild(main);
             started = Time.GetTicksMsec();
             RenderingServer.FramePostDraw += ObserveFrame;
+            subscribed = true;
             GD.Print($"PAL_M4_GPU_BEGIN:mode={mode}:language={language}:renderer={DisplayServer.GetName()}");
         }
         catch (Exception error) { Fail(error); }
@@ -190,9 +192,11 @@ public partial class M4FirstBattleGpuFixture : Node
     {
         if (finished) return;
         ulong now = Time.GetTicksMsec();
-        if (now - started > 300000u)
+        // The synthetic full Won/Lost campaigns pace at real GPU frame time; the committed
+        // headless cases carry a 280s case budget, so the local bound stays above it.
+        if (now - started > (mode == "real" ? 300000u : 600000u))
         {
-            Fail(new TimeoutException($"mode={mode} phase={phase} did not complete in the 300s liveness bound."));
+            Fail(new TimeoutException($"mode={mode} phase={phase} exceeded its liveness bound."));
             return;
         }
         if (main is null || main.Failure is not null) return;
@@ -260,7 +264,12 @@ public partial class M4FirstBattleGpuFixture : Node
                         if (!feedbackCaptured && main.StoryDrawSnapshot is { ResultVisible: true }) wantFeedback = true;
                         return;
                     }
-                    if (main.StoryBattleMode == StoryBattlePresentation.Settlement && !settlementCaptured) wantSettlement = true;
+                    if (main.StoryBattleMode == StoryBattlePresentation.Settlement && !settlementCaptured)
+                    {
+                        // Hold confirm input so the exp/cash line stays presented until captured.
+                        if (main.StorySettlementLine is not null) wantSettlement = true;
+                        return;
+                    }
                     InputTap(Key.Enter);
                     rounds++;
                     return;
@@ -278,13 +287,22 @@ public partial class M4FirstBattleGpuFixture : Node
                             if (downBefore < 0)
                             {
                                 downBefore = updates;
-                                downHeldFrames = 14;
+                                downHeldFrames = 40;
+                                framesSinceDown = 0;
                                 InputKey(Key.Down, true); // hold: a discrete 100ms step needs the key held across ticks
                                 return;
                             }
                             if (downHeldFrames > 0)
                             {
                                 if (--downHeldFrames == 0) InputKey(Key.Down, false);
+                                return;
+                            }
+                            framesSinceDown++;
+                            if ((framesSinceDown % 120) == 0)
+                                GD.Print($"PAL_M4_GPU_WAIT:updates={updates} downBefore={downBefore} phase={session.Phase} display={session.PendingDisplay is not null} battle={main.StoryBattle is not null} lost={main.StoryLostTerminal}");
+                            if (framesSinceDown > 900)
+                            {
+                                Fail(new TimeoutException($"post-completion exploration did not commit an update (updates={updates}, downBefore={downBefore}, phase={session.Phase})."));
                                 return;
                             }
                             if (updates > downBefore) Finish();
@@ -652,7 +670,7 @@ public partial class M4FirstBattleGpuFixture : Node
     private void Finish()
     {
         finished = true;
-        RenderingServer.FramePostDraw -= ObserveFrame;
+        DisconnectRenderer();
         if (mode == "real")
         {
             var battle = main!.StoryBattle;
@@ -668,7 +686,7 @@ public partial class M4FirstBattleGpuFixture : Node
     private void Fail(Exception error)
     {
         finished = true;
-        RenderingServer.FramePostDraw -= ObserveFrame;
+        DisconnectRenderer();
         if (Directory.Exists(evidence)) SaveResult(completed: false, error.GetType().Name + ": " + error.Message);
         GD.PrintErr($"PAL_M4_GPU_FAILED:{error.GetType().Name}:{error.Message}");
         GetTree().Quit(1);
@@ -687,9 +705,20 @@ public partial class M4FirstBattleGpuFixture : Node
             JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
     }
 
+    private bool subscribed;
+
+    private void DisconnectRenderer()
+    {
+        // Godot logs an engine error when unsubscribing an already-removed connection, so
+        // guard the teardown (the M3 fixture pattern): Finish/Fail and _ExitTree share it.
+        if (!subscribed) return;
+        RenderingServer.FramePostDraw -= ObserveFrame;
+        subscribed = false;
+    }
+
     public override void _ExitTree()
     {
-        RenderingServer.FramePostDraw -= ObserveFrame;
+        DisconnectRenderer();
         synthetic?.Dispose();
         syntheticStatics?.Dispose();
     }

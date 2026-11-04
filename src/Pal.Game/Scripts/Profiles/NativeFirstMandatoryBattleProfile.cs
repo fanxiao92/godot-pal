@@ -283,6 +283,9 @@ public sealed class FirstBattleRealResources
         Events = events; Chinese = chinese; English = english; BattleContent = battleContent; Font = font;
         Prompts = Array.AsReadOnly(prompts);
         portraitMap = portraits; eventUris = eventFileUris; hashMap = hashes;
-        chineseWords = chineseWords; englishWords = englishWords; GlobalObjects = globalObjects;
+        // Parameter names shadow the fields: bind through this. The previous bare
+        // self-assignments left the words tables null (CS0649), which GPU acceptance (#54
+        // unit C) exposed as a NullReferenceException in PalStoryBattleView._Draw's HUD text.
+        this.chineseWords = chineseWords; this.englishWords = englishWords; GlobalObjects = globalObjects;
     }
 }
