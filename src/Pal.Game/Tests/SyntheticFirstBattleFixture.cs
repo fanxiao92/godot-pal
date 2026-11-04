@@ -32,7 +32,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             string samples = ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle");
             Directory.CreateDirectory(Path.Combine(root, "Leaves/Dialogue"));
             foreach (var (relative, name) in new[] {
-                ("Static/Leader.tres", "Leaves/Leader.tres"), ("Static/Palette.tres", "Leaves/Palette.tres"),
+                ("Static/Palette.tres", "Leaves/Palette.tres"),
                 ("Visual/Background.tres", "Leaves/Background.tres"), ("Visual/Enemy.tres", "Leaves/Enemy.tres"),
                 ("Dialogue/Font.tres", "Leaves/Dialogue/Font.tres"),
                 ("Dialogue/Language.zh-Hans.tres", "Leaves/Dialogue/Language.zh-Hans.tres"),
@@ -41,6 +41,15 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 ("Dialogue/Prompt-01.tres", "Leaves/Dialogue/Prompt-01.tres"),
                 ("Dialogue/Prompt-02.tres", "Leaves/Dialogue/Prompt-02.tres") })
                 File.Copy(Path.Combine(samples, relative), Path.Combine(root, name));
+            // Player battle sprites: two copies of the authored leader leaf, each carrying its
+            // declared F0/F1 source identity (the closure cross-check reads Source["identity"]).
+            foreach (string roleId in new[] { "F0", "F1" })
+            {
+                var sprite = (PalSprite)ResourceLoader.Load(Path.Combine(samples, "Static/Leader.tres"),
+                    cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+                sprite.Source["identity"] = roleId;
+                NativeProfileFixture.SaveResource(sprite, Path.Combine(root, $"Leaves/{roleId}.tres"));
+            }
             // 1. Synthetic modern events at the frozen addresses (fast battle, hooks, Won
             //    continuation with dynamic verbs, Lost reload boundary, dynamic autos).
             string eventsUri = WriteEvents(lost);
@@ -78,7 +87,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 ["visualUri"] = visualUri,
                 ["globalObjectsUri"] = globalUri,
                 ["portraits"] = new JsonArray(),
-                ["playerSpriteUris"] = new JsonArray(Localize("Leaves/Leader.tres"), Localize("Leaves/Leader.tres")),
+                ["playerSpriteUris"] = new JsonArray(Localize("Leaves/F0.tres"), Localize("Leaves/F1.tres")),
                 ["enemySpriteId"] = 97, ["enemyArchiveEntry"] = "ABC97",
                 ["roleSpriteIds"] = new JsonArray("F0", "F1"),
                 ["battlefieldId"] = 24, ["battlefieldArchiveEntry"] = "FBP24",
@@ -224,7 +233,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             FormatVersion = 1,
             SourceIdentity = "Synthetic first-battle closure visual over authored leaves; not retail data.",
             RoleId = 0,
-            PlayerSpriteUri = Localize("Leaves/Leader.tres"),
+            PlayerSpriteUri = Localize("Leaves/F0.tres"),
             PlayerPosition = new Vector2I(200, 176),
             PaletteUri = Localize("Leaves/Palette.tres"),
         };
