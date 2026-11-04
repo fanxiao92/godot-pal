@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（48 个 opcode 位、40 个动词：M5 批1 #96 新增基础控制流，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（56 个 opcode 位、48 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -13,7 +13,7 @@ pal-extract rebuild-events --input <events目录> --output <新文件>
 
 `export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
 
-实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 48 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`randomJump`、`startBattle`、`changeHp`、`changeMp`、`boostStat`、`setDialog` 四变体、`showDialog`、`redraw`、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 56 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`itemShortageJump`（#97）、`playerLacksPoisonJump`（#97）、`enemyLacksPoisonJump`（#97）、`notPoisonedJump`（#97）、`enemyHpAboveJump`（#97）、`enemyTurnJump`（#97）、`partyHpNotFullJump`（#97）、`waitForAnyKey`（#97）、`randomJump`、`startBattle`、`changeHp`、`changeMp`、`boostStat`、`setDialog` 四变体、`showDialog`、`redraw`、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`、`revivePlayer`、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
 
 导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
@@ -156,6 +156,15 @@ data/extracted/events/
 | `0x0004` | `call` | `to` 为引用映射 operand 0（被调 trigger 脚本入口）、`eventObjectId` 为 WORD 映射 operand 1（0=继承调用者的对象 id）；operand 2 保留（#96） |
 | `0x0008` | `advanceEntry` | 无操作数映射；三个原操作数保留（#96） |
 | `0x000A` | `confirmNoJump` | `to` 为引用映射 operand 0（玩家选否时跳转）；operand 1、2 保留（#96） |
+| `0x004D` | `waitForAnyKey` | 无操作数映射；三个原操作数保留；实际按键集合为 KeySearch/KeyMenu（#97） |
+| `0x004E` | `requestReload` | 无操作数映射；三个原操作数保留；后继为 stop（#97 复核修正：参考直接 `return 0`） |
+| `0x0058` | `itemShortageJump` | `itemId` 为 WORD 映射 operand 0、`count` 为有符号整数映射 operand 1（`(SHORT)` 比较）、`to` 为引用映射 operand 2；库存持有量 < count 时跳转（#97） |
+| `0x005D` | `playerLacksPoisonJump` | `objectId` 为 WORD 映射 operand 0（object.json poison 视图）、`to` 为引用映射 operand 1；当前玩家角色未携带该毒对象时跳转（#97） |
+| `0x005E` | `enemyLacksPoisonJump` | 同 `playerLacksPoisonJump`，检查敌人 rgPoisons；operand 2 保留（#97） |
+| `0x0061` | `notPoisonedJump` | `to` 为引用映射 operand 0；当前玩家角色完全无毒时跳转；operand 1、2 保留（#97） |
+| `0x0064` | `enemyHpAboveJump` | `percent` 为 WORD 映射 operand 0（无符号乘子）、`to` 为引用映射 operand 1；敌当前 HP×100 > 敌表最大 HP×percent 时跳转；operand 2 保留（#97） |
+| `0x0068` | `enemyTurnJump` | `to` 为引用映射 operand 0（敌方行动回合时跳转）；operand 1、2 保留（#97） |
+| `0x0074` | `partyHpNotFullJump` | `to` 为引用映射 operand 0（任一在队队员 HP 低于上限时跳转）；operand 1、2 保留（#97） |
 | `0x0007` | `startBattle` | `enemyTeamId` 为 WORD 映射 operand 0；`lossTarget` 为可空引用映射 operand 1；`isBoss` 为布尔值，`fleeTarget` 为可空引用，二者共同映射 operand 2，规则见下文 |
 | `0x001F` | `giveItem` | `itemId` 为 WORD 映射 operand 0、`count` 为有符号整数映射 operand 1；operand 2 保留 |
 | `0x0006` | `randomJump` | `rate` 为 WORD 映射 operand 0、`to` 为引用映射 operand 1；operand 2 保留。执行时抽取 `RandomLong(1,100)`，**抽取值 ≥ rate 时跳转**，否则顺序后继；预检必须同时覆盖两个真实分支（#49） |
@@ -215,7 +224,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x006D setSceneScripts | case 0x006D：`rgScene[operand0−1].wScriptOnEnter/wScriptOnTeleport = operand1/2` | scene 下标 → `sceneId`（1 基） |
 | 0x004A setBattlefield | case 0x004A：`gpGlobals->wNumBattleField = operand0` | 战场编号 → `battlefieldId` |
 
-#### 当前注册表（48 个 opcode 位，40 个动词）
+#### 当前注册表（56 个 opcode 位，48 个动词）
 
 | opcode | op | 字段（绑定） | 执行方式 | 后继 |
 |---|---|---|---|---|
@@ -252,13 +261,21 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0046 | `setPartyPos` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
 | 0x0049 | `setState` | `eventObjectId`(word,0)、`state`(signedWord,1) | shared | sequential |
 | 0x004A | `setBattlefield` | `battlefieldId`(word,0) | shared | sequential |
-| 0x004E | `requestReload` | — | shared | sequential |
+| 0x004D | `waitForAnyKey` | — | shared | sequential |
+| 0x004E | `requestReload` | — | shared | stop（#97 复核修正） |
 | 0x004F | `fadeToRed` | — | shared | sequential |
 | 0x0050 | `fadeOut` | `frames`(word,0) | shared | sequential |
 | 0x0052 | `hide` | `frames`(word,0) | shared | sequential |
+| 0x0058 | `itemShortageJump` | `itemId`(word,0)、`count`(signedWord,1)、`to`(reference,2) | shared | conditionalJump |
+| 0x005D | `playerLacksPoisonJump` | `objectId`(word,0)、`to`(reference,1) | shared | conditionalJump |
+| 0x005E | `enemyLacksPoisonJump` | `objectId`(word,0)、`to`(reference,1) | shared | conditionalJump |
+| 0x0061 | `notPoisonedJump` | `to`(reference,0) | shared | conditionalJump |
+| 0x0064 | `enemyHpAboveJump` | `percent`(word,0)、`to`(reference,1) | shared | conditionalJump |
+| 0x0068 | `enemyTurnJump` | `to`(reference,0) | shared | conditionalJump |
 | 0x0005 | `redraw` | `delayUnits`(word,0) | triggerSwitchOnly | sequential |
 | 0x006D | `setSceneScripts` | `sceneId`(word,0)、`onEnter`(word,1)、`onTeleport`(word,2) | shared | sequential |
 | 0x0073 | `fadeScene` | `mode`(word,0) | shared | sequential |
+| 0x0074 | `partyHpNotFullJump` | `to`(reference,0) | shared | conditionalJump |
 | 0x0075 | `setParty` | `roleId0`(word,0)、`roleId1`(word,1)、`roleId2`(word,2) | shared | sequential |
 | 0x0078 | `noop` | — | shared | sequential |
 | 0x0090 | `setObjectScript` | `objectId`(word,0)、`value`(word,1)、`slotIndex`(word,2) | shared | sequential |
@@ -282,6 +299,25 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x000A | `confirmNoJump` | `to`=operand0（选否跳转目标） | triggerSwitchOnly（trigger 3375：`PAL_ConfirmMenu()` 选否→`wScriptEntry=to`，否则 next；auto 无 case→TerminateOnError） | conditionalJump（`to` 或 next） | `to` 解析重编码；operand1、2 保留 | 26（目标全部在范围内） |
 
 真实数据核对：五个跳转类 opcode（0x0002/0x0003/0x0004/0x0006/0x000A）的全部目标操作数要么为 0（引用 L0000，合法）要么落在 chunk 4 内，无越界；export→rebuild 字节一致回归见 #96 回执。目标引用的悬空拒绝发生在重建的标签解析处（与 `randomJump` 同口径）；`startBattle` 式的导出期范围预检（`DecodeValidatesReferenceRange`）本批不启用。
+
+#### M5 批2 条目：条件跳转一（#97）
+
+本批核对结论：**全部操作数为立即 WORD**（同批1，`pScript->rgwOperand[n]` 直读，无变量寻址）；10 个 opcode 全部位于两执行器共享的 `PAL_InterpretInstruction`（script.c:587 起，switch 于 650，default→3078 `TerminateOnError`），executor 一律 `shared`，两执行器行为一致；条件跳转统一经 `wScriptEntry = 目标操作数 − 1` 赋值 + 函数尾统一 `return wScriptEntry + 1`（script.c:3085）生效——目标 WORD 0 合法（引用 L0000，到达即停）。行号与逐条语义如下。
+
+| opcode | 动词 | 字段映射与寻址 | 执行方式（script.c 行号） | 后继 | 反向编码 | 真实数据 |
+|---|---|---|---|---|---|---|
+| 0x0041 | `markFailed`（#78 已具名，复核） | 无操作数映射 | shared（1623：`g_fScriptSuccess = FALSE`；该标记由 `PAL_RunTriggerScript` 每次调用开头置 TRUE（3189），供调用方检查脚本成败） | sequential | 无映射字段，三操作数保留源 WORD | 4 |
+| 0x004D | `waitForAnyKey` | 无操作数映射 | shared（1753：`PAL_WaitForKey(0)` 无超时阻塞；参考实现实际只接受 KeySearch/KeyMenu（[play.c](../../reference/sdlpal/play.c):641 `fAllowAnyKey=FALSE`），真正任意键的 `PAL_WaitForAnyKey` 未被本 case 调用——动词沿用 script.c 注释，实际按键集合记录在案） | sequential | 三操作数保留源 WORD | 0 |
+| 0x004E | `requestReload`（#78 已具名，复核修正） | 无操作数映射 | shared（1760：`PAL_FadeOut(1)`+`PAL_ReloadInNextTick(bCurrentSaveSlot)`（1764-1765）后直接 `return 0`（1766）——不回到 `wScriptEntry+1`，trigger 循环因入口 0 退出且保存入口不变，auto 返回 0） | **stop**（#78 原声明 sequential 有误，本批修正） | 三操作数保留源 WORD | 1 |
+| 0x0058 | `itemShortageJump` | `itemId`=operand0（object.json item 视图下标，`PAL_GetItemAmount` 按 rgInventory.wItem 精确比对）、`count`=operand1（**有符号**：1864 `(SHORT)(rgwOperand[1])` 比较；库存持有量 0..65535 恒非负，负阈值永不触发）、`to`=operand2 | shared（1859：持有量 < count 时 `wScriptEntry = to − 1`（1866）） | conditionalJump（to 或 next） | 三字段均重编码（itemId/count 由值、to 解析标签）；无保留操作数 | 9（itemId 81..283；count 8 个 1、1 个 36；目标全在范围内） |
+| 0x005D | `playerLacksPoisonJump` | `objectId`=operand0（**object.json poison 视图**下标：与运行时 rgPoisonStatus[].wPoisonID 精确相等比较，该状态值即对象下标）、`to`=operand1 | shared（1914：`PAL_IsPlayerPoisonedByKind(wEventObjectID, objectId)`（1918）为假时跳（1920）——wEventObjectID 此处按玩家角色解释） | conditionalJump | 两字段重编码；operand2 保留 | 12（objectId 全部落在 555..560，即 data-schema 毒对象区间 551..564 内——该区间冻结的「脚本引用」证据源） |
+| 0x005E | `enemyLacksPoisonJump` | `objectId`=operand0（同上，比较对象为 `g_Battle.rgEnemy[wEventObjectID].rgPoisons[].wPoisonID`）、`to`=operand1 | shared（1924：扫描 MAX_POISONS 槽无该毒对象即跳（1938）） | conditionalJump | 同 0x005D | 6（objectId 555..560 各 1） |
+| 0x0061 | `notPoisonedJump` | `to`=operand0 | shared（1957：`PAL_IsPlayerPoisonedByLevel(wEventObjectID, 0)`（1961）为假时跳（1963）——任意非空、等级<99 的毒即算中毒） | conditionalJump | `to` 重编码；operand1、2 保留 | 2（目标均为 39505） |
+| 0x0064 | `enemyHpAboveJump` | `percent`=operand0（**无符号** WORD：1987-1989 `当前 HP×100 > 敌表最大 HP×operand0`，乘子无 SHORT 转换，语义为百分比阈值）、`to`=operand1 | shared（1983：以 `rgEnemy[wEventObjectID].wObjectID` 查对象表 wEnemyID 再查敌表最大 HP） | conditionalJump | 两字段重编码；operand2 保留 | 2（percent 为 5/25；目标在范围内） |
+| 0x0068 | `enemyTurnJump` | `to`=operand0 | shared（2025：`g_Battle.fEnemyMoving`（2029）为真时跳（2031）） | conditionalJump | `to` 重编码；operand1、2 保留 | 9（目标全在范围内） |
+| 0x0074 | `partyHpNotFullJump` | `to`=operand0 | shared（2149：遍历在队队员，任一 `HP < MaxHP`（2156）即跳（2158）） | conditionalJump | `to` 重编码；operand1、2 保留 | 3（目标 2008×2、3320） |
+
+真实数据核对：七个跳转类 opcode（0x0058/0x005D/0x005E/0x0061/0x0064/0x0068/0x0074）的全部目标操作数非零且落在 chunk 4（43538 条）内；export→rebuild 字节一致回归见 #97 回执。0x005D/0x005E 的 `objectId` 全部落在 555..560，正是 [data-schema](data-schema.md) poison 视图冻结的「脚本引用」证据首源，但把该证据接入 export-data 视图判定属后续票，本批不改变 object.json 导出；0x0058 的 `itemId` 含 281..283，超出 #81 item 证据并集 61..278 的上沿，同属后续视图判定票的输入。悬空拒绝仍在重建标签解析处（与批1同口径），本批不启用导出期范围预检。
 
 #### raw 保底与反向编码规则
 

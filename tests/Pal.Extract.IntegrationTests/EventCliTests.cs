@@ -317,6 +317,88 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Conditional_jump_batch2_verbs_export_roundtrip_and_reencode_jump_targets_from_labels()
+    {
+        // M5 batch 2 (#97): conditional jumps part 1 plus the re-verified markFailed /
+        // requestReload (stop-class successor) and waitForAnyKey. Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x0041, 0, 0, 0,     // markFailed
+            0x004D, 0, 0, 0,     // waitForAnyKey
+            0x004E, 0, 0, 0,     // requestReload (stops the run)
+            0x0058, 1, 2, 9,     // itemShortageJump: fewer than 2 of item 1 -> L0009
+            0x005D, 560, 8, 0,   // playerLacksPoisonJump: poison object 560 -> L0008
+            0x005E, 561, 7, 0,   // enemyLacksPoisonJump: poison object 561 -> L0007
+            0x0061, 6, 0, 0,     // notPoisonedJump: no poison at all -> L0006
+            0x0064, 30, 5, 0,    // enemyHpAboveJump: HP above 30% -> L0005
+            0x0068, 4, 0, 0,     // enemyTurnJump: enemy's turn -> L0004
+            0x0074, 0, 0, 0);    // partyHpNotFullJump: someone below max HP -> L0000
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(10, commands.Count);
+        Assert.Equal("markFailed", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal("waitForAnyKey", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("requestReload", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal("itemShortageJump", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[3]!["itemId"]!.GetValue<int>());
+        Assert.Equal(2, commands[3]!["count"]!.GetValue<int>());
+        Assert.Equal("L0009", commands[3]!["to"]!.GetValue<string>());
+        Assert.Equal("playerLacksPoisonJump", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(560, commands[4]!["objectId"]!.GetValue<int>());
+        Assert.Equal("L0008", commands[4]!["to"]!.GetValue<string>());
+        Assert.Equal("enemyLacksPoisonJump", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(561, commands[5]!["objectId"]!.GetValue<int>());
+        Assert.Equal("L0007", commands[5]!["to"]!.GetValue<string>());
+        Assert.Equal("notPoisonedJump", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("L0006", commands[6]!["to"]!.GetValue<string>());
+        Assert.Equal("enemyHpAboveJump", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(30, commands[7]!["percent"]!.GetValue<int>());
+        Assert.Equal("L0005", commands[7]!["to"]!.GetValue<string>());
+        Assert.Equal("enemyTurnJump", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal("L0004", commands[8]!["to"]!.GetValue<string>());
+        Assert.Equal("partyHpNotFullJump", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal("L0000", commands[9]!["to"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode the signed threshold, the poison object ids, the percent and
+        // the resolved jump WORDs; enemyTurnJump's target moves to L0004 by resolving its label.
+        commands[3]!["count"] = -1; // signed threshold: two's-complement WORD 0xFFFF
+        commands[3]!["to"] = "L0001";
+        commands[4]!["objectId"] = 551;
+        commands[4]!["to"] = "L0000"; // zero-target rule: references index 0, re-encodes as WORD 0
+        commands[5]!["objectId"] = 564;
+        commands[7]!["percent"] = 99;
+        commands[8]!["to"] = "L0006";
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0041, 0, 0, 0,
+            0x004D, 0, 0, 0,
+            0x004E, 0, 0, 0,
+            0x0058, 1, unchecked((int)0xFFFF), 1,
+            0x005D, 551, 0, 0,
+            0x005E, 564, 7, 0,
+            0x0061, 6, 0, 0,
+            0x0064, 99, 5, 0,
+            0x0068, 6, 0, 0,
+            0x0074, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A dangling jump target is rejected without producing output.
+        commands[8]!["to"] = "L0100";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
