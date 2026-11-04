@@ -153,6 +153,8 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         return RootUri + "/Events/index.json";
     }
 
+    private const int HookThirdMessage = 12; // inside the authored languages' existing ids
+
     private delegate void PutCommand(int address, string op, int opcode, int a, int b, int c, params (string Key, JsonNode? Value)[] fields);
 
     private static void Hook(PutCommand put, int start, int firstMessage)
@@ -164,7 +166,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         put(start + 4, "setDialog", 61, 0, 0, 0, ("box", "lower"), ("portraitId", 0), ("color", 0), ("rngWord", 0));
         put(start + 5, "showDialog", 65535, firstMessage + 1, 0, 0, ("messageId", firstMessage + 1), ("descriptionLineWord", 0));
         put(start + 6, "setDialog", 60, 0, 0, 0, ("box", "upper"), ("portraitId", 0), ("color", 0), ("rngWord", 0));
-        put(start + 7, "showDialog", 65535, firstMessage + 2, 0, 0, ("messageId", firstMessage + 2), ("descriptionLineWord", 0));
+        put(start + 7, "showDialog", 65535, HookThirdMessage, 0, 0, ("messageId", HookThirdMessage), ("descriptionLineWord", 0));
         put(start + 8, "changeHp", 27, 0, 9999, 0, ("scope", 0), ("amount", 9999));
         put(start + 9, "end", 0, 0, 0, 0, ("mode", "keep"));
     }
