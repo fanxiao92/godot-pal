@@ -124,7 +124,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         Put(0xA075, "fadeToRed", 0x4f, 0, 0, 0);
         Put(0xA076, "requestReload", 0x4e, 0, 0, 0);
         Hook(Put, 0xA96E, 4);
-        Hook(Put, 0xA9B5, 8);
+        Hook(Put, 0xA9B5, 17);
         var commands = new JsonArray();
         for (int address = 0; address < count; address++)
         {
@@ -153,7 +153,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         return RootUri + "/Events/index.json";
     }
 
-    private const int HookThirdMessage = 12; // inside the authored languages' existing ids
+    private const int HookThirdMessage = 16; // singleton block in the authored languages
 
     private delegate void PutCommand(int address, string op, int opcode, int a, int b, int c, params (string Key, JsonNode? Value)[] fields);
 
