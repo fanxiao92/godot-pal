@@ -22,8 +22,8 @@ public sealed class ExportDataCliTests : IDisposable
         // undetermined). DATA chunk 0 is registered as the store table (18 = 1 x 18
         // bytes), DATA chunk 1 as the enemy table (70 = 1 x 70 bytes), DATA chunk 2
         // as the enemy-team table (10 = 1 x 10 bytes), and DATA chunk 3 as the
-        // player-roles table (900 = 1 x 900 bytes, #86 attribute group structured,
-        // #87 equipment/magic/sound/cover group as raw placeholders); all four also
+        // player-roles table (900 = 1 x 900 bytes, the #86 attribute group and the
+        // #87 equipment/magic/sound/cover group both structured); all four also
         // feed the object view evidence besides; the other chunks are placeholders
         // until their tables are registered by #87-#91.
         MkfFixture.Write(input, "SSS.MKF", new byte[64], new byte[16], new byte[28], Array.Empty<byte>(), new byte[24]);

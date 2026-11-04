@@ -111,22 +111,27 @@ public static class DataTables
         ]);
 
     // player-roles.json - DATA.MKF chunk 3, PLAYERROLES, 450 WORD (900 bytes), one
-    // single record. #86/#87 deliver this table in two ticket halves over the same
-    // document (the split is frozen in data-schema.md's player-roles section): #86
-    // structures the attribute group (avatar/sprites/name/attackAll/level/HP/MP and
-    // the strength/defense/dexterity/flee/poison-resistance/elemental-resistance
-    // members plus the unknown/walk-frame attribute slots), while the #87
-    // equipment/magic/sound/cover members are exported as raw WORD-array placeholders
-    // (equipmentRaw[6][6], coveredByRaw[6], magicRaw[32][6], cooperativeMagicRaw[6],
-    // and seven sound placeholders, each [6]) that keep the C layout dimensions and
-    // every WORD verbatim; #87 replaces them losslessly with the structured names.
-    // global.h declares every member as a plain WORD array (PLAYERS = WORD[6]) - the
-    // PLAYERROLES sounds are WORD, unlike the ENEMY SHORT sounds - so nothing here
-    // decodes as SignedWord. rgwName (WORD 18..23) doubles as the object.json
-    // player-view evidence source that ObjectUnionTable reads from this same chunk
-    // (fight.c:800-813/848-876); rgwEquipment (WORD 66), rgwMagic (WORD 192), and
-    // rgwCooperativeMagic (WORD 390) feed the item/magic evidence besides (DATA
-    // chunk 3 is deliberately read twice; see DataGameData).
+    // single record. The #86/#87 ticket pair delivered this table over the same
+    // single-record document (the field union frozen in data-schema.md's
+    // player-roles section): #86 structured the attribute group (avatar/sprites/
+    // name/attackAll/level/HP/MP and the strength/defense/dexterity/flee/
+    // poison-resistance/elemental-resistance members plus the unknown/walk-frame
+    // slots) and exported the #87 members as raw WORD-array placeholders; #87
+    // then replaced those placeholders losslessly with the structured names below
+    // - same layout dimensions, same strict validation, every WORD value
+    // unchanged - so the whole 450-WORD record is structured with no placeholder
+    // left. global.h declares every member as a plain WORD array (PLAYERS =
+    // WORD[6]) - the PLAYERROLES sounds are WORD, unlike the ENEMY SHORT sounds -
+    // so nothing here decodes as SignedWord. equipment holds item object indices
+    // (0 = unequipped, itemmenu.c:363), magic and cooperativeMagic magic object
+    // indices (0 = not learned / no cooperative magic, magicmenu.c:339-354 and
+    // fight.c:3859-3861), coveredBy holds role indices (fight.c:784/839/4948), and
+    // the seven sound rows feed AUDIO_PlaySound (fight.c:850/4816/5014 etc.).
+    // rgwName (WORD 18..23) doubles as the object.json player-view evidence source
+    // that ObjectUnionTable reads from this same chunk (fight.c:800-813/848-876);
+    // rgwEquipment (WORD 66), rgwMagic (WORD 192), and rgwCooperativeMagic
+    // (WORD 390) feed the item/magic evidence besides (DATA chunk 3 is
+    // deliberately read twice; see DataGameData).
     public static readonly DataTableDescriptor PlayerRoles = new(
         "player-roles", "DATA.MKF", 3,
         [
@@ -141,7 +146,7 @@ public static class DataTables
             new DataField("maxMp", DataFieldType.Word, [6]),
             new DataField("hp", DataFieldType.Word, [6]),
             new DataField("mp", DataFieldType.Word, [6]),
-            new DataField("equipmentRaw", DataFieldType.Word, [6, 6]),
+            new DataField("equipment", DataFieldType.Word, [6, 6]),
             new DataField("attackStrength", DataFieldType.Word, [6]),
             new DataField("magicStrength", DataFieldType.Word, [6]),
             new DataField("defense", DataFieldType.Word, [6]),
@@ -152,19 +157,19 @@ public static class DataTables
             new DataField("unknown2", DataFieldType.Word, [6]),
             new DataField("unknown3", DataFieldType.Word, [6]),
             new DataField("unknown4", DataFieldType.Word, [6]),
-            new DataField("coveredByRaw", DataFieldType.Word, [6]),
-            new DataField("magicRaw", DataFieldType.Word, [32, 6]),
+            new DataField("coveredBy", DataFieldType.Word, [6]),
+            new DataField("magic", DataFieldType.Word, [32, 6]),
             new DataField("walkFrames", DataFieldType.Word, [6]),
-            new DataField("cooperativeMagicRaw", DataFieldType.Word, [6]),
+            new DataField("cooperativeMagic", DataFieldType.Word, [6]),
             new DataField("unknown5", DataFieldType.Word, [6]),
             new DataField("unknown6", DataFieldType.Word, [6]),
-            new DataField("deathSoundRaw", DataFieldType.Word, [6]),
-            new DataField("attackSoundRaw", DataFieldType.Word, [6]),
-            new DataField("weaponSoundRaw", DataFieldType.Word, [6]),
-            new DataField("criticalSoundRaw", DataFieldType.Word, [6]),
-            new DataField("magicSoundRaw", DataFieldType.Word, [6]),
-            new DataField("coverSoundRaw", DataFieldType.Word, [6]),
-            new DataField("dyingSoundRaw", DataFieldType.Word, [6]),
+            new DataField("deathSound", DataFieldType.Word, [6]),
+            new DataField("attackSound", DataFieldType.Word, [6]),
+            new DataField("weaponSound", DataFieldType.Word, [6]),
+            new DataField("criticalSound", DataFieldType.Word, [6]),
+            new DataField("magicSound", DataFieldType.Word, [6]),
+            new DataField("coverSound", DataFieldType.Word, [6]),
+            new DataField("dyingSound", DataFieldType.Word, [6]),
         ]);
 
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat

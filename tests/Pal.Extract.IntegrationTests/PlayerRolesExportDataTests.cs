@@ -5,16 +5,19 @@ using Xunit;
 
 namespace Pal.Extract.Tests;
 
-// CLI-level proof of the player-roles table registration (#86): a miniature
-// SSS.MKF whose three chunks are valid for the registered tables plus a
-// hand-authored DATA.MKF chunk 3 must decode through `export-data` with the
-// frozen attribute-group fields, the #87 raw placeholders, and the index entry.
-// DATA chunk 3 is both the exported player-roles table and the object view
-// evidence source, so the record literals here double as valid evidence: the
-// six name words 36..41 (the real-data shape) stay inside the 43-record object
-// chunk and are disjoint from the item evidence (equipment 10/11) and the magic
-// evidence (magicRaw slot 0 and cooperativeMagicRaw 12/13), so the exported
-// name/equipment/magic fields and the object.json views stay consistent.
+// CLI-level proof of the player-roles table registration (#87, completing the
+// #86/#87 split): a miniature SSS.MKF whose three chunks are valid for the
+// registered tables plus a hand-authored DATA.MKF chunk 3 must decode through
+// `export-data` with the frozen attribute-group fields, the structured #87
+// equipment/magic/sound/cover fields, and the index entry. DATA chunk 3 is both
+// the exported player-roles table and the object view evidence source, so the
+// record literals here double as valid evidence: the six name words 36..41 (the
+// real-data shape) stay inside the 43-record object chunk and are disjoint from
+// the item evidence (equipment 10/11) and the magic evidence (magic slot 0 and
+// cooperativeMagic 12/13), so the exported name/equipment/magic fields and the
+// object.json views stay consistent. The record bytes are the same literals the
+// #86 tests used, so the placeholder-free structured names carry identical
+// WORDs - the lossless replacement pinned at the CLI level.
 public sealed class PlayerRolesExportDataTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), $"pal-export-data-player-roles-{Guid.NewGuid():N}");
@@ -113,13 +116,13 @@ public sealed class PlayerRolesExportDataTests : IDisposable
     }
 
     [Fact]
-    public async Task Export_data_extracts_player_roles_fields_placeholders_and_the_index_entry()
+    public async Task Export_data_extracts_player_roles_fields_and_the_index_entry()
     {
         // SSS chunk 2: 43 all-zero WIN95 records (602 = 43 x 14 bytes, not a
         // multiple of 12, so the variant stays decidable). The role record below
         // decides views at 36..41 (player, via the six name words), 10/11 (item,
-        // via equipmentRaw), and 12/13 (magic, via magicRaw slot 0 and
-        // cooperativeMagicRaw); the other 33 records stay undetermined.
+        // via equipment), and 12/13 (magic, via magic slot 0 and cooperativeMagic);
+        // the other 33 records stay undetermined.
         MkfFixture.Write(input, "SSS.MKF",
             [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2], new byte[602]);
         MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], Record);
@@ -142,18 +145,18 @@ public sealed class PlayerRolesExportDataTests : IDisposable
         AssertRow(record.GetProperty("hp"), Hp);
         AssertRow(record.GetProperty("poisonResistance"), PoisonResistance);
         AssertRows(record, "elementalResistance", ElementalRows);
-        AssertRows(record, "equipmentRaw", EquipmentRows); // the #87 placeholders survive verbatim
-        var magic = record.GetProperty("magicRaw");
+        AssertRows(record, "equipment", EquipmentRows); // the #87 structured equipment/magic/sound/cover group
+        var magic = record.GetProperty("magic");
         Assert.Equal(32, magic.GetArrayLength());
         AssertRow(magic[0], MagicRows().First());
         AssertRow(magic[31], MagicRows().Last());
-        AssertRow(record.GetProperty("coveredByRaw"), CoveredBy);
-        AssertRow(record.GetProperty("cooperativeMagicRaw"), CooperativeMagic);
-        AssertRow(record.GetProperty("dyingSoundRaw"), DyingSound);
+        AssertRow(record.GetProperty("coveredBy"), CoveredBy);
+        AssertRow(record.GetProperty("cooperativeMagic"), CooperativeMagic);
+        AssertRow(record.GetProperty("dyingSound"), DyingSound);
 
         // The same DATA chunk 3 feeds the object view evidence: the exported name
-        // words decide exactly the six player views, the equipmentRaw members 10/11
-        // the two item views, and magicRaw/cooperativeMagicRaw 12/13 the two magic
+        // words decide exactly the six player views, the equipment members 10/11
+        // the two item views, and magic/cooperativeMagic 12/13 the two magic
         // views; no other record gains a view.
         using var objects = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "object.json")));
         var objectRecords = objects.RootElement.GetProperty("records");
@@ -168,7 +171,7 @@ public sealed class PlayerRolesExportDataTests : IDisposable
                 default: undetermined++; break;
             }
         Assert.Equal(6, players);   // rgwName = [36,37,38,40,39,41], the exported name row
-        Assert.Equal(2, items);     // equipmentRaw items 10/11
+        Assert.Equal(2, items);     // equipment items 10/11
         Assert.Equal(2, magics);    // magic/cooperative magic objects 12/13
         Assert.Equal(33, undetermined);
 

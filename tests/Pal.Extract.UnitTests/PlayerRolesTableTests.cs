@@ -7,25 +7,26 @@ using Xunit;
 
 namespace Pal.Extract.Tests;
 
-// Player-roles table (DATA.MKF chunk 3, PLAYERROLES, 900 bytes) - #86, the
-// attribute-group half of the two-ticket split: #86 structures the attribute /
-// HP / MP / level / poison-resistance / elemental-resistance / name members (the
-// "#86" rows of the frozen field table in docs/design/data-schema.md), while the
-// #87 equipment / magic / sound / cover members are exported as raw WORD-array
-// placeholders (equipmentRaw[6][6], coveredByRaw[6], magicRaw[32][6],
-// cooperativeMagicRaw[6], and seven sound placeholders of [6]) that #87 replaces
-// losslessly with the structured names. Expected values are hand-computed from
-// independently authored little-endian literals; every member is a plain WORD
-// array in global.h (the PLAYERROLES sounds are WORD, unlike the ENEMY SHORT
-// sounds), so nothing decodes as SignedWord. rgwName (WORD 18..23) doubles as
-// the object.json player-view evidence source, which the evidence test pins to
-// the exported name field of this same chunk.
+// Player-roles table (DATA.MKF chunk 3, PLAYERROLES, 900 bytes) - #87, the
+// equipment/magic/sound/cover half that completes the two-ticket split frozen in
+// docs/design/data-schema.md's player-roles section: the 11 raw WORD-array
+// placeholders #86 exported (equipmentRaw[6][6], coveredByRaw[6], magicRaw[32][6],
+// cooperativeMagicRaw[6], and seven sound placeholders of [6]) are now replaced
+// losslessly with the structured names (the placeholder name minus the Raw
+// suffix), so the whole 450-WORD record is structured and no placeholder name
+// survives - documents still carrying a Raw name are rejected as unknown fields.
+// Expected values are hand-computed from independently authored little-endian
+// literals; every member is a plain WORD array in global.h (the PLAYERROLES
+// sounds are WORD, unlike the ENEMY SHORT sounds), so nothing decodes as
+// SignedWord. rgwName (WORD 18..23) doubles as the object.json player-view
+// evidence source, which the evidence test pins to the exported name field of
+// this same chunk.
 public sealed class PlayerRolesTableTests
 {
     private static readonly DataTableDescriptor Table = DataTables.PlayerRoles;
 
     // The 450 hand-authored WORDs of the single record, one frozen-schema field
-    // per row; each row is serialized little-endian. magicRaw's unlearned middle
+    // per row; each row is serialized little-endian. magic's unlearned middle
     // slots (1..30) are uniform zeros (0 = not learned, magicmenu.c:339-354).
     private static int[] Avatar => [1, 2, 3, 4, 5, 6];
     private static int[] BattleSprite => [65535, 0, 0x8000, 32767, 0x1234, 0xABCD];
@@ -106,7 +107,7 @@ public sealed class PlayerRolesTableTests
     }
 
     [Fact]
-    public void Descriptor_declares_the_frozen_split_layout()
+    public void Descriptor_declares_the_frozen_layout()
     {
         Assert.Equal("player-roles", Table.FileId);
         Assert.Equal("DATA.MKF", Table.Archive);
@@ -116,21 +117,21 @@ public sealed class PlayerRolesTableTests
         string[] expectedNames =
         [
             "avatar", "battleSprite", "spriteNum", "name", "attackAll", "unknown1", "level",
-            "maxHp", "maxMp", "hp", "mp", "equipmentRaw",
+            "maxHp", "maxMp", "hp", "mp", "equipment",
             "attackStrength", "magicStrength", "defense", "dexterity", "fleeRate", "poisonResistance", "elementalResistance",
-            "unknown2", "unknown3", "unknown4", "coveredByRaw", "magicRaw",
-            "walkFrames", "cooperativeMagicRaw", "unknown5", "unknown6",
-            "deathSoundRaw", "attackSoundRaw", "weaponSoundRaw", "criticalSoundRaw", "magicSoundRaw", "coverSoundRaw", "dyingSoundRaw",
+            "unknown2", "unknown3", "unknown4", "coveredBy", "magic",
+            "walkFrames", "cooperativeMagic", "unknown5", "unknown6",
+            "deathSound", "attackSound", "weaponSound", "criticalSound", "magicSound", "coverSound", "dyingSound",
         ];
         Assert.Equal(expectedNames, Table.Fields.Select(field => field.Name).ToArray());
-        Assert.Equal(35, Table.Fields.Length); // 24 #86 structured fields + 11 #87 raw placeholders
+        Assert.Equal(35, Table.Fields.Length); // 24 #86 attribute fields + 11 #87 equipment/magic/sound/cover fields
 
         // The three multi-dimensional members keep the C layout: equipment is
         // [MAX_PLAYER_EQUIPMENTS][MAX_PLAYER_ROLES] = [6][6], magic is
         // [MAX_PLAYER_MAGICS][MAX_PLAYER_ROLES] = [32][6], and the elemental
         // resistance is [NUM_MAGIC_ELEMENTAL][MAX_PLAYER_ROLES] = [5][6].
-        Assert.Equal(new[] { 6, 6 }, Table.Fields.Single(field => field.Name == "equipmentRaw").Dimensions);
-        Assert.Equal(new[] { 32, 6 }, Table.Fields.Single(field => field.Name == "magicRaw").Dimensions);
+        Assert.Equal(new[] { 6, 6 }, Table.Fields.Single(field => field.Name == "equipment").Dimensions);
+        Assert.Equal(new[] { 32, 6 }, Table.Fields.Single(field => field.Name == "magic").Dimensions);
         Assert.Equal(new[] { 5, 6 }, Table.Fields.Single(field => field.Name == "elementalResistance").Dimensions);
         foreach (DataField field in Table.Fields.Where(field => field.Dimensions is not null && field.Dimensions.Length == 1))
             Assert.Equal(new[] { 6 }, field.Dimensions); // every flat member is a PLAYERS row
@@ -139,10 +140,10 @@ public sealed class PlayerRolesTableTests
         // decodes signed, not even the sound members (WORD here, SHORT in ENEMY).
         Assert.DoesNotContain(Table.Fields, field => field.Type == DataFieldType.SignedWord);
 
-        // The #87 final names must not appear before their ticket: only the Raw
-        // placeholders stand in for the equipment/magic/sound/cover group.
-        foreach (string final in new[] { "equipment", "coveredBy", "magic", "cooperativeMagic", "deathSound", "attackSound", "weaponSound", "criticalSound", "magicSound", "coverSound", "dyingSound" })
-            Assert.DoesNotContain(final, Table.Fields.Select(field => field.Name).ToArray());
+        // The #86 placeholders are gone for good: none of the eleven Raw names
+        // may survive the #87 replacement (a Raw name is now an unknown field).
+        foreach (string placeholder in new[] { "equipmentRaw", "coveredByRaw", "magicRaw", "cooperativeMagicRaw", "deathSoundRaw", "attackSoundRaw", "weaponSoundRaw", "criticalSoundRaw", "magicSoundRaw", "coverSoundRaw", "dyingSoundRaw" })
+            Assert.DoesNotContain(placeholder, Table.Fields.Select(field => field.Name).ToArray());
     }
 
     [Fact]
@@ -163,8 +164,8 @@ public sealed class PlayerRolesTableTests
         Assert.Equal(0xFF, Record[84]);  Assert.Equal(0xFF, Record[85]);   // maxHp[0] = 65535
         Assert.Equal(0xFF, Record[114]); Assert.Equal(0x7F, Record[115]);  // hp[3] = 32767 (WORD 57)
         Assert.Equal(0x34, Record[20]);  Assert.Equal(0x12, Record[21]);   // battleSprite[4] = 0x1234 (WORD 10)
-        Assert.Equal(0x0A, Record[132]); Assert.Equal(0x00, Record[133]);  // equipmentRaw[0][0] = 10
-        Assert.Equal(0x0C, Record[384]); Assert.Equal(0x00, Record[385]);  // magicRaw[0][0] = 12
+        Assert.Equal(0x0A, Record[132]); Assert.Equal(0x00, Record[133]);  // equipment[0][0] = 10
+        Assert.Equal(0x0C, Record[384]); Assert.Equal(0x00, Record[385]);  // magic[0][0] = 12
 
         var record = records[0]!.AsObject();
         AssertRow(record, "avatar", Avatar);
@@ -178,7 +179,7 @@ public sealed class PlayerRolesTableTests
         AssertRow(record, "maxMp", MaxMp);
         AssertRow(record, "hp", Hp);
         AssertRow(record, "mp", Mp);
-        AssertRows(record, "equipmentRaw", EquipmentRows);
+        AssertRows(record, "equipment", EquipmentRows);
         AssertRow(record, "attackStrength", AttackStrength);
         AssertRow(record, "magicStrength", MagicStrength);
         AssertRow(record, "defense", Defense);
@@ -189,21 +190,31 @@ public sealed class PlayerRolesTableTests
         AssertRow(record, "unknown2", Unknown2);
         AssertRow(record, "unknown3", Unknown3);
         AssertRow(record, "unknown4", Unknown4);
-        AssertRow(record, "coveredByRaw", CoveredBy);
-        var magic = record["magicRaw"]!.AsArray();
+        AssertRow(record, "coveredBy", CoveredBy);
+        var magic = record["magic"]!.AsArray();
         Assert.Equal(32, magic.Count); // MAX_PLAYER_MAGICS slots
-        AssertRows(record, "magicRaw", MagicRows().ToArray());
+        AssertRows(record, "magic", MagicRows().ToArray());
         AssertRow(record, "walkFrames", WalkFrames);
-        AssertRow(record, "cooperativeMagicRaw", CooperativeMagic);
+        AssertRow(record, "cooperativeMagic", CooperativeMagic);
         AssertRow(record, "unknown5", Unknown5);
         AssertRow(record, "unknown6", Unknown6);
-        AssertRow(record, "deathSoundRaw", DeathSound);
-        AssertRow(record, "attackSoundRaw", AttackSound);
-        AssertRow(record, "weaponSoundRaw", WeaponSound);
-        AssertRow(record, "criticalSoundRaw", CriticalSound);
-        AssertRow(record, "magicSoundRaw", MagicSound);
-        AssertRow(record, "coverSoundRaw", CoverSound);
-        AssertRow(record, "dyingSoundRaw", DyingSound);
+        AssertRow(record, "deathSound", DeathSound);
+        AssertRow(record, "attackSound", AttackSound);
+        AssertRow(record, "weaponSound", WeaponSound);
+        AssertRow(record, "criticalSound", CriticalSound);
+        AssertRow(record, "magicSound", MagicSound);
+        AssertRow(record, "coverSound", CoverSound);
+        AssertRow(record, "dyingSound", DyingSound);
+
+        // The reference 0 semantics survive the structured replacement verbatim:
+        // an unequipped slot stays 0 in equipment (itemmenu.c:363 treats 0 as no
+        // equipment) and an unlearned slot stays 0 in magic (magicmenu.c:339-354
+        // skips w == 0), so the exported zeros keep their meaning, not a filler.
+        Assert.Equal(0, (int)record["equipment"]![0]![1]!);
+        Assert.Equal(0, (int)record["equipment"]![1]![0]!);
+        var unlearned = record["magic"]![1]!.AsArray();
+        Assert.Equal(6, unlearned.Count);
+        foreach (JsonNode? slot in unlearned) Assert.Equal(0, (int)slot!);
     }
 
     [Fact]
@@ -249,18 +260,18 @@ public sealed class PlayerRolesTableTests
     {
         DataTableSchema.ValidateDocument(Table, DataTableSchema.DecodeTable(Table, Record)); // freshly decoded passes
 
-        var finalName = DataTableSchema.DecodeTable(Table, Record);
-        finalName["records"]![0]!["equipment"] = new JsonArray(0, 0, 0, 0, 0, 0); // #87 final name, not the #86 placeholder
-        Assert.Throws<InvalidDataException>(() => DataTableSchema.ValidateDocument(Table, finalName));
+        var placeholderName = DataTableSchema.DecodeTable(Table, Record);
+        placeholderName["records"]![0]!["magicRaw"] = new JsonArray(0, 0, 0, 0, 0, 0); // the #86-era placeholder name, superseded by #87
+        Assert.Throws<InvalidDataException>(() => DataTableSchema.ValidateDocument(Table, placeholderName));
 
         var cName = DataTableSchema.DecodeTable(Table, Record);
         cName["records"]![0]!["rgwMagic"] = new JsonArray(0, 0, 0, 0, 0, 0); // C name, not the frozen JSON name
         Assert.Throws<InvalidDataException>(() => DataTableSchema.ValidateDocument(Table, cName));
 
-        foreach (string placeholder in new[] { "magicRaw", "coveredByRaw", "dyingSoundRaw" })
+        foreach (string field in new[] { "magic", "coveredBy", "dyingSound" })
         {
             var missing = DataTableSchema.DecodeTable(Table, Record);
-            missing["records"]![0]!.AsObject().Remove(placeholder); // dropping a placeholder drops information
+            missing["records"]![0]!.AsObject().Remove(field); // dropping a field drops information
             Assert.Throws<InvalidDataException>(() => DataTableSchema.ValidateDocument(Table, missing));
         }
     }
@@ -279,12 +290,12 @@ public sealed class PlayerRolesTableTests
         shortRow["records"]![0]!["name"] = new JsonArray(Enumerable.Range(1, 5).Select(value => (JsonNode)value).ToArray());
         Assert.Throws<InvalidDataException>(() => DataTableSchema.ValidateDocument(Table, shortRow));
 
-        var fiveParts = DataTableSchema.DecodeTable(Table, Record); // equipmentRaw is exactly [6][6]
-        fiveParts["records"]![0]!["equipmentRaw"] = new JsonArray(Enumerable.Range(0, 5).Select(_ => (JsonNode)new JsonArray(0, 0, 0, 0, 0, 0)).ToArray());
+        var fiveParts = DataTableSchema.DecodeTable(Table, Record); // equipment is exactly [6][6]
+        fiveParts["records"]![0]!["equipment"] = new JsonArray(Enumerable.Range(0, 5).Select(_ => (JsonNode)new JsonArray(0, 0, 0, 0, 0, 0)).ToArray());
         Assert.Throws<InvalidDataException>(() => DataTableSchema.ValidateDocument(Table, fiveParts));
 
-        var fiveRoles = DataTableSchema.DecodeTable(Table, Record); // magicRaw inner rows are exactly 6 words
-        fiveRoles["records"]![0]!["magicRaw"] = new JsonArray(Enumerable.Range(0, 32).Select(_ => (JsonNode)new JsonArray(0, 0, 0, 0, 0)).ToArray());
+        var fiveRoles = DataTableSchema.DecodeTable(Table, Record); // magic inner rows are exactly 6 words
+        fiveRoles["records"]![0]!["magic"] = new JsonArray(Enumerable.Range(0, 32).Select(_ => (JsonNode)new JsonArray(0, 0, 0, 0, 0)).ToArray());
         Assert.Throws<InvalidDataException>(() => DataTableSchema.ValidateDocument(Table, fiveRoles));
 
         var fourElements = DataTableSchema.DecodeTable(Table, Record); // NUM_MAGIC_ELEMENTAL is exactly 5
@@ -293,30 +304,31 @@ public sealed class PlayerRolesTableTests
     }
 
     [Fact]
-    public void A_single_placeholder_word_change_reaches_the_document_verbatim()
+    public void A_single_word_change_reaches_the_document_verbatim()
     {
         var original = DataTableSchema.DecodeTable(Table, Record);
-        Assert.Equal(11, (int)original["records"]![0]!["equipmentRaw"]![2]![1]!); // baselines from the literals
-        Assert.Equal(0, (int)original["records"]![0]!["magicRaw"]![7]![3]!);
+        Assert.Equal(11, (int)original["records"]![0]!["equipment"]![2]![1]!); // baselines from the literals
+        Assert.Equal(0, (int)original["records"]![0]!["magic"]![7]![3]!);
 
-        // equipmentRaw[2][1] is WORD 66 + 2*6 + 1 = 79; magicRaw[7][3] is
+        // equipment[2][1] is WORD 66 + 2*6 + 1 = 79; magic[7][3] is
         // WORD 192 + 7*6 + 3 = 237.
         byte[] equipmentMutated = [.. Record];
         BinaryPrimitives.WriteUInt16LittleEndian(equipmentMutated.AsSpan(2 * 79), 0x1234);
         var changedEquipment = DataTableSchema.DecodeTable(Table, equipmentMutated);
-        Assert.Equal(0x1234, (int)changedEquipment["records"]![0]!["equipmentRaw"]![2]![1]!);
+        Assert.Equal(0x1234, (int)changedEquipment["records"]![0]!["equipment"]![2]![1]!);
 
         byte[] magicMutated = [.. Record];
         BinaryPrimitives.WriteUInt16LittleEndian(magicMutated.AsSpan(2 * 237), 65535);
         var changedMagic = DataTableSchema.DecodeTable(Table, magicMutated);
-        Assert.Equal(65535, (int)changedMagic["records"]![0]!["magicRaw"]![7]![3]!);
+        Assert.Equal(65535, (int)changedMagic["records"]![0]!["magic"]![7]![3]!);
 
         // Exactly one document element differs: reverting it in the decoded output
-        // restores deep equality with the original document, so the placeholder
-        // preserves every WORD and hides nothing.
-        changedEquipment["records"]![0]!["equipmentRaw"]![2]![1] = 11;
+        // restores deep equality with the original document, so the structured
+        // replacement preserves every WORD and hides nothing - the same verbatim
+        // property the #86 placeholders carried over to #87.
+        changedEquipment["records"]![0]!["equipment"]![2]![1] = 11;
         Assert.True(JsonNode.DeepEquals(changedEquipment, original));
-        changedMagic["records"]![0]!["magicRaw"]![7]![3] = 0;
+        changedMagic["records"]![0]!["magic"]![7]![3] = 0;
         Assert.True(JsonNode.DeepEquals(changedMagic, original));
     }
 

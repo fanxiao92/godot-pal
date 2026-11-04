@@ -50,8 +50,9 @@ internal static class DataGameData
             // as the item- and magic-view evidence source (wAttackEquivItem/wStealItem/
             // wMagic), chunk 2 once as the registered enemy-team table above and once
             // here as the enemy-view evidence source (rgwEnemy, 0/0xFFFF skipped), and
-            // chunk 3 once as the registered player-roles table above (#86 attribute
-            // group structured, #87 equipment/magic/sound/cover group as raw placeholders)
+            // chunk 3 once as the registered player-roles table above (the #86
+            // attribute group and the #87 equipment/magic/sound/cover group both
+            // structured; #87 replaced #86's raw placeholders losslessly)
             // and once here as the player-view evidence source (rgwName, all six words)
             // plus the item-view (rgwEquipment) and magic-view (rgwMagic/
             // rgwCooperativeMagic) evidence source; all paths use the same archive read
