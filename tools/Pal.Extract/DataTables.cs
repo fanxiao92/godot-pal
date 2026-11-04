@@ -43,6 +43,16 @@ public static class DataTables
             new DataField("eventObjectIndex", DataFieldType.Word),
         ]);
 
+    // store.json - DATA.MKF chunk 0, STORE, 9 WORD (18 bytes) per record. Record count =
+    // chunk byte length / 18; global.h declares rgwItems as a plain WORD array (each
+    // element is an object.json item-view index, 0 = empty slot per uigame.c:1644), so
+    // unlike EVENTOBJECT nothing here decodes as SignedWord.
+    public static readonly DataTableDescriptor Store = new(
+        "store", "DATA.MKF", 0,
+        [
+            new DataField("items", DataFieldType.Word, [9]),
+        ]);
+
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
     // DataTableDescriptor: every record declares one union view (player/item by #81,
     // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant

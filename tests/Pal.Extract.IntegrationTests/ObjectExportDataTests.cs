@@ -71,7 +71,7 @@ public sealed class ObjectExportDataTests : IDisposable
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "scene.json") },
+        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "object.json")));
@@ -102,7 +102,7 @@ public sealed class ObjectExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(3, tables.Length);
+        Assert.Equal(4, tables.Length);
         Assert.Equal("event-object.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
         var entry = tables.Single(table => table.GetProperty("file").GetString() == "object.json");
         Assert.Equal("SSS.MKF", entry.GetProperty("archive").GetString());
