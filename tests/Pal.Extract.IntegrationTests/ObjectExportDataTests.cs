@@ -49,9 +49,11 @@ public sealed class ObjectExportDataTests : IDisposable
         return bytes;
     }
 
-    // The DATA.MKF view-evidence fixture: one store selling items 1 and 2, one empty
-    // enemy, an empty enemy team, and PLAYERROLES whose rgwName[0] = 0 (a name word
-    // of 0 is still player evidence; fight.c reads rgObject[rgwName[w]].player).
+    // Writes the DATA.MKF view-evidence fixture: one store selling items 1 and 2, one
+    // empty enemy, an empty enemy team, and PLAYERROLES whose rgwName[0] = 0 (a name
+    // word of 0 is still player evidence; fight.c reads rgObject[rgwName[w]].player);
+    // the trailing 32 zero bytes are DATA chunk 4 as the registered magic table (#88,
+    // its zero type exporting the layerOffset view), which is not view evidence.
     private static void WriteDataFixture(string input) =>
         WriteDataFixture(input, Words(1, 2, 0, 0, 0, 0, 0, 0, 0));
 
@@ -59,7 +61,7 @@ public sealed class ObjectExportDataTests : IDisposable
         WriteDataFixture(input, store, new byte[70], new byte[10], new byte[900]);
 
     private static void WriteDataFixture(string input, byte[] store, byte[] enemy, byte[] enemyTeam, byte[] roles) =>
-        MkfFixture.Write(input, "DATA.MKF", store, enemy, enemyTeam, roles);
+        MkfFixture.Write(input, "DATA.MKF", store, enemy, enemyTeam, roles, new byte[32]);
 
     [Fact]
     public async Task Export_data_extracts_object_records_with_views_and_the_index_entry()
@@ -71,7 +73,7 @@ public sealed class ObjectExportDataTests : IDisposable
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
+        Assert.Equal(new[] { Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "object.json")));
@@ -102,7 +104,7 @@ public sealed class ObjectExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(7, tables.Length);
+        Assert.Equal(8, tables.Length);
         Assert.Equal("enemy-team.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
         Assert.Equal("enemy.json", tables[1].GetProperty("file").GetString());
         Assert.Equal("event-object.json", tables[2].GetProperty("file").GetString());
@@ -276,11 +278,13 @@ public sealed class ObjectExportDataTests : IDisposable
         Assert.Contains("chunk 2", noEnemyTeam.Stderr, StringComparison.Ordinal);
         Assert.False(Directory.Exists(output));
 
-        MkfFixture.Write(input, "DATA.MKF", Words(1, 2, 0, 0, 0, 0, 0, 0, 0), new byte[70], new byte[10]); // no chunk 3
+        MkfFixture.Write(input, "DATA.MKF", Words(1, 2, 0, 0, 0, 0, 0, 0, 0), new byte[70], new byte[10]); // no chunk 3, so chunk 4 is absent too
         var noRoles = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.Equal(1, noRoles.ExitCode);
         Assert.Contains("DATA.MKF", noRoles.Stderr, StringComparison.Ordinal);
-        Assert.Contains("chunk 3", noRoles.Stderr, StringComparison.Ordinal);
+        // The registered magic table (chunk 4) is decoded before the roles evidence
+        // (chunk 3) and names the first missing DATA chunk.
+        Assert.Contains("chunk 4", noRoles.Stderr, StringComparison.Ordinal);
         Assert.False(Directory.Exists(output));
     }
 

@@ -285,9 +285,9 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 | `type` | `wType` | WORD | `MAGIC_TYPE`（0 普通/1 攻全体/2 攻整队/3 攻全场/4 施于单人/5 施于全队/8 变身/9 召唤） |
 | `xOffset` | `wXOffset` | WORD | X 偏移 |
 | `yOffset` | `wYOffset` | WORD | Y 偏移 |
-| `summonEffect` | `rgSpecific.wSummonEffect` | WORD | 召唤效果精灵（`type=9` 时按此视图解释，与 `layerOffset` 二选一） |
-| `layerOffset` | `rgSpecific.sLayerOffset` | SHORT | 非召唤法术层偏移（fight.c:2518 `(SHORT)` 读取；`type=9` 以外的视图） |
-| `speed` | `wSpeed` | SHORT | 效果速度；声明 SHORT（fight.c 按 `(wSpeed+5)*10` 使用） |
+| `summonEffect` | `rgSpecific.wSummonEffect` | WORD | 召唤效果精灵（`type=9` 时按此视图解释，与 `layerOffset` 二选一；仅 fight.c:3135 在 `PAL_BattleShowPlayerSummonMagicAnim`（fight.c:3072）内读取） |
+| `layerOffset` | `rgSpecific.sLayerOffset` | SHORT | 非召唤法术层偏移（fight.c:2518/2735/2960 分别在 `PAL_BattleShowPlayerDefMagicAnim`/`OffMagicAnim`/`EnemyMagicAnim` 中以 `(SHORT)` 读取；`type=9` 以外的视图） |
+| `speed` | `wSpeed` | SHORT | 效果速度；声明 SHORT（fight.c:2513/2730/2955/3171 按 `(wSpeed+5)*10` 参与带符号帧延迟计算） |
 | `keepEffect` | `wKeepEffect` | WORD | 参考标注 FIXME |
 | `fireDelay` | `wFireDelay` | WORD | 发动阶段起始帧 |
 | `effectTimes` | `wEffectTimes` | WORD | 效果次数 |
@@ -297,9 +297,9 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 | `costMp` | `wCostMP` | WORD | MP 消耗 |
 | `baseDamage` | `wBaseDamage` | WORD | 基础伤害 |
 | `elemental` | `wElemental` | WORD | 元素（0 无，末位为毒） |
-| `sound` | `wSound` | SHORT | 音效；声明 SHORT 按有符号导出 |
+| `sound` | `wSound` | SHORT | 音效；声明 SHORT 按有符号导出（fight.c:2501/2671/2713/2929/3114 传入 `AUDIO_PlaySound` 的 `INT iSoundNum`，audio.c:517） |
 
-`rgSpecific` 是同一物理 WORD 的双视图：记录**必须按 `type` 恰好声明其一**（`type=9` 召唤 ⇒ `summonEffect`；其余 ⇒ `layerOffset`），不得两者并存或两者皆缺。真实数据核对：3328 ÷ 32 = 104 条。
+`rgSpecific` 是同一物理 WORD 的双视图：记录**必须按 `type` 恰好声明其一**（`type=9` 召唤 ⇒ `summonEffect`；其余 ⇒ `layerOffset`），不得两者并存或两者皆缺。分派依据参考实际调用点：`wSummonEffect` 视图只在 `PAL_BattleShowPlayerSummonMagicAnim`（fight.c:3072 定义，fight.c:3135 读 `rgSpecific.wSummonEffect + 10` 载入召唤神灵精灵）内被读取，而该函数仅在 `wType == kMagicTypeSummon` 判断下被调用（fight.c:3865-3868 合击法术分支、fight.c:4255-4257 攻击法术分支，两个分支的 else 路径分别走 4259-4261/3951 的非召唤动画函数）；`sLayerOffset` 视图由三个非召唤效果函数读取（fight.c:2518/2735/2960，均为显式 `(SHORT)` 转换）。导出时同一记录只落一个字段名，严格校验按本记录 `type` 拒绝另一视图名与两者并存。真实数据核对：3328 ÷ 32 = 104 条。
 
 ### battle-field.json — DATA 5，`BATTLEFIELD`，12 字节（6 WORD）
 

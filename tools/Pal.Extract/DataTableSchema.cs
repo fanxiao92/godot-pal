@@ -20,11 +20,26 @@ public sealed record DataField(string Name, DataFieldType Type, int[]? Dimension
     internal int WordCount => Dimensions is null ? 1 : Dimensions.Aggregate(1, (total, size) => total * size);
 }
 
+/// One exported view of a shared dispatched WORD slot (data-schema v1, #78): Name is
+/// the JSON field a record exports the slot as, Type that view's signedness, and
+/// MatchValue the dispatch field value that selects this view. A null MatchValue is
+/// the fallback view for every other dispatch value; at most one option may declare it.
+public sealed record DispatchedWordOption(string Name, DataFieldType Type, int? MatchValue = null);
+
+/// A single shared WORD of the record layout whose exported field name and signedness
+/// are selected per record (MAGIC's rgSpecific union, #78): the option whose MatchValue
+/// equals the decoded value of DispatchFieldName - a scalar WORD field decoded before
+/// SlotWordIndex - wins, the null-MatchValue fallback covers every other value. A
+/// record exports exactly the selected option's name, never two and never none; the
+/// strict validator enforces the same rule on reload.
+public sealed record DispatchedWordSlot(string CName, string DispatchFieldName, int SlotWordIndex, DispatchedWordOption[] Options);
+
 /// Structure descriptor for one extracted data table; the record count is derived from
 /// the source chunk byte length divided by the descriptor's record size (data-schema v1).
-public sealed record DataTableDescriptor(string FileId, string Archive, int Chunk, DataField[] Fields)
+/// DispatchedSlot optionally declares one shared WORD viewed under per-record names.
+public sealed record DataTableDescriptor(string FileId, string Archive, int Chunk, DataField[] Fields, DispatchedWordSlot? DispatchedSlot = null)
 {
-    public int RecordByteSize => Fields.Sum(entry => entry.WordCount) * 2;
+    public int RecordByteSize => (Fields.Sum(entry => entry.WordCount) + (DispatchedSlot is null ? 0 : 1)) * 2;
 }
 
 /// Shared skeleton for the M5 data-table extraction tickets (#79–#91): structure
@@ -42,12 +57,20 @@ public static class DataTableSchema
         if (recordSize == 0) throw new InvalidDataException($"{descriptor.Archive}: chunk {descriptor.Chunk}: table descriptor declares no fields.");
         if (chunk.Length == 0 || chunk.Length % recordSize != 0)
             throw new InvalidDataException($"{descriptor.Archive}: chunk {descriptor.Chunk}: byte length {chunk.Length} is not a positive multiple of the {recordSize}-byte record size.");
+        ValidateSlotPlacement(descriptor);
         var records = new JsonArray();
         for (int offset = 0; offset < chunk.Length; offset += recordSize)
         {
             var record = new JsonObject();
             int cursor = offset;
-            foreach (DataField field in descriptor.Fields) record[field.Name] = DecodeField(chunk, ref cursor, field, 0);
+            int wordIndex = 0;
+            foreach (DataField field in descriptor.Fields)
+            {
+                DecodeSlotIfDue(descriptor, record, chunk, ref cursor, ref wordIndex);
+                record[field.Name] = DecodeField(chunk, ref cursor, field, 0);
+                wordIndex += field.WordCount;
+            }
+            DecodeSlotIfDue(descriptor, record, chunk, ref cursor, ref wordIndex);
             records.Add(record);
         }
         return new JsonObject
@@ -82,6 +105,7 @@ public static class DataTableSchema
     /// WORD/signed WORD ranges are all enforced with the record index in the message.
     public static void ValidateDocument(DataTableDescriptor descriptor, JsonObject document)
     {
+        ValidateSlotPlacement(descriptor);
         StrictJson.ValidateKeys(document, descriptor.FileId, "formatVersion", "profile", "fileId", "records");
         if (StrictJson.Int(document, "formatVersion") != 1 || StrictJson.String(document, "profile") != "faithful")
             throw new InvalidDataException($"{descriptor.FileId}.json: unsupported formatVersion or profile.");
@@ -92,8 +116,18 @@ public static class DataTableSchema
         {
             var record = records[index]?.AsObject() ?? throw new InvalidDataException($"{descriptor.FileId}.json: record {index} must be an object.");
             string context = $"{descriptor.FileId}.json record {index}";
-            StrictJson.ValidateKeys(record, context, descriptor.Fields.Select(field => field.Name).ToArray());
+            // A dispatched slot selects its one exported name per record from the dispatch
+            // value before the key check, so the other view's name is unknown there and the
+            // selected one is required - both views or the wrong view cannot pass.
+            DispatchedWordOption? selected = null;
+            if (descriptor.DispatchedSlot is { } slot)
+                selected = SelectOption(slot, ReadDispatchValue(record, context, slot));
+            string[] allowed = selected is null
+                ? descriptor.Fields.Select(field => field.Name).ToArray()
+                : [.. descriptor.Fields.Select(field => field.Name), selected.Name];
+            StrictJson.ValidateKeys(record, context, allowed);
             foreach (DataField field in descriptor.Fields) ValidateValue(record, context, field, record[field.Name], 0);
+            if (selected is not null) ValidateValue(record, context, new DataField(selected.Name, selected.Type), record[selected.Name], 0);
         }
     }
 
@@ -108,6 +142,72 @@ public static class DataTableSchema
         var array = new JsonArray();
         for (int index = 0; index < field.Dimensions[dimension]; index++) array.Add(DecodeField(chunk, ref offset, field, dimension + 1));
         return array;
+    }
+
+    // Decodes the dispatched slot once the cursor reaches its word, after the dispatch
+    // field has been decoded; the emitted field keeps the slot's physical position in
+    // the JSON key order.
+    private static void DecodeSlotIfDue(DataTableDescriptor descriptor, JsonObject record, byte[] chunk, ref int offset, ref int wordIndex)
+    {
+        if (descriptor.DispatchedSlot is not { } slot || wordIndex != slot.SlotWordIndex) return;
+        DispatchedWordOption option = SelectOption(slot, record[slot.DispatchFieldName]?.GetValue<int>()
+            ?? throw new InvalidDataException($"dispatched slot '{slot.CName}': dispatch field '{slot.DispatchFieldName}' is not decoded yet."));
+        ushort word = BinaryPrimitives.ReadUInt16LittleEndian(chunk.AsSpan(offset));
+        offset += 2;
+        record[option.Name] = option.Type == DataFieldType.SignedWord ? (short)word : (int)word;
+        wordIndex++;
+    }
+
+    // Selects the option a record exports the slot as: the first exact MatchValue hit,
+    // else the single fallback option; no match and no fallback is not a decodable record.
+    private static DispatchedWordOption SelectOption(DispatchedWordSlot slot, int dispatchValue)
+    {
+        foreach (DispatchedWordOption option in slot.Options) if (option.MatchValue == dispatchValue) return option;
+        return slot.Options.FirstOrDefault(option => option.MatchValue is null)
+            ?? throw new InvalidDataException($"dispatched slot '{slot.CName}': dispatch value {dispatchValue} selects no exported view.");
+    }
+
+    private static int ReadDispatchValue(JsonObject record, string context, DispatchedWordSlot slot)
+    {
+        JsonNode? node = record[slot.DispatchFieldName];
+        try { return node?.GetValue<int>() ?? throw new InvalidDataException($"{context}.{slot.DispatchFieldName} must be an integer."); }
+        catch (InvalidOperationException) { throw new InvalidDataException($"{context}.{slot.DispatchFieldName} must be an integer."); }
+        catch (FormatException) { throw new InvalidDataException($"{context}.{slot.DispatchFieldName} must be an integer."); }
+    }
+
+    // Rejects inconsistent dispatched-slot descriptors before any record is decoded: the
+    // slot's word index must land on a field boundary, the dispatch field must be a
+    // scalar WORD decoded before the slot, and option names must be unique without
+    // colliding with field names or stacking fallbacks.
+    private static void ValidateSlotPlacement(DataTableDescriptor descriptor)
+    {
+        if (descriptor.DispatchedSlot is not { } slot) return;
+        string location = $"{descriptor.Archive}: chunk {descriptor.Chunk}: dispatched slot '{slot.CName}'";
+        if (slot.SlotWordIndex < 0 || slot.Options.Length == 0)
+            throw new InvalidDataException($"{location} declares no usable option.");
+        if (slot.Options.Count(option => option.MatchValue is null) > 1)
+            throw new InvalidDataException($"{location} declares more than one fallback view.");
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (DispatchedWordOption option in slot.Options)
+        {
+            if (!names.Add(option.Name)) throw new InvalidDataException($"{location} declares view '{option.Name}' twice.");
+            if (descriptor.Fields.Any(field => field.Name == option.Name))
+                throw new InvalidDataException($"{location} view '{option.Name}' collides with a field name.");
+        }
+        int wordIndex = 0, dispatchEnd = -1;
+        DataField? dispatch = null;
+        bool aligned = false;
+        foreach (DataField field in descriptor.Fields)
+        {
+            if (wordIndex == slot.SlotWordIndex) aligned = true;
+            if (field.Name == slot.DispatchFieldName) { dispatch = field; dispatchEnd = wordIndex + field.WordCount; }
+            wordIndex += field.WordCount;
+        }
+        if (wordIndex == slot.SlotWordIndex) aligned = true;
+        if (!aligned)
+            throw new InvalidDataException($"{location} word index {slot.SlotWordIndex} does not fall on a field boundary.");
+        if (dispatch is null || dispatch.Dimensions is not null || dispatch.Type != DataFieldType.Word || dispatchEnd > slot.SlotWordIndex)
+            throw new InvalidDataException($"{location} dispatch field '{slot.DispatchFieldName}' must be a scalar WORD before the slot.");
     }
 
     private static void ValidateValue(JsonObject record, string context, DataField field, JsonNode? node, int dimension)

@@ -40,11 +40,11 @@ public sealed class SceneExportDataTests : IDisposable
     public async Task Export_data_extracts_scene_records_and_the_index_entry()
     {
         MkfFixture.Write(input, "SSS.MKF", [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2], new byte[28]);
-        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900]);
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900], new byte[32]);
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
+        Assert.Equal(new[] { Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "scene.json")));
@@ -58,7 +58,7 @@ public sealed class SceneExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(7, tables.Length);
+        Assert.Equal(8, tables.Length);
         Assert.Equal("enemy-team.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
         Assert.Equal("enemy.json", tables[1].GetProperty("file").GetString());
         Assert.Equal("event-object.json", tables[2].GetProperty("file").GetString());
@@ -76,7 +76,7 @@ public sealed class SceneExportDataTests : IDisposable
     public async Task Export_data_fails_when_chunk_1_is_not_a_multiple_of_8_bytes()
     {
         MkfFixture.Write(input, "SSS.MKF", [.. EventObjectRecord1, .. EventObjectRecord2], new byte[9], new byte[28]);
-        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900]);
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900], new byte[32]);
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.Equal(1, result.ExitCode);

@@ -41,11 +41,11 @@ public sealed class EventObjectExportDataTests : IDisposable
     public async Task Export_data_extracts_event_object_records_and_the_index_entry()
     {
         MkfFixture.Write(input, "SSS.MKF", [.. Record1, .. Record2], new byte[8], new byte[28]);
-        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900]);
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900], new byte[32]);
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
+        Assert.Equal(new[] { Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "event-object.json")));
@@ -59,7 +59,7 @@ public sealed class EventObjectExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(7, tables.Length); // object.json registered by #81, store.json by #83, enemy.json by #84, enemy-team.json by #85, player-roles.json by #86; their own tests cover those entries
+        Assert.Equal(8, tables.Length); // object.json registered by #81, store.json by #83, enemy.json by #84, enemy-team.json by #85, player-roles.json by #86, magic.json by #88; their own tests cover those entries
         Assert.Equal("enemy-team.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
         Assert.Equal("enemy.json", tables[1].GetProperty("file").GetString());
         Assert.Equal("event-object.json", tables[2].GetProperty("file").GetString());
@@ -77,7 +77,7 @@ public sealed class EventObjectExportDataTests : IDisposable
     public async Task Export_data_fails_when_chunk_0_is_not_a_multiple_of_32_bytes()
     {
         MkfFixture.Write(input, "SSS.MKF", new byte[33], new byte[8], new byte[28]); // chunk 0 defect only
-        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900]);
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[10], new byte[900], new byte[32]);
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.Equal(1, result.ExitCode);

@@ -14,7 +14,7 @@ internal static class DataGameData
     private const int MaximumChunkBytes = 64 * 1024 * 1024;
 
     // Registered tables in source order (SSS chunks first, then DATA chunks).
-    private static readonly DataTableDescriptor[] RegisteredTables = [DataTables.EventObject, DataTables.Scene, DataTables.Store, DataTables.Enemy, DataTables.EnemyTeam, DataTables.PlayerRoles];
+    private static readonly DataTableDescriptor[] RegisteredTables = [DataTables.EventObject, DataTables.Scene, DataTables.Store, DataTables.Enemy, DataTables.EnemyTeam, DataTables.PlayerRoles, DataTables.Magic];
 
     internal static void Export(string input, string output)
     {

@@ -172,6 +172,48 @@ public static class DataTables
             new DataField("dyingSound", DataFieldType.Word, [6]),
         ]);
 
+    // magic.json - DATA.MKF chunk 4, MAGIC, 16 WORD (32 bytes) per record. Record
+    // count = chunk byte length / 32; global.h declares wSpeed and wSound as SHORT
+    // (fight.c:2513/2730/2955/3171 compute the effect frame delay as (wSpeed + 5) * 10
+    // and fight.c:2501/2671/2713/2929/3114 pass wSound to AUDIO_PlaySound's signed INT
+    // parameter, audio.c:517), so exactly those two decode as SignedWord. rgSpecific is
+    // #78's frozen dual view, expressed as the descriptor's one dispatched slot at
+    // word 4: wType (word 1) == 9 (kMagicTypeSummon) exports the WORD wSummonEffect
+    // view read only by PAL_BattleShowPlayerSummonMagicAnim (fight.c:3135), which is
+    // invoked exclusively under wType == kMagicTypeSummon checks (fight.c:3865-3868
+    // cooperative and 4255-4257 offensive magic); every other type exports the SHORT
+    // sLayerOffset view the non-summon effect paths read through explicit (SHORT)
+    // casts (fight.c:2518 PAL_BattleShowPlayerDefMagicAnim, fight.c:2735
+    // PAL_BattleShowPlayerOffMagicAnim, fight.c:2960 PAL_BattleShowEnemyMagicAnim).
+    // Each record therefore exports exactly one of summonEffect/layerOffset - the two
+    // views of one physical WORD, never both - and this table is not the object.json
+    // magic view (that is SSS.MKF chunk 2's wMagicNumber; #82 verified the direction:
+    // the object magic view points INTO this table, not the other way round).
+    public static readonly DataTableDescriptor Magic = new(
+        "magic", "DATA.MKF", 4,
+        [
+            new DataField("effect", DataFieldType.Word),
+            new DataField("type", DataFieldType.Word),
+            new DataField("xOffset", DataFieldType.Word),
+            new DataField("yOffset", DataFieldType.Word),
+            new DataField("speed", DataFieldType.SignedWord),
+            new DataField("keepEffect", DataFieldType.Word),
+            new DataField("fireDelay", DataFieldType.Word),
+            new DataField("effectTimes", DataFieldType.Word),
+            new DataField("shake", DataFieldType.Word),
+            new DataField("wave", DataFieldType.Word),
+            new DataField("unknown", DataFieldType.Word),
+            new DataField("costMp", DataFieldType.Word),
+            new DataField("baseDamage", DataFieldType.Word),
+            new DataField("elemental", DataFieldType.Word),
+            new DataField("sound", DataFieldType.SignedWord),
+        ],
+        new DispatchedWordSlot("rgSpecific", "type", 4,
+        [
+            new DispatchedWordOption("summonEffect", DataFieldType.Word, 9),
+            new DispatchedWordOption("layerOffset", DataFieldType.SignedWord),
+        ]));
+
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
     // DataTableDescriptor: every record declares one union view (player/item by #81,
     // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant
