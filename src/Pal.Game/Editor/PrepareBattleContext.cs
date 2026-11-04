@@ -125,6 +125,7 @@ public partial class PrepareBattleContext : Node
         native.BattleContentUri = binding.BattleContentUri;
         native.DialogueDirectory = binding.DialogueDirectory;
         native.VisualUri = binding.VisualUri;
+        native.GlobalObjectsUri = binding.GlobalObjectsUri;
         native.ImagePlayerSpriteUris = binding.PlayerSpriteUris.ToArray();
         native.ImageEnemyId = binding.EnemySpriteId;
         native.ImageEnemyArchiveEntry = binding.EnemyArchiveEntry;
@@ -136,7 +137,7 @@ public partial class PrepareBattleContext : Node
         string dialogue = binding.DialogueDirectory;
         // The events index is a modern JSON collection input, not a native resource type; the
         // story chain likewise unions the complete event file list instead of walking into it.
-        string[] seeds = new[] { binding.BattleContentUri, dialogue + "/Font.tres",
+        string[] seeds = new[] { binding.BattleContentUri, binding.GlobalObjectsUri, dialogue + "/Font.tres",
             dialogue + "/Language.zh-Hans.tres", dialogue + "/Language.en.tres",
             dialogue + "/Prompt-00.tres", dialogue + "/Prompt-01.tres", dialogue + "/Prompt-02.tres" }
             .Concat(binding.Portraits.Select(pair => pair.Uri)).Concat(binding.PlayerSpriteUris).ToArray();
@@ -159,7 +160,7 @@ public partial class PrepareBattleContext : Node
         }
     }
 
-    private sealed record RealClosureBinding(string EventsIndex, string BattleContentUri, string DialogueDirectory, string VisualUri,
+    private sealed record RealClosureBinding(string EventsIndex, string BattleContentUri, string DialogueDirectory, string VisualUri, string GlobalObjectsUri,
         IReadOnlyList<(int Id, string Uri)> Portraits, IReadOnlyList<string> PlayerSpriteUris,
         int EnemySpriteId, string EnemyArchiveEntry, IReadOnlyList<string> RoleSpriteIds,
         int BattlefieldId, string BattlefieldArchiveEntry, bool IncludesLayoutAndEffectFrames)
@@ -173,7 +174,7 @@ public partial class PrepareBattleContext : Node
             var root = document.RootElement;
             Require(root.ValueKind == System.Text.Json.JsonValueKind.Object, "battle resource binding must be an object");
             foreach (var property in root.EnumerateObject())
-                Require(property.Name is "formatVersion" or "eventsIndex" or "battleContentUri" or "dialogueDirectory" or "visualUri"
+                Require(property.Name is "formatVersion" or "eventsIndex" or "battleContentUri" or "dialogueDirectory" or "visualUri" or "globalObjectsUri"
                     or "portraits" or "playerSpriteUris" or "enemySpriteId" or "enemyArchiveEntry" or "roleSpriteIds"
                     or "battlefieldId" or "battlefieldArchiveEntry" or "includesLayoutAndEffectFrames",
                     "battle resource binding: unknown field '" + property.Name + "'");
@@ -196,7 +197,7 @@ public partial class PrepareBattleContext : Node
                 Require(valid, "battle resource binding: portraits entries require integer id and string uri");
                 portraits.Add((portraitId, portraitUri));
             }
-            return new(Text("eventsIndex"), Text("battleContentUri"), Text("dialogueDirectory"), Text("visualUri"),
+            return new(Text("eventsIndex"), Text("battleContentUri"), Text("dialogueDirectory"), Text("visualUri"), Text("globalObjectsUri"),
                 portraits, List("playerSpriteUris"), Number("enemySpriteId"), Text("enemyArchiveEntry"), List("roleSpriteIds"),
                 Number("battlefieldId"), Text("battlefieldArchiveEntry"),
                 root.GetProperty("includesLayoutAndEffectFrames").ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False

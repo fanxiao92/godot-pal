@@ -28,6 +28,7 @@ public partial class PalFirstMandatoryBattleProfile : Resource
     [Export] public string BattleContentUri { get; set; } = "";
     [Export] public string DialogueDirectory { get; set; } = "";
     [Export] public string VisualUri { get; set; } = "";
+    [Export] public string GlobalObjectsUri { get; set; } = "";
     [Export] public Dictionary<int, string> Portraits { get; set; } = new();
     [Export] public Dictionary<string, string> ResourceSha256 { get; set; } = new();
     [Export] public string[] ImagePlayerSpriteUris { get; set; } = [];

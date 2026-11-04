@@ -164,7 +164,12 @@ public partial class Main : Node2D
                 Dialogue.PaletteFromScene = Palette(map.Data);
                 // The real call mutates one shared dynamic world (script verbs) while the battle
                 // half runs the same verified content; the world is bound before initialization.
-                var world = DynamicEventWorld.ForHost(Battle!.Rules, checkedProfile.Leader,
+                // The @09C3 performance also mutates global objects outside the static bundle;
+                // the closure-bound table extends the world's object set (ids stay unique).
+                var staticIds = new System.Collections.Generic.HashSet<int>(Battle!.Rules.Objects.Select(o => (int)o.Id));
+                var extendedRules = Battle.Rules.WithObjects(Battle.Rules.Objects
+                    .Concat(real.Resources.GlobalObjects.Where(o => !staticIds.Contains(o.Id))));
+                var world = DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
                     map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport);
                 for (int role = 0; role < real.Profile.Roles.Count; role++)
                 {
@@ -177,7 +182,7 @@ public partial class Main : Node2D
                 Dialogue.PreviewSessionFactory = () => new TriggerScriptSession(real.Resources.Events,
                     language == "zh-Hans" ? real.Resources.Chinese : real.Resources.English,
                     real.Resources.BattleContent, new GodotBattleRandom(selected.BattleSeed),
-                    DynamicEventWorld.ForHost(Battle!.Rules, checkedProfile.Leader,
+                    DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
                         map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport));
                 Dialogue.Initialize(Display, real.Resources, language, firstBattleSeedRandom, map.Data);
                 // The verified closure reuses the production story-battle machinery: the facade

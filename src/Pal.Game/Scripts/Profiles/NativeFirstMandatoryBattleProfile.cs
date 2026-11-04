@@ -73,8 +73,8 @@ public static class NativeFirstMandatoryBattleProfile
     private static (FirstMandatoryBattleClosureReceipt Closure, CheckedBattleVisualProfile Visual, FirstBattleRealResources Resources) VerifyRealClosure(
         PalFirstMandatoryBattleProfile native, FirstMandatoryBattleProfile profile, string staticResources, string identity)
     {
-        foreach (string path in new[] { native.EventsIndex, native.BattleContentUri, native.DialogueDirectory, native.VisualUri })
-        { Require(path.Length > 0, identity + ": the real closure binding requires EventsIndex, BattleContentUri, DialogueDirectory and VisualUri together"); NativeExplorationProfile.ValidateUri(path); }
+        foreach (string path in new[] { native.EventsIndex, native.BattleContentUri, native.DialogueDirectory, native.VisualUri, native.GlobalObjectsUri })
+        { Require(path.Length > 0, identity + ": the real closure binding requires EventsIndex, BattleContentUri, DialogueDirectory, VisualUri and GlobalObjectsUri together"); NativeExplorationProfile.ValidateUri(path); }
         Require(native.ImageEnemyId is > 0 and <= ushort.MaxValue && native.ImageBattlefieldId is > 0 and <= ushort.MaxValue
             && native.ImageEnemyArchiveEntry.Length > 0 && native.ImageBattlefieldArchiveEntry.Length > 0
             && native.ImageRoleSpriteIds.Length == native.ImagePlayerSpriteUris.Length && native.ImageRoleSpriteIds.Length > 0
@@ -92,7 +92,7 @@ public static class NativeFirstMandatoryBattleProfile
         var eventPaths = TriggerEventLoader.DependencyUris(native.EventsIndex);
         foreach (string path in eventPaths) CheckFile(path, hashes);
         string dialogue = native.DialogueDirectory;
-        string[] seeds = new[] { native.BattleContentUri, dialogue + "/Font.tres", dialogue + "/Language.zh-Hans.tres",
+        string[] seeds = new[] { native.BattleContentUri, native.GlobalObjectsUri, dialogue + "/Font.tres", dialogue + "/Language.zh-Hans.tres",
             dialogue + "/Language.en.tres", dialogue + "/Prompt-00.tres", dialogue + "/Prompt-01.tres", dialogue + "/Prompt-02.tres" }
             .Concat(native.Portraits?.Values ?? Enumerable.Empty<string>()).Concat(native.ImagePlayerSpriteUris).ToArray();
         var dependencies = NativeContentDependencies.ContentDependencies(seeds, hashes);
@@ -148,8 +148,36 @@ public static class NativeFirstMandatoryBattleProfile
             native.VisualUri + ": battle background source identity must be " + native.ImageBattlefieldArchiveEntry);
         foreach (string path in hashes.Keys) CheckFile(path, hashes);
         var portraits = (native.Portraits ?? new Godot.Collections.Dictionary<int, string>()).ToDictionary(x => x.Key, x => LoadImage(x.Value));
+        // The global event-object table: closure-reachable records outside the static bundle.
+        var table = LoadTyped<PalGlobalEventObjects>(native.GlobalObjectsUri, resource =>
+        {
+            Require(resource.FormatVersion == 1 && !string.IsNullOrWhiteSpace(resource.SourceIdentity),
+                native.GlobalObjectsUri + ": global event-object table identity/version is invalid");
+            Require(resource.Objects is { Length: > 0 } && resource.Objects.All(x => x is not null),
+                native.GlobalObjectsUri + ": global event-object table is empty or malformed");
+            var ids = new System.Collections.Generic.HashSet<int>();
+            foreach (var record in resource.Objects)
+            {
+                Require(record.OwnerId is > 0 and <= 65535 && ids.Add(record.OwnerId),
+                    native.GlobalObjectsUri + ": global event-object IDs must be unique nonzero WORDs");
+                Require(record.X is >= 0 and <= 65535 && record.Y is >= 0 and <= 65535 && record.Direction is >= 0 and <= 65535
+                    && record.TriggerMode is >= 0 and <= 65535 && record.TriggerEntry is >= 0 and <= 65535 && record.AutoEntry is >= 0 and <= 65535
+                    && record.AutoIdleFrameCount is >= 0 and <= 65535 && record.SpriteId is >= 0 and <= 65535 && record.SpriteFrames is >= 0 and <= 65535
+                    && record.CurrentFrame is >= 0 and <= 65535 && record.ScriptIdleFrameCount is >= 0 and <= 65535
+                    && record.SpritePtrOffset is >= 0 and <= 65535 && record.AutoSpriteFrames is >= 0 and <= 65535,
+                    native.GlobalObjectsUri + $": global event-object {record.OwnerId} carries a non-WORD field");
+            }
+        });
+        var globalObjects = table.Objects.Select(record => new SceneObject(checked((ushort)record.OwnerId),
+            checked((ushort)record.X), checked((ushort)record.Y), checked((short)record.State), checked((short)record.VanishTime),
+            checked((short)record.Layer), checked((ushort)record.SpriteId), checked((ushort)record.SpriteFrames),
+            checked((ushort)record.Direction), checked((ushort)record.CurrentFrame))
+        {
+            TriggerMode = checked((ushort)record.TriggerMode), TriggerEntry = checked((ushort)record.TriggerEntry),
+            AutoEntry = checked((ushort)record.AutoEntry)
+        }).ToArray();
         return (closure, visual, new FirstBattleRealResources(events, chinese, english, content, font, prompts, portraits,
-            TriggerEventLoader.DependencyUris(native.EventsIndex).ToArray(), hashes, ChineseWords(), EnglishWords()));
+            TriggerEventLoader.DependencyUris(native.EventsIndex).ToArray(), hashes, ChineseWords(), EnglishWords(), globalObjects));
     }
 
     private static T LoadTyped<T>(string uri, Action<T> validate) where T : Resource
@@ -241,17 +269,20 @@ public sealed class FirstBattleRealResources
     public System.Collections.Generic.IReadOnlyDictionary<string, string> ResourceSha256 => hashMap;
     public System.Collections.Generic.IReadOnlyDictionary<int, string> ChineseWords => chineseWords;
     public System.Collections.Generic.IReadOnlyDictionary<int, string> EnglishWords => englishWords;
+    /// <summary>Global event-object records outside the static bundle (closure-bound table).</summary>
+    public System.Collections.Generic.IReadOnlyList<SceneObject> GlobalObjects { get; }
     private readonly System.Collections.Generic.Dictionary<int, string> chineseWords;
     private readonly System.Collections.Generic.Dictionary<int, string> englishWords;
 
     internal FirstBattleRealResources(TriggerEventCollection events, DialogueLanguagePackage chinese, DialogueLanguagePackage english,
         TriggerBattleContent battleContent, PalDialogueFont font, PalDialogueIndexedImage[] prompts,
         System.Collections.Generic.Dictionary<int, PalDialogueIndexedImage> portraits, string[] eventFileUris, System.Collections.Generic.Dictionary<string, string> hashes,
-        System.Collections.Generic.Dictionary<int, string> chineseWords, System.Collections.Generic.Dictionary<int, string> englishWords)
+        System.Collections.Generic.Dictionary<int, string> chineseWords, System.Collections.Generic.Dictionary<int, string> englishWords,
+        SceneObject[] globalObjects)
     {
         Events = events; Chinese = chinese; English = english; BattleContent = battleContent; Font = font;
         Prompts = Array.AsReadOnly(prompts);
         portraitMap = portraits; eventUris = eventFileUris; hashMap = hashes;
-        chineseWords = chineseWords; englishWords = englishWords;
+        chineseWords = chineseWords; englishWords = englishWords; GlobalObjects = globalObjects;
     }
 }
