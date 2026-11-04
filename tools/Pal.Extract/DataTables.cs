@@ -53,6 +53,50 @@ public static class DataTables
             new DataField("items", DataFieldType.Word, [9]),
         ]);
 
+    // enemy.json - DATA.MKF chunk 1, ENEMY, 35 WORD (70 bytes) per record. Record
+    // count = chunk byte length / 70; global.h declares the five sound members as
+    // SHORT (wAttackSound/wActionSound/wMagicSound/wDeathSound/wCallSound; fight.c
+    // tests wMagicSound >= 0 and plays the others through AUDIO_PlaySound's signed
+    // parameter), so exactly those five decode as SignedWord - the first DATA-side
+    // table with signed members. magicId/attackEquivItemId/stealItemId are object.json
+    // magic/item-view indices that double as the ObjectUnionTable evidence source
+    // (0xFFFF wMagic = no magic per fight.c:4660).
+    public static readonly DataTableDescriptor Enemy = new(
+        "enemy", "DATA.MKF", 1,
+        [
+            new DataField("idleFrames", DataFieldType.Word),
+            new DataField("magicFrames", DataFieldType.Word),
+            new DataField("attackFrames", DataFieldType.Word),
+            new DataField("idleAnimSpeed", DataFieldType.Word),
+            new DataField("actWaitFrames", DataFieldType.Word),
+            new DataField("yPosOffset", DataFieldType.Word),
+            new DataField("attackSound", DataFieldType.SignedWord),
+            new DataField("actionSound", DataFieldType.SignedWord),
+            new DataField("magicSound", DataFieldType.SignedWord),
+            new DataField("deathSound", DataFieldType.SignedWord),
+            new DataField("callSound", DataFieldType.SignedWord),
+            new DataField("health", DataFieldType.Word),
+            new DataField("exp", DataFieldType.Word),
+            new DataField("cash", DataFieldType.Word),
+            new DataField("level", DataFieldType.Word),
+            new DataField("magicId", DataFieldType.Word),
+            new DataField("magicRate", DataFieldType.Word),
+            new DataField("attackEquivItemId", DataFieldType.Word),
+            new DataField("attackEquivItemRate", DataFieldType.Word),
+            new DataField("stealItemId", DataFieldType.Word),
+            new DataField("stealItemCount", DataFieldType.Word),
+            new DataField("attackStrength", DataFieldType.Word),
+            new DataField("magicStrength", DataFieldType.Word),
+            new DataField("defense", DataFieldType.Word),
+            new DataField("dexterity", DataFieldType.Word),
+            new DataField("fleeRate", DataFieldType.Word),
+            new DataField("poisonResistance", DataFieldType.Word),
+            new DataField("elementalResistance", DataFieldType.Word, [5]),
+            new DataField("physicalResistance", DataFieldType.Word),
+            new DataField("dualMove", DataFieldType.Word),
+            new DataField("collectValue", DataFieldType.Word),
+        ]);
+
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
     // DataTableDescriptor: every record declares one union view (player/item by #81,
     // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant

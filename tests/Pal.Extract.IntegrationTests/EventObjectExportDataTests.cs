@@ -23,8 +23,9 @@ public sealed class EventObjectExportDataTests : IDisposable
     // 0, 65535, 0x8000/-32768, 32767, -1, and the script.c -15 vanish time. Chunk 1 is a
     // minimal all-zero SCENE record pair and chunk 2 an all-zero WIN95 OBJECT pair so
     // the fixture stays valid now that #80/#81 register those tables; the all-zero DATA
-    // fixture (store/enemy/player-roles, one empty 18-byte store record) keeps both
-    // object records legal and now feeds the registered store table besides.
+    // fixture (store/enemy/player-roles, one empty 18-byte store record and one empty
+    // 70-byte enemy record) keeps both object records legal and now feeds the
+    // registered store/enemy tables besides.
     private static byte[] Record1 => Words(-32768, 0x1234, 0, -1, 0x8000, 65535, unchecked((short)0x8000), 8, 0xABCD, 0, 3, 32767, 1, 65535, 2, 32768);
     private static byte[] Record2 => Words(-15, 1840, 1200, 2, 10000, 0, 32767, 5, 0x1234, 65535, 0, 0, 0, 0, 4660, 0);
 
@@ -43,7 +44,7 @@ public sealed class EventObjectExportDataTests : IDisposable
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
+        Assert.Equal(new[] { Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "object.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "event-object.json")));
@@ -57,9 +58,9 @@ public sealed class EventObjectExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(4, tables.Length); // object.json registered by #81, store.json by #83; their own tests cover those entries
-        Assert.Equal("event-object.json", tables[0].GetProperty("file").GetString());
-        Assert.Equal("object.json", tables[1].GetProperty("file").GetString());
+        Assert.Equal(5, tables.Length); // object.json registered by #81, store.json by #83, enemy.json by #84; their own tests cover those entries
+        Assert.Equal("enemy.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
+        Assert.Equal("event-object.json", tables[1].GetProperty("file").GetString());
         var entry = tables.Single(table => table.GetProperty("file").GetString() == "event-object.json");
         Assert.Equal("SSS.MKF", entry.GetProperty("archive").GetString());
         Assert.Equal(0, entry.GetProperty("chunk").GetInt32());
