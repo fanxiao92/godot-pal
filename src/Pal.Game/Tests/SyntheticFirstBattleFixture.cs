@@ -15,7 +15,9 @@ namespace Pal.Game.Tests;
 internal sealed class SyntheticFirstBattleFixture : IDisposable
 {
     private readonly string input = Path.Combine(Path.GetTempPath(), "pal-synth-closure-" + Guid.NewGuid().ToString("N"));
-    private readonly string root = ProjectSettings.GlobalizePath("res://Assets/RuntimeTests/SyntheticFirstBattle-" + Guid.NewGuid().ToString("N"));
+    private static readonly string RootName = "SyntheticFirstBattle-" + Guid.NewGuid().ToString("N");
+    private readonly string root = ProjectSettings.GlobalizePath("res://Assets/RuntimeTests/" + RootName);
+    private static string RootUri => "res://Assets/RuntimeTests/" + RootName;
     internal string ProfileUri { get; }
 
     internal SyntheticFirstBattleFixture(NativeProfileFixture staticFixture, string staticRoot, string staticProfile, bool lost)
@@ -143,7 +145,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
                 ["sha256"] = new string('e', 64) },
             ["files"] = new JsonArray("story"),
         }.ToJsonString());
-        return ProjectSettings.LocalizePath(directory) + "/index.json";
+        return RootUri + "/Events/index.json";
     }
 
     private delegate void PutCommand(int address, string op, int opcode, int a, int b, int c, params (string Key, JsonNode? Value)[] fields);
@@ -253,8 +255,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         return path;
     }
 
-    private string Localize(string relative) =>
-        ProjectSettings.LocalizePath(Path.Combine(root, relative)).TrimEnd('/');
+    private string Localize(string relative) => RootUri + "/" + relative;
 
     public void Dispose()
     {
