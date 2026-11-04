@@ -60,6 +60,8 @@
 | [`Test-GameStartup.ps1`](../../scripts/Test-GameStartup.ps1) | 人工资源真实 Godot import/Main 启动与指定拒绝控制 | `Test-M0.ps1` 直接调用，内部用 Prepare-GameScene | 显式验收子入口；保留，不证明 GPU/物理桌面 |
 | [`Test-GodotCompatibility.ps1`](../../scripts/Test-GodotCompatibility.ps1) | 外部人工项目、生成器/net10 构建/引擎兼容与负控制探针 | 搜索范围内未查到运行调用或当前文档入口；外部未知 | 特殊兼容调查；保留，不能从历史探针推断当前运行成功 |
 | [`Test-RealDialogueGpu.ps1`](../../scripts/Test-RealDialogueGpu.ps1) | 选定语言/可选真实 Main 的 GPU 回读及程序输入；保护真实资源身份 | 无仓内脚本运行调用；[对话](../design/dialogue-display.md)和[NPC 宿主](../design/npc-interaction-host.md)为显式入口；外部未知 | 显式 GPU 证据，不是物理/人工验收；保留，不自动 prepare/build/清理 |
+| [`Test-M4FirstBattleGpu.ps1`](../../scripts/Test-M4FirstBattleGpu.ps1) | M4 首战链 GPU 像素验收：真实 staged Profile.tres 双语或合成 Won/Lost 闭包，帧捕获+独立像素 oracle；保护私有资源树 | 无仓内脚本运行调用；`res://Tests/M4FirstBattleGpuFixture.tscn` 为显式本地入口；外部未知 | 显式 GPU 证据（程序输入），不是物理/人工验收；保留，不自动 prepare/build/清理 |
+| [`Test-M4PhysicalDesktop.ps1`](../../scripts/Test-M4PhysicalDesktop.ps1) | M4 物理桌面验收：真实窗口进程+SendInput 真实键盘走完合成全闭包（Won/Lost），✕/Alt+F4 正常关窗、退出码/生命周期/无残留 | 无仓内脚本运行调用；`res://Tests/M4PhysicalDesktopFixture.tscn` 为显式本地入口（夹具零进程内注入）；外部未知 | 显式物理验收证据；保留，不自动 prepare/build/清理 |
 
 ## 待核实退役项
 
