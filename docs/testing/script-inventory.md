@@ -40,6 +40,8 @@
 | [`gdunit-packages.lock.json`](../../scripts/gdunit-packages.lock.json) | 固定包来源、recipe、文件长度/散列与地址 | Get-GdUnitPackages、Engineering、Range；GdUnitPackages 回归 | 资源身份数据，不可执行；保留 |
 | [`Prepare-GameScene.ps1`](../../scripts/Prepare-GameScene.ps1) | M1 包显式离线转换为 Godot native 场景/资源，拒绝覆盖 | `Test-GameStartup.ps1`；PreparePathSafety/PrepareProcess 回归；根 README | 显式资源准备；保留，不自动提取/同步、不创建探索 profile |
 | [`Prepare-StoryPackage.ps1`](../../scripts/Prepare-StoryPackage.ps1) | 外部完整现代事件+metadata与已准备native依赖→typed Story/Visual，严格回读、无覆盖 | StoryPackagePrepareProcessTests；[schema/前置资产/命令](../design/story-package-preparation.md) | 显式离线生产准备；输入非自包含，不接Main、不自动准备依赖 |
+| [`Prepare-BattleData.ps1`](../../scripts/Prepare-BattleData.ps1) | 外部单文件严格 UTF-8 现代数值→typed native 数值包，路径/lease/hash/回读、无覆盖发布 | BattleDataPrepareProcessTests；[数值契约](../design/modern-battle-data.md) | 显式离线生产准备；不接 Main |
+| [`Prepare-BattleContext.ps1`](../../scripts/Prepare-BattleContext.ps1) | 外部作者 battle-context 文档（可选 -BattleResources 绑定）→首战闭包回执与 Profile.tres | BattlePrepareProcessTests；[首战上下文](../design/first-story-battle-context.md) | 显式离线生产准备；真实原始/派生资源不提交 |
 | [`Prepare-DialoguePackage.ps1`](../../scripts/Prepare-DialoguePackage.ps1) | 显式转换现代对话包为 native 资源并 import | 搜索范围内无脚本运行调用；[对话文档](../design/dialogue-display.md)为手工入口；外部未知 | 显式资源准备；保留，复用已准备资源 |
 | [`Write-StaticScene4Profile.ps1`](../../scripts/Write-StaticScene4Profile.ps1) | 只读 DATA.MKF role0 WORD，author 固定 scene4 profile，拒绝覆盖 | 搜索范围内未查到运行调用或当前文档入口；外部未知 | 显式一次性 author 工具；保留，退役另核；不上传真实输入/输出 |
 
