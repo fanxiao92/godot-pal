@@ -230,6 +230,29 @@ public static class DataTables
             new DataField("magicEffect", DataFieldType.SignedWord, [5]),
         ]);
 
+    // level-up-magic.json - DATA.MKF chunk 6, LEVELUPMAGIC_ALL, 10 WORD (20 bytes) per
+    // record. Record count = chunk byte length / 20; global.c:299-300 loads the chunk
+    // as nLevelUpMagic LEVELUPMAGIC_ALL rows (global.c:369-370 allocates them), and each
+    // row's m[MAX_PLAYABLE_PLAYER_ROLES = 5 (palcommon.h:48)] member pairs export as the
+    // roles sub-record array - the first descriptor with a repeated sub-record (DataField
+    // grew the Members parameter for it; the frozen schema's 对象[5]). global.h:384-393
+    // declares both wLevel and wMagic as plain WORD, so nothing here decodes as
+    // SignedWord. magicId is an object.json magic-view index: battle.c:1300-1309 walks
+    // the rows per role w and skips a pair when wMagic == 0 (0 = learns nothing) or
+    // wLevel > rgwLevel[w], else PAL_AddMagic stores wMagic into the role's rgwMagic
+    // object slot (#82 verified the direction; the pair is not extraction-time view
+    // evidence - the 17 magic objects reachable only through this table stay
+    // undetermined in object.json).
+    public static readonly DataTableDescriptor LevelUpMagic = new(
+        "level-up-magic", "DATA.MKF", 6,
+        [
+            new DataField("roles", null, [5],
+            [
+                new DataField("level", DataFieldType.Word),
+                new DataField("magicId", DataFieldType.Word),
+            ]),
+        ]);
+
     // object.json - SSS.MKF chunk 2 - is the OBJECT union and therefore not a flat
     // DataTableDescriptor: every record declares one union view (player/item by #81,
     // magic/enemy/poison by #82) decided from cross-archive evidence. Its variant

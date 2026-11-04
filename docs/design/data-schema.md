@@ -316,13 +316,13 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 
 | JSON 字段 | C 名 | 类型 | 说明 |
 |---|---|---|---|
-| `roles` | `m[MAX_PLAYABLE_PLAYER_ROLES]` | 对象[5] | 每角色一项，按角色顺序 |
+| `roles` | `m[MAX_PLAYABLE_PLAYER_ROLES]` | 对象[5] | 每角色一项，按角色顺序（MAX_PLAYABLE_PLAYER_ROLES = 5 见 palcommon.h:48；global.c:299-300 自 DATA chunk 6 加载 nLevelUpMagic 条，battle.c:1300 逐条扫描） |
 
 `roles` 元素：
 
 | JSON 字段 | C 名 | 类型 | 说明 |
 |---|---|---|---|
-| `level` | `wLevel` | WORD | 达到该等级 |
+| `level` | `wLevel` | WORD | 达到该等级（battle.c:1303 `wLevel > rgwLevel[w]` 则跳过该行，未达级不习得） |
 | `magicId` | `wMagic` | WORD | 习得的法术对象，指向 object.json magic 视图（battle.c:1302-1309 经 `PAL_AddMagic` 存入 `rgwMagic` 对象槽，#82 核实），0 = 无 |
 
 真实数据核对：400 ÷ 20 = 20 条。

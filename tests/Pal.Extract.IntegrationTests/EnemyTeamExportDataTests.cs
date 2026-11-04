@@ -52,11 +52,11 @@ public sealed class EnemyTeamExportDataTests : IDisposable
         // records 2, 3, and 4 as enemies; record 1 stays undetermined.
         MkfFixture.Write(input, "SSS.MKF",
             [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2], new byte[70]);
-        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], [.. EnemyTeamRecord1, .. EnemyTeamRecord2], new byte[900], new byte[32], new byte[12]);
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], [.. EnemyTeamRecord1, .. EnemyTeamRecord2], new byte[900], new byte[32], new byte[12], new byte[20]);
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.True(result.ExitCode == 0, result.Stderr);
-        Assert.Equal(new[] { Path.Combine(output, "battle-field.json"), Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
+        Assert.Equal(new[] { Path.Combine(output, "battle-field.json"), Path.Combine(output, "enemy-team.json"), Path.Combine(output, "enemy.json"), Path.Combine(output, "event-object.json"), Path.Combine(output, "index.json"), Path.Combine(output, "level-up-magic.json"), Path.Combine(output, "magic.json"), Path.Combine(output, "object.json"), Path.Combine(output, "player-roles.json"), Path.Combine(output, "scene.json"), Path.Combine(output, "store.json") },
             Directory.GetFiles(output).Order());
 
         using var table = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "enemy-team.json")));
@@ -81,7 +81,7 @@ public sealed class EnemyTeamExportDataTests : IDisposable
 
         using var index = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "index.json")));
         var tables = index.RootElement.GetProperty("tables").EnumerateArray().ToArray();
-        Assert.Equal(9, tables.Length);
+        Assert.Equal(10, tables.Length);
         Assert.Equal("battle-field.json", tables[0].GetProperty("file").GetString()); // lexicographic file order
         Assert.Equal("enemy-team.json", tables[1].GetProperty("file").GetString());
         var entry = tables.Single(table => table.GetProperty("file").GetString() == "enemy-team.json");
@@ -99,7 +99,7 @@ public sealed class EnemyTeamExportDataTests : IDisposable
     {
         MkfFixture.Write(input, "SSS.MKF",
             [.. EventObjectRecord1, .. EventObjectRecord2], [.. SceneRecord1, .. SceneRecord2], new byte[70]);
-        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[11], new byte[900], new byte[32], new byte[12]); // chunk 2 defect only
+        MkfFixture.Write(input, "DATA.MKF", new byte[18], new byte[70], new byte[11], new byte[900], new byte[32], new byte[12], new byte[20]); // chunk 2 defect only
         string output = Path.Combine(root, "data");
         var result = await CliProcess.Run(root, "export-data", "--input", input, "--output", output);
         Assert.Equal(1, result.ExitCode);

@@ -13,11 +13,18 @@ public enum DataFieldType
     SignedWord,
 }
 
-/// One field of a data-table record: a scalar WORD or a row-major array of WORDs
-/// (nested dimensions, last index varies fastest, matching the C layout).
-public sealed record DataField(string Name, DataFieldType Type, int[]? Dimensions = null)
+/// One field of a data-table record: a scalar WORD, a row-major array of WORDs
+/// (nested dimensions, last index varies fastest, matching the C layout), or - when
+/// Members is set - a repeated sub-record array of objects (one per dimension element,
+/// members in declaration order; LEVELUPMAGIC's m[5], #90). A Members field declares
+/// no word Type of its own; its members are plain scalar/array fields.
+public sealed record DataField(string Name, DataFieldType? Type, int[]? Dimensions = null, DataField[]? Members = null)
 {
-    internal int WordCount => Dimensions is null ? 1 : Dimensions.Aggregate(1, (total, size) => total * size);
+    internal int WordCount => Members is { } members
+        ? members.Sum(member => member.WordCount) * RepeatCount
+        : RepeatCount;
+
+    private int RepeatCount => Dimensions is null ? 1 : Dimensions.Aggregate(1, (total, size) => total * size);
 }
 
 /// One exported view of a shared dispatched WORD slot (data-schema v1, #78): Name is
@@ -133,8 +140,18 @@ public static class DataTableSchema
 
     private static JsonNode DecodeField(byte[] chunk, ref int offset, DataField field, int dimension)
     {
+        // A leaf Members field decodes one sub-record object (or, without dimensions,
+        // the single object itself); a leaf word field decodes its one WORD.
         if (field.Dimensions is null || dimension == field.Dimensions.Length)
         {
+            if (field.Members is { } members)
+            {
+                var element = new JsonObject();
+                foreach (DataField member in members) element[member.Name] = DecodeField(chunk, ref offset, member, 0);
+                return element;
+            }
+            if (field.Type is null)
+                throw new InvalidDataException($"field '{field.Name}' declares neither a word type nor member fields.");
             ushort word = BinaryPrimitives.ReadUInt16LittleEndian(chunk.AsSpan(offset));
             offset += 2;
             return field.Type == DataFieldType.SignedWord ? (short)word : (int)word;
@@ -215,6 +232,19 @@ public static class DataTableSchema
         string location = $"{context}.{field.Name}";
         if (field.Dimensions is null || dimension == field.Dimensions.Length)
         {
+            if (field.Members is { } members)
+            {
+                // One sub-record object: exactly the declared member keys, each member
+                // then range-checked as its own field.
+                JsonObject element;
+                try { element = node?.AsObject() ?? throw new InvalidDataException($"{location} must be an object."); }
+                catch (InvalidOperationException) { throw new InvalidDataException($"{location} must be an object."); }
+                StrictJson.ValidateKeys(element, location, members.Select(member => member.Name).ToArray());
+                foreach (DataField member in members) ValidateValue(record, context, member, element[member.Name], 0);
+                return;
+            }
+            if (field.Type is null)
+                throw new InvalidDataException($"{location} field declares neither a word type nor member fields.");
             int value;
             try { value = node?.GetValue<int>() ?? throw new InvalidDataException($"{location} must be an integer."); }
             catch (InvalidOperationException) { throw new InvalidDataException($"{location} must be an integer."); }
