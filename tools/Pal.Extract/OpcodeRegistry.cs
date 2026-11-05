@@ -113,6 +113,11 @@ public static class OpcodeRegistry
         new(0x0013, "setObjectPosition", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("x", OpcodeFieldKind.Word, 1), new("y", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0014, "setObjectGesture", [new("frame", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0015, "setPartyFacing", [new("direction", OpcodeFieldKind.Word, 0), new("gesture", OpcodeFieldKind.Word, 1), new("memberIndex", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #106: like setPartyFacing but for the preamble-selected event object (shared preamble
+        // pCurrent: 0/0xFFFF = caller, else a 1-based index, script.c:626-638) - operand 0 also
+        // gates the whole case: WORD 0 skips it entirely (script.c:745), and operand 2 is the
+        // absolute frame (wCurrentFrameNum), not the direction*3+gesture form of 0x0015.
+        new(0x0016, "setObjectFacing", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("direction", OpcodeFieldKind.Word, 1), new("frame", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0017, "setExtraAttr", [new("equipPartWord", OpcodeFieldKind.Word, 0), new("field", OpcodeFieldKind.Word, 1), new("value", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0018, "equipItem", [new("equipPartWord", OpcodeFieldKind.Word, 0), new("itemId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0019, "incPlayerAttr", [new("field", OpcodeFieldKind.Word, 0), new("delta", OpcodeFieldKind.SignedWord, 1), new("roleOperand", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
@@ -164,6 +169,11 @@ public static class OpcodeRegistry
         // script.c:1452-1519); otherwise grants store[0].rgwItems[RandomLong(1, min(9, value)) - 1]
         // and shows the obtained-item dialog.
         new(0x0034, "transformCollectedEnemies", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #106: runs the current scene's OnTeleport trigger script (rgScene[wNumScene - 1].
+        // wScriptOnTeleport via a nested PAL_RunTriggerScript, script.c:1558-1561); in battle or
+        // with no teleport script it marks the script failed and jumps to operand 0
+        // (script.c:1565-1569) - the same plain-reference jump shape as playerFlee.
+        new(0x0038, "teleportParty", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         // #103: g_Battle.rgEnemy[wEventObjectID] loses operand 0 HP and the moving player gains the
         // same amount, capped at max HP (script.c:1573-1586); unsigned WORD arithmetic.
         new(0x0039, "drainHpFromEnemy", [new("amount", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
@@ -174,6 +184,10 @@ public static class OpcodeRegistry
         new(0x003C, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "upper"), new("portraitId", OpcodeFieldKind.Word, 0), new("color", OpcodeFieldKind.LowByte, 1), new("rngWord", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x003D, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "lower"), new("portraitId", OpcodeFieldKind.Word, 0), new("color", OpcodeFieldKind.LowByte, 1), new("rngWord", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x003E, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "centerWindow"), new("color", OpcodeFieldKind.LowByte, 0)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
+        // #106: PAL_PartyRideEventObject(wEventObjectID, x, y, h, 2) (script.c:203) - the party
+        // rides the caller event object to the absolute map tile position; speed 2 is the low
+        // variant (script.c:1608-1610) and the ride loop blocks until arrival, so no stall.
+        new(0x003F, "rideEventObjectSlow", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0040, "setTriggerMode", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("mode", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0041, "markFailed", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #103: PAL_BattleSimulateMagic(target, operand0, operand1) (fight.c:5301) - operand 0 is the
@@ -183,9 +197,18 @@ public static class OpcodeRegistry
         // enemy index (script.c:1634-1636); an apply-to-all magic overrides the target (fight.c:5321).
         new(0x0042, "simulateMagic", [new("magicId", OpcodeFieldKind.Word, 0), new("baseDamage", OpcodeFieldKind.Word, 1), new("enemyOperand", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0043, "setMusic", [new("musicId", OpcodeFieldKind.Word, 0), new("mode", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #106: the normal-speed ride variant - PAL_PartyRideEventObject(..., 4) (script.c:1653);
+        // same x/y/h tile operands as 0x003F, whose callees scale x*32+h*16 / y*16+h*8 pixels.
+        new(0x0044, "rideEventObject", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0046, "setPartyPos", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0049, "setState", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x004A, "setBattlefield", [new("battlefieldId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #106: PAL_MonsterChasePlayer(wEventObjectID, speed, chaseRange, floating) (script.c:310) -
+        // the caller monster chases the party; operand 0 is the sensitive range in tile units
+        // (|dx| + 2|dy| < range * 32 * global wChaseRange, script.c:393; WORD 0 is normalized to 8
+        // at runtime only), operand 1 the speed (0 -> 4 likewise), operand 2 a truthy WORD whose
+        // non-zero form lets the monster float over obstacles.
+        new(0x004C, "chasePlayer", [new("chaseRange", OpcodeFieldKind.Word, 0), new("speed", OpcodeFieldKind.Word, 1), new("floating", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x004D, "waitForAnyKey", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x004E, "requestReload", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Stop),
         new(0x004F, "fadeToRed", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
@@ -212,6 +235,14 @@ public static class OpcodeRegistry
         // #103: g_Battle.rgEnemy[wEventObjectID].e.wHealth = 0 (script.c:1950-1954).
         new(0x0060, "killEnemy", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0061, "notPoisonedJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #106: wChasespeedChangeCycles = operand 0 and wChaseRange = 0 (script.c:1970-1972) -
+        // pauses monster chasing (PAL_MonsterChasePlayer skips its whole chase block while the
+        // global range is 0, script.c:341); play.c:235-237 counts the cycles down per game
+        // update and resets the range to 1 when it reaches zero.
+        new(0x0062, "pauseEnemyChasing", [new("cycles", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #106: the same countdown with wChaseRange = 3 (script.c:1978-1980) - triples every
+        // monster's chase sensitivity (script.c:393) for the operand-0 cycles.
+        new(0x0063, "speedUpEnemyChasing", [new("cycles", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0064, "enemyHpAboveJump", [new("percent", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         // #103: PAL_BattleSimulateMagic((SHORT)wEventObjectID, operand0, operand1 * 5 +
         // moving-player attackStrength * RandomLong(0, 3)) - operand 0 is the thrown weapon's
@@ -235,6 +266,11 @@ public static class OpcodeRegistry
         // every enemy during magic animations (fight.c:2681: positive blows right/down, negative
         // left/up), reset at battle boundaries (fight.c:3608/4576).
         new(0x006B, "blowAwayEnemies", [new("strength", OpcodeFieldKind.SignedWord, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #106: moves the preamble-selected NPC (pCurrent/wCurEventObjectID, script.c:626-638:
+        // 0/0xFFFF = caller, else a 1-based index) by the signed pixel offsets - the batch's only
+        // (SHORT) casts (script.c:2060-2061) - then animates one walk step
+        // (PAL_NPCWalkOneStep(wCurEventObjectID, 0), script.c:2062).
+        new(0x006C, "walkNpcStep", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("xOffset", OpcodeFieldKind.SignedWord, 1), new("yOffset", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #99 review correction: script.c:3295 reads the delay from operand 1 ((0 -> 60) ms
         // normalization at runtime) and the gesture flag from operand 2; operand 0 is unused.
         new(0x0005, "redraw", [new("delayUnits", OpcodeFieldKind.Word, 1), new("updateGestures", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),

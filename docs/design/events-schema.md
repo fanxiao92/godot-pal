@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（116 个 opcode 位、108 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二、批4 #99 对话表现、状态物品批1 #100、状态物品批2 #101、状态物品批3 #102（状态物品域 29 个 opcode 收官）、战斗批1 #103、战斗批2+菜单 #104（战斗域 22 个 opcode 收官、菜单域 2 个 opcode 收官）、场景移动批1 #105，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（124 个 opcode 位、116 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二、批4 #99 对话表现、状态物品批1 #100、状态物品批2 #101、状态物品批3 #102（状态物品域 29 个 opcode 收官）、战斗批1 #103、战斗批2+菜单 #104（战斗域 22 个 opcode 收官、菜单域 2 个 opcode 收官）、场景移动批1 #105、场景移动批2 #106，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -13,7 +13,7 @@ pal-extract rebuild-events --input <events目录> --output <新文件>
 
 `export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
 
-实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 114 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`itemShortageJump`（#97）、`playerLacksPoisonJump`（#97）、`enemyLacksPoisonJump`（#97）、`notPoisonedJump`（#97）、`enemyHpAboveJump`（#97）、`enemyTurnJump`（#97）、`partyHpNotFullJump`（#97）、`waitForAnyKey`（#97）、`roleInPartyJump`（#98）、`notFacingObjectJump`（#98）、`objectOutOfZoneJump`（#98）、`delay`（#98）、`itemNotEquippedJump`（#98）、`notFirstOfKindJump`（#98）、`stateMatchJump`（#98）、`sceneMatchJump`（#98）、`quitGame`（#98）、`randomBranch`（#98）、`restoreScreen`（#99）、`backupScreen`（#99）、`setExtraAttr`（#100）、`equipItem`（#100）、`incPlayerAttr`（#100）、`setPlayerStat`（#100）、`changeCash`（#100）、`addItem`（#100）、`removeItem`（#100）、`removeEquipment`（#101）、`applyPoisonToEnemy`（#101）、`applyPoisonToPlayer`（#101）、`curePoisonByObjectIdForEnemy`（#101）、`curePoisonByObjectIdForPlayer`（#101）、`curePoisonsByLevel`（#101）、`setStatusPlayer`（#101）、`setStatusEnemy`（#101）、`clearPlayerStatus`（#101）、`addMagic`（#102）、`removeMagic`（#102）、`setMagicBaseDamageByMp`（#102）、`halveHp`（#102）、`killPlayer`（#102）、`setMagicBaseDamageByCash`（#102）、`increaseLevel`（#102）、`halveCash`（#102）、`inflictDamageToEnemy`（#103）、`changeBattleSprite`（#103）、`collectEnemyForItems`（#103）、`transformCollectedEnemies`（#103）、`drainHpFromEnemy`（#103）、`playerFlee`（#103）、`simulateMagic`（#103）、`halveEnemyHp`（#103）、`killEnemy`（#103）、`throwWeapon`（#103）、`enemyUseMagic`（#104）、`enemyEscape`（#104）、`stealFromEnemy`（#104）、`blowAwayEnemies`（#104）、`setBattleResult`（#104）、`enableAutoBattle`（#104）、`showMagicCastAnimation`（#104）、`enemyDivide`（#104）、`enemySummon`（#104）、`enemyTransform`（#104）、`showBuyMenu`（#104）、`showSellMenu`（#104）、`randomJump`、`startBattle`（#103 复核）、`changeHp`（#100 复核）、`changeMp`（#100 复核）、`boostStat`（#102 复核）、`setDialog` 四变体（#99 复核）、`showDialog`（#99 复核）、`redraw`（#99 复核修正）、`waitUpdate`、`walkStep`、`face`、`walkTo`、`setObjectPosition`、`setObjectGesture`、`setPartyFacing`、`changeHpMp`（#100 复核）、`revivePlayer`（#101 复核）、`setAutoEntry`、`setTriggerEntry`、`setTriggerMode`、`markFailed`、`setMusic`、`setPartyPos`、`setState`、`setBattlefield`（#103 复核）、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 124 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`itemShortageJump`（#97）、`playerLacksPoisonJump`（#97）、`enemyLacksPoisonJump`（#97）、`notPoisonedJump`（#97）、`enemyHpAboveJump`（#97）、`enemyTurnJump`（#97）、`partyHpNotFullJump`（#97）、`waitForAnyKey`（#97）、`roleInPartyJump`（#98）、`notFacingObjectJump`（#98）、`objectOutOfZoneJump`（#98）、`delay`（#98）、`itemNotEquippedJump`（#98）、`notFirstOfKindJump`（#98）、`stateMatchJump`（#98）、`sceneMatchJump`（#98）、`quitGame`（#98）、`randomBranch`（#98）、`restoreScreen`（#99）、`backupScreen`（#99）、`setExtraAttr`（#100）、`equipItem`（#100）、`incPlayerAttr`（#100）、`setPlayerStat`（#100）、`changeCash`（#100）、`addItem`（#100）、`removeItem`（#100）、`removeEquipment`（#101）、`applyPoisonToEnemy`（#101）、`applyPoisonToPlayer`（#101）、`curePoisonByObjectIdForEnemy`（#101）、`curePoisonByObjectIdForPlayer`（#101）、`curePoisonsByLevel`（#101）、`setStatusPlayer`（#101）、`setStatusEnemy`（#101）、`clearPlayerStatus`（#101）、`addMagic`（#102）、`removeMagic`（#102）、`setMagicBaseDamageByMp`（#102）、`halveHp`（#102）、`killPlayer`（#102）、`setMagicBaseDamageByCash`（#102）、`increaseLevel`（#102）、`halveCash`（#102）、`inflictDamageToEnemy`（#103）、`changeBattleSprite`（#103）、`collectEnemyForItems`（#103）、`transformCollectedEnemies`（#103）、`teleportParty`（#106）、`drainHpFromEnemy`（#103）、`playerFlee`（#103）、`simulateMagic`（#103）、`halveEnemyHp`（#103）、`killEnemy`（#103）、`pauseEnemyChasing`（#106）、`speedUpEnemyChasing`（#106）、`throwWeapon`（#103）、`enemyUseMagic`（#104）、`enemyEscape`（#104）、`stealFromEnemy`（#104）、`blowAwayEnemies`（#104）、`walkNpcStep`（#106）、`setBattleResult`（#104）、`enableAutoBattle`（#104）、`showMagicCastAnimation`（#104）、`enemyDivide`（#104）、`enemySummon`（#104）、`enemyTransform`（#104）、`showBuyMenu`（#104）、`showSellMenu`（#104）、`randomJump`、`startBattle`（#103 复核）、`changeHp`（#100 复核）、`changeMp`（#100 复核）、`boostStat`（#102 复核）、`setDialog` 四变体（#99 复核）、`showDialog`（#99 复核）、`redraw`（#99 复核修正）、`waitUpdate`、`walkStep`、`face`、`walkTo`、`walkToSlow`（#105）、`setObjectPosition`、`setObjectPositionRelativeToParty`（#105）、`setObjectGesture`、`setPartyFacing`、`setObjectFacing`（#106）、`changeHpMp`（#100 复核）、`revivePlayer`（#101 复核）、`setAutoEntry`、`setTriggerEntry`、`rideEventObjectSlow`（#106）、`setTriggerMode`、`markFailed`、`setMusic`、`rideEventObject`（#106）、`setPartyPos`、`setState`、`setBattlefield`（#103 复核）、`chasePlayer`（#106）、`requestReload`、`fadeToRed`、`fadeOut`、`hide`、`setSceneScripts`、`fadeScene`、`setParty`、`noop`、`setObjectScript`、`setStateRange`）；其余 opcode—including 契约的其他基础动作—仍以 `raw` 保存，后续批次只追加描述符。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
 
 导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
@@ -230,14 +230,14 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 
 | opcode | 参考实际寻址（[script.c](../../reference/sdlpal/script.c)） | 结论 |
 |---|---|---|
-| 0x0024 setAutoEntry / 0x0025 setTriggerEntry / 0x0040 setTriggerMode / 0x0049 setState / 0x0013 setObjectPosition / 0x0012 setObjectPositionRelativeToParty（#105 新增） | `PAL_InterpretInstruction` 前奏按 operand 0 选 `pCurrent`：0 或 0xFFFF=调用者，否则 `lprgEventObject[operand0−1]`（1 基）；case 体写 `pCurrent->wAutoScript`/`wTriggerScript`/`wTriggerMode`/`sState`/`x,y`（0x0024/0x0025/0x0040/0x0049 另有 operand0≠0 守卫；0x0012/0x0013 无守卫直接写 x/y） | **event object 下标** → `eventObjectId` |
+| 0x0024 setAutoEntry / 0x0025 setTriggerEntry / 0x0040 setTriggerMode / 0x0049 setState / 0x0013 setObjectPosition / 0x0012 setObjectPositionRelativeToParty（#105 新增）/ 0x0016 setObjectFacing（#106 新增）/ 0x006C walkNpcStep（#106 新增） | `PAL_InterpretInstruction` 前奏按 operand 0 选 `pCurrent`：0 或 0xFFFF=调用者，否则 `lprgEventObject[operand0−1]`（1 基）；case 体写 `pCurrent->wAutoScript`/`wTriggerScript`/`wTriggerMode`/`sState`/`x,y`/`wDirection`+`wCurrentFrameNum`（0x0016）/`x,y +=`（0x006C）（0x0024/0x0025/0x0040/0x0049/0x0016 另有 operand0≠0 守卫，0x0016 的 0 是整体跳过的 no-op 形态；0x0012/0x0013/0x006C 无守卫直接写） | **event object 下标** → `eventObjectId` |
 | 0x0090 setObjectScript | case 0x0090：`gpGlobals->g.rgObject[operand0].rgwData[2 + operand2] = operand1` | **object union 下标，不是 event object** → 保留 `objectId`（配合 `slotIndex`；语义槽随 union 视图而定，与第 3.2 节对象表入口槽对应） |
 | 0x009A setStateRange | case 0x009A：`for (i = operand0; i <= operand1; i++) lprgEventObject[i−1].sState = operand2` | **event object 闭区间** → `fromEventObjectId`/`toEventObjectId` |
 | 0x0007 startBattle | `PAL_StartBattle(wEnemyTeam, ...)`；敌队表为 DATA chunk 2（enemy-team.json） | → `enemyTeamId` |
 | 0x006D setSceneScripts | case 0x006D：`rgScene[operand0−1].wScriptOnEnter/wScriptOnTeleport = operand1/2` | scene 下标 → `sceneId`（1 基） |
 | 0x004A setBattlefield | case 0x004A：`gpGlobals->wNumBattleField = operand0` | 战场编号 → `battlefieldId` |
 
-#### 当前注册表（116 个 opcode 位，108 个动词）
+#### 当前注册表（124 个 opcode 位，116 个动词）
 
 | opcode | op | 字段（绑定） | 执行方式 | 后继 |
 |---|---|---|---|---|
@@ -258,7 +258,8 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0012 | `setObjectPositionRelativeToParty` | `eventObjectId`(word,0)、`xOffset`(word,1)、`yOffset`(word,2) | shared | sequential |
 | 0x0013 | `setObjectPosition` | `eventObjectId`(word,0)、`x`(word,1)、`y`(word,2) | shared | sequential |
 | 0x0014 | `setObjectGesture` | `frame`(word,0) | shared | sequential |
-| 0x0015 | `setPartyFacing` | `direction`(word,0)、`gesture`(word,1)、`memberIndex`(word,2) | shared | sequential |
+| 0x0015 | `setPartyFacing` | `direction`(word,0)、`gesture`(word,1)、`memberIndex`(word,2) | shared | sequential（#106 复核） |
+| 0x0016 | `setObjectFacing` | `eventObjectId`(word,0)、`direction`(word,1)、`frame`(word,2) | shared | sequential |
 | 0x0017 | `setExtraAttr` | `equipPartWord`(word,0)、`field`(word,1)、`value`(signedWord,2) | shared | sequential |
 | 0x0018 | `equipItem` | `equipPartWord`(word,0)、`itemId`(word,1) | shared | sequential |
 | 0x0019 | `incPlayerAttr` | `field`(word,0)、`delta`(signedWord,1)、`roleOperand`(word,2) | shared | sequential |
@@ -288,19 +289,23 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0031 | `changeBattleSprite` | `battleSprite`(word,0) | shared | sequential |
 | 0x0033 | `collectEnemyForItems` | `to`(reference,0) | shared | conditionalJump |
 | 0x0034 | `transformCollectedEnemies` | `to`(reference,0) | shared | conditionalJump |
+| 0x0038 | `teleportParty` | `to`(reference,0) | shared | conditionalJump |
 | 0x0039 | `drainHpFromEnemy` | `amount`(word,0) | shared | sequential |
 | 0x003A | `playerFlee` | `to`(reference,0) | shared | conditionalJump |
 | 0x003B | `setDialog` | `box`="center"、`color`(lowByte,0)、`rngWord`(word,2) | triggerSwitchOnly | sequential |
 | 0x003C | `setDialog` | `box`="upper"、`portraitId`(word,0)、`color`(lowByte,1)、`rngWord`(word,2) | triggerSwitchOnly | sequential |
 | 0x003D | `setDialog` | `box`="lower"、`portraitId`(word,0)、`color`(lowByte,1)、`rngWord`(word,2) | triggerSwitchOnly | sequential |
 | 0x003E | `setDialog` | `box`="centerWindow"、`color`(lowByte,0) | triggerSwitchOnly | sequential |
+| 0x003F | `rideEventObjectSlow` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
 | 0x0040 | `setTriggerMode` | `eventObjectId`(word,0)、`mode`(word,1) | shared | sequential |
 | 0x0041 | `markFailed` | — | shared | sequential |
 | 0x0042 | `simulateMagic` | `magicId`(word,0)、`baseDamage`(word,1)、`enemyOperand`(signedWord,2) | shared | sequential |
 | 0x0043 | `setMusic` | `musicId`(word,0)、`mode`(word,1) | shared | sequential |
-| 0x0046 | `setPartyPos` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
+| 0x0044 | `rideEventObject` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
+| 0x0046 | `setPartyPos` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential（#106 复核） |
 | 0x0049 | `setState` | `eventObjectId`(word,0)、`state`(signedWord,1) | shared | sequential |
 | 0x004A | `setBattlefield` | `battlefieldId`(word,0) | shared | sequential（#103 复核） |
+| 0x004C | `chasePlayer` | `chaseRange`(word,0)、`speed`(word,1)、`floating`(word,2) | shared | sequential |
 | 0x004D | `waitForAnyKey` | — | shared | sequential |
 | 0x004E | `requestReload` | — | shared | stop（#97 复核修正） |
 | 0x004F | `fadeToRed` | — | shared | sequential |
@@ -317,6 +322,8 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x005F | `killPlayer` | — | shared | sequential |
 | 0x0060 | `killEnemy` | — | shared | sequential |
 | 0x0061 | `notPoisonedJump` | `to`(reference,0) | shared | conditionalJump |
+| 0x0062 | `pauseEnemyChasing` | `cycles`(word,0) | shared | sequential |
+| 0x0063 | `speedUpEnemyChasing` | `cycles`(word,0) | shared | sequential |
 | 0x0064 | `enemyHpAboveJump` | `percent`(word,0)、`to`(reference,1) | shared | conditionalJump |
 | 0x0066 | `throwWeapon` | `magicId`(word,0)、`damageUnits`(word,1) | shared | sequential |
 | 0x0067 | `enemyUseMagic` | `magicId`(word,0)、`magicRate`(word,1) | shared | sequential |
@@ -324,6 +331,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0069 | `enemyEscape` | — | shared | sequential |
 | 0x006A | `stealFromEnemy` | `stealRate`(word,0) | shared | sequential |
 | 0x006B | `blowAwayEnemies` | `strength`(signedWord,0) | shared | sequential |
+| 0x006C | `walkNpcStep` | `eventObjectId`(word,0)、`xOffset`(signedWord,1)、`yOffset`(signedWord,2) | shared | sequential |
 | 0x0005 | `redraw` | `delayUnits`(word,1)、`updateGestures`(word,2) | triggerSwitchOnly | sequential（#99 复核修正） |
 | 0x006D | `setSceneScripts` | `sceneId`(word,0)、`onEnter`(word,1)、`onTeleport`(word,2) | shared | sequential |
 | 0x0073 | `fadeScene` | `mode`(word,0) | shared | sequential |
@@ -550,6 +558,25 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0014 | `setObjectGesture`（#78 已具名，复核维持） | `frame`=operand0（728 `pEvtObj->wCurrentFrameNum = operand0`；729 方向硬编码 `kDirSouth`（palcommon.h:92，值 0）**非操作数**——无 direction 字段）；作用于调用者对象 pEvtObj（无对象操作数）；operand1、2 参考 case 未用 | shared（724：break） | sequential | frame 重编码；operand1、2 保留 | 475（frame 0..35；operand1/2 全 0） |
 
 真实数据核对：本批命中合计 2210（新具名 422 = 0x0011 421 + 0x0012 1；复核 1788 = walkStep 385 + face 493 + walkTo 387 + setObjectPosition 48 + setObjectGesture 475 本已具名）。raw 命中从 #104 的 5222 降至 4800（−422）。本批无引用字段、无跳转目标，无悬空拒绝面变化；0x0012 唯一命中的 0xFF80 按无符号 WORD 原样往返（有符号解读无参考转型佐证，不设 signedWord）。export→rebuild SHA `f36cf853…b39e72a` 字节一致。框架零扩展：`eventObjectId`/`xOffset`/`yOffset`/`x`/`y`/`h`/`direction`/`frame` 全部沿用既有 word 类型、walkStep 的 `direction` 沿用既有 opcodeOffset 绑定；`DecodeValidatesReferenceRange` 导出期预检不启用（与前批同口径，悬空拒绝仍在重建标签解析处）。场景移动域（#77 六域之一，共 75 个 opcode 拆 8 批）本批为移动批1，剩余移动批2/3（#106/#107）、对象批1/2（#108/#109）、屏幕批1/2（#110/#111）、音乐场景特殊（#112）待后续批次。
+
+#### M5 场景移动批2 条目（#106，场景移动域-移动批2）
+
+本批核对结论：全部操作数仍为立即 WORD（同前批，`pScript->rgwOperand[n]` 直读，无变量寻址）；十个 opcode 位全部位于两执行器共享的 `PAL_InterpretInstruction`（trigger 开关 3206-3440 / auto 开关 3522-3641 逐一核对无对应 case，每个 case 在 script.c 仅出现一次，executor 一律 `shared`），后继除 0x0038 teleportParty 的失败分支（1568-1569 置脚本失败标记 + `wScriptEntry = to − 1`，playerFlee/changeCash 同形普通引用跳转，WORD 0=L0000）为 conditionalJump 外一律 sequential（break 后函数尾 3085 `return wScriptEntry + 1`；ride 族的同步到达循环在被调函数内部（script.c:203 起），非脚本条目重试停等）。**朝向/手势双形状复核**：0x0015 setPartyFacing 写队伍全局——`wPartyDirection = operand0`（736）且 `rgParty[operand2].wFrame = direction×3 + operand1`（737-738）：direction 是队伍朝向、gesture 是该朝向 3 帧行内偏移（非绝对帧）、memberIndex 是 0 基 rgParty 槽（无 −1，数组上限 MAX_PLAYABLE_PLAYER_ROLES=5，palcommon.h:48，真实数据仅 0..2）——三字段映射复核维持；0x0016 是对象侧变体但 operand2 是**绝对帧**（748 `pCurrent->wCurrentFrameNum = operand2`）非 gesture 行偏移，定名 frame 区别，且 operand0 兼任门控（745 `!= 0` 守卫：0 是整体跳过的 no-op 形态，0xFFFF 仍为调用者且生效，与前奏 0=调用者口径在 0 值上分岔）。0x0046 复核：viewport = (x×32+h×16, y×16+h×8) − partyoffset（1679-1685）、队员自 partyoffset 起按 wPartyDirection 相关 16/8 像素步长排布并同步 rgTrail（1690-1699）——x/y/h 与 walkTo/ride 族同一 tile 坐标系，三字段映射维持。0x004C 三操作数：chaseRange（敏感半径 tile 单位，script.c:393 `|dx|+2|dy| < range×32×gpGlobals->wChaseRange`；WORD 0 运行时归一 8 仅改内存条目 1740-1742）、speed（0→4 同口径，1745-1747）、floating 真值 WORD（非零无视障碍，script.c:437-443）。0x0062/0x0063 仅 operand0=持续周期数（wChasespeedChangeCycles，play.c:235-237 每次游戏更新递减、归零时全局范围复位 1），全局 wChaseRange 硬编码 0/3（1972/1980）非操作数——0=追捕块被 341 的 `!= 0` 守卫整体跳过（暂停）、3=敏感半径×3（加速），两 case 仅此常量差异故保持两动词。signed/unsigned：**仅 0x006C 两处 `(SHORT)` 转型（2060-2061 xOffset/yOffset，本批唯二有符号字段）**，其余全部无符号 WORD。行号与逐条语义如下。
+
+| opcode | 动词 | 字段映射与寻址 | 执行方式（script.c 行号） | 后继 | 反向编码 | 真实数据 |
+|---|---|---|---|---|---|---|
+| 0x0015 | `setPartyFacing`（#78 已具名，复核维持） | `direction`=operand0（736 写 `gpGlobals->wPartyDirection`）、`gesture`=operand1（737-738 `rgParty[memberIndex].wFrame = direction×3 + gesture`，朝向 3 帧行内偏移非绝对帧）、`memberIndex`=operand2（737 0 基 rgParty 槽直用无 −1） | shared（732：break） | sequential | 三字段重编码；无保留操作数 | 915（direction 0×461/1×125/2×156/3×173；gesture 0×681、1..26 共 234——最大帧 3×3+26=35，与 setObjectGesture 的 frame 0..35 同一帧空间佐证；memberIndex 0×820/1×88/2×7） |
+| 0x0016 | `setObjectFacing`（新） | `eventObjectId`=operand0（前奏选 pCurrent：0/0xFFFF=调用者、否则 operand0−1 1 基，626-638；**另有 ≠0 门控**：0 整体跳过 745）、`direction`=operand1（747 写 `pCurrent->wDirection`）、`frame`=operand2（748 写 `pCurrent->wCurrentFrameNum`，绝对帧） | shared（741：break） | sequential | 三字段重编码；无保留操作数 | 730（eventObjectId 0×3（no-op 门控形态）/0xFFFF×3（调用者）/1 基 11..4810×724；direction 0×377/1×105/2×105/3×142/4×1（4=kDirUnknown，palcommon.h:96，唯一一例）；frame 0×542、1..27 共 188） |
+| 0x0038 | `teleportParty`（新） | `to`=operand0（失败跳转目标：1558-1561 非战斗且当前场景 `rgScene[wNumScene−1].wScriptOnTeleport`≠0 时嵌套 `PAL_RunTriggerScript(teleport, 0xFFFF)` 后顺序；战斗中或无传送脚本时 1568 置脚本失败标记并 1569 `wScriptEntry = to − 1` 跳转；普通引用 WORD 0=L0000，非可空 failTarget 绑定） | shared（1554：break） | conditionalJump（失败→to，成功→next） | `to` 解析标签重编码；operand1、2 保留 | 1（to=38780=L977C，在 43538 条内且非零） |
+| 0x003F | `rideEventObjectSlow`（新） | `x`=operand0、`y`=operand1、`h`=operand2（1609-1610 `PAL_PartyRideEventObject(wEventObjectID, x, y, h, 2)`——队伍骑调用者对象至绝对 tile 坐标；速度 2 为常量非操作数；被调函数内部同步循环至到达，非脚本条目重试停等） | shared（1605：break） | sequential | 三字段重编码；无保留操作数 | 2（x 30/47、y 66/77、h 全 0） |
+| 0x0044 | `rideEventObject`（新） | 同 0x003F 操作数形状，速度常量 4（1654）；被调按 x×32+h×16 / y×16+h×8 换算像素（script.c:241/304），与 0x0046 同一 tile 坐标系 | shared（1650：break） | sequential | 三字段重编码；无保留操作数 | 112（x 8..56、y 19..102、h 0×49/1×63） |
+| 0x0046 | `setPartyPos`（#78 已具名，复核维持） | `x`=operand0、`y`=operand1、`h`=operand2（1679-1685 viewport=(x×32+h×16, y×16+h×8)−partyoffset；1690-1699 队员自 partyoffset 起按 wPartyDirection 相关 16/8 像素步长（1672-1677：West/South x +16、North/East −16；West/North y +8、South/East −8）排布并同步 rgTrail——三字段映射维持） | shared（1665：break） | sequential | 三字段重编码；无保留操作数 | 1065（x 0..57、y 0..120（各含 1 个 0）、h 0×582/1×483） |
+| 0x004C | `chasePlayer`（新） | `chaseRange`=operand0（敏感半径 tile 单位：script.c:393 `\|dx\|+2\|dy\| < range×32×gpGlobals->wChaseRange` 才追；WORD 0 运行时归一 8 仅改内存条目 1740-1742）、`speed`=operand1（0→4 同口径，1745-1747）、`floating`=operand2（真值 WORD：非零在被调内无视障碍，script.c:436-444）；追捕者=调用者对象 wEventObjectID（1750） | shared（1733：break） | sequential | 三字段重编码；无保留操作数 | 21（chaseRange 0×2/6..128；speed 0×10/2/4/6/8；floating 0×17/1×2/0xFFFF×2——真值 WORD 0/1/0xFFFF 形状同 waitUpdate.updateGestures） |
+| 0x0062 | `pauseEnemyChasing`（新） | `cycles`=operand0（1971 `wChasespeedChangeCycles = operand0`；全局 `wChaseRange = 0`（1972）硬编码非操作数——追捕块被 script.c:341 的 `!= 0` 守卫整体跳过即暂停；play.c:235-237 每次游戏更新递减、归零时 wChaseRange 复位 1） | shared（1967：break） | sequential | cycles 重编码；operand1、2 保留 | 1（cycles 600） |
+| 0x0063 | `speedUpEnemyChasing`（新） | 同 0x0062 周期形状，全局 `wChaseRange = 3`（1980）——每只怪物的敏感半径×3（script.c:393），仅常量差异故保持两动词 | shared（1975：break） | sequential | cycles 重编码；operand1、2 保留 | 1（cycles 600） |
+| 0x006C | `walkNpcStep`（新） | `eventObjectId`=operand0（前奏选 pCurrent/wCurEventObjectID：0/0xFFFF=调用者、否则 1 基，626-638；无守卫）、`xOffset`=operand1、`yOffset`=operand2（2060-2061 `pCurrent->x += (SHORT)operand1`、y 同理——**本批唯二 (SHORT) 转型**，像素偏移加到 WORD 型 x/y 上；2062 `PAL_NPCWalkOneStep(wCurEventObjectID, 0)` 走一步动画） | shared（2056：break） | sequential | 三字段重编码；无保留操作数 | 295（eventObjectId 0×1/0xFFFF×226（调用者）/1 基 9..3348×68；xOffset 有符号 −32..16（0×46，65504=−32）、yOffset −12..16（0×16，65524=−12）） |
+
+真实数据核对：本批命中合计 3143（新具名 1163 = 0x0016 730 + 0x0038 1 + 0x003F 2 + 0x0044 112 + 0x004C 21 + 0x0062 1 + 0x0063 1 + 0x006C 295；复核 1980 = setPartyFacing 915 + setPartyPos 1065 本已具名）。raw 命中从 #105 的 4800 降至 3637（−1163）。0x0038 唯一命中目标 38780 非零且落在 chunk 4（43538 条）内，本批唯一引用字段；无悬空拒绝面变化，`DecodeValidatesReferenceRange` 导出期预检不启用（与前批同口径）。0x006C 的有符号偏移按补码双向往返（−16 编码 0xFFF0、0xFFE0 解码 −32），与本批其余无符号 WORD 字段互不混用；0x0016 的 eventObjectId 0（no-op 门控）与 0xFFFF（调用者）两形态均有真实命中且都按 WORD 原样往返。export→rebuild SHA `f36cf853…b39e72a` 字节一致。框架零扩展：`chaseRange`/`speed`/`floating`/`cycles`/`eventObjectId`/`direction`/`frame`/`x`/`y`/`h`/`to` 沿用既有 word/reference 绑定，`xOffset`/`yOffset` 复用 signedWord（0x004C 的字数归一与 0x0057/0x0086 同口径：编码仍 0）。场景移动域（#77 六域之一，共 75 个 opcode 拆 8 批）本批为移动批2，剩余移动批3（#107）、对象批1/2（#108/#109）、屏幕批1/2（#110/#111）、音乐场景特殊（#112）待后续批次。
 
 #### raw 保底与反向编码规则
 

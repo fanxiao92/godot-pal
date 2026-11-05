@@ -1209,6 +1209,127 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Scene_movement_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement batch 2 (#106, movement part 2): setPartyFacing (review),
+        // setObjectFacing (new), teleportParty (new), rideEventObjectSlow (new),
+        // rideEventObject (new), setPartyPos (review), chasePlayer (new), pauseEnemyChasing
+        // (new), speedUpEnemyChasing (new) and walkNpcStep (new). Hand-built stream, not retail
+        // data. setPartyFacing stores the direction row plus a 0..2 pose offset for the
+        // operand-2 party slot; setObjectFacing targets the preamble event object and gates on
+        // operand 0 being non-zero (WORD 0 is a no-op form, 0xFFFF the caller); teleportParty
+        // runs the scene's teleport script or jumps to its plain reference on failure; the ride
+        // verbs share x/y/h tile operands with speeds 2/4 as runtime constants; chasePlayer's
+        // chaseRange/speed WORD-0 forms are runtime defaults (8/4) and floating is a truthy
+        // WORD; the two chase verbs only differ in the hardcoded global range 0/3; walkNpcStep
+        // moves the preamble NPC by signed pixel offsets (the batch's only SHORT casts).
+        byte[] original = Words(
+            0x0015, 2, 5, 1,                               // setPartyFacing: north, pose 5, member slot 1
+            0x0016, 84, 1, 6,                              // setObjectFacing: object 84, west, frame 6
+            0x0016, unchecked((int)0xFFFF), 3, 0,          // setObjectFacing: the caller's object, east, frame 0
+            0x0038, 6, 0, 0,                               // teleportParty: failure target L0006
+            0x003F, 30, 66, 0,                             // rideEventObjectSlow: tile (30,66) layer 0
+            0x0044, 16, 45, 1,                             // rideEventObject: tile (16,45) layer 1
+            0x0046, 10, 20, 1,                             // setPartyPos: tile (10,20) layer 1
+            0x004C, 8, 4, 1,                               // chasePlayer: range 8, speed 4, floating
+            0x0062, 600, 0, 0,                             // pauseEnemyChasing: 600 cycles
+            0x0063, 600, 0, 0,                             // speedUpEnemyChasing: 600 cycles
+            0x006C, unchecked((int)0xFFFF), unchecked((int)0xFFE0), 8, // walkNpcStep: caller, -32/+8 pixels
+            0, 0, 0, 0);                                   // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(12, commands.Count);
+        Assert.Equal("setPartyFacing", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[0]!["direction"]!.GetValue<int>());
+        Assert.Equal(5, commands[0]!["gesture"]!.GetValue<int>());
+        Assert.Equal(1, commands[0]!["memberIndex"]!.GetValue<int>());
+        Assert.Equal("setObjectFacing", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(84, commands[1]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(6, commands[1]!["frame"]!.GetValue<int>());
+        Assert.Equal("setObjectFacing", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[2]!["eventObjectId"]!.GetValue<int>()); // caller form
+        Assert.Equal(3, commands[2]!["direction"]!.GetValue<int>());
+        Assert.Equal("teleportParty", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("L0006", commands[3]!["to"]!.GetValue<string>());
+        Assert.Equal("rideEventObjectSlow", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(30, commands[4]!["x"]!.GetValue<int>());
+        Assert.Equal(66, commands[4]!["y"]!.GetValue<int>());
+        Assert.Equal("rideEventObject", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(45, commands[5]!["y"]!.GetValue<int>());
+        Assert.Equal(1, commands[5]!["h"]!.GetValue<int>());
+        Assert.Equal("setPartyPos", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(10, commands[6]!["x"]!.GetValue<int>());
+        Assert.Equal(20, commands[6]!["y"]!.GetValue<int>());
+        Assert.Equal("chasePlayer", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(8, commands[7]!["chaseRange"]!.GetValue<int>());
+        Assert.Equal(4, commands[7]!["speed"]!.GetValue<int>());
+        Assert.Equal(1, commands[7]!["floating"]!.GetValue<int>());
+        Assert.Equal("pauseEnemyChasing", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(600, commands[8]!["cycles"]!.GetValue<int>());
+        Assert.Equal("speedUpEnemyChasing", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(600, commands[9]!["cycles"]!.GetValue<int>());
+        Assert.Equal("walkNpcStep", commands[10]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[10]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(-32, commands[10]!["xOffset"]!.GetValue<int>()); // 0xFFE0 through the SHORT cast
+        Assert.Equal(8, commands[10]!["yOffset"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the pose row and member slot move, the object
+        // facing switches to the no-op gate form with the kDirUnknown direction and frame 27,
+        // the teleport failure target moves to L0002, the rides and party position move, the
+        // chase range drops to the runtime-default encoding with the floating truthy form, the
+        // pause cycles reset, and the NPC step becomes a 1-based object with -16/-12 offsets.
+        commands[0]!["direction"] = 3;
+        commands[0]!["gesture"] = 0;
+        commands[0]!["memberIndex"] = 2;
+        commands[1]!["eventObjectId"] = 0; // WORD 0: the gate no-op form still encodes
+        commands[1]!["direction"] = 4; // kDirUnknown appears once in real data
+        commands[1]!["frame"] = 27;
+        commands[3]!["to"] = "L0002";
+        commands[4]!["x"] = 47;
+        commands[4]!["h"] = 1;
+        commands[5]!["y"] = 102;
+        commands[6]!["x"] = 0;
+        commands[6]!["h"] = 0;
+        commands[7]!["chaseRange"] = 0; // runtime default 8 still encodes 0
+        commands[7]!["floating"] = 65_535;
+        commands[8]!["cycles"] = 0;
+        commands[10]!["eventObjectId"] = 9;
+        commands[10]!["xOffset"] = -16;
+        commands[10]!["yOffset"] = -12;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0015, 3, 0, 2,
+            0x0016, 0, 4, 27,
+            0x0016, unchecked((int)0xFFFF), 3, 0,
+            0x0038, 2, 0, 0,
+            0x003F, 47, 66, 1,
+            0x0044, 16, 102, 1,
+            0x0046, 0, 20, 0,
+            0x004C, 0, 4, unchecked((int)0xFFFF),
+            0x0062, 0, 0, 0,
+            0x0063, 600, 0, 0,
+            0x006C, 9, unchecked((int)0xFFF0), unchecked((int)0xFFF4),
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A dangling teleportParty target is rejected without output.
+        commands[3]!["to"] = "L0099";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
