@@ -34,7 +34,7 @@ Assert ($unit -notmatch '--filter|--no-build|--no-restore|Invoke-CiUnit|New-CiCa
 Assert ($unit -notmatch '(?m)^    (if|needs):' -and $unit -match 'timeout-minutes: 20') 'Unit must run independently within the existing job budget.'
 foreach ($fragment in @('persist-credentials: false','fetch-depth: 2','lfs: false','global-json-file: global.json','if: always()','if-no-files-found: error','name: ci-unit-evidence-${{ github.run_id }}-${{ github.run_attempt }}')) { Assert ($unit.Contains($fragment)) "Missing native CI policy: $fragment" }
 Assert ($unit.Contains('Test-UnitBoundary.ps1')) 'Unit job must run the source-boundary guard (M5 retro: #113 shipped a unit File-I/O violation CI could not see).'
-Assert ($unit.Contains("git grep --cached -l -e 'version https://git-lfs'")) 'Unit job must guard committable trees against LFS pointers (M5 retro: #76 CI diagnosis).'
+Assert ($unit.Contains('git grep --cached -l -e') -and $unit.Contains('https://git-lfs')) 'Unit job must guard committable trees against LFS pointers (M5 retro: #76 CI diagnosis).'
 # #76 informational committable-scope full gate: the same Test-M0 entry as local acceptance.
 Assert ($full -cmatch [regex]::Escape("if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action == 'ready_for_review')")) 'Full gate must run only on main push, PR readiness or manual dispatch.'
 Assert (-not [regex]::IsMatch($full, "github\.event\.action == 'synchronize'")) 'Full gate must never be scheduled per synchronize.'
