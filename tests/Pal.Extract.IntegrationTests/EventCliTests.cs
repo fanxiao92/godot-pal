@@ -1535,6 +1535,96 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Scene_movement_object_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement object batch 2 (#109, the 13-opcode object subdomain's
+        // closing batch of 6): syncState (conditional state sync from the preamble-
+        // selected object to the caller, ungated unlike the 0x0024 family),
+        // setObjectLayer (the SHORT draw-order/draw-offset layer, real data carries
+        // -10), placeUsedItem (place the used item's event object in front of the
+        // party, jumping to the plain reference on a not-in-scene or blocked
+        // failure), animateObject (the speed-0 gesture-frame advance, real data uses
+        // the caller form only), and the two #109 re-verified bits setObjectScript
+        // (the object union's script slots) and setStateRange (the closed 1-based
+        // event-object range). Hand-built stream, not retail data; the placeUsedItem
+        // failure target of the real @9AE6 form (39656) maps to the in-file L0006.
+        byte[] original = Words(
+            0x006F, 103, 0, 0,                                    // syncState: real-data @00FF form
+            0x007E, unchecked((int)0xFFFF), 33, 0,                // setObjectLayer: real-data @517C caller form
+            0x0084, 798, 2, 6,                                    // placeUsedItem: real-data @9AE6 form, target in-file
+            0x0087, 0, 0, 0,                                      // animateObject: real-data @0349 caller form
+            0x0090, 435, 0, 0,                                    // setObjectScript: real-data @552E clearing form
+            0x009A, 102, 103, 2,                                  // setStateRange: real-data @0678 blocker form
+            0, 0, 0, 0);                                          // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(7, commands.Count);
+        Assert.Equal("syncState", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(103, commands[0]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(0, commands[0]!["state"]!.GetValue<int>());
+        Assert.Equal("setObjectLayer", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[1]!["eventObjectId"]!.GetValue<int>()); // caller form
+        Assert.Equal(33, commands[1]!["layer"]!.GetValue<int>());
+        Assert.Equal("placeUsedItem", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(798, commands[2]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[2]!["state"]!.GetValue<int>());
+        Assert.Equal("L0006", commands[2]!["to"]!.GetValue<string>()); // the failure reference
+        Assert.Equal("animateObject", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[3]!["eventObjectId"]!.GetValue<int>()); // the caller form
+        Assert.Equal("setObjectScript", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(435, commands[4]!["objectId"]!.GetValue<int>()); // the object union index, not an event object
+        Assert.Equal(0, commands[4]!["value"]!.GetValue<int>()); // the real clearing form
+        Assert.Equal(0, commands[4]!["slotIndex"]!.GetValue<int>());
+        Assert.Equal("setStateRange", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(102, commands[5]!["fromEventObjectId"]!.GetValue<int>());
+        Assert.Equal(103, commands[5]!["toEventObjectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[5]!["state"]!.GetValue<int>());
+        Assert.Equal("end", commands[6]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the sync's other object becomes the
+        // real-data @0102 form's object with a negative hidden state, the layer becomes
+        // the real-data @7DB4 negative form, the placement failure target moves and its
+        // state turns normal, the animation addresses a 1-based object explicitly, the
+        // object script installs the setAutoEntry real-data entry top into the third
+        // union script slot, and the range collapses to the hidden state.
+        commands[0]!["eventObjectId"] = 102;
+        commands[0]!["state"] = -123; // 0xFF85 through the SHORT cast
+        commands[1]!["layer"] = -10; // 0xFFF6, the real-data negative layer
+        commands[2]!["to"] = "L0004";
+        commands[2]!["state"] = 1;
+        commands[3]!["eventObjectId"] = 4168; // 1-based, no real hit but the preamble form
+        commands[4]!["value"] = 41_099; // 0xA08B, the setAutoEntry real-data entry top
+        commands[4]!["slotIndex"] = 2; // union index 4, the third script slot
+        commands[5]!["state"] = 0; // kObjStateHidden, the real-data majority
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x006F, 102, unchecked((int)0xFF85), 0,
+            0x007E, unchecked((int)0xFFFF), unchecked((int)0xFFF6), 0,
+            0x0084, 798, 1, 4,
+            0x0087, 4168, 0, 0,
+            0x0090, 435, 41_099, 2,
+            0x009A, 102, 103, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A range state beyond the signed WORD range is rejected without output.
+        commands[5]!["state"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rangeRejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rangeRejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]

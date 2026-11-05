@@ -319,6 +319,16 @@ public static class OpcodeRegistry
         // layer global becomes operand2 * 8 (script.c:2107; drawn at rgParty[i].y + wLayer + 10,
         // scene.c:225); gestures update only when an offset is non-zero (script.c:2109-2112).
         new(0x006E, "moveParty", [new("xOffset", OpcodeFieldKind.SignedWord, 0), new("yOffset", OpcodeFieldKind.SignedWord, 1), new("layerUnits", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #109: "Sync the state of current event object with another event object"
+        // (script.c:2115-2122) - if the preamble-selected object's sState (pCurrent,
+        // script.c:626-638: 0/0xFFFF = caller, else a 1-based index) equals (SHORT)
+        // operand 1, the caller's sState (pEvtObj) becomes operand 1 too; unlike the
+        // 0x0024 setState family there is no operand0 != 0 gate - WORD 0 selects the
+        // caller as pCurrent and the check degrades to a self-compare. sState is a SHORT
+        // field (global.h:103) like setState.state, so the binding is signed. Real data:
+        // 11 hits - eventObjectId 63..139 (all 1-based), state 0 x10 / 1 x1; operand 2
+        // is unused by the case and preserved (one hit carries 1).
+        new(0x006F, "syncState", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #107: PAL_PartyWalkTo(x, y, h, 2) (script.c:2129) - the whole party walks to the
         // absolute map tile position at the constant low speed 2; the callee blocks until
         // arrival (script.c:133-197), so the successor stays sequential.
@@ -343,6 +353,14 @@ public static class OpcodeRegistry
         // operand1 / y += (SHORT) operand2 (script.c:2281-2282) - the walkNpcStep shape
         // without the walk-one-step animation call.
         new(0x007D, "moveObject", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("xOffset", OpcodeFieldKind.SignedWord, 1), new("yOffset", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #109: "Set the layer of event object" (script.c:2285-2290) - the
+        // preamble-selected object's sLayer becomes (SHORT)operand1; sLayer is a SHORT
+        // field (global.h:100) consumed as a vertical draw offset and draw-order value
+        // in half-tile units (scene.c:302 y += sLayer * 8 + 9, scene.c:316
+        // PAL_AddSpriteToDraw(..., sLayer * 8 + 2)). Real data: 10 hits - eventObjectId
+        // 0xFFFF (caller, script.c:517C) and 1-based 59..4168; layer -10 (0xFFF6, the
+        // signed evidence), 0, 3, 7, 10, 13, 33; operand 2 is unused and preserved.
+        new(0x007E, "setObjectLayer", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("layer", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #107: "Move the viewport" with three forms (script.c:2296-2378): WORD 0/0 offsets
         // reset the viewport to the normal state (party recentered at 160,112; redrawn unless
         // frames is 0xFFFF, script.c:2296-2318); otherwise the signed pixel offsets scroll the
@@ -357,8 +375,27 @@ public static class OpcodeRegistry
         // re-executes (wScriptEntry--, script.c:2444) - a runtime stall, not a jump.
         new(0x0082, "walkToFastest", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0083, "objectOutOfZoneJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("zoneUnits", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #109: "Place the item which player used as an event object to the scene"
+        // (script.c:2473-2509) - operand 0 is a 1-based global event-object id that must
+        // fall inside the current scene's event-object window (rgScene[wNumScene-1].
+        // wEventObjectIndex < operand0 <= rgScene[wNumScene].wEventObjectIndex,
+        // script.c:2475-2481); the object is placed one step in front of the party
+        // (party map position + 16/-16 px x and 8/-8 px y by facing, script.c:2483-2491)
+        // unless PAL_CheckObstacle blocks (script.c:2493-2500), then its sState becomes
+        // (SHORT)operand1; both failure paths jump to operand 2 with the script marked
+        // failed - the same plain-reference jump shape as 0x0038/0x0083. Real data:
+        // 2 hits - eventObjectId 798/3607, state 2, target 39656.
+        new(0x0084, "placeUsedItem", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0085, "delay", [new("delayUnits", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0086, "itemNotEquippedJump", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #109: "Animate the event object" (script.c:2542-2546) -
+        // PAL_NPCWalkOneStep(wCurEventObjectID, 0) at speed 0 moves nothing (scene.c:887-888
+        // multiply the step by the speed) and only advances the selected object's gesture
+        // frame (wCurrentFrameNum++ wrapping at nSpriteFrames, with 3-frame sprites
+        // wrapping at 4, scene.c:891-900); the callee returns early for id 0 or past
+        // nEventObject (scene.c:873-876). Real data: 189 hits with all three operands
+        // zero - the caller form only.
+        new(0x0087, "animateObject", [new("eventObjectId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #102: unlike 0x0057 (by MP), this has no role/multiplier operand: the base damage is
         // min(cash, 5000) * 2 / 5 written into the magic table entry named by operand 0, and
         // the same amount is deducted from cash (script.c:2549-2557).
@@ -410,7 +447,22 @@ public static class OpcodeRegistry
         new(0x00A1, "gatherParty", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x00A2, "randomBranch", [new("count", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.RandomBranch),
         new(0x00A6, "backupScreen", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #109 re-verified against script.c:2607-2613: the #78 conclusion holds - operand 0
+        // indexes gpGlobals->g.rgObject directly with no -1, i.e. a 0-based object-union id
+        // (object.json), not an event object; operand 2 selects the union's script slots
+        // rgwData[2 + slot] (slot 0..2 -> the per-view script WORDs at union indices 2..4:
+        // item onUse/onEquip/onThrow, magic onSuccess/onUse, enemy turnStart/battleEnd/ready,
+        // poison playerScript/reserved/enemyScript, player friendDeath/dying); operand 1 is
+        // the written WORD - a cross-structure chunk-4 script entry like setAutoEntry.entry,
+        // WORD 0 clearing the slot (real data: 3 hits all clearing - objectId 435/454/485,
+        // value 0, slotIndex 0).
         new(0x0090, "setObjectScript", [new("objectId", OpcodeFieldKind.Word, 0), new("value", OpcodeFieldKind.Word, 1), new("slotIndex", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #109 re-verified against script.c:2758-2766: the #78 conclusion holds - the closed
+        // 1-based event-object range operand0..operand1 writes lprgEventObject[i - 1].sState
+        // for every i; operand 2 has no (SHORT) cast but assigns into the SHORT sState storage
+        // (global.h:103), keeping setState.state's signedWord binding; an empty range
+        // (operand0 > operand1, real data has one to=0 hit) writes nothing. Real data: 81
+        // hits - from 26..4747, to 27..4749, state 0 x48 / 1 x6 / 2 x27.
         new(0x009A, "setStateRange", [new("fromEventObjectId", OpcodeFieldKind.Word, 0), new("toEventObjectId", OpcodeFieldKind.Word, 1), new("state", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0xFFFF, "showDialog", [new("messageId", OpcodeFieldKind.Word, 0), new("descriptionLineWord", OpcodeFieldKind.Word, 1)], OpcodeExecutor.BothSwitchesDiffer, OpcodeSuccessor.MessageSpan),
     ];
