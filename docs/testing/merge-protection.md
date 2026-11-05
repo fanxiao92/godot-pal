@@ -17,7 +17,7 @@
 
 ## 作用与限制
 
-当前阶段性测试要求是独立 `unit-check`；旧 `full-check` 仍精确失败，但已不是 required check。检查名及 Actions App 绑定不认证 workflow 路径或 ref；候选身份及 Unit/完整门区别按 [CI 分流](ci-dispatch.md)核对。
+当前阶段性测试要求是独立 `unit-check`；#76 起 `full-check` 已从 #69 的过渡显式拒绝恢复为真实的 informational committable-scope 完整门（非 required check；范围界定、私有资产边界与转 required 操作步骤见[工程检查](engineering-checks.md)，调度见[CI 分流](ci-dispatch.md)）。检查名及 Actions App 绑定不认证 workflow 路径或 ref；候选身份及 Unit/完整门区别按 [CI 分流](ci-dispatch.md)核对。
 
 #67 原件分别证明：旧 full 要求仍在时普通 merge 实际 405 拒绝；切换后对 pending/不完整、取消、指定失败、缺失、错误来源同名 success、旧候选和错误实际 checkout 的普通 merge 拒绝；已知良好 [PR #70](https://github.com/fanxiao92/godot-pal/pull/70) 在 Unit success、旧 full failure 时普通 merge 实际允许，合入 `d9bc96e4cb4166600cab6027a7d6370221d01d55`，随后[真实 main push](https://github.com/fanxiao92/godot-pal/actions/runs/41440000263)全量 Unit/原件核验通过。控制 PR #71 关闭且未合并；失败原件和独立恢复均保留，#55 未操作。实际 run/attempt、检查绑定、HTTP 响应和证据限制见 #67 回执，不以本页摘要代替。
 

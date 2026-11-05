@@ -76,3 +76,30 @@ pwsh -NoProfile -File ./tests/Test-Engineering.Tests.ps1
 两者只操作自有中文／空格临时目录，均从 foreign cwd 调公开入口。AST 回归包含可观测副作用脚本、模块／数据、括号／字符串、多文件混错、缺／空／无效范围、缓存排除与外部生成文件预检；故意坏脚本仅为数据，不提交永久坏源码。
 
 聚合回归的显式人工仓库以 stub 工具验证接线，不能冒称其 SDK 或包来源是真实验收：核固定步骤、中文原始字节、真实退出 7、采证失败保留原失败、缺结果、损坏 UTF-8、缺／坏 bundle、既有目录不覆盖、默认清理和失败后正常调用无污染。真实仓库 Offline／OwnedProcess 必须另外执行并分别报告。
+
+## CI committable-scope 完整门（full-check，#76）
+
+`full-check` job 把 `Test-M0.ps1` 的**可提交子集**搬上 CI：以 `-Scope committable` 走与本地完整门同一入口、同一批计划、同一 TRX 身份断言与失败控制（三轮合成批、空缓存整建、警告基线、native-map 批、3 个 1-failure 控制、startup 检查）。先以 informational（非 required）上线，不用 `continue-on-error`：失败如实红，按两步上线设计不阻塞合并。结构与调度的本地回归是 `tests/Test-CiWorkflow.Tests.ps1`（真实 block 提取 + 真实 dotnet 夹具，不启动 Godot/远端 Actions）。
+
+### 范围界定与私有资产边界
+
+- **可提交子集 = Test-M0 全项减 local-only 真实分相例**：`RealFirstBattleFlowTests` 依赖 gitignored 私有资产 `src/Pal.Game/Assets/M4RealBattle53Closure`（M4 GPU/人工验收链在机外显式准备，永不提交/上传）。committable scope 由 `GameTestBatches.ps1` 的 `$script:LocalOnlyRealMatches` 单源声明：该类仍编译且可发现（Godot source/discovery 仍 626），仅退出执行计划（scene-realfull 3→2、game 正例 623→622）；local-only 声明必须留在 scene-realfull 批内、不得整批清空，否则 fail-closed。
+- **本地仍全量跑**：默认 `-Scope full` 行为与输出句式逐字不变；真实分相例的本地验收收据仍由交付流程提供（资产不在仓库，CI 上按身份声明跳过，不是环境误判）。
+- PASS summary：full 变体保留原句式（含「this PASS alone does not establish remote-CI execution identity」）；committable 变体以「committable-scope full gate」开头、声明排除正例数与私有资产本地收据边界、结尾声明远端 PASS 不替代被排除正例的本地全套门。
+- job/step 名与 `PASS.txt` 回显携带 committable-scope full gate 身份；artifact `ci-full-evidence-<run_id>-<run_attempt>` 上传 37 份 TRX、PASS.txt 与身份 JSON（不含 NuGet 缓存；私有产物在 CI 上本就不存在）。
+
+### 调度与预算
+
+- 仅 `push`（main）、`pull_request` 的 `ready_for_review` 动作与显式 `workflow_dispatch` 触发；绝不 per-synchronize。`timeout-minutes: 35`（预算 25–35 分钟/次）；批内 session 超时钉（共享 120s、native-map/scene-realfull 300s）与本地同机制（同一 Test-M0 代码）。
+- 引擎与 GdUnit：`Get-Godot.ps1`（官方 4.7.2 mono 归档，SHA512 钉死）与 Test-M0 内建 bootstrap（[固定源码包](gdunit-source-packages.md)）逐次下载核验，不缓存复用。
+
+### 钉同步时机
+
+非 Game 工程钉（core/cli-unit/cli-integration 的 passed/skipped）只被**完整门实际运行**验证；scoped 套件（Test-Range、单工程 `dotnet test`）不触发它们。M5 期间系列票只跑 scoped 套件，钉停留在 #53 同步值（914/142/279+2），本票按本 worktree 受控单跑实测同步为 928/464/359+2（先例 #53 `2e092ce`「sync gate pins to actual」；TRX 留本票回执）。**凡增加/迁移测试的票，要么同步钉，要么在其回执中声明钉未同步的完整门状态**，否则完整门（本地与 CI）在下一次运行前不可用。
+
+### 转 required 的操作步骤（维护者后执）
+
+1. informational 观察：连续 3 次绿（main push ×1 + PR ready ×2 或等价），无预算超限（Actions 可见时长不超 35 分钟）。保留 run/attempt 与 check-run 链接作为首绿证据。
+2. 按[保护说明](merge-protection.md)的受控流程：GET 保存现保护对象 → 仅以 checks-only 载荷把 `full-check` 加入 required status checks（保留 `unit-check`、strict、enforce_admins、禁强推/删除不变）→ GET 回读比较。
+3. 观察拒绝/允许行为（pending/取消/指定失败/缺失/错误候选）后如实记录；#69 的过渡显式拒绝已被本票替换为真实门，无需另行关闭。
+4. 回滚同样按受控流程恢复原 required 集合；不因 informational 绿自动写入保护。

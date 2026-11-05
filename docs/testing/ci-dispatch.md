@@ -12,7 +12,9 @@
 
 固定工程为 `tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj` 和 `tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj`。每工程独立 step，直接 `dotnet test <csproj> --configuration Debug --settings tests/unit.runsettings --logger 'trx;LogFileName=results.trx' --results-directory <本轮目录>`；无 filter/path 筛选、独立 discovery、solution、`--no-build` 或 `--no-restore`。前项失败后后项按 Actions 默认成功条件不执行，上传仍尽力运行。
 
-自动路径不运行 Source/Offline、Integration、Prepare、Godot 或完整门，也不下载 Godot/GdUnit；它们继续是显式选择。
+同一 workflow 的 `full-check` job（#76 起）独立调度：仅 push(main)、PR `ready_for_review` 动作与显式 `workflow_dispatch`，绝不 per-synchronize；以 `Test-M0.ps1 -Scope committable` 执行可提交范围完整门（真实退出码、TRX 身份断言、三轮合成批、失败控制，与本地同一入口与超时钉），引擎由 `Get-Godot.ps1` 钉死校验下载，GdUnit 由 Test-M0 内建 bootstrap 准备。范围界定、私有资产边界与转 required 步骤见[工程检查](engineering-checks.md)；它与 unit-check 无 needs 关系，artifact 为 `ci-full-evidence-<run_id>-<run_attempt>`。
+
+Unit 自动路径（unit-check job）不运行 Source/Offline、Integration、Prepare、Godot 或完整门，也不下载 Godot/GdUnit；它们继续是显式选择（full-check job 是例外，见上节）。
 
 ## 工具链、身份与失败
 
@@ -36,7 +38,7 @@ Actions 日志保留实际步骤输出和退出；artifact `ci-unit-evidence-<ru
 
 [#69](https://github.com/fanxiao92/godot-pal/issues/69)/[#67](https://github.com/fanxiao92/godot-pal/issues/67) 在 [PR #70](https://github.com/fanxiao92/godot-pal/pull/70)、[PR #72](https://github.com/fanxiao92/godot-pal/pull/72) 的原交付及远端控制是历史事实；包括 merge 等价修复、负控制 PR #71 和 [main push 41444146011](https://github.com/fanxiao92/godot-pal/actions/runs/41444146011) 的独立核验。不改写旧原件，也不要求复跑。**这些成功不补签本次原生 workflow 的远端运行或已退出默认路径的审计保证。** 修改本地文件不等于已发布；新候选的远端结果必须单独按提交确认。
 
-required check 仍为 `unit-check`；本次不修改服务端保护。保留的 `full-check` 仍明确抛错、不运行重型检查，它会使整体 workflow failure，即使独立 Unit 成功。清理该过渡 blocker 不属于本次原生化；它不是完整验收成功。配置及普通拒绝/允许历史、权限限制和未来恢复条件见[保护说明](merge-protection.md)。
+required check 仍为 `unit-check`；本次不修改服务端保护。#76 已把 `full-check` 从 #69 的过渡显式拒绝恢复为真实的 informational committable-scope 完整门（非 required；调度、范围界定与两步上线步骤见[工程检查](engineering-checks.md)），其失败如实红但按两步上线设计不阻塞合并。配置及普通拒绝/允许历史、权限限制和未来恢复条件见[保护说明](merge-protection.md)。
 
 ## 显式本地回归
 
