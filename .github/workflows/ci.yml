@@ -1,4 +1,4 @@
-name: Unit-only Windows feedback
+name: Unit and committable-scope full Windows feedback
 
 on:
   push:
@@ -65,11 +65,52 @@ jobs:
             ${{ runner.temp }}/unit-results/cli-unit/results.trx
 
   full-check:
-    # Transitional explicit refusal: never certify Unit as full while old protection remains.
+    # #76 informational committable-scope full gate: the real Test-M0 entry on the
+    # committable subset (private staged real-asset positives stay on local receipts;
+    # see docs/testing/engineering-checks.md). Heavy by design: only main pushes, explicit
+    # PR readiness and manual dispatch start it, never per-synchronize. Not a required
+    # check; converting it to required is a maintainer operation documented there.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action == 'ready_for_review')
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
-      - name: Block legacy full acceptance
+      - name: Checkout exact event candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+          lfs: false
+      - name: Install the repository SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Verify full gate checkout
         shell: pwsh
         run: |
-          throw 'Full acceptance automation is paused by #69. Unit-only is not full-check; server cutover requires separate authorization and validation.'
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($actual -cne $env:GITHUB_SHA) { throw 'Full gate checkout does not match GITHUB_SHA.' }
+      - name: Committable-scope full gate (Test-M0)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $godot = & (Join-Path $env:GITHUB_WORKSPACE 'scripts/Get-Godot.ps1') -Destination (Join-Path $env:RUNNER_TEMP 'godot')
+          $evidence = Join-Path $env:RUNNER_TEMP 'm0-evidence'
+          & (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-M0.ps1') -GodotPath $godot -EvidenceDirectory $evidence -Scope committable
+          Get-Content -LiteralPath (Join-Path $evidence 'PASS.txt')
+      - name: Upload full gate evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
+        with:
+          name: ci-full-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/m0-evidence/PASS.txt
+            ${{ runner.temp }}/m0-evidence/test-results.json
+            ${{ runner.temp }}/m0-evidence/game-batch-plan.json
+            ${{ runner.temp }}/m0-evidence/game-batches.json
+            ${{ runner.temp }}/m0-evidence/discovery.json
+            ${{ runner.temp }}/m0-evidence/discovery.log
+            ${{ runner.temp }}/m0-evidence/processes-*.json
+            ${{ runner.temp }}/m0-evidence/**/*.trx
+            ${{ runner.temp }}/m0-evidence/godot/**

@@ -26,14 +26,27 @@ Assert (Test-Path -LiteralPath $settings -PathType Leaf) 'Native Unit settings m
 [xml]$settingsXml = [IO.File]::ReadAllText($settings)
 Assert ($settingsXml.RunSettings.RunConfiguration.TreatNoTestsAsError -ceq 'true' -and $settingsXml.RunSettings.xUnit.FailSkips -ceq 'true') 'Native zero/skip failure policy missing.'
 Assert ($text -match 'types: \[opened, synchronize, reopened, ready_for_review, converted_to_draft, edited\]' -and $text -match 'branches: \[main\]' -and $text -match '(?m)^  workflow_dispatch:') 'Event coverage changed.'
-Assert ($text -notmatch 'paths:|paths-ignore:|--filter|--no-build|--no-restore|continue-on-error|Invoke-CiUnit|New-CiCandidateInputs|Test-CiCandidate|Test-Engineering|Test-M0|Test-Unit.ps1|Get-Godot|Get-GdUnit|CI_TOKEN|unit-run.json') 'Native workflow acquired narrowing, audit orchestration or heavy dependencies.'
 $unit = [regex]::Match($text, '(?ms)^  unit-check:\n(?<body>.*?)(?=^  full-check:)').Groups['body'].Value
-Assert ($unit -and $unit -notmatch '(?m)^    (if|needs):' -and $unit -match 'timeout-minutes: 20') 'Unit must run independently within the existing job budget.'
+$full = [regex]::Match($text, '(?ms)^  full-check:\n(?<body>.*\z)').Groups['body'].Value
+Assert ($unit -and $full) 'Both the native Unit job and the #76 full-check job must stay present.'
+Assert ($text -notmatch 'paths:|paths-ignore:|continue-on-error|CI_TOKEN|unit-run\.json') 'Workflow-level narrowing or audit artifacts are not allowed.'
+Assert ($unit -notmatch '--filter|--no-build|--no-restore|Invoke-CiUnit|New-CiCandidateInputs|Test-CiCandidate|Test-Engineering|Test-M0|Test-Unit\.ps1|Get-Godot|Get-GdUnit') 'Native Unit job acquired narrowing, audit orchestration or heavy dependencies.'
+Assert ($unit -notmatch '(?m)^    (if|needs):' -and $unit -match 'timeout-minutes: 20') 'Unit must run independently within the existing job budget.'
 foreach ($fragment in @('persist-credentials: false','fetch-depth: 2','lfs: false','global-json-file: global.json','if: always()','if-no-files-found: error','name: ci-unit-evidence-${{ github.run_id }}-${{ github.run_attempt }}')) { Assert ($unit.Contains($fragment)) "Missing native CI policy: $fragment" }
+# #76 informational committable-scope full gate: the same Test-M0 entry as local acceptance.
+Assert ($full -cmatch [regex]::Escape("if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action == 'ready_for_review')")) 'Full gate must run only on main push, PR readiness or manual dispatch.'
+Assert (-not [regex]::IsMatch($full, "github\.event\.action == 'synchronize'")) 'Full gate must never be scheduled per synchronize.'
+Assert ($full -cmatch '(?m)^    runs-on: windows-2022$' -and $full -cmatch '(?m)^    timeout-minutes: 35$') 'Full gate runner or its 35-minute envelope changed.'
+Assert ($full -cmatch '(?m)^    if:' -and $full -notmatch '(?m)^    needs:') 'Full gate must stay scheduled independently, not behind unit-check.'
+foreach ($fragment in @('persist-credentials: false','fetch-depth: 2','lfs: false','global-json-file: global.json','if: always()','if-no-files-found: error','name: ci-full-evidence-${{ github.run_id }}-${{ github.run_attempt }}','m0-evidence/**/*.trx','m0-evidence/PASS.txt')) { Assert ($full.Contains($fragment)) "Missing full gate CI policy: $fragment" }
 $checkout = Block 'Verify Unit checkout'
 $core = Block 'Run Core Unit'
 $cli = Block 'Run CLI Unit'
-$legacy = Block 'Block legacy full acceptance'
+$fullCheckout = Block 'Verify full gate checkout'
+$gate = Block 'Committable-scope full gate (Test-M0)'
+Assert ($gate.Contains('-Scope committable')) 'Full gate lost its committable scope selection.'
+Assert ($gate.Contains('Test-M0.ps1') -and $gate.Contains('Get-Godot.ps1')) 'Full gate must use the shared Test-M0 entry with the pinned engine download.'
+Assert ($gate.Contains('PASS.txt')) 'Full gate must surface its PASS summary in the job output.'
 foreach ($entry in @(@{code=$core;project='Pal.Core.UnitTests';name='core'},@{code=$cli;project='Pal.Extract.UnitTests';name='cli-unit'})) {
     Assert ($entry.code.Contains("dotnet test tests/$($entry.project)/$($entry.project).csproj --configuration Debug --settings tests/unit.runsettings --logger 'trx;LogFileName=results.trx'")) 'Expected a direct full-project native command.'
     Assert ($entry.code.Contains('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }') -and $entry.code.Contains('Test-Path')) 'Original exit or missing-report guard missing.'
@@ -116,7 +129,8 @@ $r = Run 'missing-report' $withoutTrx
 Assert ($r.exit -ne 0 -and $r.text.Contains('Missing current Core Unit TRX.')) 'Missing TRX did not fail for its designated reason.'
 $r = Run 'existing-results' ("New-Item -ItemType Directory -Path `"`$env:RUNNER_TEMP/unit-results/core`" -Force | Out-Null`n" + $core)
 Assert ($r.exit -ne 0 -and $r.text.Contains('Core Unit results directory already exists.')) 'Existing results were allowed to substitute for a new run.'
-$r = Run 'legacy-block' $legacy
-Assert ($r.exit -ne 0 -and $r.text.Contains('Unit-only is not full-check')) 'Preserved legacy full refusal changed.'
-Put (Join-Path $base 'summary.json') (@{cases=10;failed=0;realDotnet=$true;realGit=$true;remoteActions=$false;productUnit=$false} | ConvertTo-Json)
-Write-Output 'PASS native Unit workflow: 10 controls; actual blocks and real dotnet/xUnit; no remote/Godot/full acceptance.'
+$r = Run 'full-checkout' $fullCheckout; Assert ($r.exit -eq 0) 'Full gate checkout guard rejected matching SHA.'
+$r = Run 'full-wrong-checkout' $fullCheckout ('f' * 40)
+Assert ($r.exit -ne 0 -and $r.text.Contains('Full gate checkout does not match GITHUB_SHA.')) 'Full gate wrong checkout was not refused for its designated reason.'
+Put (Join-Path $base 'summary.json') (@{cases=11;failed=0;realDotnet=$true;realGit=$true;remoteActions=$false;productUnit=$false} | ConvertTo-Json)
+Write-Output 'PASS native Unit workflow and committable full-gate wiring: 11 controls; actual blocks and real dotnet/xUnit; no remote Actions/Godot execution.'
