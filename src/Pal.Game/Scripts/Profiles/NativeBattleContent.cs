@@ -108,6 +108,7 @@ public static class NativeBattleContent
     {
         Equipment = Copy(x.Equipment, "Player.Equipment"), Statuses = Copy(x.Statuses, "Player.Statuses"), Poisons = Copy(x.Poisons, "Player.Poisons"),
         DyingScript = x.DyingScript, FriendDeathScript = x.FriendDeathScript,
+        MagicPower = x.MagicPower, FleeRate = x.FleeRate,
         CoveredByRoleId = x.HasCoveredByRoleId ? x.CoveredByRoleId : null, AttackAll = x.AttackAll
     };
 
@@ -116,6 +117,7 @@ public static class NativeBattleContent
         RoleId = x.RoleId, Hp = x.Hp, MaxHp = x.MaxHp, Attack = x.Attack, Defense = x.Defense, Dexterity = x.Dexterity,
         Equipment = x.Equipment.ToArray(), Statuses = x.Statuses.ToArray(), Poisons = x.Poisons.ToArray(),
         DyingScript = x.DyingScript, FriendDeathScript = x.FriendDeathScript,
+        MagicPower = x.MagicPower, FleeRate = x.FleeRate,
         HasCoveredByRoleId = x.CoveredByRoleId.HasValue, CoveredByRoleId = x.CoveredByRoleId ?? 0, AttackAll = x.AttackAll
     };
 

@@ -11,6 +11,8 @@ public partial class PalBattlePlayer : Resource
     [Export] public int Attack { get; set; } = 0;
     [Export] public int Defense { get; set; } = 0;
     [Export] public int Dexterity { get; set; } = 0;
+    [Export] public int MagicPower { get; set; } = 0;
+    [Export] public int FleeRate { get; set; } = 0;
     [Export] public int DyingScript { get; set; } = 0;
     [Export] public int FriendDeathScript { get; set; } = 0;
     [Export] public int CoveredByRoleId { get; set; } = 0;

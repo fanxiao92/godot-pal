@@ -108,6 +108,7 @@ public class NativeBattleContentTests
         var player = initial.Player with
         {
             Hp = 0, MaxHp = 65535, Attack = 65535, Defense = 123, Dexterity = 234,
+            MagicPower = 321, FleeRate = 654,
             Equipment = [6, 5, 4, 3, 2, 1], Statuses = Enumerable.Range(10, 9).ToArray(), Poisons = [7, 65535],
             DyingScript = 12, FriendDeathScript = 13, AttackAll = true, CoveredByRoleId = 0
         };
