@@ -294,7 +294,7 @@ public class TriggerEventCollectionTests
     [InlineData("{\"op\":\"end\",\"mode\":\"advance\"}", 1)]
     [InlineData("{\"op\":\"end\",\"mode\":\"redirect\",\"to\":\"L0000\",\"limit\":65535}", 2)]
     [InlineData("{\"op\":\"goto\",\"to\":\"L0000\",\"limit\":0}", 3)]
-    [InlineData("{\"op\":\"giveItem\",\"itemId\":65535,\"count\":-32768}", 31)]
+    [InlineData("{\"op\":\"addItem\",\"itemId\":65535,\"count\":-32768}", 31)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"center\",\"color\":0,\"rngWord\":1}", 59)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"lower\",\"portraitId\":0,\"color\":255,\"rngWord\":0}", 61)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"centerWindow\",\"color\":79}", 62)]
@@ -315,6 +315,19 @@ public class TriggerEventCollectionTests
             command["to"] = "missing#L0000";
             Assert.Throws<InvalidDataException>(() => fixture.Load());
         }
+    }
+
+    [Fact]
+    public void Old_001F_giveItem_verb_stays_rejected_after_the_addItem_rename()
+    {
+        // #116 (M5 review P1-2): the frozen verb for 0x001F is addItem (named by #100; the M5
+        // export and the events-schema contract table both use it). The v1 contract placeholder
+        // giveItem must stay rejected so exactly one spelling exists, like the #114 field renames.
+        var fixture = new EventFixture();
+        fixture.Commands[0] = JsonNode.Parse("""
+            {"label":"L0000","op":"giveItem","itemId":5,"count":1,"next":"L0001","source":{"index":0,"opcode":31,"operands":[5,1,0]}}
+            """);
+        Assert.Contains("Unknown op 'giveItem'", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
     }
 
     [Theory]
@@ -344,8 +357,8 @@ public class TriggerEventCollectionTests
     [Theory]
     [InlineData("{\"op\":\"end\",\"mode\":\"redirect\",\"to\":null,\"limit\":0}", 2)]
     [InlineData("{\"op\":\"goto\",\"to\":\"L0000\",\"limit\":65536}", 3)]
-    [InlineData("{\"op\":\"giveItem\",\"itemId\":1,\"count\":32768}", 31)]
-    [InlineData("{\"op\":\"giveItem\",\"itemId\":-1,\"count\":0}", 31)]
+    [InlineData("{\"op\":\"addItem\",\"itemId\":1,\"count\":32768}", 31)]
+    [InlineData("{\"op\":\"addItem\",\"itemId\":-1,\"count\":0}", 31)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"center\",\"color\":0,\"rngWord\":0,\"portraitId\":0}", 59)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"lower\",\"color\":0,\"portraitId\":0,\"rngWord\":65536}", 61)]
     [InlineData("{\"op\":\"setDialog\",\"box\":\"centerWindow\",\"color\":-1}", 62)]

@@ -158,7 +158,7 @@ public sealed class TriggerEventCollection
             {
                 "raw" => [],
                 "end" => EventJson.Text(node, "mode") == "redirect" ? ["mode", "to", "limit"] : ["mode"],
-                "goto" => ["to", "limit"], "giveItem" => ["itemId", "count"],
+                "goto" => ["to", "limit"], "addItem" => ["itemId", "count"],
                 "randomJump" => ["rate", "to"],
                 "changeHp" => ["scope", "amount"], "changeMp" => ["scope", "amount"],
                 "boostStat" => ["field", "percent", "roleOperand"],
@@ -232,10 +232,11 @@ public sealed class TriggerEventCollection
                     if (opcode != 3) throw new InvalidDataException("Invalid goto mapping.");
                     ReadTarget(node, command);
                     break;
-                case "giveItem":
-                    if (opcode != 31) throw new InvalidDataException("Invalid giveItem mapping.");
+                case "addItem":
+                    // #116: the frozen 0x001F verb is addItem (#100); the v1 placeholder giveItem is rejected.
+                    if (opcode != 31) throw new InvalidDataException("Invalid addItem mapping.");
                     _ = EventJson.Word(node, "itemId");
-                    if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("giveItem.count must be a signed WORD.");
+                    if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("addItem.count must be a signed WORD.");
                     break;
                 case "randomJump":
                     // script.c:3301-3312: draw RandomLong(1,100); the jump is taken when draw >= rate.

@@ -43,7 +43,7 @@ public class TriggerScriptSessionTests
     [InlineData("raw")]
     [InlineData("rng")]
     [InlineData("center")]
-    [InlineData("giveItem")]
+    [InlineData("addItem")]
     [InlineData("goto")]
     [InlineData("advance")]
     public void Entire_selected_capability_closure_is_rejected_before_any_display_or_caller_change(string fault)
@@ -57,7 +57,7 @@ public class TriggerScriptSessionTests
             // The plain center box is now the retail game-over presentation; the still-closed
             // control is the randomized dialog word (rngWord != 0).
             "center" => JsonNode.Parse("""{"op":"setDialog","box":"center","color":0,"rngWord":1,"source":{"index":3,"opcode":59,"operands":[0,1,0]}}""")!,
-            "giveItem" => JsonNode.Parse("""{"op":"giveItem","itemId":5,"count":-1,"source":{"index":3,"opcode":31,"operands":[0,0,0]}}""")!,
+            "addItem" => JsonNode.Parse("""{"op":"addItem","itemId":5,"count":-1,"source":{"index":3,"opcode":31,"operands":[0,0,0]}}""")!,
             "goto" => JsonNode.Parse("""{"op":"goto","to":"L0000","limit":0,"source":{"index":3,"opcode":3,"operands":[0,0,0]}}""")!,
             _ => JsonNode.Parse("""{"op":"end","mode":"advance","source":{"index":3,"opcode":1,"operands":[0,0,0]}}""")!
         };

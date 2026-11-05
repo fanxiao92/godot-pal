@@ -685,7 +685,7 @@ public sealed class TriggerScriptBattleBindingTests
         // An unsupported op after the reload never executes (script.c 0x004E returns 0),
         // so the selected-entry preflight accepts the call without requiring it.
         fixture.Commands[2] = JsonNode.Parse("""
-          {"label":"L0002","op":"giveItem","itemId":5,"count":1,"next":"L0003","source":{"index":2,"opcode":31,"operands":[5,1,0]}}
+          {"label":"L0002","op":"addItem","itemId":5,"count":1,"next":"L0003","source":{"index":2,"opcode":31,"operands":[5,1,0]}}
           """);
         TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), Content(), "shared", "npc");
         var script = Script(fixture, new BindingRandom());
