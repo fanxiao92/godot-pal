@@ -64,7 +64,16 @@ function Get-GameSourceInventory([string]$Directory) {
     return $cases.ToArray()
 }
 
-function Get-GameBatchPlan([string]$Repository) {
+# --- #76 committable-scope split ------------------------------------------------------
+# The real phases positive depends on gitignored private staged assets
+# (src/Pal.Game/Assets/M4RealBattle53Closure, prepared off-repo by the M4 acceptance chain;
+# never committed or uploaded). Gate scope 'committable' keeps these matches compiled and
+# discoverable but drops them from the execution plan, so CI can run the full gate on the
+# committable subset; the default 'full' scope (local acceptance) keeps them.
+$script:LocalOnlyRealMatches = @('Pal.Game.Tests.RealFirstBattleFlowTests.')
+# ---------------------------------------------------------------------------------------
+
+function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committable')][string]$Scope = 'full') {
     $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
     $definitions = @(
         @{ name = 'process'; count = 85; classes = @('StoryMainProcessTests', 'MainProcessTests', 'ExplorationProcessTests') }
@@ -96,25 +105,43 @@ function Get-GameBatchPlan([string]$Repository) {
         @{ name = 'native-map'; count = 412; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
         @{ name = 'scene-realfull'; count = 3; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.') }
     )
+    $localOnly = if ($Scope -ceq 'committable') {
+        @($inventory | Where-Object { $name = $_.name; $script:LocalOnlyRealMatches | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)
+    } else { @() }
+    if ($localOnly.Count) {
+        # Fail closed if the split marker and the scene-realfull definition drift apart.
+        $realfull = @($definitions | Where-Object name -CEQ 'scene-realfull')
+        $declared = @($realfull.matches | Where-Object { $_ -cin $script:LocalOnlyRealMatches })
+        if ($realfull.Count -ne 1 -or $declared.Count -ne $script:LocalOnlyRealMatches.Count) {
+            throw 'Local-only real-asset matches must stay declared by the scene-realfull batch.'
+        }
+    }
     $batches = foreach ($definition in $definitions) {
         # Name-level partitions (matches) select their members by the same FullyQualifiedName
         # substring the runtime filter uses; class-only batches keep the class membership rule.
         # The Game partition assertion below still enforces exact, disjoint coverage.
-        $filter = if ($definition.matches) { ($definition.matches | ForEach-Object { "FullyQualifiedName~$_" }) -join '|' }
+        # Committable scope drops only the local-only real-asset matches above (#76).
+        $selected = @($definition.matches)
+        if ($Scope -ceq 'committable') {
+            $selected = @($definition.matches | Where-Object { $_ -cnotin $script:LocalOnlyRealMatches })
+            if ($definition.matches -and -not $selected.Count) { throw "Batch $($definition.name) would lose every member in $Scope scope." }
+        }
+        $filter = if ($selected) { ($selected | ForEach-Object { "FullyQualifiedName~$_" }) -join '|' }
             else { ($definition.classes | ForEach-Object { "FullyQualifiedName~Pal.Game.Tests.$_." }) -join '|' }
-        $names = if ($definition.matches) {
-            @($inventory | Where-Object { $name = $_.name; $definition.matches | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)
+        $names = if ($selected) {
+            @($inventory | Where-Object { $name = $_.name; $selected | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)
         } else {
             @($inventory | Where-Object class -CIn $definition.classes | ForEach-Object name)
         }
-        if ($names.Count -ne $definition.count) { throw "Batch $($definition.name) source count differs: $($names.Count)/$($definition.count)." }
-        [pscustomobject]@{ name = $definition.name; count = $definition.count; classes = $definition.classes; expected = $names; filter = $filter; sessionTimeoutMs = [int]($definition.sessionTimeoutMs ?? 120000) }
+        $expected = [int]$definition.count - @($localOnly | Where-Object { $name = $_; @($definition.matches) | Where-Object { $name -CLike "*$_*" } }).Count
+        if ($names.Count -ne $expected) { throw "Batch $($definition.name) $Scope source count differs: $($names.Count)/$expected." }
+        [pscustomobject]@{ name = $definition.name; count = $expected; classes = $definition.classes; expected = $names; filter = $filter; sessionTimeoutMs = [int]($definition.sessionTimeoutMs ?? 120000) }
     }
     $controls = @($inventory | Where-Object class -CEQ 'FailureControlTests')
     $expectedControls = @('Pal.Game.Tests.FailureControlTests.IntentionalAssertionMismatchPropagates',
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
-    Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object class -CNE 'FailureControlTests' | ForEach-Object name) 'Game partition'
+    Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.class -CNE 'FailureControlTests' -and $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
     if ($inventory.Count -ne 626) { throw "Game inventory differs: $($inventory.Count)/626." }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
@@ -122,7 +149,8 @@ function Get-GameBatchPlan([string]$Repository) {
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 142; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 279; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = 623; skipped = 0 }
+        # 623 full-scope positives; committable scope executes one fewer (#76 local-only split).
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (623 - $localOnly.Count); skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {
@@ -133,7 +161,7 @@ function Get-GameBatchPlan([string]$Repository) {
     }
     Assert-ExactTestNames @($allProjects) @($projects.path + @('src/Pal.Core/Pal.Core.csproj', 'tools/Pal.Extract/Pal.Extract.csproj')) 'Solution project classification'
     Assert-ExactTestNames @($solutionProjects) @($projects.path) 'Solution test projects'
-    [pscustomobject]@{ inventory = $inventory; batches = @($batches); controls = $controls; projects = $projects }
+    [pscustomobject]@{ scope = $Scope; inventory = $inventory; batches = @($batches); controls = $controls; projects = $projects; localOnly = $localOnly }
 }
 
 function Get-GatePassSummary($Plan) {
@@ -146,16 +174,29 @@ function Get-GatePassSummary($Plan) {
     foreach ($name in @('core', 'cli-unit', 'prepare', 'game')) {
         if ([int]$projects[$name].skipped -ne 0) { throw "Gate PASS summary cannot omit skips for '$name'." }
     }
+    # #76: committable-scope plans list their excluded local-only positives explicitly.
+    $localOnly = @($Plan.localOnly)
     $batchCounts = @($Plan.batches | ForEach-Object { [int]$_.count })
     $positiveCount = ($batchCounts | Measure-Object -Sum).Sum
     if ($positiveCount -ne [int]$projects.game.passed) { throw 'Gate PASS summary Game project and batch counts differ.' }
-    if (@($Plan.inventory).Count -ne ($positiveCount + @($Plan.controls).Count)) { throw 'Gate PASS summary Game inventory and partition counts differ.' }
+    if (@($Plan.inventory).Count -ne ($positiveCount + @($Plan.controls).Count + $localOnly.Count)) { throw 'Gate PASS summary Game inventory and partition counts differ.' }
 
     $cliPassed = [int]$projects['cli-integration'].passed
     $cliSkipped = [int]$projects['cli-integration'].skipped
     $roundCount = 3
     $trxCount = @($Plan.projects | Where-Object name -CNE 'game').Count + ($batchCounts.Count * $roundCount) + @($Plan.controls).Count
-    "PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core $($projects.core.passed) passed; CLI unit $($projects['cli-unit'].passed) passed; CLI integration $cliPassed passed + $cliSkipped skipped ($($cliPassed + $cliSkipped) total); Prepare $($projects.prepare.passed) passed; Godot source/discovery $(@($Plan.inventory).Count); positives $positiveCount as serial $($batchCounts -join '/') in each of three complete rounds; $trxCount identity-verified TRX; $(@($Plan.controls).Count) separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity."
+    # Full scope keeps the original sentence verbatim; committable scope states its own
+    # identity and the private-asset boundary instead of claiming the excluded positive.
+    $scopePrefix = if ($localOnly.Count) { 'committable-scope full gate; ' } else { '' }
+    $excluded = if ($localOnly.Count) {
+        "; $($localOnly.Count) local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process's responsibility)"
+    } else { '' }
+    $boundary = if ($localOnly.Count) {
+        'this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives'
+    } else {
+        'this PASS alone does not establish remote-CI execution identity'
+    }
+    "PASS: ${scopePrefix}eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core $($projects.core.passed) passed; CLI unit $($projects['cli-unit'].passed) passed; CLI integration $cliPassed passed + $cliSkipped skipped ($($cliPassed + $cliSkipped) total); Prepare $($projects.prepare.passed) passed; Godot source/discovery $(@($Plan.inventory).Count); positives $positiveCount as serial $($batchCounts -join '/') in each of three complete rounds; $trxCount identity-verified TRX; $(@($Plan.controls).Count) separately verified 1-failure controls; native prepare/profile/import/Main startup$excluded. Headless automation only; real GPU/manual desktop acceptance is separate; $boundary."
 }
 
 function Read-TestRunIdentity([string]$Path) {

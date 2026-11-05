@@ -2,7 +2,11 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$GodotPath,
-    [string]$EvidenceDirectory
+    [string]$EvidenceDirectory,
+    # #76: 'committable' runs the CI subset — every gate member except the local-only real
+    # positives that need gitignored private staged assets (see GameTestBatches.ps1).
+    # Default 'full' keeps the original local acceptance scope and counts.
+    [ValidateSet('full', 'committable')][string]$Scope = 'full'
 )
 $ErrorActionPreference = 'Stop'
 $GodotPath = (Resolve-Path $GodotPath).Path
@@ -13,6 +17,7 @@ $evidence = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory)
 if (Test-Path $evidence) { throw 'Use a new evidence directory; this run requires an empty package cache.' }
 New-Item -ItemType Directory $evidence | Out-Null
 Write-Host "M0/M2/M3 evidence: $evidence"
+if ($Scope -ceq 'committable') { Write-Host "Gate scope: $Scope (CI subset; local-only real-asset positives stay on local acceptance receipts)." }
 $previous = @{}
 foreach ($key in @('NUGET_PACKAGES', 'NUGET_HTTP_CACHE_PATH', 'NUGET_FALLBACK_PACKAGES', 'GODOT_BIN', 'PAL_TEST_GODOT')) {
     $previous[$key] = [Environment]::GetEnvironmentVariable($key)
@@ -106,7 +111,7 @@ try {
 
     . (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
     & (Join-Path $repository 'tests/Pal.Game.Tests/GameBatches.Tests.ps1')
-    $gamePlan = Get-GameBatchPlan $repository
+    $gamePlan = Get-GameBatchPlan $repository -Scope $Scope
     $gameProject = @($gamePlan.projects | Where-Object name -CEQ 'game')
     if ($gameProject.Count -ne 1) { throw 'Expected exactly one Game project identity.' }
     $gamePlan | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $evidence 'game-batch-plan.json')
@@ -195,7 +200,11 @@ try {
     Save-ProcessSnapshot 'processes-final'
     Get-GatePassSummary $gamePlan |
         Set-Content (Join-Path $evidence 'PASS.txt')
-    Write-Host 'PASS: automated M0/M2/M3 acceptance completed. Graphical/manual acceptance is separate.'
+    if ($Scope -ceq 'committable') {
+        Write-Host 'PASS: committable-scope automated M0/M2/M3 acceptance completed; the excluded local-only real positives keep local acceptance receipts. Graphical/manual acceptance is separate.'
+    } else {
+        Write-Host 'PASS: automated M0/M2/M3 acceptance completed. Graphical/manual acceptance is separate.'
+    }
 } finally {
     # Retain a process snapshot on failures as well as successful runs.
     try { Save-ProcessSnapshot 'processes-exit' }
