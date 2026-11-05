@@ -751,48 +751,51 @@ public static class OpcodeRegistry
     public static void ValidateCommand(JsonObject command, string fileId, int count)
     {
         string label = StrictJson.String(command, "label");
-        if (!IsIdentifier(label)) throw new InvalidDataException($"{fileId}.json: invalid command label.");
+        // Error locators use the cross-file unambiguous {fileId}.json#{label} form:
+        // labels are only unique within one file while rebuild accepts multi-file sets.
+        string context = $"{fileId}.json#{label}";
+        if (!IsIdentifier(label)) throw new InvalidDataException($"{context}: invalid command label.");
         string op = StrictJson.String(command, "op");
-        if (!OpNames.Contains(op)) throw new InvalidDataException($"{fileId}.json: unsupported op {op}.");
+        if (!OpNames.Contains(op)) throw new InvalidDataException($"{context}: unsupported op {op}.");
         string? next = StrictJson.NullableString(command, "next");
-        if (next is not null) ValidateReferenceSyntax(next, $"{label}.next");
+        if (next is not null) ValidateReferenceSyntax(next, $"{context}.next");
         var source = StrictJson.Required(command, "source");
         StrictJson.ValidateKeys(source, "source", "index", "opcode", "operands");
         int index = StrictJson.Int(source, "index"), opcodeValue = StrictJson.Int(source, "opcode");
-        if (index < 0 || index >= count || opcodeValue is < 0 or > 65535) throw new InvalidDataException($"{label}: source index/opcode out of range.");
+        if (index < 0 || index >= count || opcodeValue is < 0 or > 65535) throw new InvalidDataException($"{context}: source index/opcode out of range.");
         var operands = StrictJson.RequiredArray(source, "operands");
-        if (operands.Count != 3) throw new InvalidDataException($"{label}: source.operands must contain exactly three WORD values.");
+        if (operands.Count != 3) throw new InvalidDataException($"{context}: source.operands must contain exactly three WORD values.");
         foreach (var operand in operands) StrictJson.Word(operand);
         if (op == "raw")
         {
             if (ByOpcode.TryGetValue(opcodeValue, out OpcodeDescriptor? registered) && !registered.AllowLegacyRaw)
-                throw new InvalidDataException($"{label}: registered opcode must use its named mapping.");
-            StrictJson.ValidateKeys(command, label, "label", "op", "next", "source");
+                throw new InvalidDataException($"{context}: registered opcode must use its named mapping.");
+            StrictJson.ValidateKeys(command, context, "label", "op", "next", "source");
             return;
         }
         if (!ByOpcode.TryGetValue(opcodeValue, out OpcodeDescriptor? descriptor) || descriptor.Op != op)
-            throw new InvalidDataException($"{label}: invalid {op} mapping.");
+            throw new InvalidDataException($"{context}: invalid {op} mapping.");
         var allowed = new List<string> { "label", "op" };
         allowed.AddRange(descriptor.Fields.Select(field => field.Name));
         allowed.AddRange(["next", "source"]);
-        StrictJson.ValidateKeys(command, label, allowed.ToArray());
+        StrictJson.ValidateKeys(command, context, allowed.ToArray());
         foreach (OpcodeField field in descriptor.Fields)
         {
             switch (field.Kind)
             {
                 case OpcodeFieldKind.Reference:
-                    ValidateReferenceSyntax(StrictJson.String(command, field.Name), $"{label}.{field.Name}");
+                    ValidateReferenceSyntax(StrictJson.String(command, field.Name), $"{context}.{field.Name}");
                     break;
                 case OpcodeFieldKind.BattleTarget:
                     string? target = StrictJson.NullableString(command, field.Name);
-                    if (target is not null) ValidateReferenceSyntax(target, $"{label}.{field.Name}");
+                    if (target is not null) ValidateReferenceSyntax(target, $"{context}.{field.Name}");
                     break;
                 case OpcodeFieldKind.BossFlag:
-                    string context = $"{fileId}.json#{label} @{index:X4}";
+                    string addressContext = $"{context} @{index:X4}";
                     if (command[field.Name] is not JsonValue value || !value.TryGetValue<bool>(out bool flag))
-                        throw new InvalidDataException($"{context}: {descriptor.Op}.{field.Name} must be a boolean.");
+                        throw new InvalidDataException($"{addressContext}: {descriptor.Op}.{field.Name} must be a boolean.");
                     if (field.CoupledTarget is string coupled && flag != (StrictJson.NullableString(command, coupled) is null))
-                        throw new InvalidDataException($"{context}: {descriptor.Op}.{field.Name} must equal {coupled} being null.");
+                        throw new InvalidDataException($"{addressContext}: {descriptor.Op}.{field.Name} must equal {coupled} being null.");
                     break;
             }
         }
@@ -804,6 +807,7 @@ public static class OpcodeRegistry
     public static void EncodeCommand(JsonObject command, string fileId, IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> labelsByFile, Span<byte> destination)
     {
         string label = StrictJson.String(command, "label");
+        string context = $"{fileId}.json#{label}";
         var source = StrictJson.Required(command, "source");
         ushort opcode = checked((ushort)StrictJson.Int(source, "opcode"));
         var operands = StrictJson.RequiredArray(source, "operands");
@@ -812,7 +816,7 @@ public static class OpcodeRegistry
         if (op != "raw")
         {
             if (!ByOpcode.TryGetValue(opcode, out OpcodeDescriptor? descriptor) || descriptor.Op != op)
-                throw new InvalidDataException($"{label}: op does not match registered source opcode.");
+                throw new InvalidDataException($"{context}: op does not match registered source opcode.");
             ushort[] words = [a, b, c];
             var bossFlags = new List<(OpcodeField Field, bool Flag)>();
             foreach (OpcodeField field in descriptor.Fields)
@@ -823,11 +827,11 @@ public static class OpcodeRegistry
                         words[field.Operand] = checked((ushort)StrictJson.Int(command, field.Name));
                         break;
                     case OpcodeFieldKind.SignedWord:
-                        words[field.Operand] = unchecked((ushort)CheckedSigned(command, field.Name));
+                        words[field.Operand] = unchecked((ushort)CheckedSigned(command, field.Name, context));
                         break;
                     case OpcodeFieldKind.LowByte:
                         int low = StrictJson.Int(command, field.Name);
-                        if (low is < 0 or > 255) throw new InvalidDataException($"{descriptor.Op}.{field.Name} must be 0..255.");
+                        if (low is < 0 or > 255) throw new InvalidDataException($"{context}: {descriptor.Op}.{field.Name} must be 0..255.");
                         words[field.Operand] = (ushort)((words[field.Operand] & 0xff00) | low);
                         break;
                     case OpcodeFieldKind.Reference:
@@ -838,16 +842,16 @@ public static class OpcodeRegistry
                         break;
                     case OpcodeFieldKind.BossFlag:
                         if (command[field.Name] is not JsonValue value || !value.TryGetValue<bool>(out bool flag))
-                            throw new InvalidDataException($"{label}: {descriptor.Op}.{field.Name} must be a boolean.");
+                            throw new InvalidDataException($"{context}: {descriptor.Op}.{field.Name} must be a boolean.");
                         bossFlags.Add((field, flag));
                         break;
                     case OpcodeFieldKind.OpcodeOffset:
                         if (opcode != field.Base + StrictJson.Int(command, field.Name))
-                            throw new InvalidDataException($"{label}: {descriptor.Op} {field.Name} does not match its opcode.");
+                            throw new InvalidDataException($"{context}: {descriptor.Op} {field.Name} does not match its opcode.");
                         break;
                     case OpcodeFieldKind.ConstantString:
                         if (StrictJson.String(command, field.Name) != field.ConstantString)
-                            throw new InvalidDataException($"{label}: invalid {descriptor.Op} mapping.");
+                            throw new InvalidDataException($"{context}: invalid {descriptor.Op} mapping.");
                         break;
                 }
             }
@@ -855,7 +859,7 @@ public static class OpcodeRegistry
                 if (field.CoupledTarget is string coupled &&
                     descriptor.Fields.FirstOrDefault(other => other.Name == coupled) is { Operand: int coupledOperand } &&
                     flag != (words[coupledOperand] == 0))
-                    throw new InvalidDataException($"{label}: {descriptor.Op}.{field.Name} must equal {coupled} being null.");
+                    throw new InvalidDataException($"{context}: {descriptor.Op}.{field.Name} must equal {coupled} being null.");
             a = words[0]; b = words[1]; c = words[2];
         }
         Write(destination, opcode); Write(destination[2..], a); Write(destination[4..], b); Write(destination[6..], c);
@@ -893,10 +897,10 @@ public static class OpcodeRegistry
             throw new InvalidDataException($"{context}: malformed file#label reference '{reference}'.");
     }
 
-    private static int CheckedSigned(JsonObject command, string field)
+    private static int CheckedSigned(JsonObject command, string field, string context)
     {
         int value = StrictJson.Int(command, field);
-        return value is >= -32768 and <= 32767 ? value : throw new InvalidDataException($"{StrictJson.String(command, "label")}.{field} must be a signed WORD.");
+        return value is >= -32768 and <= 32767 ? value : throw new InvalidDataException($"{context}.{field} must be a signed WORD.");
     }
 
     private static ushort EncodeReference(JsonObject command, string field, string fileId, IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> labelsByFile)
