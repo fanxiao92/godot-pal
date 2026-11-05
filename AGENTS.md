@@ -27,6 +27,8 @@
 
 执行多票里程碑、协调子代理或恢复长会话前，读取[长任务信息分工](docs/agents/large-task-handoffs.md)。
 
+- 里程碑交付合入 main 后，显式收尾清理本轮隔离 worktree 与已合并分支（`git worktree remove` / `git worktree prune`、删除已合并分支）；有未合并或未提交残留时单独列出，丢弃前取得明确授权。pi-subagents 的 worktree 清理是显式受审操作，不是自动 post-action，须由协调者主动发起。
+
 ## 项目边界
 
 - `src/Pal.Core` 保持纯 .NET 业务逻辑；Godot 节点、输入、渲染和平台 I/O 留在外层。测试优先使用公开构造、事件与更新接口，预期值来自独立规格或参考核对，而非被测实现生成。

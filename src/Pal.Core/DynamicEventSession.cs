@@ -228,11 +228,11 @@ public sealed class DynamicEventWorld
     }
 
     /// <summary>script.c 0x009A: one signed state word for a contiguous object-ID range.</summary>
-    internal void SetStateRange(int fromObjectId, int toObjectId, int state, TriggerPosition position)
+    internal void SetStateRange(int fromEventObjectId, int toEventObjectId, int state, TriggerPosition position)
     {
-        if (fromObjectId == 0 || toObjectId < fromObjectId)
+        if (fromEventObjectId == 0 || toEventObjectId < fromEventObjectId)
             throw new InvalidDataException($"{position}: setStateRange requires a nonempty object-ID range.");
-        for (int id = fromObjectId; id <= toObjectId; id++) Require(id, position).State = state;
+        for (int id = fromEventObjectId; id <= toEventObjectId; id++) Require(id, position).State = state;
         WorldChanged?.Invoke();
     }
 
@@ -566,8 +566,8 @@ public sealed class DynamicEventSession
                     return world.WalkTowards(obj.Id, command.TileX * 32 + command.Layer * 16, command.TileY * 16 + command.Layer * 8, 3)
                         ? Next(address) : address;
                 case "setState":
-                    if (command.ObjectId != 0)
-                        world.SetObjectState(command.ObjectId == 0xffff ? obj.Id : command.ObjectId, command.State, command.Position);
+                    if (command.EventObjectId != 0)
+                        world.SetObjectState(command.EventObjectId == 0xffff ? obj.Id : command.EventObjectId, command.State, command.Position);
                     return Next(address);
                 case "hide":
                     world.HideObject(obj.Id, command.Frames == 0 ? 800 : command.Frames);

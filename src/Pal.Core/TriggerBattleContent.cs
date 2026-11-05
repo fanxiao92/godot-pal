@@ -71,8 +71,8 @@ public sealed class TriggerBattleContent
             x => x.ObjectId, x => x with { Effects = Array.AsReadOnly(x.Effects.Select(e => e with { Statuses = Copy(e.Statuses) }).ToArray()) }));
     }
 
-    internal IReadOnlyList<ClassicBattleEnemy> Enemies(int teamId) => EnemyTeams.TryGetValue(teamId, out var enemies) ? enemies
-        : throw new InvalidDataException($"Missing battle team {teamId}.");
+    internal IReadOnlyList<ClassicBattleEnemy> Enemies(int enemyTeamId) => EnemyTeams.TryGetValue(enemyTeamId, out var enemies) ? enemies
+        : throw new InvalidDataException($"Missing battle team {enemyTeamId}.");
 
     internal IReadOnlyList<ClassicBattlePlayer> SettledPlayers(IReadOnlyDictionary<int, BattleRoleSnapshot> roles) =>
         Players.Select(x =>
@@ -84,11 +84,11 @@ public sealed class TriggerBattleContent
                 : x with { Hp = settled.Hp, MaxHp = settled.MaxHp };
         }).ToArray();
 
-    internal void Validate(int teamId, IReadOnlyDictionary<int, BattleRoleSnapshot> roles)
+    internal void Validate(int enemyTeamId, IReadOnlyDictionary<int, BattleRoleSnapshot> roles)
     {
         if (roles.Values.Any(x => x.MaxHp > 32767))
             throw new InvalidDataException("Trigger battle content requires maxHP <= 32767 for subsequent battles.");
-        ClassicBattleLifecycleSession.Validate(roles.Values.ToArray(), SettledPlayers(roles), Enemies(teamId), GrowthByRole,
+        ClassicBattleLifecycleSession.Validate(roles.Values.ToArray(), SettledPlayers(roles), Enemies(enemyTeamId), GrowthByRole,
             BattleEquipmentState.Initialize(this));
     }
 
@@ -102,5 +102,5 @@ public sealed class TriggerBattleContent
         : throw new InvalidOperationException("Single-actor compatibility access cannot project multiplayer content.");
 }
 
-public sealed record TriggerBattleRequest(Guid Id, int Caller, TriggerPosition Position, int TeamId, bool IsBoss,
+public sealed record TriggerBattleRequest(Guid Id, int Caller, TriggerPosition Position, int EnemyTeamId, bool IsBoss,
     int NextAddress, int? LossAddress, int? FleeAddress, ClassicBattleLifecycleSession Lifecycle);

@@ -22,13 +22,13 @@ public sealed class EventCliTests : IDisposable
             Words(12, 1, 0, 0, 0, 0, 0, 1),
             Words(0, 0, 0, 0, 0, 0, 0, 0),
             [],
-            Words(0x003c, 59, 79, 1, 0xffff, 61, 17, 7, 0, 0, 0, 0, 0x0086, 0, 65535, 7));
+            Words(0x003c, 59, 79, 1, 0xffff, 61, 17, 7, 0, 0, 0, 0, 0x0032, 0, 65535, 7));
     }
 
     [Fact]
     public async Task StartBattle_export_roundtrip_and_semantic_edits_use_resolved_targets_not_source_words()
     {
-        byte[] original = Words(7, 65535, 0, 0, 7, 18, 4, 3, 0x0086, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10);
+        byte[] original = Words(7, 65535, 0, 0, 7, 18, 4, 3, 0x0032, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10);
         WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
@@ -37,7 +37,7 @@ public sealed class EventCliTests : IDisposable
         var commands = events["commands"]!.AsArray();
         Assert.Equal(5, commands.Count);
         Assert.Equal("startBattle", commands[0]!["op"]!.GetValue<string>());
-        Assert.Equal(65535, commands[0]!["teamId"]!.GetValue<int>());
+        Assert.Equal(65535, commands[0]!["enemyTeamId"]!.GetValue<int>());
         Assert.True(commands[0]!["isBoss"]!.GetValue<bool>());
         Assert.Null(commands[0]!["lossTarget"]);
         Assert.Null(commands[0]!["fleeTarget"]);
@@ -54,11 +54,11 @@ public sealed class EventCliTests : IDisposable
         var last = commands[4]!.DeepClone();
         commands.RemoveAt(4);
         commands[3]!["next"] = "targets#L0004";
-        commands[0]!["teamId"] = 19;
+        commands[0]!["enemyTeamId"] = 19;
         commands[0]!["lossTarget"] = "targets#L0004";
         commands[0]!["isBoss"] = false;
         commands[0]!["fleeTarget"] = "L0001";
-        commands[1]!["teamId"] = 20;
+        commands[1]!["enemyTeamId"] = 20;
         commands[1]!["lossTarget"] = null;
         commands[1]!["isBoss"] = true;
         commands[1]!["fleeTarget"] = null;
@@ -72,14 +72,14 @@ public sealed class EventCliTests : IDisposable
         var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
         Assert.True(edited.ExitCode == 0, edited.Stderr);
         Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
-        Assert.Equal(Words(7, 19, 4, 1, 7, 20, 0, 0, 0x0086, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+        Assert.Equal(Words(7, 19, 4, 1, 7, 20, 0, 0, 0x0032, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
     }
 
     [Fact]
     public async Task Legacy_raw7_package_rebuilds_without_a_named_mapping_migration()
     {
-        byte[] original = Words(0x0086, 0, 65535, 8, 7, 18, 65535, 0, 0, 7, 8, 9);
-        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0086, 0, 65535, 8, 0x0086, 18, 65535, 0, 0, 7, 8, 9));
+        byte[] original = Words(0x0032, 0, 65535, 8, 7, 18, 65535, 0, 0, 7, 8, 9);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0032, 0, 65535, 8, 0x0032, 18, 65535, 0, 0, 7, 8, 9));
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
         string path = Path.Combine(exported, "shared.json");
@@ -111,7 +111,7 @@ public sealed class EventCliTests : IDisposable
     [InlineData("duplicate-key")]
     public async Task StartBattle_at_true_chunk_end_rejects_invalid_fields_and_result_references_without_output(string fault)
     {
-        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0086, 0, 65535, 8, 7, 18, 0, 0));
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0032, 0, 65535, 8, 7, 18, 0, 0));
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
         string path = Path.Combine(exported, "shared.json");
@@ -119,9 +119,9 @@ public sealed class EventCliTests : IDisposable
         var command = events["commands"]![1]!.AsObject();
         switch (fault)
         {
-            case "team-negative": command["teamId"] = -1; break;
-            case "team-overflow": command["teamId"] = 65536; break;
-            case "team-type": command["teamId"] = "18"; break;
+            case "team-negative": command["enemyTeamId"] = -1; break;
+            case "team-overflow": command["enemyTeamId"] = 65536; break;
+            case "team-type": command["enemyTeamId"] = "18"; break;
             case "boss-type": command["isBoss"] = 1; break;
             case "boss-flee": command["fleeTarget"] = "L0001"; break;
             case "nonboss-null": command["isBoss"] = false; break;
@@ -137,7 +137,7 @@ public sealed class EventCliTests : IDisposable
             case "ffff-outside": command["lossTarget"] = "LFFFF"; break;
         }
         string text = events.ToJsonString();
-        if (fault == "duplicate-key") text = text.Replace("\"teamId\":18", "\"teamId\":18,\"teamId\":19");
+        if (fault == "duplicate-key") text = text.Replace("\"enemyTeamId\":18", "\"enemyTeamId\":18,\"enemyTeamId\":19");
         File.WriteAllText(path, text);
         var result = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
         Assert.Equal(1, result.ExitCode);
@@ -246,6 +246,1715 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(rebuilt));
     }
 
+    [Fact]
+    public async Task Control_flow_batch1_verbs_export_roundtrip_and_reencode_jump_targets_from_labels()
+    {
+        // M5 batch 1 (#96): end advance/redirect, goto, call, advanceEntry, confirmNoJump plus the
+        // re-verified end keep / randomJump / waitUpdate family. Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x0002, 2, 3, 7,   // end redirect: resume at L0002 unless the idle limit 3 trips
+            0x0003, 5, 2, 0,   // goto L0005
+            0x0004, 4, 9, 1,   // call L0004 with event object 9 as the script context
+            0x0008, 0, 0, 0,   // advanceEntry
+            0x000a, 3, 0, 0,   // confirmNoJump L0003 when the player selects No
+            0x0009, 30, 1, 1,  // waitUpdate 30 frames with game updates and gestures
+            0x0001, 0, 0, 0,   // end advance
+            0x0000, 0, 0, 0);  // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(8, commands.Count);
+        Assert.Equal("end", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal("redirect", commands[0]!["mode"]!.GetValue<string>());
+        Assert.Equal("L0002", commands[0]!["to"]!.GetValue<string>());
+        Assert.Equal(3, commands[0]!["limit"]!.GetValue<int>());
+        Assert.Equal("goto", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("L0005", commands[1]!["to"]!.GetValue<string>());
+        Assert.Equal("call", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal("L0004", commands[2]!["to"]!.GetValue<string>());
+        Assert.Equal(9, commands[2]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal("advanceEntry", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("confirmNoJump", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal("L0003", commands[4]!["to"]!.GetValue<string>());
+        Assert.Equal("waitUpdate", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(30, commands[5]!["frames"]!.GetValue<int>());
+        Assert.Equal("end", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("advance", commands[6]!["mode"]!.GetValue<string>());
+        Assert.Equal("end", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal("keep", commands[7]!["mode"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode jump WORDs from resolved labels: goto to L0000 exercises the
+        // zero-target rule (target 0 references the label at index 0 and re-encodes as WORD 0).
+        commands[0]!["limit"] = 0; // always take the branch
+        commands[1]!["to"] = "L0000";
+        commands[2]!["eventObjectId"] = 0; // inherit the caller's event object id
+        commands[4]!["to"] = "L0001";
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0002, 2, 0, 7,
+            0x0003, 0, 2, 0,
+            0x0004, 4, 0, 1,
+            0x0008, 0, 0, 0,
+            0x000a, 1, 0, 0,
+            0x0009, 30, 1, 1,
+            0x0001, 0, 0, 0,
+            0x0000, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A dangling jump target is rejected without producing output.
+        commands[1]!["to"] = "L0100";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Conditional_jump_batch2_verbs_export_roundtrip_and_reencode_jump_targets_from_labels()
+    {
+        // M5 batch 2 (#97): conditional jumps part 1 plus the re-verified markFailed /
+        // requestReload (stop-class successor) and waitForAnyKey. Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x0041, 0, 0, 0,     // markFailed
+            0x004D, 0, 0, 0,     // waitForAnyKey
+            0x004E, 0, 0, 0,     // requestReload (stops the run)
+            0x0058, 1, 2, 9,     // itemShortageJump: fewer than 2 of item 1 -> L0009
+            0x005D, 560, 8, 0,   // playerLacksPoisonJump: poison object 560 -> L0008
+            0x005E, 561, 7, 0,   // enemyLacksPoisonJump: poison object 561 -> L0007
+            0x0061, 6, 0, 0,     // notPoisonedJump: no poison at all -> L0006
+            0x0064, 30, 5, 0,    // enemyHpAboveJump: HP above 30% -> L0005
+            0x0068, 4, 0, 0,     // enemyTurnJump: enemy's turn -> L0004
+            0x0074, 0, 0, 0);    // partyHpNotFullJump: someone below max HP -> L0000
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(10, commands.Count);
+        Assert.Equal("markFailed", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal("waitForAnyKey", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("requestReload", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal("itemShortageJump", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[3]!["itemId"]!.GetValue<int>());
+        Assert.Equal(2, commands[3]!["count"]!.GetValue<int>());
+        Assert.Equal("L0009", commands[3]!["to"]!.GetValue<string>());
+        Assert.Equal("playerLacksPoisonJump", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(560, commands[4]!["objectId"]!.GetValue<int>());
+        Assert.Equal("L0008", commands[4]!["to"]!.GetValue<string>());
+        Assert.Equal("enemyLacksPoisonJump", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(561, commands[5]!["objectId"]!.GetValue<int>());
+        Assert.Equal("L0007", commands[5]!["to"]!.GetValue<string>());
+        Assert.Equal("notPoisonedJump", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("L0006", commands[6]!["to"]!.GetValue<string>());
+        Assert.Equal("enemyHpAboveJump", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(30, commands[7]!["percent"]!.GetValue<int>());
+        Assert.Equal("L0005", commands[7]!["to"]!.GetValue<string>());
+        Assert.Equal("enemyTurnJump", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal("L0004", commands[8]!["to"]!.GetValue<string>());
+        Assert.Equal("partyHpNotFullJump", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal("L0000", commands[9]!["to"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode the signed threshold, the poison object ids, the percent and
+        // the resolved jump WORDs; enemyTurnJump's target moves to L0004 by resolving its label.
+        commands[3]!["count"] = -1; // signed threshold: two's-complement WORD 0xFFFF
+        commands[3]!["to"] = "L0001";
+        commands[4]!["objectId"] = 551;
+        commands[4]!["to"] = "L0000"; // zero-target rule: references index 0, re-encodes as WORD 0
+        commands[5]!["objectId"] = 564;
+        commands[7]!["percent"] = 99;
+        commands[8]!["to"] = "L0006";
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0041, 0, 0, 0,
+            0x004D, 0, 0, 0,
+            0x004E, 0, 0, 0,
+            0x0058, 1, unchecked((int)0xFFFF), 1,
+            0x005D, 551, 0, 0,
+            0x005E, 564, 7, 0,
+            0x0061, 6, 0, 0,
+            0x0064, 99, 5, 0,
+            0x0068, 6, 0, 0,
+            0x0074, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A dangling jump target is rejected without producing output.
+        commands[8]!["to"] = "L0100";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Conditional_jump_batch3_verbs_export_roundtrip_and_reencode_jump_targets_from_labels()
+    {
+        // M5 batch 3 (#98): conditional jumps part 2 plus delay, quitGame (stop-class successor)
+        // and randomBranch (multi-way: one of the next `count` entries). Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x0079, 3, 7, 0,     // roleInPartyJump: role name word 3 in party -> L0007
+            0x0081, 2, 1, 6,     // notFacingObjectJump: player not facing object 2 zone 1 -> L0006
+            0x0083, 5, 2, 4,     // objectOutOfZoneJump: object 5 outside caller zone 2 -> L0004
+            0x0085, 25, 0, 0,    // delay 25 units (2000 ms wall clock, no game updates)
+            0x0086, 87, 2, 9,    // itemNotEquippedJump: fewer than 2 of item 87 equipped -> L0009
+            0x0091, 3, 0, 0,     // notFirstOfKindJump: not first of same kind -> L0003
+            0x0094, 4, 1, 8,     // stateMatchJump: object 4 state 1 -> L0008
+            0x0095, 13, 5, 0,    // sceneMatchJump: current scene 13 -> L0005
+            0x00A0, 0, 0, 0,     // quitGame (stops the run, no operands)
+            0x00A2, 3, 0, 0);    // randomBranch: one of the next 3 entries
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(10, commands.Count);
+        Assert.Equal("roleInPartyJump", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[0]!["roleNameWord"]!.GetValue<int>());
+        Assert.Equal("L0007", commands[0]!["to"]!.GetValue<string>());
+        Assert.Equal("notFacingObjectJump", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[1]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(1, commands[1]!["zoneUnits"]!.GetValue<int>());
+        Assert.Equal("L0006", commands[1]!["to"]!.GetValue<string>());
+        Assert.Equal("objectOutOfZoneJump", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(5, commands[2]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[2]!["zoneUnits"]!.GetValue<int>());
+        Assert.Equal("L0004", commands[2]!["to"]!.GetValue<string>());
+        Assert.Equal("delay", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(25, commands[3]!["delayUnits"]!.GetValue<int>());
+        Assert.Equal("itemNotEquippedJump", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(87, commands[4]!["itemId"]!.GetValue<int>());
+        Assert.Equal(2, commands[4]!["count"]!.GetValue<int>());
+        Assert.Equal("L0009", commands[4]!["to"]!.GetValue<string>());
+        Assert.Equal("notFirstOfKindJump", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal("L0003", commands[5]!["to"]!.GetValue<string>());
+        Assert.Equal("stateMatchJump", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(4, commands[6]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(1, commands[6]!["state"]!.GetValue<int>());
+        Assert.Equal("L0008", commands[6]!["to"]!.GetValue<string>());
+        Assert.Equal("sceneMatchJump", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(13, commands[7]!["sceneId"]!.GetValue<int>());
+        Assert.Equal("L0005", commands[7]!["to"]!.GetValue<string>());
+        Assert.Equal("quitGame", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal("randomBranch", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[9]!["count"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode the signed state, the branch count, the role name word and
+        // the resolved jump WORDs; roleInPartyJump's target exercises the zero-target rule.
+        commands[0]!["roleNameWord"] = 6;
+        commands[0]!["to"] = "L0000"; // zero-target rule: references index 0, re-encodes as WORD 0
+        commands[1]!["eventObjectId"] = 9;
+        commands[1]!["zoneUnits"] = 2;
+        commands[2]!["to"] = "L0001";
+        commands[3]!["delayUnits"] = 30;
+        commands[4]!["itemId"] = 195;
+        commands[4]!["count"] = 1;
+        commands[4]!["to"] = "L0002";
+        commands[5]!["to"] = "L0004";
+        commands[6]!["eventObjectId"] = 0; // caller's own object
+        commands[6]!["state"] = -1; // signed: two's-complement WORD 0xFFFF
+        commands[7]!["sceneId"] = 20;
+        commands[7]!["to"] = "L0003";
+        commands[9]!["count"] = 5;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0079, 6, 0, 0,
+            0x0081, 9, 2, 6,
+            0x0083, 5, 2, 1,
+            0x0085, 30, 0, 0,
+            0x0086, 195, 1, 2,
+            0x0091, 4, 0, 0,
+            0x0094, 0, unchecked((int)0xFFFF), 8,
+            0x0095, 20, 3, 0,
+            0x00A0, 0, 0, 0,
+            0x00A2, 5, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A dangling jump target is rejected without producing output.
+        commands[5]!["to"] = "L0100";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Dialog_batch4_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 batch 4 (#99): dialog presentation - the four setDialog variants, showDialog, redraw
+        // (corrected: delay on operand 1, gesture flag on operand 2, operand 0 unused), plus the new
+        // restoreScreen / backupScreen. Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x00A6, 0, 0, 0,           // backupScreen (shared executor, no operands)
+            0x003C, 59, 0x4F79, 1,     // setDialog upper: portrait 59, color 0x79 (high byte 0x4F), rng 1
+            0xFFFF, 101, 0, 0,         // showDialog 101
+            0x008E, 0, 0, 0,           // restoreScreen (trigger switch only)
+            0x0005, 77, 2, 1,          // redraw: 2 delay units (120 ms), gestures on, operand 0 unused
+            0x003B, 0x3112, 0, 0,      // setDialog center: color 0x12 (high byte 0x31), rng 0
+            0x003D, 60, 200, 0,        // setDialog lower: portrait 60, color 200, rng 0
+            0x003E, 0x2107, 9, 8,      // setDialog centerWindow: color 7 (high byte 0x21), operands 1/2 preserved
+            0, 0, 0, 0);               // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(9, commands.Count);
+        Assert.Equal("backupScreen", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal("setDialog", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("upper", commands[1]!["box"]!.GetValue<string>());
+        Assert.Equal(59, commands[1]!["portraitId"]!.GetValue<int>());
+        Assert.Equal(0x79, commands[1]!["color"]!.GetValue<int>());
+        Assert.Equal(1, commands[1]!["rngWord"]!.GetValue<int>());
+        Assert.Equal("showDialog", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(101, commands[2]!["messageId"]!.GetValue<int>());
+        Assert.Equal(0, commands[2]!["descriptionLineWord"]!.GetValue<int>());
+        Assert.Equal("restoreScreen", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("redraw", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[4]!["delayUnits"]!.GetValue<int>());
+        Assert.Equal(1, commands[4]!["updateGestures"]!.GetValue<int>());
+        Assert.Equal("setDialog", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal("center", commands[5]!["box"]!.GetValue<string>());
+        Assert.Equal(0x12, commands[5]!["color"]!.GetValue<int>());
+        Assert.Equal("setDialog", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("lower", commands[6]!["box"]!.GetValue<string>());
+        Assert.Equal("setDialog", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal("centerWindow", commands[7]!["box"]!.GetValue<string>());
+        Assert.Equal(7, commands[7]!["color"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields, not source words: low-byte colors keep their source
+        // high bytes, the portrait / rng / delay / gesture / message words are rewritten, and the
+        // unused redraw operand 0 plus centerWindow operands 1-2 keep their source WORDs.
+        commands[1]!["portraitId"] = 61;
+        commands[1]!["color"] = 200;
+        commands[2]!["messageId"] = 102;
+        commands[2]!["descriptionLineWord"] = 1;
+        commands[4]!["delayUnits"] = 5;
+        commands[4]!["updateGestures"] = 0;
+        commands[5]!["rngWord"] = 1;
+        commands[6]!["portraitId"] = 58;
+        commands[7]!["color"] = 200;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x00A6, 0, 0, 0,
+            0x003C, 61, 0x4FC8, 1,
+            0xFFFF, 102, 1, 0,
+            0x008E, 0, 0, 0,
+            0x0005, 77, 5, 0,
+            0x003B, 0x3112, 0, 1,
+            0x003D, 58, 200, 0,
+            0x003E, 0x21C8, 9, 8,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // An unrelated semantic field is rejected without producing output.
+        commands[2]!["text"] = "hello";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Status_item_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 status-item batch 1 (#100): the seven new setExtraAttr / equipItem / incPlayerAttr /
+        // setPlayerStat / changeCash / addItem / removeItem verbs plus the re-verified changeHp /
+        // changeMp / changeHpMp. Hand-built stream, not retail data. The equip rows follow the
+        // PLAYERROLES WORD layout (17=attack .. 22=poisonResistance; 64=walkFrames), equip parts
+        // are 0x0B+body part, and removeItem's operand 2 is a nullable shortage target.
+        byte[] original = Words(
+            0x0017, 0x0B, 19, unchecked((int)0xFFF6),  // setExtraAttr: head part, defense row, -10
+            0x0018, 0x0D, 208, 0,                      // equipItem: shoulder part, item 208
+            0x0019, 7, 100, 2,                         // incPlayerAttr: maxHP row, +100, role operand 2
+            0x001A, 64, 3, 0,                          // setPlayerStat: walkFrames row, 3, caller role
+            0x001B, 0, 300, 0,                         // changeHp: one player +300
+            0x001C, 1, unchecked((int)0xFFF6), 0,      // changeMp: whole party -10
+            0x001D, 1, 25, 0,                          // changeHpMp: whole party +25 to both stats
+            0x001E, 65511, 8, 7,                        // changeCash: -25, fail target L0008
+            0x001F, 138, 9, 5,                         // addItem: item 138 x9
+            0x0020, 148, 1, 9,                         // removeItem: item 148 x1, shortage target L0009
+            0, 0, 0, 0);                               // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(11, commands.Count);
+        Assert.Equal("setExtraAttr", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(0x0B, commands[0]!["equipPartWord"]!.GetValue<int>());
+        Assert.Equal(19, commands[0]!["field"]!.GetValue<int>());
+        Assert.Equal(-10, commands[0]!["value"]!.GetValue<int>());
+        Assert.Equal("equipItem", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(0x0D, commands[1]!["equipPartWord"]!.GetValue<int>());
+        Assert.Equal(208, commands[1]!["itemId"]!.GetValue<int>());
+        Assert.Equal("incPlayerAttr", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(7, commands[2]!["field"]!.GetValue<int>());
+        Assert.Equal(100, commands[2]!["delta"]!.GetValue<int>());
+        Assert.Equal(2, commands[2]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("setPlayerStat", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(64, commands[3]!["field"]!.GetValue<int>());
+        Assert.Equal(0, commands[3]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("changeHp", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[4]!["scope"]!.GetValue<int>());
+        Assert.Equal(300, commands[4]!["amount"]!.GetValue<int>());
+        Assert.Equal("changeMp", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[5]!["scope"]!.GetValue<int>());
+        Assert.Equal(-10, commands[5]!["amount"]!.GetValue<int>());
+        Assert.Equal("changeHpMp", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(25, commands[6]!["amount"]!.GetValue<int>());
+        Assert.Equal("changeCash", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(-25, commands[7]!["amount"]!.GetValue<int>());
+        Assert.Equal("L0008", commands[7]!["to"]!.GetValue<string>());
+        Assert.Equal("addItem", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(138, commands[8]!["itemId"]!.GetValue<int>());
+        Assert.Equal(9, commands[8]!["count"]!.GetValue<int>());
+        Assert.Equal("removeItem", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(148, commands[9]!["itemId"]!.GetValue<int>());
+        Assert.Equal(1, commands[9]!["count"]!.GetValue<int>());
+        Assert.Equal("L0009", commands[9]!["shortageTarget"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the cash fail target moves to L0000 (zero-target
+        // rule), removeItem's shortage target becomes null (WORD 0, removal proceeds even when
+        // short) with count 0 kept as 0 (runtime normalizes to 1), and preserved operands stay.
+        commands[0]!["equipPartWord"] = 0x11; // extra part
+        commands[0]!["value"] = 5;
+        commands[1]!["itemId"] = 209;
+        commands[2]!["field"] = 6; // level row
+        commands[2]!["delta"] = -10;
+        commands[2]!["roleOperand"] = 0;
+        commands[3]!["value"] = 383;
+        commands[3]!["roleOperand"] = 2;
+        commands[4]!["scope"] = 1;
+        commands[5]!["scope"] = 0;
+        commands[6]!["amount"] = 30;
+        commands[7]!["amount"] = 500;
+        commands[7]!["to"] = "L0000";
+        commands[8]!["itemId"] = 139;
+        commands[8]!["count"] = -1;
+        commands[9]!["count"] = 0;
+        commands[9]!["shortageTarget"] = null;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0017, 0x11, 19, 5,
+            0x0018, 0x0D, 209, 0,
+            0x0019, 6, unchecked((int)0xFFF6), 0,
+            0x001A, 64, 383, 2,
+            0x001B, 1, 300, 0,
+            0x001C, 0, unchecked((int)0xFFF6), 0,
+            0x001D, 1, 30, 0,
+            0x001E, 500, 0, 7,
+            0x001F, 139, unchecked((int)0xFFFF), 5,
+            0x0020, 148, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A shortage target pointing at address zero must use null, not a label.
+        commands[9]!["shortageTarget"] = "L0000";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Status_item_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 status-item batch 2 (#101): the nine new removeEquipment / applyPoisonToEnemy /
+        // applyPoisonToPlayer / curePoisonByObjectIdForEnemy / curePoisonByObjectIdForPlayer /
+        // curePoisonsByLevel / setStatusPlayer / setStatusEnemy / clearPlayerStatus verbs plus
+        // the re-verified revivePlayer. Hand-built stream, not retail data. Poison operands are
+        // object.json poison-view object IDs, status numbers are rgPlayerStatus/rgwStatus row
+        // indices, every numeric operand is an unsigned WORD, and setStatusEnemy's operand 2 is
+        // the resisted conditional-jump target.
+        byte[] original = Words(
+            0x0022, 0, 5, 9,                      // revivePlayer: one player, half of max HP
+            0x0023, 2, 3, 7,                      // removeEquipment: role 2, 1-based part 3
+            0x0028, 1, 556, 0,                    // applyPoisonToEnemy: all enemies, poison 556
+            0x0029, 0, 560, 4,                    // applyPoisonToPlayer: one player, poison 560
+            0x002A, 1, 555, 0,                    // curePoisonByObjectIdForEnemy: all enemies
+            0x002B, 0, 557, 6,                    // curePoisonByObjectIdForPlayer: one player
+            0x002C, 1, 2, 0,                      // curePoisonsByLevel: whole party, level <= 2
+            0x002D, 3, 5, 8,                      // setStatusPlayer: row 3, 5 rounds
+            0x002E, 5, 3, 11,                     // setStatusEnemy: row 5, 3 rounds, resist target L000B
+            0x002F, 2, 11, 13,                    // clearPlayerStatus: row 2
+            0, 0, 0, 0,                           // end keep
+            0, 0, 0, 0);                          // end keep (jump target L000B)
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(12, commands.Count);
+        Assert.Equal("revivePlayer", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[0]!["scope"]!.GetValue<int>());
+        Assert.Equal(5, commands[0]!["healthTenths"]!.GetValue<int>());
+        Assert.Equal("removeEquipment", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[1]!["playerRole"]!.GetValue<int>());
+        Assert.Equal(3, commands[1]!["partWord"]!.GetValue<int>());
+        Assert.Equal("applyPoisonToEnemy", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[2]!["scope"]!.GetValue<int>());
+        Assert.Equal(556, commands[2]!["objectId"]!.GetValue<int>());
+        Assert.Equal("applyPoisonToPlayer", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[3]!["scope"]!.GetValue<int>());
+        Assert.Equal(560, commands[3]!["objectId"]!.GetValue<int>());
+        Assert.Equal("curePoisonByObjectIdForEnemy", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal("curePoisonByObjectIdForPlayer", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(557, commands[5]!["objectId"]!.GetValue<int>());
+        Assert.Equal("curePoisonsByLevel", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[6]!["maxLevel"]!.GetValue<int>());
+        Assert.Equal("setStatusPlayer", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[7]!["status"]!.GetValue<int>());
+        Assert.Equal(5, commands[7]!["rounds"]!.GetValue<int>());
+        Assert.Equal("setStatusEnemy", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(5, commands[8]!["status"]!.GetValue<int>());
+        Assert.Equal(3, commands[8]!["rounds"]!.GetValue<int>());
+        Assert.Equal("L000B", commands[8]!["to"]!.GetValue<string>());
+        Assert.Equal("clearPlayerStatus", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[9]!["status"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the scope flags flip, poison object IDs move,
+        // the level and round counts change, setStatusEnemy's resisted target moves to L0000
+        // (zero-target rule), and the untouched preserved operands keep their source WORDs.
+        commands[0]!["scope"] = 1;
+        commands[0]!["healthTenths"] = 10;
+        commands[1]!["playerRole"] = 0;
+        commands[1]!["partWord"] = 0; // remove every part
+        commands[2]!["scope"] = 0;
+        commands[2]!["objectId"] = 560;
+        commands[3]!["scope"] = 1;
+        commands[3]!["objectId"] = 556;
+        commands[4]!["scope"] = 0;
+        commands[4]!["objectId"] = 558;
+        commands[5]!["scope"] = 1;
+        commands[5]!["objectId"] = 559;
+        commands[6]!["scope"] = 0;
+        commands[6]!["maxLevel"] = 3;
+        commands[7]!["status"] = 6;
+        commands[7]!["rounds"] = 999;
+        commands[8]!["status"] = 0;
+        commands[8]!["rounds"] = 65535;
+        commands[8]!["to"] = "L0000";
+        commands[9]!["status"] = 8;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0022, 1, 10, 9,
+            0x0023, 0, 0, 7,
+            0x0028, 0, 560, 0,
+            0x0029, 1, 556, 4,
+            0x002A, 0, 558, 0,
+            0x002B, 1, 559, 6,
+            0x002C, 0, 3, 0,
+            0x002D, 6, 999, 8,
+            0x002E, 0, 65535, 0,
+            0x002F, 8, 11, 13,
+            0, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A resisted target that dangles is rejected without output.
+        commands[8]!["to"] = "L0100";
+        File.WriteAllText(path, events.ToJsonString());
+        var dangling = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "dangling.bin"));
+        Assert.Equal(1, dangling.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "dangling.bin")));
+    }
+
+    [Fact]
+    public async Task Status_item_batch3_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 status-item batch 3 (#102): the eight new addMagic / removeMagic /
+        // setMagicBaseDamageByMp / halveHp / killPlayer / setMagicBaseDamageByCash / increaseLevel /
+        // halveCash verbs plus the re-verified boostStat. Hand-built stream, not retail data.
+        // Magic operands are object.json magic-view object IDs (addMagic/removeMagic store them
+        // into rgwMagic; the two base-damage verbs dereference .magic.wMagicNumber), operand 1 of
+        // 0x0055/0x0056 is the boostStat roleOperand shape, and 0x0057's WORD 0 multiplier
+        // normalizes to 8 at runtime only (encodes as 0). The halving and kill verbs map no
+        // operands; increaseLevel counts levels; every numeric operand of the batch is an
+        // unsigned WORD except boostStat's percent.
+        byte[] original = Words(
+            0x0030, 17, 50, 2,                     // boostStat: attack row, +50%, role index 1
+            0x0055, 300, 0, 7,                     // addMagic: object 300 to the caller role
+            0x0056, 311, 2, 0,                     // removeMagic: object 311 from role index 1
+            0x0057, 305, 0, 5,                     // setMagicBaseDamageByMp: MP x 8 (encoded 0)
+            0x005A, 3, 4, 5,                       // halveHp
+            0x005F, 1, 2, 3,                       // killPlayer
+            0x0088, 295, 6, 0,                     // setMagicBaseDamageByCash
+            0x008D, 1, 2, 3,                       // increaseLevel: one level
+            0x008F, 4, 5, 6,                       // halveCash
+            0, 0, 0, 0);                           // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(10, commands.Count);
+        Assert.Equal("boostStat", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(17, commands[0]!["field"]!.GetValue<int>());
+        Assert.Equal(50, commands[0]!["percent"]!.GetValue<int>());
+        Assert.Equal(2, commands[0]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("addMagic", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(300, commands[1]!["magicId"]!.GetValue<int>());
+        Assert.Equal(0, commands[1]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("removeMagic", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(311, commands[2]!["magicId"]!.GetValue<int>());
+        Assert.Equal(2, commands[2]!["roleOperand"]!.GetValue<int>());
+        Assert.Equal("setMagicBaseDamageByMp", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(305, commands[3]!["magicId"]!.GetValue<int>());
+        Assert.Equal(0, commands[3]!["mpMultiplier"]!.GetValue<int>());
+        Assert.Equal("halveHp", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal("killPlayer", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal("setMagicBaseDamageByCash", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(295, commands[6]!["magicId"]!.GetValue<int>());
+        Assert.Equal("increaseLevel", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[7]!["levels"]!.GetValue<int>());
+        Assert.Equal("halveCash", commands[8]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the stat row, percent and role change, the magic
+        // object IDs move, the MP multiplier becomes an explicit 8, the level count grows, and
+        // the untouched preserved operands keep their source WORDs.
+        commands[0]!["field"] = 18; // magicStrength row
+        commands[0]!["percent"] = -25;
+        commands[0]!["roleOperand"] = 0;
+        commands[1]!["magicId"] = 310;
+        commands[1]!["roleOperand"] = 2;
+        commands[2]!["magicId"] = 300;
+        commands[2]!["roleOperand"] = 0;
+        commands[3]!["magicId"] = 321;
+        commands[3]!["mpMultiplier"] = 8;
+        commands[6]!["magicId"] = 300;
+        commands[7]!["levels"] = 5;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0030, 18, unchecked((int)0xFFE7), 0,
+            0x0055, 310, 2, 7,
+            0x0056, 300, 0, 0,
+            0x0057, 321, 8, 5,
+            0x005A, 3, 4, 5,
+            0x005F, 1, 2, 3,
+            0x0088, 300, 6, 0,
+            0x008D, 5, 2, 3,
+            0x008F, 4, 5, 6,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A negative level count is rejected without output (unsigned WORD, no SHORT cast).
+        commands[7]!["levels"] = -1;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Battle_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 battle batch 1 (#103): the ten new inflictDamageToEnemy / changeBattleSprite /
+        // collectEnemyForItems / transformCollectedEnemies / drainHpFromEnemy / playerFlee /
+        // simulateMagic / halveEnemyHp / killEnemy / throwWeapon verbs plus the re-verified
+        // startBattle / setBattlefield. Hand-built stream, not retail data. The three fail jumps
+        // (0x0033/0x0034/0x003A) are required references; simulateMagic's operand 2 is the (SHORT)
+        // enemy-target shape (0 or negative = caller slot, positive = operand - 1 enemy index);
+        // throwWeapon's operand 0 is the magic-view object of the thrown weapon.
+        byte[] original = Words(
+            0x0007, 44, 0, 0,        // startBattle: team 44, boss battle (no result targets)
+            0x0021, 1, 300, 0,       // inflictDamageToEnemy: every enemy, 300 damage
+            0x0031, 5, 0, 0,         // changeBattleSprite: sprite 5 for the caller role
+            0x0033, 11, 0, 0,        // collectEnemyForItems: nothing to collect -> L000B
+            0x0034, 10, 0, 0,        // transformCollectedEnemies: counter empty -> L000A
+            0x0039, 180, 0, 0,       // drainHpFromEnemy: 180 HP to the moving player
+            0x003A, 9, 0, 0,         // playerFlee: boss blocks fleeing -> L0009
+            0x0042, 323, 0, 0,       // simulateMagic: magic 323, damage 0, caller enemy slot
+            0x004A, 12, 0, 0,        // setBattlefield: battlefield 12
+            0x005B, 1000, 0, 0,      // halveEnemyHp: halving capped at 1000
+            0x0060, 0, 0, 0,         // killEnemy
+            0x0066, 344, 105, 0,     // throwWeapon: magic 344, 105 five-HP units
+            0, 0, 0, 0);             // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(13, commands.Count);
+        Assert.Equal("startBattle", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(44, commands[0]!["enemyTeamId"]!.GetValue<int>());
+        Assert.True(commands[0]!["isBoss"]!.GetValue<bool>());
+        Assert.Null(commands[0]!["lossTarget"]);
+        Assert.Null(commands[0]!["fleeTarget"]);
+        Assert.Equal("inflictDamageToEnemy", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[1]!["scope"]!.GetValue<int>());
+        Assert.Equal(300, commands[1]!["damage"]!.GetValue<int>());
+        Assert.Equal("changeBattleSprite", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(5, commands[2]!["battleSprite"]!.GetValue<int>());
+        Assert.Equal("collectEnemyForItems", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("L000B", commands[3]!["to"]!.GetValue<string>());
+        Assert.Equal("transformCollectedEnemies", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal("L000A", commands[4]!["to"]!.GetValue<string>());
+        Assert.Equal("drainHpFromEnemy", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(180, commands[5]!["amount"]!.GetValue<int>());
+        Assert.Equal("playerFlee", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("L0009", commands[6]!["to"]!.GetValue<string>());
+        Assert.Equal("simulateMagic", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(323, commands[7]!["magicId"]!.GetValue<int>());
+        Assert.Equal(0, commands[7]!["baseDamage"]!.GetValue<int>());
+        Assert.Equal(0, commands[7]!["enemyOperand"]!.GetValue<int>());
+        Assert.Equal("setBattlefield", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(12, commands[8]!["battlefieldId"]!.GetValue<int>());
+        Assert.Equal("halveEnemyHp", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(1000, commands[9]!["maxDamage"]!.GetValue<int>());
+        Assert.Equal("killEnemy", commands[10]!["op"]!.GetValue<string>());
+        Assert.Equal("throwWeapon", commands[11]!["op"]!.GetValue<string>());
+        Assert.Equal(344, commands[11]!["magicId"]!.GetValue<int>());
+        Assert.Equal(105, commands[11]!["damageUnits"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the battle turns non-boss with explicit result
+        // targets, the damage/scope/amount/cap fields move, the fail jumps exercise the zero-target
+        // rule, simulateMagic gains an explicit 1-based enemy target and damage, and the thrown
+        // weapon switches to magic 360 with fewer five-HP units.
+        commands[0]!["enemyTeamId"] = 45;
+        commands[0]!["lossTarget"] = "L0001";
+        commands[0]!["isBoss"] = false;
+        commands[0]!["fleeTarget"] = "L0002";
+        commands[1]!["scope"] = 0;
+        commands[1]!["damage"] = 400;
+        commands[2]!["battleSprite"] = 2;
+        commands[3]!["to"] = "L0000";
+        commands[4]!["to"] = "L0001";
+        commands[5]!["amount"] = 999;
+        commands[6]!["to"] = "L0000";
+        commands[7]!["magicId"] = 349;
+        commands[7]!["baseDamage"] = 50;
+        commands[7]!["enemyOperand"] = 2;
+        commands[8]!["battlefieldId"] = 24;
+        commands[9]!["maxDamage"] = 100;
+        commands[11]!["magicId"] = 360;
+        commands[11]!["damageUnits"] = 10;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0007, 45, 1, 2,
+            0x0021, 0, 400, 0,
+            0x0031, 2, 0, 0,
+            0x0033, 0, 0, 0,
+            0x0034, 1, 0, 0,
+            0x0039, 999, 0, 0,
+            0x003A, 0, 0, 0,
+            0x0042, 349, 50, 2,
+            0x004A, 24, 0, 0,
+            0x005B, 100, 0, 0,
+            0x0060, 0, 0, 0,
+            0x0066, 360, 10, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // An enemy target beyond the signed WORD bound is rejected without output.
+        commands[7]!["enemyOperand"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Battle_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 battle batch 2 (#104) - the battle-domain closing batch plus the two menu verbs:
+        // showBuyMenu/showSellMenu, enemyUseMagic, enemyEscape, stealFromEnemy, blowAwayEnemies,
+        // setBattleResult, enableAutoBattle, showMagicCastAnimation, enemyDivide, enemySummon and
+        // enemyTransform. Hand-built stream, not retail data. enemyUseMagic's operand 0 is the
+        // magic-view object with the cast rate on operand 1; blowAwayEnemies reads a (SHORT) wind
+        // strength (real data uses -3/-2); setBattleResult keeps the raw BATTLERESULT WORD (0xFFFF
+        // = fleed); enemyDivide/enemySummon fail jumps are nullable references (WORD 0 = no jump);
+        // enemySummon's count is a (SHORT) with non-positive values normalized to 1 at runtime.
+        byte[] original = Words(
+            0x0026, 12, 0, 0,        // showBuyMenu: store row 12
+            0x0027, 0, 0, 0,         // showSellMenu: player inventory, no table row
+            0x0067, 318, 5, 0,       // enemyUseMagic: magic 318, rate 5
+            0x0069, 0, 0, 0,         // enemyEscape: all enemies flee, battle terminates
+            0x006A, 6, 0, 0,         // stealFromEnemy: steal rate 6 from the caller enemy
+            0x006B, unchecked((int)0xFFFD), 0, 0, // blowAwayEnemies: (SHORT) -3 wind
+            0x0089, 3, 0, 0,         // setBattleResult: won
+            0x008A, 0, 0, 0,         // enableAutoBattle
+            0x0092, 2, 0, 0,         // showMagicCastAnimation: player slot 2
+            0x009C, 0, 0, 0,         // enemyDivide: copies 0 (runtime 1), no fail target
+            0x009E, 433, 2, 0,       // enemySummon: enemy 433 x2, no fail target
+            0x009F, 410, 0, 0,       // enemyTransform: become enemy 410
+            0, 0, 0, 0);             // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(13, commands.Count);
+        Assert.Equal("showBuyMenu", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(12, commands[0]!["storeId"]!.GetValue<int>());
+        Assert.Equal("showSellMenu", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("enemyUseMagic", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(318, commands[2]!["magicId"]!.GetValue<int>());
+        Assert.Equal(5, commands[2]!["magicRate"]!.GetValue<int>());
+        Assert.Equal("enemyEscape", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("stealFromEnemy", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(6, commands[4]!["stealRate"]!.GetValue<int>());
+        Assert.Equal("blowAwayEnemies", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(-3, commands[5]!["strength"]!.GetValue<int>());
+        Assert.Equal("setBattleResult", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[6]!["result"]!.GetValue<int>());
+        Assert.Equal("enableAutoBattle", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal("showMagicCastAnimation", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[8]!["playerOperand"]!.GetValue<int>());
+        Assert.Equal("enemyDivide", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[9]!["copies"]!.GetValue<int>());
+        Assert.Null(commands[9]!["failTarget"]);
+        Assert.Equal("enemySummon", commands[10]!["op"]!.GetValue<string>());
+        Assert.Equal(433, commands[10]!["objectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[10]!["count"]!.GetValue<int>());
+        Assert.Null(commands[10]!["failTarget"]);
+        Assert.Equal("enemyTransform", commands[11]!["op"]!.GetValue<string>());
+        Assert.Equal(410, commands[11]!["objectId"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the store row, enemy magic/rate (0 keeps the
+        // runtime-normalized encoding), steal rate, a positive wind, the fleed result WORD, no
+        // single caster, an explicit divide fail target with 2 copies, a summon of the summoner's
+        // own object (WORD 0) with a runtime-normalized count of -1 and an explicit fail target,
+        // and another transform target.
+        commands[0]!["storeId"] = 1;
+        commands[2]!["magicId"] = 375;
+        commands[2]!["magicRate"] = 0;
+        commands[4]!["stealRate"] = 0;
+        commands[5]!["strength"] = 3;
+        commands[6]!["result"] = 65_535;
+        commands[8]!["playerOperand"] = 0;
+        commands[9]!["copies"] = 2;
+        commands[9]!["failTarget"] = "L0002";
+        commands[10]!["objectId"] = 0;
+        commands[10]!["count"] = -1;
+        commands[10]!["failTarget"] = "L0001";
+        commands[11]!["objectId"] = 434;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0026, 1, 0, 0,
+            0x0027, 0, 0, 0,
+            0x0067, 375, 0, 0,
+            0x0069, 0, 0, 0,
+            0x006A, 0, 0, 0,
+            0x006B, 3, 0, 0,
+            0x0089, unchecked((int)0xFFFF), 0, 0,
+            0x008A, 0, 0, 0,
+            0x0092, 0, 0, 0,
+            0x009C, 2, 2, 0,
+            0x009E, 0, unchecked((int)0xFFFF), 1,
+            0x009F, 434, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A summon count beyond the signed WORD bound is rejected without output.
+        commands[10]!["count"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement batch 1 (#105, movement part 1): the four walkStep opcode bits,
+        // face, walkTo, walkToSlow (new), setObjectPositionRelativeToParty (new),
+        // setObjectPosition and setObjectGesture. Hand-built stream, not retail data. Direction
+        // comes from the opcode for walkStep (opcode - 0x000B); face's 0xFFFF operands are
+        // no-change sentinels kept as plain WORDs; walkToSlow walks every other frame at speed 2
+        // (both runtime constants, not operands); the party-relative verb takes the
+        // preamble-selected event object id plus offsets from the party's map position (real data
+        // encodes -128 as 0xFF80); setObjectGesture hardcodes direction kDirSouth, no operand.
+        byte[] original = Words(
+            0x000B, 0, 0, 0,                              // walkStep: one step south
+            0x000D, 0, 0, 0,                              // walkStep: one step north
+            0x000F, 2, unchecked((int)0xFFFF), 5,         // face: north, frame unchanged, operand2 preserved
+            0x0010, 24, 60, 1,                            // walkTo: map position, layer 1
+            0x0011, 33, 48, 0,                            // walkToSlow: slower walk on layer 0
+            0x0012, 84, unchecked((int)0xFF80), 56,       // setObjectPositionRelativeToParty: object 84, -128/+56 around the party
+            0x0013, 28, 1280, 256,                        // setObjectPosition: object 28 to the absolute position
+            0x0014, 7, 0, 0,                              // setObjectGesture: frame 7 (direction hardcoded south)
+            0x000E, 0, 0, 0,                              // walkStep: one step east
+            0x000C, 0, 0, 0,                              // walkStep: one step west
+            0, 0, 0, 0);                                  // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(11, commands.Count);
+        Assert.Equal("walkStep", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[0]!["direction"]!.GetValue<int>());
+        Assert.Equal("walkStep", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[1]!["direction"]!.GetValue<int>());
+        Assert.Equal("face", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[2]!["direction"]!.GetValue<int>());
+        Assert.Equal(65_535, commands[2]!["frame"]!.GetValue<int>()); // no-change sentinel
+        Assert.Equal("walkTo", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(24, commands[3]!["x"]!.GetValue<int>());
+        Assert.Equal(1, commands[3]!["h"]!.GetValue<int>());
+        Assert.Equal("walkToSlow", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(33, commands[4]!["x"]!.GetValue<int>());
+        Assert.Equal(0, commands[4]!["h"]!.GetValue<int>());
+        Assert.Equal("setObjectPositionRelativeToParty", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(84, commands[5]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(65_408, commands[5]!["xOffset"]!.GetValue<int>());
+        Assert.Equal(56, commands[5]!["yOffset"]!.GetValue<int>());
+        Assert.Equal("setObjectPosition", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(28, commands[6]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(1280, commands[6]!["x"]!.GetValue<int>());
+        Assert.Equal(256, commands[6]!["y"]!.GetValue<int>());
+        Assert.Equal("setObjectGesture", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(7, commands[7]!["frame"]!.GetValue<int>());
+        Assert.Equal("walkStep", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[8]!["direction"]!.GetValue<int>());
+        Assert.Equal("walkStep", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[9]!["direction"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the sentinel frame becomes an explicit 23, the
+        // walk targets and layer move, the party-relative verb switches to the caller's object
+        // (0) with offsets 0/64, the absolute position moves, and the gesture frame resets to 0.
+        commands[2]!["direction"] = 3;
+        commands[2]!["frame"] = 23;
+        commands[3]!["x"] = 40;
+        commands[3]!["h"] = 0;
+        commands[4]!["y"] = 50;
+        commands[4]!["h"] = 1;
+        commands[5]!["eventObjectId"] = 0; // the caller's object via the shared preamble
+        commands[5]!["xOffset"] = 0; // exactly at the party
+        commands[5]!["yOffset"] = 64;
+        commands[6]!["x"] = 1360;
+        commands[6]!["y"] = 1376;
+        commands[7]!["frame"] = 0;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x000B, 0, 0, 0,
+            0x000D, 0, 0, 0,
+            0x000F, 3, 23, 5,
+            0x0010, 40, 60, 0,
+            0x0011, 33, 50, 1,
+            0x0012, 0, 0, 64,
+            0x0013, 28, 1360, 1376,
+            0x0014, 0, 0, 0,
+            0x000E, 0, 0, 0,
+            0x000C, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A walkStep direction that contradicts its source opcode is rejected without output.
+        commands[0]!["direction"] = 2;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement batch 2 (#106, movement part 2): setPartyFacing (review),
+        // setObjectFacing (new), teleportParty (new), rideEventObjectSlow (new),
+        // rideEventObject (new), setPartyPos (review), chasePlayer (new), pauseEnemyChasing
+        // (new), speedUpEnemyChasing (new) and walkNpcStep (new). Hand-built stream, not retail
+        // data. setPartyFacing stores the direction row plus a 0..2 pose offset for the
+        // operand-2 party slot; setObjectFacing targets the preamble event object and gates on
+        // operand 0 being non-zero (WORD 0 is a no-op form, 0xFFFF the caller); teleportParty
+        // runs the scene's teleport script or jumps to its plain reference on failure; the ride
+        // verbs share x/y/h tile operands with speeds 2/4 as runtime constants; chasePlayer's
+        // chaseRange/speed WORD-0 forms are runtime defaults (8/4) and floating is a truthy
+        // WORD; the two chase verbs only differ in the hardcoded global range 0/3; walkNpcStep
+        // moves the preamble NPC by signed pixel offsets (the batch's only SHORT casts).
+        byte[] original = Words(
+            0x0015, 2, 5, 1,                               // setPartyFacing: north, pose 5, member slot 1
+            0x0016, 84, 1, 6,                              // setObjectFacing: object 84, west, frame 6
+            0x0016, unchecked((int)0xFFFF), 3, 0,          // setObjectFacing: the caller's object, east, frame 0
+            0x0038, 6, 0, 0,                               // teleportParty: failure target L0006
+            0x003F, 30, 66, 0,                             // rideEventObjectSlow: tile (30,66) layer 0
+            0x0044, 16, 45, 1,                             // rideEventObject: tile (16,45) layer 1
+            0x0046, 10, 20, 1,                             // setPartyPos: tile (10,20) layer 1
+            0x004C, 8, 4, 1,                               // chasePlayer: range 8, speed 4, floating
+            0x0062, 600, 0, 0,                             // pauseEnemyChasing: 600 cycles
+            0x0063, 600, 0, 0,                             // speedUpEnemyChasing: 600 cycles
+            0x006C, unchecked((int)0xFFFF), unchecked((int)0xFFE0), 8, // walkNpcStep: caller, -32/+8 pixels
+            0, 0, 0, 0);                                   // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(12, commands.Count);
+        Assert.Equal("setPartyFacing", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[0]!["direction"]!.GetValue<int>());
+        Assert.Equal(5, commands[0]!["gesture"]!.GetValue<int>());
+        Assert.Equal(1, commands[0]!["memberIndex"]!.GetValue<int>());
+        Assert.Equal("setObjectFacing", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(84, commands[1]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(6, commands[1]!["frame"]!.GetValue<int>());
+        Assert.Equal("setObjectFacing", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[2]!["eventObjectId"]!.GetValue<int>()); // caller form
+        Assert.Equal(3, commands[2]!["direction"]!.GetValue<int>());
+        Assert.Equal("teleportParty", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("L0006", commands[3]!["to"]!.GetValue<string>());
+        Assert.Equal("rideEventObjectSlow", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(30, commands[4]!["x"]!.GetValue<int>());
+        Assert.Equal(66, commands[4]!["y"]!.GetValue<int>());
+        Assert.Equal("rideEventObject", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(45, commands[5]!["y"]!.GetValue<int>());
+        Assert.Equal(1, commands[5]!["h"]!.GetValue<int>());
+        Assert.Equal("setPartyPos", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(10, commands[6]!["x"]!.GetValue<int>());
+        Assert.Equal(20, commands[6]!["y"]!.GetValue<int>());
+        Assert.Equal("chasePlayer", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(8, commands[7]!["chaseRange"]!.GetValue<int>());
+        Assert.Equal(4, commands[7]!["speed"]!.GetValue<int>());
+        Assert.Equal(1, commands[7]!["floating"]!.GetValue<int>());
+        Assert.Equal("pauseEnemyChasing", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(600, commands[8]!["cycles"]!.GetValue<int>());
+        Assert.Equal("speedUpEnemyChasing", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(600, commands[9]!["cycles"]!.GetValue<int>());
+        Assert.Equal("walkNpcStep", commands[10]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[10]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(-32, commands[10]!["xOffset"]!.GetValue<int>()); // 0xFFE0 through the SHORT cast
+        Assert.Equal(8, commands[10]!["yOffset"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the pose row and member slot move, the object
+        // facing switches to the no-op gate form with the kDirUnknown direction and frame 27,
+        // the teleport failure target moves to L0002, the rides and party position move, the
+        // chase range drops to the runtime-default encoding with the floating truthy form, the
+        // pause cycles reset, and the NPC step becomes a 1-based object with -16/-12 offsets.
+        commands[0]!["direction"] = 3;
+        commands[0]!["gesture"] = 0;
+        commands[0]!["memberIndex"] = 2;
+        commands[1]!["eventObjectId"] = 0; // WORD 0: the gate no-op form still encodes
+        commands[1]!["direction"] = 4; // kDirUnknown appears once in real data
+        commands[1]!["frame"] = 27;
+        commands[3]!["to"] = "L0002";
+        commands[4]!["x"] = 47;
+        commands[4]!["h"] = 1;
+        commands[5]!["y"] = 102;
+        commands[6]!["x"] = 0;
+        commands[6]!["h"] = 0;
+        commands[7]!["chaseRange"] = 0; // runtime default 8 still encodes 0
+        commands[7]!["floating"] = 65_535;
+        commands[8]!["cycles"] = 0;
+        commands[10]!["eventObjectId"] = 9;
+        commands[10]!["xOffset"] = -16;
+        commands[10]!["yOffset"] = -12;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0015, 3, 0, 2,
+            0x0016, 0, 4, 27,
+            0x0016, unchecked((int)0xFFFF), 3, 0,
+            0x0038, 2, 0, 0,
+            0x003F, 47, 66, 1,
+            0x0044, 16, 102, 1,
+            0x0046, 0, 20, 0,
+            0x004C, 0, 4, unchecked((int)0xFFFF),
+            0x0062, 0, 0, 0,
+            0x0063, 600, 0, 0,
+            0x006C, 9, unchecked((int)0xFFF0), unchecked((int)0xFFF4),
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A dangling teleportParty target is rejected without output.
+        commands[3]!["to"] = "L0099";
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_batch3_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement batch 3 (#107, movement part 3 - the movement subdomain's closing
+        // batch): moveParty, partyWalkToSlow/partyWalkTo/partyWalkToFast, walkToFast,
+        // moveObject, moveViewport (scroll + reset forms), walkToFastest, rideEventObjectFast,
+        // setFollower and gatherParty. Hand-built stream, not retail data. moveParty shifts the
+        // viewport by signed pixel offsets and writes the layer global (layerUnits * 8); the
+        // partyWalkTo ladder passes absolute x/y/h tiles at constant speeds 2/4/8; walkToFast
+        // is the gated speed-4 walkTo form and walkToFastest the ungated speed-8 one; moveObject
+        // shifts the preamble event object by signed pixel offsets without the walk animation;
+        // moveViewport scrolls by signed offsets for a frame count with the 0/0 reset form
+        // reusing the same WORDs; setFollower stores direct MGO sprite numbers (not roles);
+        // gatherParty reads no operands.
+        byte[] original = Words(
+            0x006E, unchecked((int)0xFFF0), 8, 1,               // moveParty: -16/+8 pixels, layer 1
+            0x0070, 12, 28, 1,                                    // partyWalkToSlow: tile (12,28) layer 1
+            0x007A, 5, 8, 0,                                      // partyWalkTo: tile (5,8) layer 0
+            0x007B, 10, 15, 1,                                    // partyWalkToFast: tile (10,15) layer 1
+            0x007C, 22, 49, 0,                                    // walkToFast: tile (22,49) layer 0
+            0x007D, unchecked((int)0xFFFF), unchecked((int)0xFFF0), 4, // moveObject: caller, -16/+4 pixels
+            0x007F, 4, 8, 16,                                     // moveViewport: scroll +4/+8 for 16 frames
+            0x007F, 0, 0, 16,                                     // moveViewport: the 0/0 reset form
+            0x0082, 24, 20, 1,                                    // walkToFastest: tile (24,20) layer 1
+            0x0097, 45, 120, 0,                                   // rideEventObjectFast: the real-data tile
+            0x0098, 82, 0, 0,                                     // setFollower: slot-1 sprite 82
+            0x00A1, 0, 0, 0,                                      // gatherParty
+            0, 0, 0, 0);                                          // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(13, commands.Count);
+        Assert.Equal("moveParty", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(-16, commands[0]!["xOffset"]!.GetValue<int>()); // 0xFFF0 through the SHORT cast
+        Assert.Equal(8, commands[0]!["yOffset"]!.GetValue<int>());
+        Assert.Equal(1, commands[0]!["layerUnits"]!.GetValue<int>());
+        Assert.Equal("partyWalkToSlow", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(12, commands[1]!["x"]!.GetValue<int>());
+        Assert.Equal("partyWalkTo", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[2]!["h"]!.GetValue<int>());
+        Assert.Equal("partyWalkToFast", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(15, commands[3]!["y"]!.GetValue<int>());
+        Assert.Equal("walkToFast", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(22, commands[4]!["x"]!.GetValue<int>());
+        Assert.Equal("moveObject", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[5]!["eventObjectId"]!.GetValue<int>()); // caller form
+        Assert.Equal(-16, commands[5]!["xOffset"]!.GetValue<int>());
+        Assert.Equal("moveViewport", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(4, commands[6]!["xOffset"]!.GetValue<int>());
+        Assert.Equal(16, commands[6]!["frames"]!.GetValue<int>());
+        Assert.Equal("moveViewport", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[7]!["xOffset"]!.GetValue<int>()); // the reset form encodes both WORDs 0
+        Assert.Equal("walkToFastest", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[8]!["h"]!.GetValue<int>());
+        Assert.Equal("rideEventObjectFast", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(45, commands[9]!["x"]!.GetValue<int>());
+        Assert.Equal(120, commands[9]!["y"]!.GetValue<int>());
+        Assert.Equal("setFollower", commands[10]!["op"]!.GetValue<string>());
+        Assert.Equal(82, commands[10]!["spriteNum0"]!.GetValue<int>());
+        Assert.Equal(0, commands[10]!["spriteNum1"]!.GetValue<int>());
+        Assert.Equal("gatherParty", commands[11]!["op"]!.GetValue<string>());
+        Assert.Equal("end", commands[12]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the party move flips to the real-data -32 tail
+        // with layer 10, the three party walks and two fast walks move tiles, the object shift
+        // switches to a 1-based object with the -80 y tail, the scroll becomes the 0xFFFF
+        // absolute-mode sentinel with a -16 x, the reset form changes its frame count, the ride
+        // changes tile line, and the second follower slot gains a sprite.
+        commands[0]!["xOffset"] = -32;
+        commands[0]!["layerUnits"] = 10;
+        commands[1]!["x"] = 50;
+        commands[2]!["h"] = 1;
+        commands[3]!["y"] = 96;
+        commands[4]!["x"] = 51;
+        commands[4]!["h"] = 1;
+        commands[5]!["eventObjectId"] = 57;
+        commands[5]!["yOffset"] = -80;
+        commands[6]!["xOffset"] = -16;
+        commands[6]!["frames"] = 65_535; // the unsigned-only absolute-mode sentinel
+        commands[7]!["frames"] = 150;
+        commands[8]!["y"] = 112;
+        commands[9]!["h"] = 1;
+        commands[10]!["spriteNum1"] = 83;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x006E, unchecked((int)0xFFE0), 8, 10,
+            0x0070, 50, 28, 1,
+            0x007A, 5, 8, 1,
+            0x007B, 10, 96, 1,
+            0x007C, 51, 49, 1,
+            0x007D, 57, unchecked((int)0xFFF0), unchecked((int)0xFFB0),
+            0x007F, unchecked((int)0xFFF0), 8, unchecked((int)0xFFFF),
+            0x007F, 0, 0, 150,
+            0x0082, 24, 112, 1,
+            0x0097, 45, 120, 1,
+            0x0098, 82, 83, 0,
+            0x00A1, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A signed pixel offset beyond the signed WORD range is rejected without output.
+        commands[0]!["xOffset"] = -32_769;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_object_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement object batch 1 (#108, the 13-opcode object subdomain's first
+        // batch of 7): the setState-family entry/mode/state writers (setAutoEntry,
+        // setTriggerEntry, setTriggerMode, setState - the preamble-selected pCurrent under
+        // the operand0 != 0 gate), nullifyObject (the fixed -15 vanish of the caller with
+        // no operands), hide in both real forms (the WORD 0 default-800 form and an
+        // explicit frame count, on the caller object), and setBattleHidingTime (the
+        // battle-global hiding countdown kept as positive units; the negation is
+        // runtime-only). Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x0024, 57, 373, 0,                                    // setAutoEntry: real-data @0133 form
+            0x0025, unchecked((int)0xFFFF), 355, 0,                // setTriggerEntry: real-data @0180 caller form
+            0x0040, unchecked((int)0xFFFF), 4, 0,                  // setTriggerMode: real-data @0066 caller form
+            0x0049, 20, 2, 0,                                      // setState: real-data @0185 blocker form
+            0x004B, 0, 0, 0,                                       // nullifyObject: real-data @A071 single hit
+            0x0052, 150, 0, 0,                                     // hide: real-data @A0D8 explicit frames
+            0x0052, 0, 0, 0,                                       // hide: real-data @A0A7 default-800 form
+            0x005C, 3, 0, 0,                                       // setBattleHidingTime: real-data @9A53 single hit
+            0, 0, 0, 0);                                           // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(9, commands.Count);
+        Assert.Equal("setAutoEntry", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(57, commands[0]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(373, commands[0]!["entry"]!.GetValue<int>());
+        Assert.Equal("setTriggerEntry", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[1]!["eventObjectId"]!.GetValue<int>()); // caller form
+        Assert.Equal(355, commands[1]!["entry"]!.GetValue<int>());
+        Assert.Equal("setTriggerMode", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(4, commands[2]!["mode"]!.GetValue<int>()); // kTriggerTouchNear
+        Assert.Equal("setState", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(20, commands[3]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[3]!["state"]!.GetValue<int>()); // blocker
+        Assert.Equal("nullifyObject", commands[4]!["op"]!.GetValue<string>()); // no fields to edit
+        Assert.Equal("hide", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(150, commands[5]!["frames"]!.GetValue<int>());
+        Assert.Equal("hide", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[6]!["frames"]!.GetValue<int>()); // the default-800 form encodes WORD 0
+        Assert.Equal("setBattleHidingTime", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[7]!["units"]!.GetValue<int>());
+        Assert.Equal("end", commands[8]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the auto entry switches to the caller form
+        // with the real-data entry top 41099, the trigger entry is cleared (WORD 0), the
+        // trigger mode becomes kTriggerNone, the state write becomes a negative hidden
+        // state on the real-data 1-based bottom object, the explicit hide grows to the
+        // runtime default, the default-800 form becomes explicit, and the hiding countdown
+        // is cleared.
+        commands[0]!["eventObjectId"] = 65_535;
+        commands[0]!["entry"] = 41_099; // 0xA08B, past the signed range - entry stays unsigned
+        commands[1]!["entry"] = 0;
+        commands[2]!["mode"] = 0;
+        commands[3]!["eventObjectId"] = 4;
+        commands[3]!["state"] = -123; // 0xFF85 through the SHORT cast
+        commands[5]!["frames"] = 800;
+        commands[6]!["frames"] = 100;
+        commands[7]!["units"] = 0;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0024, unchecked((int)0xFFFF), 41_099, 0,
+            0x0025, unchecked((int)0xFFFF), 0, 0,
+            0x0040, unchecked((int)0xFFFF), 0, 0,
+            0x0049, 4, unchecked((int)0xFF85), 0,
+            0x004B, 0, 0, 0,
+            0x0052, 800, 0, 0,
+            0x0052, 100, 0, 0,
+            0x005C, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A state beyond the signed WORD range is rejected without output.
+        commands[3]!["state"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_object_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement object batch 2 (#109, the 13-opcode object subdomain's
+        // closing batch of 6): syncState (conditional state sync from the preamble-
+        // selected object to the caller, ungated unlike the 0x0024 family),
+        // setObjectLayer (the SHORT draw-order/draw-offset layer, real data carries
+        // -10), placeUsedItem (place the used item's event object in front of the
+        // party, jumping to the plain reference on a not-in-scene or blocked
+        // failure), animateObject (the speed-0 gesture-frame advance, real data uses
+        // the caller form only), and the two #109 re-verified bits setObjectScript
+        // (the object union's script slots) and setStateRange (the closed 1-based
+        // event-object range). Hand-built stream, not retail data; the placeUsedItem
+        // failure target of the real @9AE6 form (39656) maps to the in-file L0006.
+        byte[] original = Words(
+            0x006F, 103, 0, 0,                                    // syncState: real-data @00FF form
+            0x007E, unchecked((int)0xFFFF), 33, 0,                // setObjectLayer: real-data @517C caller form
+            0x0084, 798, 2, 6,                                    // placeUsedItem: real-data @9AE6 form, target in-file
+            0x0087, 0, 0, 0,                                      // animateObject: real-data @0349 caller form
+            0x0090, 435, 0, 0,                                    // setObjectScript: real-data @552E clearing form
+            0x009A, 102, 103, 2,                                  // setStateRange: real-data @0678 blocker form
+            0, 0, 0, 0);                                          // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(7, commands.Count);
+        Assert.Equal("syncState", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(103, commands[0]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(0, commands[0]!["state"]!.GetValue<int>());
+        Assert.Equal("setObjectLayer", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[1]!["eventObjectId"]!.GetValue<int>()); // caller form
+        Assert.Equal(33, commands[1]!["layer"]!.GetValue<int>());
+        Assert.Equal("placeUsedItem", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(798, commands[2]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[2]!["state"]!.GetValue<int>());
+        Assert.Equal("L0006", commands[2]!["to"]!.GetValue<string>()); // the failure reference
+        Assert.Equal("animateObject", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[3]!["eventObjectId"]!.GetValue<int>()); // the caller form
+        Assert.Equal("setObjectScript", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(435, commands[4]!["objectId"]!.GetValue<int>()); // the object union index, not an event object
+        Assert.Equal(0, commands[4]!["value"]!.GetValue<int>()); // the real clearing form
+        Assert.Equal(0, commands[4]!["slotIndex"]!.GetValue<int>());
+        Assert.Equal("setStateRange", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(102, commands[5]!["fromEventObjectId"]!.GetValue<int>());
+        Assert.Equal(103, commands[5]!["toEventObjectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[5]!["state"]!.GetValue<int>());
+        Assert.Equal("end", commands[6]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the sync's other object becomes the
+        // real-data @0102 form's object with a negative hidden state, the layer becomes
+        // the real-data @7DB4 negative form, the placement failure target moves and its
+        // state turns normal, the animation addresses a 1-based object explicitly, the
+        // object script installs the setAutoEntry real-data entry top into the third
+        // union script slot, and the range collapses to the hidden state.
+        commands[0]!["eventObjectId"] = 102;
+        commands[0]!["state"] = -123; // 0xFF85 through the SHORT cast
+        commands[1]!["layer"] = -10; // 0xFFF6, the real-data negative layer
+        commands[2]!["to"] = "L0004";
+        commands[2]!["state"] = 1;
+        commands[3]!["eventObjectId"] = 4168; // 1-based, no real hit but the preamble form
+        commands[4]!["value"] = 41_099; // 0xA08B, the setAutoEntry real-data entry top
+        commands[4]!["slotIndex"] = 2; // union index 4, the third script slot
+        commands[5]!["state"] = 0; // kObjStateHidden, the real-data majority
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x006F, 102, unchecked((int)0xFF85), 0,
+            0x007E, unchecked((int)0xFFFF), unchecked((int)0xFFF6), 0,
+            0x0084, 798, 1, 4,
+            0x0087, 4168, 0, 0,
+            0x0090, 435, 41_099, 2,
+            0x009A, 102, 103, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A range state beyond the signed WORD range is rejected without output.
+        commands[5]!["state"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rangeRejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rangeRejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_screen_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement screen batch 1 (#110, the first half of the 19-opcode
+        // screen subdomain, 10 opcodes): shakeScreen (the per-screen-update shake
+        // countdown), setPlayingRng + playRng (the rng.mkf movie selection and its
+        // frame-range playback), the three reviewed fade bits fadeToRed (parameterless
+        // game-over fade, mapping holds), fadeOut (review correction: PAL_FadeOut's
+        // delay pacing unit, #78's "frames" corrected away), fadeScene (review
+        // correction: VIDEO_FadeScreen's speed, #78's "mode" corrected away), the new
+        // fadeIn (PAL_FadeIn with the (SHORT)>0 delay gate, real data only uses the 0
+        // and 0xFFFF default forms), the day/night palette verb pair, and waveScreen
+        // (the level + signed per-update progression, real data carries -4). Hand-built
+        // stream, not retail data; every row is a real-data hit form.
+        byte[] original = Words(
+            0x0035, 99, 1, 0,                                      // shakeScreen: real-data @60F2 form
+            0x0036, 9, 0, 0,                                      // setPlayingRng: real-data @8AF8 top form
+            0x0037, 113, 162, 16,                                 // playRng: real-data @08C0 form
+            0x004F, 0, 0, 0,                                      // fadeToRed: real-data @A074 form
+            0x0050, 2, 0, 0,                                      // fadeOut: real-data @0856 form
+            0x0051, unchecked((int)0xFFFF), 0, 0,                 // fadeIn: real-data @0B56 SHORT -1 form
+            0x0053, 0, 0, 0,                                      // useDayPalette: real-data @08CD form
+            0x0054, 0, 0, 0,                                      // useNightPalette: real-data @06C7 form
+            0x0071, 255, unchecked((int)0xFFFC), 0,               // waveScreen: real-data @7ECA form
+            0x0073, 7, 54, 0,                                     // fadeScene: real-data @55D9 form
+            0, 0, 0, 0);                                          // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(11, commands.Count);
+        Assert.Equal("shakeScreen", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(99, commands[0]!["times"]!.GetValue<int>());
+        Assert.Equal(1, commands[0]!["level"]!.GetValue<int>());
+        Assert.Equal("setPlayingRng", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(9, commands[1]!["rngId"]!.GetValue<int>()); // the rng.mkf segment number
+        Assert.Equal("playRng", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(113, commands[2]!["startFrame"]!.GetValue<int>());
+        Assert.Equal(162, commands[2]!["endFrame"]!.GetValue<int>());
+        Assert.Equal(16, commands[2]!["speed"]!.GetValue<int>());
+        Assert.Equal("fadeToRed", commands[3]!["op"]!.GetValue<string>()); // no mapped fields
+        Assert.Equal("fadeOut", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[4]!["delay"]!.GetValue<int>()); // the #110-corrected name
+        Assert.Null(commands[4]!["frames"]); // #78's name is gone
+        Assert.Equal("fadeIn", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[5]!["delay"]!.GetValue<int>()); // the (SHORT)-1 form stays the raw WORD
+        Assert.Equal("useDayPalette", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("useNightPalette", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal("waveScreen", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(255, commands[8]!["level"]!.GetValue<int>()); // just below the 256 stop cutoff
+        Assert.Equal(-4, commands[8]!["progression"]!.GetValue<int>()); // 0xFFFC through the SHORT cast
+        Assert.Equal("fadeScene", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(7, commands[9]!["speed"]!.GetValue<int>()); // the #110-corrected name
+        Assert.Null(commands[9]!["mode"]); // #78's name is gone
+        Assert.Equal("end", commands[10]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the shake grows to the real-data @613F
+        // 999/4 form, the movie selection switches to the real @6140 form and plays
+        // its opening frame with both WORD-0 default forms, the game-over fade keeps
+        // no operand, the fade-out delay becomes the majority WORD-0 form, the fade-in
+        // delay switches to the other real default form, the wave stops at level 0
+        // with the positive real progression, and the scene fade slows to speed 3
+        // while keeping its preserved operand1.
+        commands[0]!["times"] = 999;
+        commands[0]!["level"] = 4;
+        commands[1]!["rngId"] = 5;
+        commands[2]!["startFrame"] = 0;
+        commands[2]!["endFrame"] = 0; // WORD 0 = play until the end (runtime -1)
+        commands[2]!["speed"] = 0; // WORD 0 = runtime 16
+        commands[4]!["delay"] = 0; // WORD 0 = runtime 1
+        commands[5]!["delay"] = 0; // the other real default form
+        commands[8]!["level"] = 0; // stop the wave
+        commands[8]!["progression"] = 2; // the real positive form
+        commands[9]!["speed"] = 3; // the real @570A speed keeps operand1 70 -> here 54
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0035, 999, 4, 0,
+            0x0036, 5, 0, 0,
+            0x0037, 0, 0, 0,
+            0x004F, 0, 0, 0,
+            0x0050, 0, 0, 0,
+            0x0051, 0, 0, 0,
+            0x0053, 0, 0, 0,
+            0x0054, 0, 0, 0,
+            0x0071, 0, 2, 0,
+            0x0073, 3, 54, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A wave progression beyond the signed WORD range is rejected without output.
+        commands[8]!["progression"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_screen_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement screen batch 2 (#111, the closing half of the 19-opcode
+        // screen subdomain, 9 opcodes): showFbp (the fbp.mkf still with its blend
+        // pacing - real data only uses the 0xFFFF black-transition form),
+        // toggleDayNightPalette (the 0x0053/0x0054 pair's flag flip through a
+        // 32-step palette fade, palette-only when the truthy word is set),
+        // setPalette (the pat.mkf palette segment behind every fade callee),
+        // colorFade (the solid-color blend with the (BYTE) color and the truthy
+        // from-direction), sceneFade (the signed scene-updating fade step - real
+        // data carries -4/-2/-1 fade-outs), showEndingAnimation (the parameterless
+        // whole-ending playback), fadeToScene (the 0x0073 shape at the fixed speed
+        // 2 - its real hits' operand words are ignored and preserved), scrollFbp
+        // (the line-by-line fbp.mkf scroll with the chunk-68 HACKHACK), and
+        // showFbpWithEffectSprite (the MGO.MKF overlay sentinel form). Hand-built
+        // stream, not retail data; every row with real hits takes a hit form, the
+        // three ending opcodes without chunk-4 hits take ending.c's own call forms.
+        byte[] original = Words(
+            0x0076, unchecked((int)0xFFFF), 0, 0,                   // showFbp: real-data @0B55 black-transition form
+            0x0080, 1, 0, 0,                                       // toggleDayNightPalette: real-data @3613 palette-only form
+            0x008B, 5, 0, 0,                                       // setPalette: real-data @56CF form
+            0x008C, 26, 4, unchecked((int)0xFFFF),                 // colorFade: real-data @4252 fade-from form
+            0x0093, unchecked((int)0xFFFC), 0, 0,                  // sceneFade: real-data @29E9 fade-out step -4
+            0x0096, 0, 0, 0,                                       // showEndingAnimation: parameterless, no real hit
+            0x009B, 2, unchecked((int)0xFFFF), 0,                  // fadeToScene: real-data @7C72 form (operands ignored)
+            0x00A4, 68, 5, unchecked((int)0x0F),                   // scrollFbp: the ending HACKHACK chunk at ending.c's own 0xF speed
+            0x00A5, 76, unchecked((int)0x027B), 7,                 // showFbpWithEffectSprite: ending.c's own chunk 76 / sprite 0x27B / fade 7
+            0, 0, 0, 0);                                          // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(10, commands.Count);
+        Assert.Equal("showFbp", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[0]!["fbpId"]!.GetValue<int>()); // the 0xFFFF black form stays the raw WORD
+        Assert.Equal(0, commands[0]!["fade"]!.GetValue<int>());
+        Assert.Equal("toggleDayNightPalette", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[1]!["paletteOnly"]!.GetValue<int>());
+        Assert.Equal("setPalette", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(5, commands[2]!["paletteId"]!.GetValue<int>());
+        Assert.Equal("colorFade", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(26, commands[3]!["color"]!.GetValue<int>()); // the (BYTE) low byte
+        Assert.Equal(4, commands[3]!["delay"]!.GetValue<int>());
+        Assert.Equal(65_535, commands[3]!["fromColor"]!.GetValue<int>()); // the truthy form stays the raw WORD
+        Assert.Equal("sceneFade", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(-4, commands[4]!["step"]!.GetValue<int>()); // 0xFFFC through the SHORT cast
+        Assert.Equal("showEndingAnimation", commands[5]!["op"]!.GetValue<string>()); // no mapped fields
+        Assert.Equal("fadeToScene", commands[6]!["op"]!.GetValue<string>()); // the ignored words stay source operands
+        Assert.Equal(new[] { 2, 65_535, 0 }, commands[6]!["source"]!["operands"]!.AsArray().Select(x => x!.GetValue<int>()));
+        Assert.Equal("scrollFbp", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(68, commands[7]!["fbpId"]!.GetValue<int>());
+        Assert.Equal(15, commands[7]!["speed"]!.GetValue<int>());
+        Assert.Equal("showFbpWithEffectSprite", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(76, commands[8]!["fbpId"]!.GetValue<int>());
+        Assert.Equal(635, commands[8]!["effectSprite"]!.GetValue<int>()); // 0x27B, the MGO.MKF sprite
+        Assert.Equal(7, commands[8]!["fade"]!.GetValue<int>());
+        Assert.Equal("end", commands[9]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the still switches to ending.c's own
+        // chunk 76 with its fade-7 pacing, the palette toggle returns to the
+        // scene-updating WORD-0 majority form, the palette segment takes the retail
+        // majority 0, the color blend takes the real top color with the delay-0 and
+        // fade-to forms, the scene fade turns to the real -1 fade-out step (arming
+        // fNeedToFadeIn), the scroll moves to ending.c's chunk 74 with the WORD-0
+        // runtime-1 speed, and the effect sprite takes the keep-current sentinel.
+        commands[0]!["fbpId"] = 76;
+        commands[0]!["fade"] = 7;
+        commands[1]!["paletteOnly"] = 0;
+        commands[2]!["paletteId"] = 0;
+        commands[3]!["color"] = 127;
+        commands[3]!["delay"] = 0; // WORD 0 = runtime 10 ms
+        commands[3]!["fromColor"] = 0; // the fade-to direction
+        commands[4]!["step"] = -1; // 0xFFFF
+        commands[7]!["fbpId"] = 74;
+        commands[7]!["speed"] = 0; // WORD 0 = runtime 1
+        commands[8]!["effectSprite"] = 65_535; // the keep-current sentinel
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0076, 76, 7, 0,
+            0x0080, 0, 0, 0,
+            0x008B, 0, 0, 0,
+            0x008C, 127, 0, 0,
+            0x0093, unchecked((int)0xFFFF), 0, 0,
+            0x0096, 0, 0, 0,
+            0x009B, 2, unchecked((int)0xFFFF), 0,
+            0x00A4, 74, 5, 0,
+            0x00A5, 76, unchecked((int)0xFFFF), 7,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A scene fade step beyond the signed WORD range is rejected without output.
+        commands[4]!["step"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var stepRejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, stepRejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_music_scene_special_batch_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement music/scene/special batch (#112, the closing batch of
+        // the 75-opcode scene-movement domain and of all 165 opcodes, 12 opcodes):
+        // setMusic (re-verified: the RIX segment plus the loop/fade mode selector),
+        // setBattleMusic (the battle-looped segment), playSound (the voc.mkf/
+        // sounds.mkf segment), stopMusic (the fade-out stop with unit-scaled
+        // duration), playCdMusic (the (SHORT) CD track with the -1 do-nothing
+        // sentinel and the RIX fallback segment), changeScene (the 1-based scene
+        // row arming the next-frame load), setPlayerSprite (the 0-based role, the
+        // MGO.MKF sprite and the truthy reload word), setSceneScripts (re-verified:
+        // the scene row's onEnter/onTeleport entry WORDs), setParty (re-verified:
+        // the three 1-based role ids), changeSceneMap (the scene row, the map
+        // number and the 0xFFFF current-scene sentinel), noop (re-verified: the
+        // upstream FIXME no-operation) and advanceEntry (the auto-only bare
+        // advance - the first AutoSwitchOnly executor). Hand-built stream, not
+        // retail data; every row takes a real-data hit form.
+        byte[] original = Words(
+            0x0043, 1, 0, 0,                                        // setMusic: the real loop-default form
+            0x0045, 37, 0, 0,                                       // setBattleMusic: the real majority form
+            0x0047, 78, 0, 0,                                       // playSound: the real x104 majority form
+            0x0077, 1, 1, 0,                                        // stopMusic: the real unit-fade form with a preserved operand1
+            0x00A3, 2, 14, 0,                                       // playCdMusic: the real @234F form
+            0x0059, 2, 0, 0,                                        // changeScene: the real @0012 low form
+            0x0065, 0, 2, 0,                                        // setPlayerSprite: the real majority form
+            0x006D, 2, 19792, 0,                                    // setSceneScripts: the real x9 form (onEnter 0x4D50)
+            0x0075, 1, 2, 0,                                        // setParty: a real multi-member form
+            0x0099, unchecked((int)0xFFFF), 164, 0,                 // changeSceneMap: the real @7C71 sentinel form
+            0x0078, 0, 0, 0,                                        // noop: the real all-zero form
+            0x00A7, 0, 0, 0,                                        // advanceEntry: the real all-zero form (auto-only)
+            0, 0, 0, 0);                                            // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(13, commands.Count);
+        Assert.Equal("setMusic", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[0]!["musicId"]!.GetValue<int>());
+        Assert.Equal(0, commands[0]!["mode"]!.GetValue<int>());
+        Assert.Equal("setBattleMusic", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(37, commands[1]!["battleMusicId"]!.GetValue<int>());
+        Assert.Equal("playSound", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(78, commands[2]!["soundId"]!.GetValue<int>());
+        Assert.Equal("stopMusic", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[3]!["fadeUnits"]!.GetValue<int>());
+        Assert.Equal(new[] { 1, 1, 0 }, commands[3]!["source"]!["operands"]!.AsArray().Select(x => x!.GetValue<int>())); // the preserved operand1
+        Assert.Equal("playCdMusic", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[4]!["track"]!.GetValue<int>()); // a positive track through the (SHORT) cast
+        Assert.Equal(14, commands[4]!["musicId"]!.GetValue<int>());
+        Assert.Equal("changeScene", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[5]!["sceneId"]!.GetValue<int>());
+        Assert.Equal("setPlayerSprite", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[6]!["playerRole"]!.GetValue<int>()); // the 0-based role index
+        Assert.Equal(2, commands[6]!["spriteNum"]!.GetValue<int>());
+        Assert.Equal(0, commands[6]!["reload"]!.GetValue<int>());
+        Assert.Equal("setSceneScripts", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[7]!["sceneId"]!.GetValue<int>());
+        Assert.Equal(19792, commands[7]!["onEnter"]!.GetValue<int>());
+        Assert.Equal(0, commands[7]!["onTeleport"]!.GetValue<int>()); // WORD 0 keeps the existing teleport script
+        Assert.Equal("setParty", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[8]!["roleId0"]!.GetValue<int>());
+        Assert.Equal(2, commands[8]!["roleId1"]!.GetValue<int>());
+        Assert.Equal(0, commands[8]!["roleId2"]!.GetValue<int>()); // WORD 0 skips the third slot
+        Assert.Equal("changeSceneMap", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[9]!["sceneId"]!.GetValue<int>()); // the sentinel stays the raw WORD
+        Assert.Equal(164, commands[9]!["mapNum"]!.GetValue<int>());
+        Assert.Equal("noop", commands[10]!["op"]!.GetValue<string>()); // no mapped fields
+        Assert.Equal("advanceEntry", commands[11]!["op"]!.GetValue<string>()); // no mapped fields, auto-only executor
+        Assert.Equal("end", commands[12]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the music takes the mode-3 fade-in
+        // form, the battle band moves to its other majority segments, the sound
+        // takes the real top segment, the stop returns to the WORD-0 2 s default,
+        // the CD track takes the -1 do-nothing sentinel, the scene row moves to the
+        // real top row, the sprite reload takes the truthy 0xFFFF form, the scene
+        // scripts take the clear-both zero form, the party gains the real third
+        // slot, and the map takes the other real map number.
+        commands[0]!["mode"] = 3;
+        commands[1]!["battleMusicId"] = 38;
+        commands[2]!["soundId"] = 275;
+        commands[3]!["fadeUnits"] = 0;
+        commands[4]!["track"] = -1; // 0xFFFF
+        commands[5]!["sceneId"] = 294;
+        commands[6]!["reload"] = unchecked((int)0xFFFF);
+        commands[7]!["onEnter"] = 0; // both zero: the case's clear-both rule
+        commands[8]!["roleId2"] = 5;
+        commands[9]!["mapNum"] = 165;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0043, 1, 3, 0,
+            0x0045, 38, 0, 0,
+            0x0047, 275, 0, 0,
+            0x0077, 0, 1, 0,
+            0x00A3, unchecked((int)0xFFFF), 14, 0,
+            0x0059, 294, 0, 0,
+            0x0065, 0, 2, unchecked((int)0xFFFF),
+            0x006D, 2, 0, 0,
+            0x0075, 1, 2, 5,
+            0x0099, unchecked((int)0xFFFF), 165, 0,
+            0x0078, 0, 0, 0,
+            0x00A7, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A CD track beyond the signed WORD range is rejected without output.
+        commands[4]!["track"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
@@ -277,7 +1986,7 @@ public sealed class EventCliTests : IDisposable
             0x6d, 1, 0, 18,
             0x90, 777, 18, 4,
             0x73, 1, 0, 0,
-            5, 1, 0, 0,
+            5, 0, 2, 1,
             0x41, 0, 0, 0,
             0x4f, 0, 0, 0,
             0x4e, 0, 0, 0,
@@ -312,11 +2021,12 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(0, commands[3].GetProperty("direction").GetInt32());
         Assert.Equal(-123, commands[7].GetProperty("state").GetInt32());
         Assert.Equal(4, commands[11].GetProperty("slotIndex").GetInt32());
-        Assert.Equal(1, commands[12].GetProperty("mode").GetInt32());
-        Assert.Equal(1, commands[13].GetProperty("delayUnits").GetInt32());
+        Assert.Equal(1, commands[12].GetProperty("speed").GetInt32()); // fadeScene's #78 "mode" renamed to speed by #110's review correction
+        Assert.Equal(2, commands[13].GetProperty("delayUnits").GetInt32());
+        Assert.Equal(1, commands[13].GetProperty("updateGestures").GetInt32());
         Assert.Equal(new[] { 28, 1280, 256 }, commands[17].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
         Assert.Equal(4242, commands[21].GetProperty("entry").GetInt32());
-        Assert.Equal(28, commands[22].GetProperty("objectId").GetInt32());
+        Assert.Equal(28, commands[22].GetProperty("eventObjectId").GetInt32());
         Assert.Equal(2500, commands[22].GetProperty("entry").GetInt32());
         Assert.Equal(24, commands[23].GetProperty("battlefieldId").GetInt32());
         Assert.Equal(new[] { 1, 2, 0 }, commands[25].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));
@@ -646,7 +2356,7 @@ public sealed class EventCliTests : IDisposable
     {
         byte[] fullScript = new byte[65536 * 8];
         for (int index = 0; index < 65536; index++)
-            BinaryPrimitives.WriteUInt16LittleEndian(fullScript.AsSpan(index * 8), 0x0086);
+            BinaryPrimitives.WriteUInt16LittleEndian(fullScript.AsSpan(index * 8), 0x0011);
         // Literal last instruction exercises both FFFF result addresses and WORD next wrap.
         Words(7, 65535, 65535, 65535).CopyTo(fullScript, 65535 * 8);
         WriteArchive("SSS.MKF", new byte[32], Words(0, 0, 0, 0), Words(0, 0, 0, 0), [], fullScript);

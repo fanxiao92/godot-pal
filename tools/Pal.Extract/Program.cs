@@ -53,6 +53,21 @@ if (args.Length == 5 && args[0] == "export-events" && args[1] == "--input" && ar
     }
 }
 
+if (args.Length == 5 && args[0] == "export-data" && args[1] == "--input" && args[3] == "--output")
+{
+    try
+    {
+        DataGameData.Export(args[2], args[4]);
+        return 0;
+    }
+    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine(exception is InvalidDataException ? $"Data export failed: {exception.Message}"
+            : $"Data export failed: unable to read input or write output ({exception.GetType().Name}).");
+        return 1;
+    }
+}
+
 if (args.Length == 5 && args[0] == "author-battle-context" && args[1] == "--input" && args[3] == "--output"
     && !string.IsNullOrWhiteSpace(args[2]) && !args[2].StartsWith("--", StringComparison.Ordinal)
     && !string.IsNullOrWhiteSpace(args[4]) && !args[4].StartsWith("--", StringComparison.Ordinal))
@@ -84,6 +99,25 @@ if (args.Length == 5 && args[0] == "rebuild-events" && args[1] == "--input" && a
     {
         Console.Error.WriteLine(exception is InvalidDataException ? $"Event rebuild failed: {exception.Message}"
             : $"Event rebuild failed: unable to read input or write output ({exception.GetType().Name}).");
+        return 1;
+    }
+}
+
+if (args.Length == 7 && args[0] == "export-battle-images" && args[1] == "--input" && args[3] == "--archive" && args[5] == "--output"
+    && !string.IsNullOrWhiteSpace(args[2]) && !args[2].StartsWith("--", StringComparison.Ordinal)
+    && !string.IsNullOrWhiteSpace(args[4]) && !args[4].StartsWith("--", StringComparison.Ordinal)
+    && !string.IsNullOrWhiteSpace(args[6]) && !args[6].StartsWith("--", StringComparison.Ordinal)
+    && args[4] is "abc" or "ball" or "f" or "fbp")
+{
+    try
+    {
+        BattleImageExporter.Export(args[2], args[6], args[4]);
+        return 0;
+    }
+    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine(exception is InvalidDataException ? $"Battle image export failed: {exception.Message}"
+            : $"Battle image export failed: unable to read input or write output ({exception.GetType().Name}).");
         return 1;
     }
 }
@@ -121,7 +155,7 @@ if (args.Length == 11 && args[0] is "export-map" or "export-scene" or "extract-s
 
 if (args.Length != 0 && (args.Length != 1 || args[0] != "--help"))
 {
-    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" or "author-battle-context" ? $"Unsupported arguments for {args[0]}."
+    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" or "author-battle-context" or "export-data" or "export-battle-images" ? $"Unsupported arguments for {args[0]}."
         : $"Unsupported arguments: {string.Join(" ", args)}");
     Console.Error.WriteLine("Use --help for usage.");
     return 2;
@@ -137,7 +171,9 @@ Console.WriteLine("""
            pal-extract extract-scene --input <directory> --output <directory> --scene <id> --palette <id> --lighting day|night
            pal-extract extract-dialogue --input <directory> --reference <reference/sdlpal> --output <new-or-empty-directory>
            pal-extract export-events --input <directory> --output <directory>
-           pal-extract rebuild-events --input <directory> --output <file>
+           pal-extract rebuild-events --input <events-directory> --output <file>
+           pal-extract export-data --input <directory> --output <new-or-empty-directory>
+           pal-extract export-battle-images --input <directory> --archive <abc|ball|f|fbp> --output <new-or-empty-directory>
            pal-extract author-battle-context --input <author.json> --output <new-or-empty-directory>
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
@@ -160,6 +196,19 @@ Console.WriteLine("""
 
       rebuild-events Reconstruct SSS.MKF chunk 4 from a complete faithful event set.
                      Writes a new file only; edited semantic fields are re-encoded.
+
+      export-data Extract the 13 registered read-only data tables (event-object, scene, store, enemy, enemy-team, player-roles, magic, battle-field, level-up-magic, battle-effect-index, enemy-pos, level-up-exp, object) and their index manifest.
+                  Requires SSS.MKF and DATA.MKF in the input; writes a new or empty output directory.
+                  All 13 frozen tables are registered (data-schema v1); this command never re-encodes tables.
+
+      export-battle-images Decode a battle image MKF (abc, ball, f or fbp) into a complete image package and an index.json manifest.
+                            Every chunk becomes a sprite document with authoritative indices/alpha planes, source hashes
+                            and PNG frames; empty chunks stay empty entries. abc and f chunks are Windows YJ2 battle sprites
+                            (abc: enemy sprites by enemyId; f: player battle sprites by battleSprite/summon effect);
+                            ball chunks are raw item bitmaps read without decompression; fbp chunks are YJ2 battle backgrounds
+                            decompressing to one raw 320x200 screen each. Requires the selected archive
+                            and pat.mkf; PNG frames use pat.mkf chunk 0 day colors. Writes a new or empty directory;
+                            links are rejected.
 
       author-battle-context Validate and canonicalize the authored @09C3 pre-trigger context.
                             Records source provenance and the complete local closure without claiming a natural save.

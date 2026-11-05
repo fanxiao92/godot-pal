@@ -55,9 +55,9 @@ internal partial class PalStoryBattleView : Node2D
     {
         foreach (var rune in text.EnumerateRunes()) if (rune.Value != ' ') _ = font.GetGlyph(rune.Value).IsSet(0, 0);
     }
-    internal void Initialize(CheckedStoryProfile story, CheckedBattleVisualProfile visual, int teamId)
+    internal void Initialize(CheckedStoryProfile story, CheckedBattleVisualProfile visual, int enemyTeamId)
     {
-        this.story = story; this.visual = visual; team = visual.Teams[teamId];
+        this.story = story; this.visual = visual; team = visual.Teams[enemyTeamId];
         background = Texture(team.Background.Width, team.Background.Height, team.Background.PaletteIndices, team.Background.Alpha);
         foreach (var frame in visual.PlayerSprite.Frames)
         {

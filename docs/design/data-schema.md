@@ -1,0 +1,400 @@
+# 数据表 JSON 契约（data-schema）v1
+
+状态：**M5 终态已交付（#113 收官）：13 张表全部实现只读提取 + 严格校验 + 语义解析。** 通用规则、文件组织、13 张表的逐字段 schema 与引用命名约定由 #78 冻结，各表提取实现由 #79–#91 逐票交付；#113 在最终 tip 以真实数据复核全部 13 表 recordCount/byteLength/chunk SHA-256 与 object 视图分布，汇总见[验收](#验收)节的「M5 终验」表。分层依据见 [ADR-0004](../adr/0004-data-and-script-layers.md)。
+
+## 范围与边界
+
+- 13 张数据表，**只读提取 + 严格校验 + 语义解析**；不重编码回原始字节、不提供 rebuild 命令（ADR-0004）。
+- 脚本 `SSS.MKF` chunk 4 走 [events-schema](events-schema.md)，不在本契约内。
+- 物品/法术描述、角色名等文本走 SLF 语言包（M3/M4 已交付），不解析 `desc.dat`/`word.dat`。
+- 运行时只读现代 JSON，不回读原始归档；Godot 原生资源由后续 Prepare 步骤生成。
+
+## 通用规则
+
+- `formatVersion` 为整数 `1`，`profile` 为 `"faithful"`；不识别的版本/profile 明确拒绝。
+- JSON 不含注释、重复键、NaN 或无穷值；未知字段拒绝（下划线开头的字段仅作可读注释，忽略但不接受重复键）。
+- `WORD` 为整数 `0..65535`；`SHORT`（有符号 WORD）字段按 `-32768..32767` 解释，不把所有字段统一按有符号解释。哪些字段按有符号解释以 `global.h` 的 C 类型声明为权威，并以下文各表标注的参考实际使用为证（负值确有语义，如 `sVanishTime = -15`）。
+- 字节序一律小端：`LOAD_DATA` / `DO_BYTESWAP` 在小端主机是 no-op，原始数据按小端 WORD 读出（[global.c](../../reference/sdlpal/global.c)）。
+- 每张表记录其来源（MKF 名 + chunk 号）、记录数、字节长度与 chunk SHA-256；**记录数 = chunk 字节长度 ÷ 结构大小**，不整除即明确失败并定位来源，不硬编码猜测。
+- 数据表**只读**：只提供提取与校验，无反向编码器、无编辑后写回。
+
+### 字段命名规则（T0 冻结）
+
+- JSON 字段用 camelCase，与 events 契约一致；去掉 C 成员的 `w`/`s`/`n`/`rgw` 前缀（`wTriggerScript`→`triggerScript`、`sState`→`state`、`rgwItems`→`items`），保留其余拼写。
+- 指向其他表的引用字段按 [引用命名约定](#引用命名约定t0-冻结) 命名（如 `enemyId`、`magicId`、`itemId`）。
+- 多维数组按 C 布局展开为嵌套 JSON 数组，外层对应第一维（最后一个下标变化最快），不转置、不展平。
+- 参考成员名在每表字段表中以「C 名」标注保留可追溯性。
+
+## 文件组织
+
+```text
+data/extracted/data/
+  index.json             版本、来源清单、文件列表与各自散列
+  event-object.json      SSS chunk 0
+  scene.json             SSS chunk 1
+  object.json            SSS chunk 2（union，见下）
+  store.json             DATA chunk 0
+  enemy.json             DATA chunk 1
+  enemy-team.json        DATA chunk 2
+  player-roles.json      DATA chunk 3
+  magic.json             DATA chunk 4
+  battle-field.json      DATA chunk 5
+  level-up-magic.json    DATA chunk 6
+  battle-effect-index.json  DATA chunk 11
+  enemy-pos.json         DATA chunk 13
+  level-up-exp.json      DATA chunk 14
+```
+
+每表一个文件 + `index.json` 清单；清单记录来源 chunk、记录数、字节长度、SHA-256。
+
+### 表文件格式 v1
+
+每表文件为单一 JSON 对象：
+
+| 字段 | 类型与约束 |
+|---|---|
+| `formatVersion` | 整数 `1` |
+| `profile` | 字符串 `"faithful"` |
+| `fileId` | 与文件名一致的表标识符（如 `"event-object"`） |
+| `records` | 记录对象数组，按 chunk 内物理顺序 |
+
+记录对象只含对应结构描述符声明的字段（object.json 另含视图声明，见下）；缺失、多余或越界均拒绝。`index.json` 为：
+
+| 字段 | 类型与约束 |
+|---|---|
+| `formatVersion` | 整数 `1` |
+| `profile` | 字符串 `"faithful"` |
+| `sources` | 来源归档数组：`{ "archive": "SSS.MKF" \| "DATA.MKF", "sha256": 小写 64 位十六进制 }`，按 SSS、DATA 顺序 |
+| `tables` | 已登记表数组，字典序；每项 `{ "file", "archive", "chunk", "recordCount", "byteLength", "sha256" }`（`sha256` 为来源 chunk 字节） |
+
+提取命令：`pal-extract export-data --input <原始资源目录> --output <新建或空目录>`（#78 交付骨架：校验 SSS.MKF 与 DATA.MKF 存在后写 `index.json`，`tables` 暂为空数组；各表由 #79–#91 登记）。
+
+## 引用命名约定（T0 冻结）
+
+脚本操作数与数据表字段中的 ID 引用统一命名：
+
+| 字段 | 引用目标 |
+|---|---|
+| `itemId` | `object.json` 的 item 视图 |
+| `magicId` | `magic.json` 或 `object.json` magic 视图中的法术编号字段 |
+| `enemyId` | `enemy.json` |
+| `enemyTeamId` | `enemy-team.json` |
+| `sceneId` | `scene.json` |
+| `objectId` | `object.json`（union，须带视图类型） |
+| `eventObjectId` | `event-object.json`（SSS chunk 0） |
+
+**`eventObjectId` 与 `objectId` 是两张不同的表**：`event-object.json`（场景事件对象，`EVENTOBJECT`，16 WORD/32 字节）与 `object.json`（物品/法术/敌人/毒脚本 union，`OBJECT`，7 WORD/14 字节）是不同的数据源。指向前者的字段命名 `eventObjectId`，指向后者的命名 `objectId`（并声明视图）。这一区分同时冻结于 [events-schema](events-schema.md) 的 opcode 注册表章节。
+
+此命名约定由 events-schema 的具名命令字段与 data-schema 的表字段共用同一套 ID 语义。
+
+## 13 张表逐字段 schema
+
+容量常量（[palcommon.h](../../reference/sdlpal/palcommon.h)）：`MAX_SCENES=300`、`MAX_OBJECTS=600`、`MAX_EVENT_OBJECTS=5500`、`MAX_LEVELS=99`、`MAX_PLAYER_ROLES=6`、`MAX_PLAYABLE_PLAYER_ROLES=5`、`MAX_STORE_ITEM=9`、`MAX_ENEMIES_IN_TEAM=5`、`MAX_PLAYER_EQUIPMENTS=6`、`MAX_PLAYER_MAGICS=32`、`NUM_MAGIC_ELEMENTAL=5`。容量是参考的上限约定；实际记录数仍由 chunk 长度 ÷ 结构大小得出。
+
+### event-object.json — SSS 0，`EVENTOBJECT`，32 字节（16 WORD）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `vanishTime` | `sVanishTime` | SHORT | 消失倒计时；可负（[play.c](../../reference/sdlpal/play.c):92 逐帧 +1/−1；[script.c](../../reference/sdlpal/script.c) 0x004B 写 −15） |
+| `x` | `x` | WORD | 地图 X 坐标 |
+| `y` | `y` | WORD | 地图 Y 坐标 |
+| `layer` | `sLayer` | SHORT | 层；可负（script.c 0x0084 以 `(SHORT)` 写入） |
+| `triggerScript` | `wTriggerScript` | WORD | trigger 入口（chunk 4 地址；对应 events 入口槽 `wTriggerScript`） |
+| `autoScript` | `wAutoScript` | WORD | auto 入口（chunk 4 地址；对应入口槽 `wAutoScript`） |
+| `state` | `sState` | SHORT | 对象状态（0 隐藏/1 正常/2 拦阻，`OBJECTSTATE`）；负值有语义，按有符号存储 |
+| `triggerMode` | `wTriggerMode` | WORD | 触发方式（0..8，`TRIGGERMODE`） |
+| `spriteNum` | `wSpriteNum` | WORD | 精灵编号（MGO.MKF） |
+| `spriteFrames` | `nSpriteFrames` | WORD | trigger 侧精灵总帧数 |
+| `direction` | `wDirection` | WORD | 朝向（`PALDIRECTION` 0..3） |
+| `currentFrameNum` | `wCurrentFrameNum` | WORD | 当前帧号 |
+| `scriptIdleFrame` | `nScriptIdleFrame` | WORD | trigger 空闲计数器 |
+| `spritePtrOffset` | `wSpritePtrOffset` | WORD | 参考标注 FIXME，原样保留 |
+| `spriteFramesAuto` | `nSpriteFramesAuto` | WORD | auto 侧精灵总帧数 |
+| `scriptIdleFrameCountAuto` | `wScriptIdleFrameCountAuto` | WORD | auto 空闲计数器 |
+
+真实数据核对（本机只读）：162464 ÷ 32 = 5077 条（≤ `MAX_EVENT_OBJECTS`）。
+
+### scene.json — SSS 1，`SCENE`，8 字节（4 WORD）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `mapNum` | `wMapNum` | WORD | 地图编号（MAP.MKF） |
+| `scriptOnEnter` | `wScriptOnEnter` | WORD | 进入场景脚本入口（chunk 4 地址；对应入口槽 `wScriptOnEnter`） |
+| `scriptOnTeleport` | `wScriptOnTeleport` | WORD | 传送离开脚本入口（chunk 4 地址；对应入口槽 `wScriptOnTeleport`） |
+| `eventObjectIndex` | `wEventObjectIndex` | WORD | 本场景事件对象起始基址（对象从 `eventObjectIndex + 1` 起，指向 event-object.json） |
+
+真实数据核对：2360 ÷ 8 = 295 条（≤ `MAX_SCENES`）。
+
+### object.json — SSS 2，`OBJECT` union，14 字节（7 WORD，WIN95）/ 12 字节（6 WORD，DOS）
+
+union 表：**每条记录必须声明 `view`（`player` / `item` / `magic` / `enemy` / `poison`，无判定证据时为 `undetermined`，见下「视图判定」）之一，同一物理 WORD 组不得同时按多视图解释**；记录对象只含所声明视图的字段（`undetermined` 记录只含 `data` 原始 WORD 数组）。视图判定依据独立证据（脚本引用、入口槽、语言包名称区间），由 object 表提取票（拆 2）核对固定；未确定视图的记录显式留待调查，不猜测、不默认。#81 已核对固定 player 与 item 两视图的证据来源；#82 补齐 magic/enemy/poison 三视图的证据来源与逐字段解码（见下），union 五视图完整。
+
+**视图判定（#81 核对固定 player/item；#82 补齐 magic/enemy/poison）**：union 本身无视图标签，参考按用途在不同代码路径读取。提取时的判定证据（均在 export-data 输入归档内）：
+
+| 视图 | 证据来源 | 参考读取点 |
+|---|---|---|
+| player | `DATA.MKF` chunk 3（PLAYERROLES）`rgwName[6]`（WORD 18..23）的全部 6 个值（含 0：名字文字下标为 0 时仍被按 player 视图读取） | [fight.c](../../reference/sdlpal/fight.c):800-813、848-876：`rgObject[PlayerRoles.rgwName[w]].player.wScriptOnFriendDeath/.wScriptOnDying`（参考中仅有的 `.player` 读取点） |
+| item | `DATA.MKF` chunk 0（STORE）`rgwItems`（每记录 WORD 0..8，0=空槽）、chunk 1（ENEMY）`wAttackEquivItem`（WORD 17）/`wStealItem`（WORD 19，0=无此物）、chunk 3（PLAYERROLES）`rgwEquipment`（WORD 66..101，0=未装备）中的非零引用 | itemmenu.c:148/171/202/269/363、play.c:273-316、fight.c:4361-4397/5135-5145、global.c:1364-1365、uibattle.c:653 等（含以 store/装备/敌表引用为下标的 `.item` 读取） |
+| magic | `DATA.MKF` chunk 3（PLAYERROLES）`rgwMagic[32][6]`（WORD 192..383，0=未习得）非零值 ∪ `rgwCooperativeMagic[6]`（WORD 390..395，0=无合击法术）非零值 ∪ chunk 1（ENEMY）`wMagic`（WORD 15）中非 0 且非 0xFFFF（两者均=无法术）的值 | [magicmenu.c](../../reference/sdlpal/magicmenu.c):339-354、[uibattle.c](../../reference/sdlpal/uibattle.c):753-759（`rgwMagic` 槽，`w != 0` 跳过后按 magic 视图读取）；[fight.c](../../reference/sdlpal/fight.c):3859-3861、uibattle.c:1120-1125（合击，经 [global.c](../../reference/sdlpal/global.c):2034 `PAL_GetPlayerCooperativeMagic`，0=无合击仍为返回语义）；fight.c:4580、4651、4660-4671、4761-4769（敌方法术，`wMagic != 0` 才进入施法分支，0xFFFF 另显式跳过） |
+| enemy | `DATA.MKF` chunk 2（ENEMYTEAM）`rgwEnemy[5]`（每记录 WORD 0..4）中非 0（空位）且非 0xFFFF 的值 | [battle.c](../../reference/sdlpal/battle.c):1601-1615（`w == 0xFFFF` continue、`w != 0` 才按 `rgObject[w].enemy` 读取；参考仅有的静态敌对象读取入口，[script.c](../../reference/sdlpal/script.c):2919/2969 的重载敌人为运行时脚本操作数，不纳入） |
+| poison | **提取期无证据源**：参考中全部 `.poison` 读取点（global.c:1440/1515/1608/1667、script.c:1213/1248、uibattle.c:132-137、uigame.c:1249-1251）都以运行时毒状态 `rgPoisonStatus`/`rgPoisons[].wPoisonID` 或脚本操作数为下标，该状态零初始化（global.c:450/630）且只由脚本填入（global.c:1513-1515 `PAL_SetPoisonStatus`；script.c:1211-1213/1246-1248）；#78 冻结的「脚本引用」证据需 opcode 注册表（#96 起）落地，此前 poison 区间记录保持 `undetermined` | ——（无提取期静态读取点；poison 视图解码与校验已就绪，由人工构造证据/文档校验路径覆盖） |
+
+magic 证据的两点边界如实说明：其一，`LEVELUPMAGIC`（DATA chunk 6）`m[].wMagic` **不纳入**——battle.c:1302-1309 仅把它经 `PAL_AddMagic` 写入运行时 `rgwMagic`，不是提取期的直接视图读取（script.c:1829 的脚本操作数同理）；真实数据中该来源独有的 17 个法术对象下标（300、310、311、…、392）如实保持 `undetermined`。其二，[magicmenu.c](../../reference/sdlpal/magicmenu.c):191 经 `.item.wScriptDesc` 成员名读取法术对象的 WORD 5（WIN95 数据中该槽为法术描述脚本，如 object[295] WORD5=43308=0xA92C；global.h 对 `wReserved2` 注释「always zero」描述的是 DOS 布局语义）——其下标来自法术列表 `rgwMagic`，不构成 item 证据；提取按冻结字段名 `reserved2` 原样导出。
+
+同一对象下标同时落在任意两类证据 ⇒ 数据不一致，明确失败定位（同一记录不得按多视图表达）；证据下标超出记录数 ⇒ 明确失败定位。其余记录（含未被引用的物品/法术、poison 区间与仅由脚本运行时引用的对象）一律 `view: "undetermined"`，以 `data` 数组原样导出整组 WORD（WIN95 7 个 / DOS 6 个，小端），不做任何视图解读——#78 冻结了「未确定视图的记录显式留待调查」但未定其表示法，`undetermined` + `data` 为 #81 的最小扩展。真实数据核对（#81+#82，本机只读，独立 Python 复核逐条一致）：player 6 条（下标 36..41 = `rgwName` 实值 [36,37,38,40,39,41]）、item 159 条（引用并集落在 61..278）、magic 65 条（引用并集落在 295..394：rgwMagic 31 + 合击 5 + 敌方 wMagic 41 的并集）、enemy 152 条（敌队引用落在 398..550，其 `wEnemyID` 1..153 均在 154 条敌表内）、undetermined 183 条；共 565。#81 时 undetermined 400，本票降 217（magic 65 + enemy 152）；poison 区间 551..564（14 条）与 17 个仅升级习得的法术对象等如实留待脚本引用证据。
+
+变体判定沿用参考 `PAL_IsWINVersion`：chunk 2 字节长度对 `sizeof(OBJECT)`（14）整除且对 12 不整除 ⇒ WIN95；反向 ⇒ DOS（参考另以 ABC/MAP/F/FBP/FIRE/MGO 的压缩签名计分）。长度同时整除 14 与 12（即 84 的倍数）时整除性不可判定，而压缩签名计分所需的归档不在 export-data 输入内 ⇒ 提取明确失败并定位 SSS.MKF chunk 2，不猜测。DOS 包加载时参考把 `rgwData[6]=rgwData[5]`（flags）、`rgwData[5]=0` 转成 WIN 布局（[global.c](../../reference/sdlpal/global.c) `PAL_LoadDefaultGame`）；提取按 chunk 内原始布局忠实导出，WIN/DOS 视图字段差异见下（`scriptDesc` 为 WIN95 新增槽）。真实数据核对：7910 ÷ 14 = 565 条（÷12 余 2）⇒ WIN95。
+
+| 视图 | JSON 字段 | C 名（WORD 序） | 类型 | 说明 |
+|---|---|---|---|---|
+| player | `reserved` | `wReserved[2]` | WORD[2] | 参考注明恒零，原样导出不强制 |
+| player | `scriptOnFriendDeath` | `wScriptOnFriendDeath` | WORD | 队友死亡入口（chunk 4 地址；入口槽 `player.wScriptOnFriendDeath`） |
+| player | `scriptOnDying` | `wScriptOnDying` | WORD | 濒死入口（入口槽 `player.wScriptOnDying`） |
+| item | `bitmap` | `wBitmap` | WORD | BALL.MKF 位图编号 |
+| item | `price` | `wPrice` | WORD | 价格 |
+| item | `scriptOnUse` | `wScriptOnUse` | WORD | 使用入口（入口槽 `item.wScriptOnUse`） |
+| item | `scriptOnEquip` | `wScriptOnEquip` | WORD | 装备入口（入口槽 `item.wScriptOnEquip`） |
+| item | `scriptOnThrow` | `wScriptOnThrow` | WORD | 投掷入口（入口槽 `item.wScriptOnThrow`） |
+| item | `scriptDesc` | `wScriptDesc` | WORD | 描述脚本（WIN95；auto 入口槽 `item.wScriptDesc`；DOS 无此槽） |
+| item | `flags` | `wFlags` | WORD | `ITEMFLAG` 位集（usable/equipable/throwable/consuming/applyToAll/sellable/可装备角色位 6..） |
+| magic | `magicId` | `wMagicNumber` | WORD | 指向 magic.json（DATA chunk 4）的法术编号 |
+| magic | `reserved1` | `wReserved1` | WORD | 参考注明恒零，原样导出 |
+| magic | `scriptOnSuccess` | `wScriptOnSuccess` | WORD | 成功入口（入口槽 `magic.wScriptOnSuccess`） |
+| magic | `scriptOnUse` | `wScriptOnUse` | WORD | 使用入口（入口槽 `magic.wScriptOnUse`） |
+| magic | `scriptDesc` | `wScriptDesc` | WORD | 描述脚本（WIN95；auto 入口槽 `magic.wScriptDesc`；DOS 无此槽） |
+| magic | `reserved2` | `wReserved2` | WORD | 参考注明恒零，原样导出 |
+| magic | `flags` | `wFlags` | WORD | `MAGICFLAG` 位集 |
+| enemy | `enemyId` | `wEnemyID` | WORD | 指向 enemy.json（DATA chunk 1）；亦为 ABC.MKF 位图编号 |
+| enemy | `resistanceToSorcery` | `wResistanceToSorcery` | WORD | 法术/毒抗性（0..10） |
+| enemy | `scriptOnTurnStart` | `wScriptOnTurnStart` | WORD | 回合开始入口（入口槽 `enemy.wScriptOnTurnStart`） |
+| enemy | `scriptOnBattleEnd` | `wScriptOnBattleEnd` | WORD | 战斗结束入口（入口槽 `enemy.wScriptOnBattleEnd`） |
+| enemy | `scriptOnReady` | `wScriptOnReady` | WORD | 就绪入口（入口槽 `enemy.wScriptOnReady`） |
+| poison | `poisonLevel` | `wPoisonLevel` | WORD | 毒等级 |
+| poison | `color` | `wColor` | WORD | 头像颜色 |
+| poison | `playerScript` | `wPlayerScript` | WORD | 玩家中毒每回合脚本（入口槽 `poison.wPlayerScript`） |
+| poison | `reserved` | `wReserved` | WORD | 参考注明恒零，原样导出 |
+| poison | `enemyScript` | `wEnemyScript` | WORD | 敌人中毒每回合脚本（入口槽 `poison.wEnemyScript`） |
+
+player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h），未定义槽不丢弃，原样导出为 `padding` 数组（player：WIN95 余 3 / DOS 余 2；enemy/poison：WIN95 余 2 / DOS 余 1）。magic 与 item 视图占满物理记录：DOS 布局（6 WORD）下两者均无 `scriptDesc` 槽（magic 的 `reserved2` 落 WORD 4、`flags` 落 WORD 5；item 的 `flags` 落 WORD 5）；WIN95 布局下 magic 的 `scriptDesc` 在 WORD 4、`reserved2` 在 WORD 5、`flags` 在 WORD 6，item 的 `scriptDesc` 在 WORD 5、`flags` 在 WORD 6。`undetermined` 记录：`{ "view": "undetermined", "data": [整组 WORD 原样] }`。
+
+### store.json — DATA 0，`STORE`，18 字节（WORD[9]）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `items` | `rgwItems[MAX_STORE_ITEM]` | WORD[9] | 商品列表；元素为 `itemId`（object.json item 视图），0 = 空槽 |
+
+真实数据核对：378 ÷ 18 = 21 条。
+
+### enemy.json — DATA 1，`ENEMY`，70 字节（35 WORD）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `idleFrames` | `wIdleFrames` | WORD | 待机总帧数 |
+| `magicFrames` | `wMagicFrames` | WORD | 施法总帧数 |
+| `attackFrames` | `wAttackFrames` | WORD | 普攻总帧数 |
+| `idleAnimSpeed` | `wIdleAnimSpeed` | WORD | 待机动画速度 |
+| `actWaitFrames` | `wActWaitFrames` | WORD | 参考标注 FIXME |
+| `yPosOffset` | `wYPosOffset` | WORD | Y 偏移 |
+| `attackSound` | `wAttackSound` | SHORT | 普攻音效；声明 SHORT，负值有语义（[fight.c](../../reference/sdlpal/fight.c):2928 对同类音效做 `>= 0` 判断） |
+| `actionSound` | `wActionSound` | SHORT | 参考标注 FIXME；声明 SHORT 按有符号导出 |
+| `magicSound` | `wMagicSound` | SHORT | 施法音效（fight.c:2928 WIN95 `>= 0` 判断） |
+| `deathSound` | `wDeathSound` | SHORT | 死亡音效 |
+| `callSound` | `wCallSound` | SHORT | 入场音效 |
+| `health` | `wHealth` | WORD | HP |
+| `exp` | `wExp` | WORD | 击败经验 |
+| `cash` | `wCash` | WORD | 击败现金 |
+| `level` | `wLevel` | WORD | 等级 |
+| `magicId` | `wMagic` | WORD | 施法对象下标，指向 object.json magic 视图（fight.c:4580/4660-4671 经 `rgObject[wMagic].magic` 读取，#82 核实；0/0xFFFF = 无法术）；指向 magic.json 的是该对象的 `wMagicNumber` |
+| `magicRate` | `wMagicRate` | WORD | 施法概率 |
+| `attackEquivItemId` | `wAttackEquivItem` | WORD | 普攻等价物品，指向 object.json item 视图 |
+| `attackEquivItemRate` | `wAttackEquivItemRate` | WORD | 等价物品概率 |
+| `stealItemId` | `wStealItem` | WORD | 偷取物品，指向 object.json item 视图 |
+| `stealItemCount` | `nStealItem` | WORD | 可偷取数量 |
+| `attackStrength` | `wAttackStrength` | WORD | 攻击力 |
+| `magicStrength` | `wMagicStrength` | WORD | 灵力 |
+| `defense` | `wDefense` | WORD | 防御 |
+| `dexterity` | `wDexterity` | WORD | 身法 |
+| `fleeRate` | `wFleeRate` | WORD | 逃跑率 |
+| `poisonResistance` | `wPoisonResistance` | WORD | 毒抗性 |
+| `elementalResistance` | `wElemResistance[NUM_MAGIC_ELEMENTAL]` | WORD[5] | 五系元素抗性 |
+| `physicalResistance` | `wPhysicalResistance` | WORD | 物理抗性 |
+| `dualMove` | `wDualMove` | WORD | 是否双动 |
+| `collectValue` | `wCollectValue` | WORD | 炼化收集值 |
+
+真实数据核对：10780 ÷ 70 = 154 条。
+
+### enemy-team.json — DATA 2，`ENEMYTEAM`，10 字节（WORD[5]）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `enemies` | `rgwEnemy[MAX_ENEMIES_IN_TEAM]` | WORD[5] | 敌队成员；元素为 `objectId`（object.json enemy 视图，battle.c:1601-1615 经 `rgObject[w].enemy` 读取，#82 核实），0 = 空位、0xFFFF = 跳过 |
+
+真实数据核对：3800 ÷ 10 = 380 条。
+
+### player-roles.json — DATA 3，`PLAYERROLES`，900 字节（450 WORD，单条记录）
+
+数组维度均为 `[MAX_PLAYER_ROLES]=6`（角色维）；多维数组外层为第一维。
+
+**分票交付（#86/#87，已落地）**：本表由两票共同产出同一份单记录文档（字段并集）。#86 交付属性组结构化字段，并以最终字段名加 `Raw` 后缀的原始 WORD 数组占位导出 #87 范围字段；#87 已按冻结规则把 11 个占位字段无损替换为下表最终字段（同名去 `Raw` 后缀，替换前后每 WORD 值不变），本节现为最终字段表，不再存在占位字段（`*Raw` 名以未知字段被严格校验拒绝）。
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `avatar` | `rgwAvatar` | WORD[6] | 状态界面头像（RGM.MKF） |
+| `battleSprite` | `rgwSpriteNumInBattle` | WORD[6] | 战斗精灵（F.MKF）；`rgwBattleEffectIndex` 按此编号索引（fight.c:2055） |
+| `spriteNum` | `rgwSpriteNum` | WORD[6] | 场景精灵（MGO.MKF） |
+| `name` | `rgwName` | WORD[6] | 角色名（WORD.DAT 文字索引）；同时是 object.json player 视图证据源（fight.c:800-813/848-876，见 object 表视图判定） |
+| `attackAll` | `rgwAttackAll` | WORD[6] | 是否全体攻击 |
+| `unknown1` | `rgwUnknown1` | WORD[6] | 参考标注 FIXME，原样导出 |
+| `level` | `rgwLevel` | WORD[6] | 等级 |
+| `maxHp` | `rgwMaxHP` | WORD[6] | HP 上限 |
+| `maxMp` | `rgwMaxMP` | WORD[6] | MP 上限 |
+| `hp` | `rgwHP` | WORD[6] | 初始 HP |
+| `mp` | `rgwMP` | WORD[6] | 初始 MP |
+| `equipment` | `rgwEquipment[MAX_PLAYER_EQUIPMENTS][MAX_PLAYER_ROLES]` | WORD[6][6] | 装备（部位×角色）；元素为 `itemId`（object.json item 视图，itemmenu.c:363），0 = 未装备 |
+| `attackStrength` | `rgwAttackStrength` | WORD[6] | 攻击力基值 |
+| `magicStrength` | `rgwMagicStrength` | WORD[6] | 灵力基值 |
+| `defense` | `rgwDefense` | WORD[6] | 防御基值 |
+| `dexterity` | `rgwDexterity` | WORD[6] | 身法基值 |
+| `fleeRate` | `rgwFleeRate` | WORD[6] | 逃跑率 |
+| `poisonResistance` | `rgwPoisonResistance` | WORD[6] | 毒抗性 |
+| `elementalResistance` | `rgwElementalResistance[NUM_MAGIC_ELEMENTAL][MAX_PLAYER_ROLES]` | WORD[5][6] | 五系元素抗性（系×角色） |
+| `unknown2` | `rgwUnknown2` | WORD[6] | 参考标注 FIXME |
+| `unknown3` | `rgwUnknown3` | WORD[6] | 参考标注 FIXME |
+| `unknown4` | `rgwUnknown4` | WORD[6] | 参考标注 FIXME |
+| `coveredBy` | `rgwCoveredBy` | WORD[6] | 低 HP/异常时代为承受的角色；值为角色下标（0..5） |
+| `magic` | `rgwMagic[MAX_PLAYER_MAGICS][MAX_PLAYER_ROLES]` | WORD[32][6] | 法术表（槽×角色）；元素为 `objectId`（object.json magic 视图，magicmenu.c:339-354/uibattle.c:753-759 经 `rgObject[w].magic` 读取，#82 核实），0 = 未习得 |
+| `walkFrames` | `rgwWalkFrames` | WORD[6] | 行走帧（参考标注 ???） |
+| `cooperativeMagic` | `rgwCooperativeMagic` | WORD[6] | 合击法术对象，指向 object.json magic 视图（fight.c:3859-3861/uibattle.c:1120-1125，#82 核实），0 = 无合击 |
+| `unknown5` | `rgwUnknown5` | WORD[6] | 参考标注 FIXME |
+| `unknown6` | `rgwUnknown6` | WORD[6] | 参考标注 FIXME |
+| `deathSound` | `rgwDeathSound` | WORD[6] | 死亡音效 |
+| `attackSound` | `rgwAttackSound` | WORD[6] | 攻击音效 |
+| `weaponSound` | `rgwWeaponSound` | WORD[6] | 武器音效 |
+| `criticalSound` | `rgwCriticalSound` | WORD[6] | 会心音效 |
+| `magicSound` | `rgwMagicSound` | WORD[6] | 施法音效 |
+| `coverSound` | `rgwCoverSound` | WORD[6] | 掩护音效 |
+| `dyingSound` | `rgwDyingSound` | WORD[6] | 濒死音效 |
+
+真实数据核对：900 ÷ 900 = 1 条。音效字段在 PLAYERROLES 中是 `WORD` 数组（不同于 ENEMY 的 SHORT 音效），按无符号导出。
+
+### magic.json — DATA 4，`MAGIC`，32 字节（16 WORD）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `effect` | `wEffect` | WORD | 效果精灵 |
+| `type` | `wType` | WORD | `MAGIC_TYPE`（0 普通/1 攻全体/2 攻整队/3 攻全场/4 施于单人/5 施于全队/8 变身/9 召唤） |
+| `xOffset` | `wXOffset` | WORD | X 偏移 |
+| `yOffset` | `wYOffset` | WORD | Y 偏移 |
+| `summonEffect` | `rgSpecific.wSummonEffect` | WORD | 召唤效果精灵（`type=9` 时按此视图解释，与 `layerOffset` 二选一；仅 fight.c:3135 在 `PAL_BattleShowPlayerSummonMagicAnim`（fight.c:3072）内读取） |
+| `layerOffset` | `rgSpecific.sLayerOffset` | SHORT | 非召唤法术层偏移（fight.c:2518/2735/2960 分别在 `PAL_BattleShowPlayerDefMagicAnim`/`OffMagicAnim`/`EnemyMagicAnim` 中以 `(SHORT)` 读取；`type=9` 以外的视图） |
+| `speed` | `wSpeed` | SHORT | 效果速度；声明 SHORT（fight.c:2513/2730/2955/3171 按 `(wSpeed+5)*10` 参与带符号帧延迟计算） |
+| `keepEffect` | `wKeepEffect` | WORD | 参考标注 FIXME |
+| `fireDelay` | `wFireDelay` | WORD | 发动阶段起始帧 |
+| `effectTimes` | `wEffectTimes` | WORD | 效果次数 |
+| `shake` | `wShake` | WORD | 震屏 |
+| `wave` | `wWave` | WORD | 波动屏 |
+| `unknown` | `wUnknown` | WORD | 参考标注 FIXME |
+| `costMp` | `wCostMP` | WORD | MP 消耗 |
+| `baseDamage` | `wBaseDamage` | WORD | 基础伤害 |
+| `elemental` | `wElemental` | WORD | 元素（0 无，末位为毒） |
+| `sound` | `wSound` | SHORT | 音效；声明 SHORT 按有符号导出（fight.c:2501/2671/2713/2929/3114 传入 `AUDIO_PlaySound` 的 `INT iSoundNum`，audio.c:517） |
+
+`rgSpecific` 是同一物理 WORD 的双视图：记录**必须按 `type` 恰好声明其一**（`type=9` 召唤 ⇒ `summonEffect`；其余 ⇒ `layerOffset`），不得两者并存或两者皆缺。分派依据参考实际调用点：`wSummonEffect` 视图只在 `PAL_BattleShowPlayerSummonMagicAnim`（fight.c:3072 定义，fight.c:3135 读 `rgSpecific.wSummonEffect + 10` 载入召唤神灵精灵）内被读取，而该函数仅在 `wType == kMagicTypeSummon` 判断下被调用（fight.c:3865-3868 合击法术分支、fight.c:4255-4257 攻击法术分支，两个分支的 else 路径分别走 4259-4261/3951 的非召唤动画函数）；`sLayerOffset` 视图由三个非召唤效果函数读取（fight.c:2518/2735/2960，均为显式 `(SHORT)` 转换）。导出时同一记录只落一个字段名，严格校验按本记录 `type` 拒绝另一视图名与两者并存。真实数据核对：3328 ÷ 32 = 104 条。
+
+### battle-field.json — DATA 5，`BATTLEFIELD`，12 字节（6 WORD）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `screenWave` | `wScreenWave` | WORD | 屏幕波动等级（battle.c:1563 复制入 `gpGlobals->wScreenWave`，WORD→WORD 无符号读写） |
+| `magicEffect` | `rgsMagicEffect[NUM_MAGIC_ELEMENTAL]` | SHORT[5] | 五系法术效果倍率；声明 SHORT（fight.c:244 `sDamage *= 10 + rgsMagicEffect[...]`，可负；元素数 NUM_MAGIC_ELEMENTAL = 5 见 palcommon.h:57，无显式 `(SHORT)` 转换点——符号性由结构体声明承担，值 < −10 使倍率变负） |
+
+真实数据核对：696 ÷ 12 = 58 条。
+
+### level-up-magic.json — DATA 6，`LEVELUPMAGIC_ALL`，20 字节（10 WORD/条）
+
+每条记录：
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `roles` | `m[MAX_PLAYABLE_PLAYER_ROLES]` | 对象[5] | 每角色一项，按角色顺序（MAX_PLAYABLE_PLAYER_ROLES = 5 见 palcommon.h:48；global.c:299-300 自 DATA chunk 6 加载 nLevelUpMagic 条，battle.c:1300 逐条扫描） |
+
+`roles` 元素：
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `level` | `wLevel` | WORD | 达到该等级（battle.c:1303 `wLevel > rgwLevel[w]` 则跳过该行，未达级不习得） |
+| `magicId` | `wMagic` | WORD | 习得的法术对象，指向 object.json magic 视图（battle.c:1302-1309 经 `PAL_AddMagic` 存入 `rgwMagic` 对象槽，#82 核实），0 = 无 |
+
+真实数据核对：400 ÷ 20 = 20 条。
+
+### battle-effect-index.json — DATA 11，`WORD[10][2]`，40 字节（单条记录）
+
+行下标为战斗精灵编号（`PAL_GetPlayerBattleSprite`，[global.c](../../reference/sdlpal/global.c):1978：`rgwSpriteNumInBattle`，可被装备效果覆盖）。#78 冻结时占位命名 `rows`，列语义留本票核实：两列都不是权重/计数，而是效果精灵（`g_Battle.lpEffectSprite`）的帧组索引——[fight.c](../../reference/sdlpal/fight.c):2387 用 `[sprite][0]`（×10+15 后连播 10 帧，施法前摇动画 `PAL_BattleShowPlayerPreMagicAnim`，fight.c:2338）、[fight.c](../../reference/sdlpal/fight.c):2055 用 `[sprite][1]`（×3 后连播 3 帧，攻击动画 `PAL_BattleShowPlayerAttackAnim`，fight.c:2008）——故按参考语义修正为下表命名的子记录对（两列均普通 WORD）。
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `sprites` | `rgwBattleEffectIndex[10][2]` | 对象[10] | 每战斗精灵编号一项（`PAL_GetPlayerBattleSprite` 返回值 0..9），成员按 C 列序 |
+
+`sprites` 元素：
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `preMagicEffectIndex` | `rgwBattleEffectIndex[sprite][0]` | WORD | 施法前摇动画的效果精灵帧组索引（fight.c:2387：×10+15 后连播 10 帧 `g_Battle.lpEffectSprite`） |
+| `attackEffectIndex` | `rgwBattleEffectIndex[sprite][1]` | WORD | 攻击动画的效果精灵帧组索引（fight.c:2055：×3 后连播 3 帧，fight.c:2130） |
+
+真实数据核对：40 ÷ 40 = 1 条。
+
+### enemy-pos.json — DATA 13，`ENEMYPOS`，100 字节（单条记录）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `positions` | `pos[MAX_ENEMIES_IN_TEAM][MAX_ENEMIES_IN_TEAM]` | `{x,y}`[5][5] | 敌位坐标（battle.c:936 `EnemyPos.pos[i][wMaxEnemyIndex]`：敌槽 `i` 的默认战位，第二下标为队伍实际最高敌槽，故真实数据仅 `j ≥ i` 的格子有活坐标，未用格子的零值原样导出） |
+
+`positions` 元素：
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `x` | `PALPOS.x` | WORD | X 坐标 |
+| `y` | `PALPOS.y` | WORD | Y 坐标 |
+
+真实数据核对：100 ÷ 100 = 1 条。
+
+### level-up-exp.json — DATA 14，`WORD[MAX_LEVELS+1]`，200 字节（单条记录）
+
+| JSON 字段 | C 名 | 类型 | 说明 |
+|---|---|---|---|
+| `levelUpExp` | `rgLevelUpExp[MAX_LEVELS+1]` | WORD[100] | 升级经验阈值表；下标为当前等级（battle.c:1106 `dwExp >= rgLevelUpExp[rgwLevel[w]]` 达阈即升级；下标 0 未用，真实数据中段起恒为 32000 封顶） |
+
+真实数据核对：200 ÷ 200 = 1 条。
+
+## 验收
+
+### M5 终验：13 表真实数据核对汇总（#113）
+
+在最终 tip 对本机 `data/raw/sdlpal`（绝对路径只读）执行 `export-data`（退出码 0），13 张表的 recordCount/byteLength/chunk SHA-256 与上文各表「真实数据核对」记录值逐项一致：
+
+| file | archive | chunk | recordCount | byteLength | chunk sha256 |
+|---|---|---|---|---|---|
+| battle-effect-index.json | DATA.MKF | 11 | 1 | 40 | `b815c493870790c3649e950cfb8ecb62249972a84ced7371641d4a7e4b4be68d` |
+| battle-field.json | DATA.MKF | 5 | 58 | 696 | `4c3572956692cef1cafed44aa1e031272a1b949323588eb12ff2a2778fba650d` |
+| enemy-pos.json | DATA.MKF | 13 | 1 | 100 | `97a101a8dd6cad71b95692bdb07ee3a34a4c2875ff01db6a7e2f175a47a42741` |
+| enemy-team.json | DATA.MKF | 2 | 380 | 3800 | `b1f9df44eeb267874fdb0a387b1dd689f1376798da1d745c37cb68f39e3989b0` |
+| enemy.json | DATA.MKF | 1 | 154 | 10780 | `40db95b3b8bfb9c3634af2bc0e42713758183ce0da4f4b13f9d14729540ba182` |
+| event-object.json | SSS.MKF | 0 | 5077 | 162464 | `44f407eab01da199797ceca160fa77c9d3efe2ceeb347e242babee2494c0b679` |
+| level-up-exp.json | DATA.MKF | 14 | 1 | 200 | `0be60aa1b94bac99651d61d649150103a4011b8059c9dfb17a48646f339ac087` |
+| level-up-magic.json | DATA.MKF | 6 | 20 | 400 | `0ddeecbb127886a6b6febb5c5464c23f6d9be2bd25f9d9f265f3856ed5eebd96` |
+| magic.json | DATA.MKF | 4 | 104 | 3328 | `d82885c5a8a4046db10eca47c0e26f5811b98289e60e443f2fa3af526a5e1bed` |
+| object.json | SSS.MKF | 2 | 565 | 7910 | `778b09793609dca55a363516b1af646022f3ef1bb757b4fa781f5d34dc6b2151` |
+| player-roles.json | DATA.MKF | 3 | 1 | 900 | `e19685ed54732cc689122acc6cbba3a18a22fe63f5ac28eea7e93226d1314353` |
+| scene.json | SSS.MKF | 1 | 295 | 2360 | `7f59702b4b09ad5fad8dad2c17b81056db7e411e9e08361a9382f3910f76971f` |
+| store.json | DATA.MKF | 0 | 21 | 378 | `699a4902ca9355642a9f207cd0379c304a1d6ed0133be8ea7865119f8d5d6569` |
+
+SSS.MKF file sha256: `942cb898f14d609475e3bcef0944e4d082ca88f76f4a7171028b451584a5e2ff`
+DATA.MKF file sha256: `c0bc968e5322b06fe669dd6e34483dd1f12dd223ac25b03b6dc74d3742635c1b`
+
+object.json 视图分布终值：player 6 / item 159 / magic 65 / enemy 152 / undetermined 183（共 565，与 #81/#82 冻结值一致）。各表首次核对与提取交付的票证 evidence：#79 event-object、#80 scene、#81/#82 object、#83 store、#84 enemy、#85 enemy-team、#86/#87 player-roles、#88 magic、#89 battle-field、#90 level-up-magic、#91 battle-effect-index/enemy-pos/level-up-exp（各票回执 `C:/evidence/m5/<票号>/receipt.md`）；#113 终验命令、逐表核对与原始输出见 `C:/evidence/m5/113/receipt.md` 与 `C:/evidence/m5/113/tmp/`（真实数据产物仅存临时目录，不入库）。
+
+- 每张表字段值与 SDLPal 加载后的结构**独立核对**（对照 `global.h` 布局与 `LOAD_DATA`/`DO_BYTESWAP`；上文各表「真实数据核对」即以本机只读数据的 chunk 长度 ÷ 结构大小验证记录数整除性）。
+- 语义解析：字段值正确 + 来源散列/长度一致即可，不要求重编码回原始字节（区别于脚本的逐字节往返）。
+- 严格 schema 校验：非法版本、重复键、未知字段、越界值、记录数不整除结构大小均明确失败并定位。
+- 真实数据本机核对；CI 用人工构造微型归档夹具（覆盖 union 视图、byteswap、有符号边界）。

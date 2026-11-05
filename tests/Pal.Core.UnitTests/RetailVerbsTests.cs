@@ -111,11 +111,11 @@ public sealed class RetailVerbsTests
                 address++;
             }
             Put("raw", 134, 0, 65535, 8); // unreached retained row so the entry address is nonzero
-            Put("setTriggerEntry", 0x25, 29, 2500, 0, ("objectId", 29), ("entry", 2500)); // not the caller: its entry word is restored on completion
-            Put("setAutoEntry", 0x24, 28, 11, 0, ("objectId", 28), ("entry", 11)); // a valid end address for the auto runner
-            Put("setObjectPosition", 0x13, 28, 1280, 256, ("objectId", 28), ("x", 1280), ("y", 256));
+            Put("setTriggerEntry", 0x25, 29, 2500, 0, ("eventObjectId", 29), ("entry", 2500)); // not the caller: its entry word is restored on completion
+            Put("setAutoEntry", 0x24, 28, 11, 0, ("eventObjectId", 28), ("entry", 11)); // a valid end address for the auto runner
+            Put("setObjectPosition", 0x13, 28, 1280, 256, ("eventObjectId", 28), ("x", 1280), ("y", 256));
             Put("setObjectGesture", 0x14, 3, 0, 0, ("frame", 3));
-            Put("setStateRange", 0x9a, 29, 30, 2, ("fromObjectId", 29), ("toObjectId", 30), ("state", 2));
+            Put("setStateRange", 0x9a, 29, 30, 2, ("fromEventObjectId", 29), ("toEventObjectId", 30), ("state", 2));
             Put("setParty", 0x75, 1, 2, 0, ("roleId0", 1), ("roleId1", 2), ("roleId2", 0));
             Put("setBattlefield", 0x4a, 24, 0, 0, ("battlefieldId", 24));
             Put("noop", 0x78, 0, 0, 0);

@@ -158,7 +158,7 @@ public sealed class TriggerEventCollection
             {
                 "raw" => [],
                 "end" => EventJson.Text(node, "mode") == "redirect" ? ["mode", "to", "limit"] : ["mode"],
-                "goto" => ["to", "limit"], "giveItem" => ["itemId", "count"],
+                "goto" => ["to", "limit"], "addItem" => ["itemId", "count"],
                 "randomJump" => ["rate", "to"],
                 "changeHp" => ["scope", "amount"], "changeMp" => ["scope", "amount"],
                 "boostStat" => ["field", "percent", "roleOperand"],
@@ -170,36 +170,36 @@ public sealed class TriggerEventCollection
                     _ => throw new InvalidDataException("Unknown dialogue box.")
                 },
                 "showDialog" => ["messageId", "descriptionLineWord"],
-                "startBattle" => ["teamId", "lossTarget", "isBoss", "fleeTarget"],
+                "startBattle" => ["enemyTeamId", "lossTarget", "isBoss", "fleeTarget"],
                 "setMusic" => ["musicId", "mode"],
                 // #53 retail verbs (script.c), all non-branching word writes/transitions.
-                "setObjectPosition" => ["objectId", "x", "y"],
+                "setObjectPosition" => ["eventObjectId", "x", "y"],
                 "setObjectGesture" => ["frame"],
                 "changeHpMp" => ["scope", "amount"],
                 "revivePlayer" => ["scope", "healthTenths"],
-                "setAutoEntry" => ["objectId", "entry"],
-                "setTriggerEntry" => ["objectId", "entry"],
+                "setAutoEntry" => ["eventObjectId", "entry"],
+                "setTriggerEntry" => ["eventObjectId", "entry"],
                 "setBattlefield" => ["battlefieldId"],
-                "fadeOut" => ["frames"],
+                "fadeOut" => ["delay"],
                 "setParty" => ["roleId0", "roleId1", "roleId2"],
                 "noop" => [],
-                "setStateRange" => ["fromObjectId", "toObjectId", "state"],
+                "setStateRange" => ["fromEventObjectId", "toEventObjectId", "state"],
                 "fadeToRed" => [],
                 "requestReload" => [],
                 // #52 dynamic-story verbs (script.c), shared by trigger and auto contexts.
                 "walkStep" => ["direction"],
                 "face" => ["direction", "frame"],
                 "walkTo" => ["x", "y", "h"],
-                "setState" => ["objectId", "state"],
+                "setState" => ["eventObjectId", "state"],
                 "hide" => ["frames"],
-                "setTriggerMode" => ["objectId", "mode"],
+                "setTriggerMode" => ["eventObjectId", "mode"],
                 "setSceneScripts" => ["sceneId", "onEnter", "onTeleport"],
                 "setObjectScript" => ["objectId", "value", "slotIndex"],
                 "setPartyPos" => ["x", "y", "h"],
                 "setPartyFacing" => ["direction", "gesture", "memberIndex"],
                 "waitUpdate" => ["frames", "runTriggers", "updateGestures"],
-                "redraw" => ["delayUnits"],
-                "fadeScene" => ["mode"],
+                "redraw" => ["delayUnits", "updateGestures"],
+                "fadeScene" => ["speed"],
                 "markFailed" => [],
                 _ => throw new InvalidDataException($"Unknown op '{op}'.")
             };
@@ -232,10 +232,11 @@ public sealed class TriggerEventCollection
                     if (opcode != 3) throw new InvalidDataException("Invalid goto mapping.");
                     ReadTarget(node, command);
                     break;
-                case "giveItem":
-                    if (opcode != 31) throw new InvalidDataException("Invalid giveItem mapping.");
+                case "addItem":
+                    // #116: the frozen 0x001F verb is addItem (#100); the v1 placeholder giveItem is rejected.
+                    if (opcode != 31) throw new InvalidDataException("Invalid addItem mapping.");
                     _ = EventJson.Word(node, "itemId");
-                    if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("giveItem.count must be a signed WORD.");
+                    if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("addItem.count must be a signed WORD.");
                     break;
                 case "randomJump":
                     // script.c:3301-3312: draw RandomLong(1,100); the jump is taken when draw >= rate.
@@ -269,7 +270,7 @@ public sealed class TriggerEventCollection
                     break;
                 case "startBattle":
                     if (opcode != 7) throw new InvalidDataException("Invalid startBattle mapping.");
-                    command.TeamId = EventJson.Word(node, "teamId");
+                    command.EnemyTeamId = EventJson.Word(node, "enemyTeamId");
                     command.LossReference = EventJson.Reference(node, "lossTarget");
                     command.FleeReference = EventJson.Reference(node, "fleeTarget");
                     var isBoss = node.GetProperty("isBoss");
@@ -293,7 +294,7 @@ public sealed class TriggerEventCollection
                 case "setObjectPosition":
                     // script.c 0x0013: pCurrent x/y words; operand 0/0xFFFF selects the caller.
                     if (opcode != 0x13) throw new InvalidDataException("Invalid setObjectPosition mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.TileX = EventJson.Word(node, "x");
                     command.TileY = EventJson.Word(node, "y");
                     break;
@@ -320,13 +321,13 @@ public sealed class TriggerEventCollection
                 case "setAutoEntry":
                     // script.c 0x0024: pCurrent wAutoScript = operand1 when operand0 selects one.
                     if (opcode != 0x24) throw new InvalidDataException("Invalid setAutoEntry mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.Value = EventJson.Word(node, "entry");
                     break;
                 case "setTriggerEntry":
                     // script.c 0x0025: pCurrent wTriggerScript = operand1 when operand0 selects one.
                     if (opcode != 0x25) throw new InvalidDataException("Invalid setTriggerEntry mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.Value = EventJson.Word(node, "entry");
                     break;
                 case "setBattlefield":
@@ -335,9 +336,11 @@ public sealed class TriggerEventCollection
                     command.Frames = EventJson.Word(node, "battlefieldId");
                     break;
                 case "fadeOut":
-                    // script.c 0x0050: PAL_FadeOut(frames or 1) and the next scene fades back in.
+                    // script.c 0x0050: PAL_FadeOut(delay or 1) — the palette fade-to-black step
+                    // unit (total duration = delay * 600 ms), not a frame count; the next
+                    // scene fades back in afterwards.
                     if (opcode != 0x50) throw new InvalidDataException("Invalid fadeOut mapping.");
-                    command.Frames = EventJson.Word(node, "frames");
+                    command.FadeOutDelay = EventJson.Word(node, "delay");
                     break;
                 case "setParty":
                     // script.c 0x0075: party = operand+1 role words, 0 = empty; empty keeps role0.
@@ -353,8 +356,8 @@ public sealed class TriggerEventCollection
                 case "setStateRange":
                     // script.c 0x009A: sState = operand2 for object IDs operand0..operand1.
                     if (opcode != 0x9a) throw new InvalidDataException("Invalid setStateRange mapping.");
-                    command.ObjectId = EventJson.Word(node, "fromObjectId");
-                    command.MemberIndex = EventJson.Word(node, "toObjectId");
+                    command.EventObjectId = EventJson.Word(node, "fromEventObjectId");
+                    command.ToEventObjectId = EventJson.Word(node, "toEventObjectId");
                     command.State = EventJson.Number(node, "state");
                     if (command.State is < short.MinValue or > short.MaxValue)
                         throw new InvalidDataException("setStateRange.state must be a signed WORD.");
@@ -392,7 +395,7 @@ public sealed class TriggerEventCollection
                 case "setState":
                     // script.c 0x0049: operand0 selects pCurrent (0/0xFFFF = caller); state is a SHORT.
                     if (opcode != 0x49) throw new InvalidDataException("Invalid setState mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.State = EventJson.Number(node, "state");
                     if (command.State is < short.MinValue or > short.MaxValue)
                         throw new InvalidDataException("setState.state must be a signed SHORT.");
@@ -405,7 +408,7 @@ public sealed class TriggerEventCollection
                 case "setTriggerMode":
                     // script.c 0x0040: operand0 selects pCurrent (0/0xFFFF = caller).
                     if (opcode != 0x40) throw new InvalidDataException("Invalid setTriggerMode mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.TriggerModeWord = EventJson.Word(node, "mode");
                     break;
                 case "setSceneScripts":
@@ -453,14 +456,18 @@ public sealed class TriggerEventCollection
                     command.UpdateGestures = EventJson.Word(node, "updateGestures");
                     break;
                 case "redraw":
-                    // script.c 0x0005: redraw the scene and delay 60ms units (0 -> 1).
+                    // script.c 0x0005: redraw the scene and delay 60ms units (0 -> 1); the
+                    // delay word is operand 1 and the truthy gesture word is operand 2 (the
+                    // party-gesture update flag, retained here; #99 re-binding).
                     if (opcode != 5) throw new InvalidDataException("Invalid redraw mapping.");
                     command.Frames = EventJson.Word(node, "delayUnits");
+                    command.UpdateGestures = EventJson.Word(node, "updateGestures");
                     break;
                 case "fadeScene":
-                    // script.c 0x0073: backup screen, rebuild the scene, VIDEO_FadeScreen(mode).
+                    // script.c 0x0073: backup screen, rebuild the scene, VIDEO_FadeScreen(speed)
+                    // — the cross-fade pacing word (larger = slower), not a mode selector.
                     if (opcode != 0x73) throw new InvalidDataException("Invalid fadeScene mapping.");
-                    command.FadeMode = EventJson.Word(node, "mode");
+                    command.FadeSpeed = EventJson.Word(node, "speed");
                     break;
                 case "markFailed":
                     // script.c 0x0041: g_fScriptSuccess = FALSE.
@@ -500,7 +507,7 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int Color { get; set; }
     internal int RngWord { get; set; }
     internal int MessageId { get; set; }
-    internal int TeamId { get; set; }
+    internal int EnemyTeamId { get; set; }
     internal bool IsBoss { get; set; }
     internal string? LossReference { get; set; }
     internal string? FleeReference { get; set; }
@@ -520,11 +527,14 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int TileX { get; set; }
     internal int TileY { get; set; }
     internal int Layer { get; set; }
+    internal int EventObjectId { get; set; }
+    internal int ToEventObjectId { get; set; }
     internal int ObjectId { get; set; }
     internal int State { get; set; }
     internal int Frames { get; set; }
+    internal int FadeOutDelay { get; set; }
     internal int TriggerModeWord { get; set; }
-    internal int FadeMode { get; set; }
+    internal int FadeSpeed { get; set; }
     internal int SceneId { get; set; }
     internal int OnEnter { get; set; }
     internal int OnTeleport { get; set; }

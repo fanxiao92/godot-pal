@@ -526,7 +526,7 @@ public sealed class MidbattleRoleHookTests
 
     private static JsonObject StartBattle(int address) => new()
     {
-        ["label"] = $"L{address:X4}", ["op"] = "startBattle", ["teamId"] = 18, ["lossTarget"] = null,
+        ["label"] = $"L{address:X4}", ["op"] = "startBattle", ["enemyTeamId"] = 18, ["lossTarget"] = null,
         ["isBoss"] = true, ["fleeTarget"] = null, ["next"] = $"L{address + 1:X4}",
         ["source"] = new JsonObject { ["index"] = address, ["opcode"] = 7, ["operands"] = new JsonArray(18, 0, 0) }
     };
@@ -602,7 +602,7 @@ internal sealed class HookFixture
         commands.Add(Raw(0));
         commands.Add(Upper(1, 0, 0, "L0002"));
         commands.Add(Upper(2, 0, 0, "L0003")); // a second context word keeps the battle as the first stop
-        commands.Add(new JsonObject { ["label"] = "L0003", ["op"] = "startBattle", ["teamId"] = 18, ["lossTarget"] = null,
+        commands.Add(new JsonObject { ["label"] = "L0003", ["op"] = "startBattle", ["enemyTeamId"] = 18, ["lossTarget"] = null,
             ["isBoss"] = true, ["fleeTarget"] = null, ["next"] = "L0004",
             ["source"] = new JsonObject { ["index"] = 3, ["opcode"] = 7, ["operands"] = new JsonArray(18, 0, 0) } });
         commands.Add(End(4));

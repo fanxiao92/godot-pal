@@ -130,7 +130,7 @@ public sealed class StoryPackagePrepareProcessTests : IDisposable
         File.WriteAllText(Path.Combine(Input, "events", "story.json"), """
         {"formatVersion":1,"profile":"faithful","fileId":"story","entries":[{"id":"npc","owner":{"type":"eventObject","id":1},"slot":"wTriggerScript","kind":"trigger","target":"L0001","sourceAddress":1}],"commands":[
         {"label":"L0000","op":"raw","next":"L0001","source":{"index":0,"opcode":134,"operands":[0,0,0]}},
-        {"label":"L0001","op":"startBattle","teamId":18,"lossTarget":"L0003","isBoss":true,"fleeTarget":null,"next":"L0002","source":{"index":1,"opcode":7,"operands":[18,3,0]}},
+        {"label":"L0001","op":"startBattle","enemyTeamId":18,"lossTarget":"L0003","isBoss":true,"fleeTarget":null,"next":"L0002","source":{"index":1,"opcode":7,"operands":[18,3,0]}},
         {"label":"L0002","op":"end","mode":"keep","next":"L0003","source":{"index":2,"opcode":0,"operands":[0,0,0]}},
         {"label":"L0003","op":"end","mode":"keep","next":null,"source":{"index":3,"opcode":0,"operands":[0,0,0]}}]}
         """);

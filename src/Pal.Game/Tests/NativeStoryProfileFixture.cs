@@ -135,7 +135,7 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     {"label":"L0000","op":"raw","next":"L0001","source":{"index":0,"opcode":134,"operands":[0,65535,8]}},
     {"label":"L0001","op":"setDialog","box":"upper","portraitId":7,"color":0,"rngWord":0,"next":"L0002","source":{"index":1,"opcode":60,"operands":[99,0,0]}},
     {"label":"L0002","op":"showDialog","messageId":61,"descriptionLineWord":0,"next":"L0003","source":{"index":2,"opcode":65535,"operands":[61,0,0]}},
-    {"label":"L0003","op":"startBattle","teamId":18,"lossTarget":"outcomes#L0007","isBoss":false,"fleeTarget":"outcomes#L000A","next":"L0004","source":{"index":3,"opcode":7,"operands":[99,7,10]}},
+    {"label":"L0003","op":"startBattle","enemyTeamId":18,"lossTarget":"outcomes#L0007","isBoss":false,"fleeTarget":"outcomes#L000A","next":"L0004","source":{"index":3,"opcode":7,"operands":[99,7,10]}},
     {"label":"L0004","op":"setDialog","box":"upper","portraitId":8,"color":0,"rngWord":0,"next":"L0005","source":{"index":4,"opcode":60,"operands":[8,0,0]}},
     {"label":"L0005","op":"showDialog","messageId":62,"descriptionLineWord":0,"next":"L0006","source":{"index":5,"opcode":65535,"operands":[62,0,0]}},
     {"label":"L0006","op":"end","mode":"keep","next":"outcomes#L0007","source":{"index":6,"opcode":0,"operands":[0,0,0]}}]}
