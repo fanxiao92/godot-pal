@@ -1,7 +1,6 @@
-using System.Buffers.Binary;
-using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -34,42 +33,6 @@ namespace Pal.Extract.Tests;
 // are rejected.
 public sealed class OpcodeSceneMovementBatch1Tests
 {
-    private const int ChunkCount = 8;
-
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> Labels =
-        new Dictionary<string, IReadOnlyDictionary<string, int>>
-        {
-            ["shared"] = Enumerable.Range(0, ChunkCount).ToDictionary(OpcodeRegistry.LabelAt, address => address),
-        };
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
-
-    private static JsonObject Decode(int index, params int[] instruction)
-    {
-        ushort opcode = unchecked((ushort)instruction[0]);
-        ushort a = unchecked((ushort)instruction[1]), b = unchecked((ushort)instruction[2]), c = unchecked((ushort)instruction[3]);
-        return OpcodeRegistry.DecodeCommand(index, ChunkCount, opcode, a, b, c);
-    }
-
-    private static byte[] Reencode(JsonObject command)
-    {
-        OpcodeRegistry.ValidateCommand(command, "shared", ChunkCount);
-        var bytes = new byte[8];
-        OpcodeRegistry.EncodeCommand(command, "shared", Labels, bytes);
-        return bytes;
-    }
-
-    private static byte[] EditAndReencode(JsonObject command, string field, JsonNode? value)
-    {
-        command[field] = value;
-        return Reencode(command);
-    }
-
     // --- 0x000B-0x000E walkStep (shared, script.c:652-661): one fall-through "walk one step"
     //     block - pEvtObj->wDirection = opcode - 0x000B (0..3 = south/west/north/east), then
     //     PAL_NPCWalkOneStep(wEventObjectID, 2) walks the caller object; no operand is consumed by

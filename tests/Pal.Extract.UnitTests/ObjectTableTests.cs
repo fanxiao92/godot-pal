@@ -1,9 +1,9 @@
-using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -31,13 +31,6 @@ public sealed class ObjectTableTests
 
     private static ObjectViewEvidence EvidenceFor(int[] players, int[] items, int[]? magic = null, int[]? enemies = null, int[]? poison = null) =>
         new(new HashSet<int>(players), new HashSet<int>(items), new HashSet<int>(magic ?? []), new HashSet<int>(enemies ?? []), new HashSet<int>(poison ?? []));
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
 
     [Fact]
     public void DetectVariant_decides_by_divisibility_and_rejects_undecidable_lengths()

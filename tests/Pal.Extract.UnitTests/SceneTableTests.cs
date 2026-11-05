@@ -1,9 +1,9 @@
-using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -20,13 +20,6 @@ public sealed class SceneTableTests
     // One hand-authored record per line: WORDs are stored little-endian.
     private static byte[] Record1 => Words(65535, 0x1234, 0, 65535);
     private static byte[] Record2 => Words(1, 32768, 0xABCD, 5077);
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
 
     [Fact]
     public void Descriptor_declares_the_frozen_four_word_layout()

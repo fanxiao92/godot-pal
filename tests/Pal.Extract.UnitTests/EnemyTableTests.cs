@@ -1,9 +1,9 @@
-using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -40,13 +40,6 @@ public sealed class EnemyTableTests
         20, 12, 14, 18, 50, 3,
         0, 1, 2, 3, 4,
         5, 0, 0);
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
 
     [Fact]
     public void Descriptor_declares_the_frozen_thirty_five_word_layout()

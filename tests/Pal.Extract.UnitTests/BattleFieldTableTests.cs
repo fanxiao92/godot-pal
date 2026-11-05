@@ -1,8 +1,8 @@
-using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -25,13 +25,6 @@ public sealed class BattleFieldTableTests
     // the signedness contrast in one record.
     private static byte[] Record1 => Words(65535, -32768, -1, -5, 32767, 4660);
     private static byte[] Record2 => Words(32768, 1, -2, 0, -32768, 5);
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
 
     [Fact]
     public void Descriptor_declares_the_frozen_six_word_layout()

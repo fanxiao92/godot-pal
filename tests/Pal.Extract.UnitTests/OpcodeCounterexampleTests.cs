@@ -1,7 +1,6 @@
-using System.Buffers.Binary;
-using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -13,43 +12,6 @@ namespace Pal.Extract.Tests;
 // out-of-range values must be rejected. Follow-up opcode tickets reuse Run().
 public sealed class OpcodeCounterexampleTests
 {
-    private const int ChunkCount = 8;
-
-    // Labels for a single-file collection covering addresses 0..7, like a tiny shared.json.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> Labels =
-        new Dictionary<string, IReadOnlyDictionary<string, int>>
-        {
-            ["shared"] = Enumerable.Range(0, ChunkCount).ToDictionary(OpcodeRegistry.LabelAt, address => address),
-        };
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
-
-    private static JsonObject Decode(int index, params int[] instruction)
-    {
-        ushort opcode = unchecked((ushort)instruction[0]);
-        ushort a = unchecked((ushort)instruction[1]), b = unchecked((ushort)instruction[2]), c = unchecked((ushort)instruction[3]);
-        return OpcodeRegistry.DecodeCommand(index, ChunkCount, opcode, a, b, c);
-    }
-
-    private static byte[] Reencode(JsonObject command)
-    {
-        OpcodeRegistry.ValidateCommand(command, "shared", ChunkCount);
-        var bytes = new byte[8];
-        OpcodeRegistry.EncodeCommand(command, "shared", Labels, bytes);
-        return bytes;
-    }
-
-    private static byte[] EditAndReencode(JsonObject command, string field, JsonNode? value)
-    {
-        command[field] = value;
-        return Reencode(command);
-    }
-
     // --- Representative case 1: a signed field (changeMp.amount). ---
     [Fact]
     public void Signed_amount_edit_reencodes_as_twos_complement_and_rejects_out_of_range()
