@@ -21,7 +21,7 @@ public sealed class EquipmentEntryRedTests
     {
         var events = new EventFixture();
         events.Commands[1] = JsonNode.Parse("""
-          {"label":"L0001","op":"startBattle","teamId":18,"lossTarget":"L0004","isBoss":true,"fleeTarget":null,
+          {"label":"L0001","op":"startBattle","enemyTeamId":18,"lossTarget":"L0004","isBoss":true,"fleeTarget":null,
            "next":"L0002","source":{"index":1,"opcode":7,"operands":[18,4,0]}}
           """);
         return events.Load();

@@ -20,7 +20,7 @@ public sealed class TriggerScriptSession
     private ClassicBattleRoleHook? _battleHook;
     private ClassicBattleEndScript? _battleEndScript;
     private int _parkedCaller;
-    private (int TeamId, bool IsBoss)? _lostBattleContext;
+    private (int EnemyTeamId, bool IsBoss)? _lostBattleContext;
 
     // Metadata discovery for the host's selected interaction; does not start or preview a call.
     public IReadOnlyList<TriggerEventEntry> Entries => _events.Entries;
@@ -171,7 +171,7 @@ public sealed class TriggerScriptSession
             || !request.Lifecycle.OwnsCompletion(completion)) return false;
         BattleRoles = request.Lifecycle.Current.Roles;
         // The reload diagnostic carries the enemy team/context of the battle that actually lost.
-        if (completion!.Outcome == ClassicBattlePhase.Lost) _lostBattleContext = (request.TeamId, request.IsBoss);
+        if (completion!.Outcome == ClassicBattlePhase.Lost) _lostBattleContext = (request.EnemyTeamId, request.IsBoss);
         _address = completion!.Outcome == ClassicBattlePhase.Lost ? request.LossAddress ?? request.NextAddress : request.NextAddress;
         PendingBattle = null;
         Continue();
@@ -277,9 +277,9 @@ public sealed class TriggerScriptSession
             if (command.Op == "end" && command.Mode == "keep") continue;
             if (command.Op == "startBattle" && battleContent is not null && item.Context == TriggerScriptContext.Event)
             {
-                try { battleContent.Validate(command.TeamId, battleRoles!); }
+                try { battleContent.Validate(command.EnemyTeamId, battleRoles!); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
-                requirements?.Teams.Add(command.TeamId);
+                requirements?.Teams.Add(command.EnemyTeamId);
                 pending.Push((Next(command), TriggerScriptContext.Event));
                 if (command.LossAddress is { } loss) pending.Push((loss, TriggerScriptContext.Event));
                 if (command.FleeAddress is { } flee) pending.Push((flee, TriggerScriptContext.Event));
@@ -292,7 +292,7 @@ public sealed class TriggerScriptSession
                 }
                 // battle.c 1334-1337: every enemy slot's post-victory script runs after the growth
                 // settlement; the whole closure (both random branches included) is preflighted here.
-                foreach (var (enemy, slot) in battleContent.Enemies(command.TeamId).Select((enemy, slot) => (enemy, slot)))
+                foreach (var (enemy, slot) in battleContent.Enemies(command.EnemyTeamId).Select((enemy, slot) => (enemy, slot)))
                     if (enemy.BattleEndScript != 0)
                         PushScript(events, pending, command.Position, enemy.BattleEndScript, TriggerScriptContext.BattleEnd);
             }
@@ -442,9 +442,9 @@ public sealed class TriggerScriptSession
                     break;
                 case "startBattle" when _battleContent is not null:
                     var lifecycle = new ClassicBattleLifecycleSession(BattleRoles!.Values.ToArray(), _battleContent.SettledPlayers(BattleRoles),
-                        _battleContent.Enemies(command.TeamId), _battleContent.GrowthByRole, _battleRandom!,
+                        _battleContent.Enemies(command.EnemyTeamId), _battleContent.GrowthByRole, _battleRandom!,
                         BattleEquipmentState.Initialize(_battleContent), runEnemyBattleEndScripts: true, isBossBattle: command.IsBoss);
-                    PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.TeamId, command.IsBoss,
+                    PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.EnemyTeamId, command.IsBoss,
                         Next(command), command.LossAddress, command.FleeAddress, lifecycle);
                     Phase = TriggerScriptPhase.WaitingForBattle;
                     return;
@@ -460,7 +460,7 @@ public sealed class TriggerScriptSession
                     // TODO(#51): implement the real 0x004E save-slot reload (PAL_FadeOut(1) then
                     // PAL_ReloadInNextTick); without a save system the call parks in this terminal
                     // phase and the host prints its one lost-reload diagnostic.
-                    PendingLostReload = new(command.Position, _lostBattleContext?.TeamId, _lostBattleContext?.IsBoss ?? false);
+                    PendingLostReload = new(command.Position, _lostBattleContext?.EnemyTeamId, _lostBattleContext?.IsBoss ?? false);
                     Phase = TriggerScriptPhase.WaitingForLostReload;
                     return;
                 case "showDialog":
@@ -487,7 +487,7 @@ public sealed class TriggerScriptSession
                     break;
                 case "setState" when _world is not null:
                     // script.c 0x0049: operand 0/0xFFFF selects the caller, otherwise that object ID.
-                    if (command.ObjectId != 0) _world.SetObjectState(command.ObjectId == 0xffff ? Caller : command.ObjectId, command.State, command.Position);
+                    if (command.EventObjectId != 0) _world.SetObjectState(command.EventObjectId == 0xffff ? Caller : command.EventObjectId, command.State, command.Position);
                     _address = Next(command);
                     break;
                 case "hide" when _world is not null:
@@ -497,7 +497,7 @@ public sealed class TriggerScriptSession
                     break;
                 case "setTriggerMode" when _world is not null:
                     // script.c 0x0040: nonzero operand0 selects the target object.
-                    if (command.ObjectId != 0) _world.SetTriggerMode(command.ObjectId == 0xffff ? Caller : command.ObjectId, command.TriggerModeWord, command.Position);
+                    if (command.EventObjectId != 0) _world.SetTriggerMode(command.EventObjectId == 0xffff ? Caller : command.EventObjectId, command.TriggerModeWord, command.Position);
                     _address = Next(command);
                     break;
                 case "setSceneScripts" when _world is not null:
@@ -518,7 +518,7 @@ public sealed class TriggerScriptSession
                     break;
                 case "setObjectPosition" when _world is not null:
                     // script.c 0x0013: operand 0/0xFFFF selects the caller, otherwise that object.
-                    _world.SetObjectPosition(command.ObjectId is 0 or 0xffff ? Caller : command.ObjectId,
+                    _world.SetObjectPosition(command.EventObjectId is 0 or 0xffff ? Caller : command.EventObjectId,
                         command.TileX, command.TileY, command.Position);
                     _address = Next(command);
                     break;
@@ -529,14 +529,14 @@ public sealed class TriggerScriptSession
                     break;
                 case "setTriggerEntry" when _world is not null:
                     // script.c 0x0025: skip when operand0 selects nothing.
-                    if (command.ObjectId != 0)
-                        _world.SetObjectEntry(command.ObjectId == 0xffff ? Caller : command.ObjectId, command.Value, true, command.Position);
+                    if (command.EventObjectId != 0)
+                        _world.SetObjectEntry(command.EventObjectId == 0xffff ? Caller : command.EventObjectId, command.Value, true, command.Position);
                     _address = Next(command);
                     break;
                 case "setAutoEntry" when _world is not null:
                     // script.c 0x0024: same selection rule as the trigger entry write.
-                    if (command.ObjectId != 0)
-                        _world.SetObjectEntry(command.ObjectId == 0xffff ? Caller : command.ObjectId, command.Value, false, command.Position);
+                    if (command.EventObjectId != 0)
+                        _world.SetObjectEntry(command.EventObjectId == 0xffff ? Caller : command.EventObjectId, command.Value, false, command.Position);
                     _address = Next(command);
                     break;
                 case "setBattlefield" when _world is not null:
@@ -558,7 +558,7 @@ public sealed class TriggerScriptSession
                     break;
                 case "setStateRange" when _world is not null:
                     // script.c 0x009A: the same signed state for a contiguous object-ID range.
-                    _world.SetStateRange(command.ObjectId, command.MemberIndex, command.State, command.Position);
+                    _world.SetStateRange(command.EventObjectId, command.ToEventObjectId, command.State, command.Position);
                     _address = Next(command);
                     break;
                 case "changeHpMp" when _world is not null:

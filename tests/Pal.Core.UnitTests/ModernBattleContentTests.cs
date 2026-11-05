@@ -86,7 +86,7 @@ public sealed class ModernBattleContentTests
         var data = PartyData();
         var events = new EventFixture();
         events.Commands[1] = JsonNode.Parse("""
-          {"label":"L0001","op":"startBattle","teamId":18,"lossTarget":null,"isBoss":true,"fleeTarget":null,
+          {"label":"L0001","op":"startBattle","enemyTeamId":18,"lossTarget":null,"isBoss":true,"fleeTarget":null,
            "next":"L0002","source":{"index":1,"opcode":7,"operands":[18,0,0]}}
           """);
         if (branch == "growth") data["growth"]![1]!["levelUpExperience"]![2] = 0;
@@ -95,7 +95,7 @@ public sealed class ModernBattleContentTests
             // next is always the actual WORD successor; loss/flee alone may branch to L0004.
             int downstream = branch == "next" ? 2 : 4;
             events.Commands[downstream] = JsonNode.Parse($$"""
-              {"label":"L{{downstream:X4}}","op":"startBattle","teamId":19,"lossTarget":null,"isBoss":true,"fleeTarget":null,
+              {"label":"L{{downstream:X4}}","op":"startBattle","enemyTeamId":19,"lossTarget":null,"isBoss":true,"fleeTarget":null,
                "next":"L{{downstream + 1:X4}}","source":{"index":{{downstream}},"opcode":7,"operands":[19,0,0]}
               }
               """);
@@ -793,7 +793,7 @@ public sealed class ModernBattleContentTests
     {
         var events = new EventFixture();
         events.Commands[1] = JsonNode.Parse("""
-          {"label":"L0001","op":"startBattle","teamId":18,"lossTarget":"L0004","isBoss":true,"fleeTarget":null,
+          {"label":"L0001","op":"startBattle","enemyTeamId":18,"lossTarget":"L0004","isBoss":true,"fleeTarget":null,
            "next":"L0002","source":{"index":1,"opcode":7,"operands":[18,4,0]}}
           """);
         return new(events.Load(), TriggerScriptSessionTests.Language(), content, random);

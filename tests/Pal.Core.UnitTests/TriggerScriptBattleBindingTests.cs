@@ -8,7 +8,7 @@ public sealed class TriggerScriptBattleBindingTests
     [Fact]
     public void ValidateEntry_returns_selected_named_requirements_without_executing_battles()
     {
-        var fixture = Fixture(); // TeamId=18 is edited; source operands deliberately still say 99.
+        var fixture = Fixture(); // EnemyTeamId=18 is edited; source operands deliberately still say 99.
         var requirements = TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(), Content(), "shared", "npc");
         Assert.Equal(new[] { 18 }, requirements.BattleTeamIds);
         Assert.Empty(requirements.PortraitIds);
@@ -208,7 +208,7 @@ public sealed class TriggerScriptBattleBindingTests
         var request = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
         Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
         Assert.True(script.BlocksSceneUpdates);
-        Assert.Equal(18, request.TeamId);
+        Assert.Equal(18, request.EnemyTeamId);
         Assert.True(request.IsBoss);
         Assert.Null(request.FleeAddress);
         Assert.Equal(4, request.LossAddress);
@@ -865,7 +865,7 @@ public sealed class TriggerScriptBattleBindingTests
 
     private static JsonObject Battle(int address, int team = 18, string? loss = "L0004", bool boss = true, string? flee = null) => new()
     {
-        ["label"] = $"L{address:X4}", ["op"] = "startBattle", ["teamId"] = team, ["lossTarget"] = loss,
+        ["label"] = $"L{address:X4}", ["op"] = "startBattle", ["enemyTeamId"] = team, ["lossTarget"] = loss,
         ["isBoss"] = boss, ["fleeTarget"] = flee, ["next"] = $"L{address + 1:X4}",
         ["source"] = new JsonObject { ["index"] = address, ["opcode"] = 7, ["operands"] = new JsonArray(99, 3, 2) }
     };

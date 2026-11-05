@@ -170,29 +170,29 @@ public sealed class TriggerEventCollection
                     _ => throw new InvalidDataException("Unknown dialogue box.")
                 },
                 "showDialog" => ["messageId", "descriptionLineWord"],
-                "startBattle" => ["teamId", "lossTarget", "isBoss", "fleeTarget"],
+                "startBattle" => ["enemyTeamId", "lossTarget", "isBoss", "fleeTarget"],
                 "setMusic" => ["musicId", "mode"],
                 // #53 retail verbs (script.c), all non-branching word writes/transitions.
-                "setObjectPosition" => ["objectId", "x", "y"],
+                "setObjectPosition" => ["eventObjectId", "x", "y"],
                 "setObjectGesture" => ["frame"],
                 "changeHpMp" => ["scope", "amount"],
                 "revivePlayer" => ["scope", "healthTenths"],
-                "setAutoEntry" => ["objectId", "entry"],
-                "setTriggerEntry" => ["objectId", "entry"],
+                "setAutoEntry" => ["eventObjectId", "entry"],
+                "setTriggerEntry" => ["eventObjectId", "entry"],
                 "setBattlefield" => ["battlefieldId"],
                 "fadeOut" => ["frames"],
                 "setParty" => ["roleId0", "roleId1", "roleId2"],
                 "noop" => [],
-                "setStateRange" => ["fromObjectId", "toObjectId", "state"],
+                "setStateRange" => ["fromEventObjectId", "toEventObjectId", "state"],
                 "fadeToRed" => [],
                 "requestReload" => [],
                 // #52 dynamic-story verbs (script.c), shared by trigger and auto contexts.
                 "walkStep" => ["direction"],
                 "face" => ["direction", "frame"],
                 "walkTo" => ["x", "y", "h"],
-                "setState" => ["objectId", "state"],
+                "setState" => ["eventObjectId", "state"],
                 "hide" => ["frames"],
-                "setTriggerMode" => ["objectId", "mode"],
+                "setTriggerMode" => ["eventObjectId", "mode"],
                 "setSceneScripts" => ["sceneId", "onEnter", "onTeleport"],
                 "setObjectScript" => ["objectId", "value", "slotIndex"],
                 "setPartyPos" => ["x", "y", "h"],
@@ -269,7 +269,7 @@ public sealed class TriggerEventCollection
                     break;
                 case "startBattle":
                     if (opcode != 7) throw new InvalidDataException("Invalid startBattle mapping.");
-                    command.TeamId = EventJson.Word(node, "teamId");
+                    command.EnemyTeamId = EventJson.Word(node, "enemyTeamId");
                     command.LossReference = EventJson.Reference(node, "lossTarget");
                     command.FleeReference = EventJson.Reference(node, "fleeTarget");
                     var isBoss = node.GetProperty("isBoss");
@@ -293,7 +293,7 @@ public sealed class TriggerEventCollection
                 case "setObjectPosition":
                     // script.c 0x0013: pCurrent x/y words; operand 0/0xFFFF selects the caller.
                     if (opcode != 0x13) throw new InvalidDataException("Invalid setObjectPosition mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.TileX = EventJson.Word(node, "x");
                     command.TileY = EventJson.Word(node, "y");
                     break;
@@ -320,13 +320,13 @@ public sealed class TriggerEventCollection
                 case "setAutoEntry":
                     // script.c 0x0024: pCurrent wAutoScript = operand1 when operand0 selects one.
                     if (opcode != 0x24) throw new InvalidDataException("Invalid setAutoEntry mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.Value = EventJson.Word(node, "entry");
                     break;
                 case "setTriggerEntry":
                     // script.c 0x0025: pCurrent wTriggerScript = operand1 when operand0 selects one.
                     if (opcode != 0x25) throw new InvalidDataException("Invalid setTriggerEntry mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.Value = EventJson.Word(node, "entry");
                     break;
                 case "setBattlefield":
@@ -353,8 +353,8 @@ public sealed class TriggerEventCollection
                 case "setStateRange":
                     // script.c 0x009A: sState = operand2 for object IDs operand0..operand1.
                     if (opcode != 0x9a) throw new InvalidDataException("Invalid setStateRange mapping.");
-                    command.ObjectId = EventJson.Word(node, "fromObjectId");
-                    command.MemberIndex = EventJson.Word(node, "toObjectId");
+                    command.EventObjectId = EventJson.Word(node, "fromEventObjectId");
+                    command.ToEventObjectId = EventJson.Word(node, "toEventObjectId");
                     command.State = EventJson.Number(node, "state");
                     if (command.State is < short.MinValue or > short.MaxValue)
                         throw new InvalidDataException("setStateRange.state must be a signed WORD.");
@@ -392,7 +392,7 @@ public sealed class TriggerEventCollection
                 case "setState":
                     // script.c 0x0049: operand0 selects pCurrent (0/0xFFFF = caller); state is a SHORT.
                     if (opcode != 0x49) throw new InvalidDataException("Invalid setState mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.State = EventJson.Number(node, "state");
                     if (command.State is < short.MinValue or > short.MaxValue)
                         throw new InvalidDataException("setState.state must be a signed SHORT.");
@@ -405,7 +405,7 @@ public sealed class TriggerEventCollection
                 case "setTriggerMode":
                     // script.c 0x0040: operand0 selects pCurrent (0/0xFFFF = caller).
                     if (opcode != 0x40) throw new InvalidDataException("Invalid setTriggerMode mapping.");
-                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.TriggerModeWord = EventJson.Word(node, "mode");
                     break;
                 case "setSceneScripts":
@@ -500,7 +500,7 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int Color { get; set; }
     internal int RngWord { get; set; }
     internal int MessageId { get; set; }
-    internal int TeamId { get; set; }
+    internal int EnemyTeamId { get; set; }
     internal bool IsBoss { get; set; }
     internal string? LossReference { get; set; }
     internal string? FleeReference { get; set; }
@@ -520,6 +520,8 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int TileX { get; set; }
     internal int TileY { get; set; }
     internal int Layer { get; set; }
+    internal int EventObjectId { get; set; }
+    internal int ToEventObjectId { get; set; }
     internal int ObjectId { get; set; }
     internal int State { get; set; }
     internal int Frames { get; set; }

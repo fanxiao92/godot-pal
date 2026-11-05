@@ -77,7 +77,7 @@
      0
     ]
    },
-   "teamId": 18,
+   "enemyTeamId": 18,
    "lossTarget": "L0011",
    "isBoss": true,
    "fleeTarget": null
@@ -95,7 +95,7 @@
      0
     ]
    },
-   "teamId": 19,
+   "enemyTeamId": 19,
    "lossTarget": "L0011",
    "isBoss": true,
    "fleeTarget": null

@@ -183,7 +183,7 @@ public class DynamicEventSessionTests
     public void markFailed_clears_the_saved_success_flag_and_trigger_mode_state_is_kept()
     {
         var fixture = new DynamicFixture();
-        fixture.Commands[5] = Command(5, """{"op":"setTriggerMode","objectId":6,"mode":2}""");
+        fixture.Commands[5] = Command(5, """{"op":"setTriggerMode","eventObjectId":6,"mode":2}""");
         fixture.Commands[6] = Command(6, """{"op":"markFailed"}""");
         var session = NewSession(fixture);
         StartAndCompleteDialogue(session);
@@ -343,7 +343,7 @@ public class DynamicEventSessionTests
               {"label":"L0000","op":"raw","next":"L0001","source":{"index":0,"opcode":134,"operands":[0,65535,8]}},
               {"label":"L0001","op":"setDialog","box":"upper","portraitId":0,"color":0,"rngWord":0,"next":"L0002","source":{"index":1,"opcode":60,"operands":[0,0,0]}},
               {"label":"L0002","op":"showDialog","messageId":61,"descriptionLineWord":0,"next":"L0003","source":{"index":2,"opcode":65535,"operands":[61,0,0]}},
-              {"label":"L0003","op":"setState","objectId":6,"state":1,"next":"L0004","source":{"index":3,"opcode":73,"operands":[6,1,0]}},
+              {"label":"L0003","op":"setState","eventObjectId":6,"state":1,"next":"L0004","source":{"index":3,"opcode":73,"operands":[6,1,0]}},
               {"label":"L0004","op":"waitUpdate","frames":3,"runTriggers":0,"updateGestures":0,"next":"L0005","source":{"index":4,"opcode":9,"operands":[3,0,0]}},
               {"label":"L0005","op":"walkTo","x":9,"y":21,"h":0,"next":"L0006","source":{"index":5,"opcode":16,"operands":[9,21,0]}},
               {"label":"L0006","op":"face","direction":0,"frame":0,"next":"L0007","source":{"index":6,"opcode":15,"operands":[0,0,0]}},

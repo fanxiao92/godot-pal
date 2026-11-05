@@ -242,7 +242,7 @@ internal sealed class RealClosureFixture(string fault)
             ("messageId", 10), ("descriptionLineWord", 0));
         Idle(PreDialog + 1, Battle - 1);
         Put(commands, Battle, "startBattle", NextOf(Battle), 7, Words(team, loss, boss),
-            ("teamId", 18), ("lossTarget", $"L{Lost:X4}"), ("isBoss", true), ("fleeTarget", null));
+            ("enemyTeamId", 18), ("lossTarget", $"L{Lost:X4}"), ("isBoss", true), ("fleeTarget", null));
         Put(commands, Won, "showDialog", NextOf(Won), 65535, Words(11, 0, 0),
             ("messageId", 11), ("descriptionLineWord", 0));
         Idle(Won + 1, WonEnd - 1);

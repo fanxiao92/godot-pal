@@ -137,9 +137,9 @@ public partial class Main
         {
             if (Dialogue?.Session?.PendingBattle is not { } pending) return false;
             var view = new PalStoryBattleView();
-            try { view.Initialize(story, storyVisual!, pending.TeamId); }
+            try { view.Initialize(story, storyVisual!, pending.EnemyTeamId); }
             catch { view.ReleaseTextures(); view.Free(); throw; }
-            var team = storyVisual!.Teams[pending.TeamId];
+            var team = storyVisual!.Teams[pending.EnemyTeamId];
             storyTeam = team;
             enemyIdle = new(team.IdleFrames, team.IdleAnimSpeed);
             // battle.c1782 startup, then the immediately due first StartFrame (battle.c763–792).

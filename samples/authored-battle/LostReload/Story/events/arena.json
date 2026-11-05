@@ -61,7 +61,7 @@
         "opcode": 7,
         "operands": [18, 7, 0]
       },
-      "teamId": 18,
+      "enemyTeamId": 18,
       "lossTarget": "L0007",
       "isBoss": true,
       "fleeTarget": null

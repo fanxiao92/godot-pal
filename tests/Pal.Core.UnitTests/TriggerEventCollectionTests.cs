@@ -11,7 +11,7 @@ public class TriggerEventCollectionTests
     {
         var fixture = new EventFixture();
         fixture.Commands[1] = JsonNode.Parse("""
-            {"label":"L0001","op":"startBattle","teamId":18,"lossTarget":"L0004","isBoss":true,"fleeTarget":null,
+            {"label":"L0001","op":"startBattle","enemyTeamId":18,"lossTarget":"L0004","isBoss":true,"fleeTarget":null,
              "next":"L0002","source":{"index":1,"opcode":7,"operands":[99,3,2]}}
             """);
         var collection = fixture.Load();
@@ -33,10 +33,10 @@ public class TriggerEventCollectionTests
     [InlineData(0, null, true, null)]
     [InlineData(65535, "L0004", false, "L0001")]
     [InlineData(18, null, false, "L0004")]
-    public void StartBattle_WORDs_and_zero_sentinels_load_as_named_semantics(int teamId, string? loss, bool boss, string? flee)
+    public void StartBattle_WORDs_and_zero_sentinels_load_as_named_semantics(int enemyTeamId, string? loss, bool boss, string? flee)
     {
         var fixture = new EventFixture();
-        fixture.Commands[1] = BattleCommand(1, teamId, loss, boss, flee);
+        fixture.Commands[1] = BattleCommand(1, enemyTeamId, loss, boss, flee);
         Assert.Equal(5, fixture.Load().InstructionCount);
     }
 
@@ -65,9 +65,9 @@ public class TriggerEventCollectionTests
         fixture.Commands[4] = command;
         switch (fault)
         {
-            case "team-negative": command["teamId"] = -1; break;
-            case "team-overflow": command["teamId"] = 65536; break;
-            case "team-type": command["teamId"] = "18"; break;
+            case "team-negative": command["enemyTeamId"] = -1; break;
+            case "team-overflow": command["enemyTeamId"] = 65536; break;
+            case "team-type": command["enemyTeamId"] = "18"; break;
             case "boss-type": command["isBoss"] = 1; break;
             case "boss-flee": command["fleeTarget"] = "L0001"; break;
             case "nonboss-null": command["isBoss"] = false; break;
@@ -83,10 +83,32 @@ public class TriggerEventCollectionTests
             case "ffff-outside": command["lossTarget"] = "LFFFF"; break;
         }
         var texts = fixture.Files.ToDictionary(p => p.Key, p => p.Value.ToJsonString());
-        if (fault == "duplicate-key") texts["shared"] = texts["shared"].Replace("\"teamId\":18", "\"teamId\":18,\"teamId\":19");
+        if (fault == "duplicate-key") texts["shared"] = texts["shared"].Replace("\"enemyTeamId\":18", "\"enemyTeamId\":18,\"enemyTeamId\":19");
         var error = Assert.Throws<InvalidDataException>(() => TriggerEventCollection.Parse(fixture.Index.ToJsonString(), texts));
         Assert.Contains("shared.json", error.Message);
         if (fault != "duplicate-key") Assert.Contains("@0004", error.Message);
+    }
+
+    [Theory]
+    [InlineData("{\"op\":\"startBattle\",\"teamId\":18,\"lossTarget\":null,\"isBoss\":true,\"fleeTarget\":null}", 7)]
+    [InlineData("{\"op\":\"setObjectPosition\",\"objectId\":28,\"x\":1280,\"y\":256}", 0x13)]
+    [InlineData("{\"op\":\"setAutoEntry\",\"objectId\":28,\"entry\":11}", 0x24)]
+    [InlineData("{\"op\":\"setTriggerEntry\",\"objectId\":29,\"entry\":2500}", 0x25)]
+    [InlineData("{\"op\":\"setState\",\"objectId\":6,\"state\":1}", 0x49)]
+    [InlineData("{\"op\":\"setTriggerMode\",\"objectId\":6,\"mode\":2}", 0x40)]
+    [InlineData("{\"op\":\"setStateRange\",\"fromObjectId\":29,\"toObjectId\":30,\"state\":2}", 0x9a)]
+    public void Pre_114_reference_field_names_stay_rejected_as_unknown_fields(string semanticJson, int opcode)
+    {
+        // #78 renamed startBattle.teamId to enemyTeamId and the event-object objectIds to
+        // eventObjectId (setObjectScript.objectId keeps addressing the object union); the strict
+        // loader must keep rejecting the pre-rename names instead of accepting both spellings.
+        var fixture = new EventFixture();
+        var command = JsonNode.Parse(semanticJson)!.AsObject();
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(7, 8, 9) };
+        fixture.Commands[0] = command;
+        Assert.Contains("unknown field", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
     }
 
     [Fact]
@@ -115,9 +137,9 @@ public class TriggerEventCollectionTests
         Assert.Equal(0, script.Caller);
     }
 
-    private static JsonObject BattleCommand(int address, int teamId, string? loss, bool boss, string? flee) => new()
+    private static JsonObject BattleCommand(int address, int enemyTeamId, string? loss, bool boss, string? flee) => new()
     {
-        ["label"] = $"L{address:X4}", ["op"] = "startBattle", ["teamId"] = teamId,
+        ["label"] = $"L{address:X4}", ["op"] = "startBattle", ["enemyTeamId"] = enemyTeamId,
         ["lossTarget"] = loss, ["isBoss"] = boss, ["fleeTarget"] = flee,
         ["next"] = address == 4 ? null : $"L{address + 1:X4}",
         ["source"] = new JsonObject { ["index"] = address, ["opcode"] = 7, ["operands"] = new JsonArray(18, 0, 0) }

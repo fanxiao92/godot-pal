@@ -151,7 +151,7 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         Put(0x09C4, "showDialog", 65535, 1, 0, 0, ("messageId", 1), ("descriptionLineWord", 0));
         for (int address = 0x09C5; address < 0x09FE; address++)
             Put(address, "face", 15, 0, 0, 0, ("direction", 0), ("frame", 0));
-        Put(0x09FE, "startBattle", 7, 0x0012, 0xA073, 0, ("teamId", 18), ("lossTarget", $"L{0xA073:X4}"), ("isBoss", true), ("fleeTarget", null));
+        Put(0x09FE, "startBattle", 7, 0x0012, 0xA073, 0, ("enemyTeamId", 18), ("lossTarget", $"L{0xA073:X4}"), ("isBoss", true), ("fleeTarget", null));
         Put(0x09FF, "showDialog", 65535, 2, 0, 0, ("messageId", 2), ("descriptionLineWord", 0));
         for (int address = 0x0A00; address < 0x0A32; address++)
             Put(address, "face", 15, 0, 0, 0, ("direction", 0), ("frame", 0));
