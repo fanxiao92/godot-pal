@@ -107,7 +107,7 @@ if (args.Length == 7 && args[0] == "export-battle-images" && args[1] == "--input
     && !string.IsNullOrWhiteSpace(args[2]) && !args[2].StartsWith("--", StringComparison.Ordinal)
     && !string.IsNullOrWhiteSpace(args[4]) && !args[4].StartsWith("--", StringComparison.Ordinal)
     && !string.IsNullOrWhiteSpace(args[6]) && !args[6].StartsWith("--", StringComparison.Ordinal)
-    && args[4] is "abc" or "ball" or "f" or "fbp")
+    && BattleImageExporter.IsKnownArchive(args[4]))
 {
     try
     {
