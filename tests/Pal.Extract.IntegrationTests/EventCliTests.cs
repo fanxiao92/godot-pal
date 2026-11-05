@@ -1625,6 +1625,110 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Scene_movement_screen_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement screen batch 1 (#110, the first half of the 19-opcode
+        // screen subdomain, 10 opcodes): shakeScreen (the per-screen-update shake
+        // countdown), setPlayingRng + playRng (the rng.mkf movie selection and its
+        // frame-range playback), the three reviewed fade bits fadeToRed (parameterless
+        // game-over fade, mapping holds), fadeOut (review correction: PAL_FadeOut's
+        // delay pacing unit, #78's "frames" corrected away), fadeScene (review
+        // correction: VIDEO_FadeScreen's speed, #78's "mode" corrected away), the new
+        // fadeIn (PAL_FadeIn with the (SHORT)>0 delay gate, real data only uses the 0
+        // and 0xFFFF default forms), the day/night palette verb pair, and waveScreen
+        // (the level + signed per-update progression, real data carries -4). Hand-built
+        // stream, not retail data; every row is a real-data hit form.
+        byte[] original = Words(
+            0x0035, 99, 1, 0,                                      // shakeScreen: real-data @60F2 form
+            0x0036, 9, 0, 0,                                      // setPlayingRng: real-data @8AF8 top form
+            0x0037, 113, 162, 16,                                 // playRng: real-data @08C0 form
+            0x004F, 0, 0, 0,                                      // fadeToRed: real-data @A074 form
+            0x0050, 2, 0, 0,                                      // fadeOut: real-data @0856 form
+            0x0051, unchecked((int)0xFFFF), 0, 0,                 // fadeIn: real-data @0B56 SHORT -1 form
+            0x0053, 0, 0, 0,                                      // useDayPalette: real-data @08CD form
+            0x0054, 0, 0, 0,                                      // useNightPalette: real-data @06C7 form
+            0x0071, 255, unchecked((int)0xFFFC), 0,               // waveScreen: real-data @7ECA form
+            0x0073, 7, 54, 0,                                     // fadeScene: real-data @55D9 form
+            0, 0, 0, 0);                                          // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(11, commands.Count);
+        Assert.Equal("shakeScreen", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(99, commands[0]!["times"]!.GetValue<int>());
+        Assert.Equal(1, commands[0]!["level"]!.GetValue<int>());
+        Assert.Equal("setPlayingRng", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(9, commands[1]!["rngId"]!.GetValue<int>()); // the rng.mkf segment number
+        Assert.Equal("playRng", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(113, commands[2]!["startFrame"]!.GetValue<int>());
+        Assert.Equal(162, commands[2]!["endFrame"]!.GetValue<int>());
+        Assert.Equal(16, commands[2]!["speed"]!.GetValue<int>());
+        Assert.Equal("fadeToRed", commands[3]!["op"]!.GetValue<string>()); // no mapped fields
+        Assert.Equal("fadeOut", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[4]!["delay"]!.GetValue<int>()); // the #110-corrected name
+        Assert.Null(commands[4]!["frames"]); // #78's name is gone
+        Assert.Equal("fadeIn", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[5]!["delay"]!.GetValue<int>()); // the (SHORT)-1 form stays the raw WORD
+        Assert.Equal("useDayPalette", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("useNightPalette", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal("waveScreen", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(255, commands[8]!["level"]!.GetValue<int>()); // just below the 256 stop cutoff
+        Assert.Equal(-4, commands[8]!["progression"]!.GetValue<int>()); // 0xFFFC through the SHORT cast
+        Assert.Equal("fadeScene", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(7, commands[9]!["speed"]!.GetValue<int>()); // the #110-corrected name
+        Assert.Null(commands[9]!["mode"]); // #78's name is gone
+        Assert.Equal("end", commands[10]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the shake grows to the real-data @613F
+        // 999/4 form, the movie selection switches to the real @6140 form and plays
+        // its opening frame with both WORD-0 default forms, the game-over fade keeps
+        // no operand, the fade-out delay becomes the majority WORD-0 form, the fade-in
+        // delay switches to the other real default form, the wave stops at level 0
+        // with the positive real progression, and the scene fade slows to speed 3
+        // while keeping its preserved operand1.
+        commands[0]!["times"] = 999;
+        commands[0]!["level"] = 4;
+        commands[1]!["rngId"] = 5;
+        commands[2]!["startFrame"] = 0;
+        commands[2]!["endFrame"] = 0; // WORD 0 = play until the end (runtime -1)
+        commands[2]!["speed"] = 0; // WORD 0 = runtime 16
+        commands[4]!["delay"] = 0; // WORD 0 = runtime 1
+        commands[5]!["delay"] = 0; // the other real default form
+        commands[8]!["level"] = 0; // stop the wave
+        commands[8]!["progression"] = 2; // the real positive form
+        commands[9]!["speed"] = 3; // the real @570A speed keeps operand1 70 -> here 54
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0035, 999, 4, 0,
+            0x0036, 5, 0, 0,
+            0x0037, 0, 0, 0,
+            0x004F, 0, 0, 0,
+            0x0050, 0, 0, 0,
+            0x0051, 0, 0, 0,
+            0x0053, 0, 0, 0,
+            0x0054, 0, 0, 0,
+            0x0071, 0, 2, 0,
+            0x0073, 3, 54, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A wave progression beyond the signed WORD range is rejected without output.
+        commands[8]!["progression"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
@@ -1691,7 +1795,7 @@ public sealed class EventCliTests : IDisposable
         Assert.Equal(0, commands[3].GetProperty("direction").GetInt32());
         Assert.Equal(-123, commands[7].GetProperty("state").GetInt32());
         Assert.Equal(4, commands[11].GetProperty("slotIndex").GetInt32());
-        Assert.Equal(1, commands[12].GetProperty("mode").GetInt32());
+        Assert.Equal(1, commands[12].GetProperty("speed").GetInt32()); // fadeScene's #78 "mode" renamed to speed by #110's review correction
         Assert.Equal(2, commands[13].GetProperty("delayUnits").GetInt32());
         Assert.Equal(1, commands[13].GetProperty("updateGestures").GetInt32());
         Assert.Equal(new[] { 28, 1280, 256 }, commands[17].GetProperty("source").GetProperty("operands").EnumerateArray().Select(x => x.GetInt32()));

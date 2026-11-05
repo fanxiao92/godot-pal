@@ -178,6 +178,26 @@ public static class OpcodeRegistry
         // script.c:1452-1519); otherwise grants store[0].rgwItems[RandomLong(1, min(9, value)) - 1]
         // and shows the obtained-item dialog.
         new(0x0034, "transformCollectedEnemies", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #110: "Shake the screen" (script.c:1521-1534) - VIDEO_ShakeScreen(times, level)
+        // (video.c:1029-1053) sets the g_wShakeTime countdown that decrements once per
+        // VIDEO_UpdateScreen blit, alternating the image up/down by the level's scanline
+        // offset until it reaches zero (video.c:571-615); operand 1 WORD 0 is normalized
+        // to 4 at runtime only (script.c:1523-1526, encoding stays 0), and operand 0 WORD 0
+        // skips the countdown and immediately redraws one clean frame (script.c:1531-1533).
+        new(0x0035, "shakeScreen", [new("times", OpcodeFieldKind.Word, 0), new("level", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #110: "Set the current playing RNG animation" (script.c:1537-1541) -
+        // gpGlobals->iCurPlayingRNG = operand0 (global.h:509): the rng.mkf segment
+        // number that playRng 0x0037 and the ending then play (PAL_RNGPlay's iNumRNG,
+        // rngplay.c:372-449, reads rng.mkf chunk iNumRNG); the case reads no other
+        // operand (naming follows the musicId precedent for MKF segment numbers).
+        new(0x0036, "setPlayingRng", [new("rngId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #110: "Play RNG animation" (script.c:1544-1553) - plays the current RNG movie
+        // (the setPlayingRng selection) from the operand-0 start frame; operand 1 is the
+        // end frame whose WORD 0 stands for -1 = play until the movie ends, and operand 2
+        // the speed whose WORD 0 is normalized to 16 at runtime only (script.c:1546-1550,
+        // encodings stay 0); PAL_RNGPlay blocks until the last frame (rngplay.c:409-434)
+        // like the blocking partyWalkTo callees - still a sequential successor.
+        new(0x0037, "playRng", [new("startFrame", OpcodeFieldKind.Word, 0), new("endFrame", OpcodeFieldKind.Word, 1), new("speed", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #106: runs the current scene's OnTeleport trigger script (rgScene[wNumScene - 1].
         // wScriptOnTeleport via a nested PAL_RunTriggerScript, script.c:1558-1561); in battle or
         // with no teleport script it marks the script failed and jumps to operand 0
@@ -235,8 +255,26 @@ public static class OpcodeRegistry
         new(0x004C, "chasePlayer", [new("chaseRange", OpcodeFieldKind.Word, 0), new("speed", OpcodeFieldKind.Word, 1), new("floating", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x004D, "waitForAnyKey", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x004E, "requestReload", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Stop),
+        // #110 re-verified (mapping holds): "Fade the screen to red color (game over)"
+        // (script.c:1768-1773) - PAL_FadeToRed() takes no parameters (palette.c:595-667:
+        // blends every color of the current pat.mkf palette toward a red-dominant form
+        // over up to 32 steps, skipping color 0x4F so dialog text stays readable); the
+        // case reads no operand and the no-fields mapping stays.
         new(0x004F, "fadeToRed", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
-        new(0x0050, "fadeOut", [new("frames", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #110 review correction (was #78's "frames"): operand 0 is PAL_FadeOut's iDelay
+        // (script.c:1775-1782, palette.c:123-190) - the palette fade-to-black pacing unit
+        // (total duration = delay * 600 ms in fixed 10 ms steps), not a frame count; WORD 0
+        // is normalized to 1 at runtime only (encoding stays 0 - real data's majority
+        // form is 0). The case also sets gpGlobals->fNeedToFadeIn = TRUE so the next scene
+        // draw fades back in.
+        new(0x0050, "fadeOut", [new("delay", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #110: "screen fade in" (script.c:1784-1792) - PAL_FadeIn(wNumPalette,
+        // fNightPalette, delay) fades the screen back into the current globals' palette
+        // (global.h:532/533); the delay gate is ((SHORT)operand0 > 0) ? operand0 : 1, so
+        // WORD 0 and the 0xFFFF form (SHORT -1) both fall back to the default 1 at
+        // runtime while the encoding keeps the raw unsigned WORD (real data: 0 and 0xFFFF
+        // only - both normalize to 1); the case also clears fNeedToFadeIn (global.h:513).
+        new(0x0051, "fadeIn", [new("delay", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #108 re-verified: "hide the event object for a while, default 800 frames"
         // (script.c:1794-1800) - acts on the caller pEvtObj, not the preamble pCurrent
         // (so no eventObjectId field): sState *= -1 toggles the hidden sign
@@ -244,6 +282,15 @@ public static class OpcodeRegistry
         // becomes operand 0 with WORD 0 normalized to 800 at runtime only (encoding
         // stays 0; real data hits the 0 form); the case reads no other operand.
         new(0x0052, "hide", [new("frames", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #110: "use the day palette" (script.c:1802-1806) - gpGlobals->fNightPalette =
+        // FALSE (global.h:533 "TRUE if use the darker night palette"): PAL_GetPalette then
+        // reads the first half of each pat.mkf palette chunk (palette.c:79-81's
+        // fNight ? 256*3 : 0 offset); the case reads no operand.
+        new(0x0053, "useDayPalette", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #110: "use the night palette" (script.c:1809-1813) - gpGlobals->fNightPalette =
+        // TRUE: PAL_GetPalette reads the second half of each pat.mkf palette chunk (the
+        // darker night colors, palette.c:79-81); the case reads no operand.
+        new(0x0054, "useNightPalette", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #102: addMagic/removeMagic's operand 0 is the object.json magic-view object ID
         // (PAL_AddMagic/PAL_RemoveMagic store it into rgwMagic and compare by equality,
         // global.c:2084/2139); operand 1 is the boostStat roleOperand shape (script.c:1820-1828:
@@ -333,7 +380,21 @@ public static class OpcodeRegistry
         // absolute map tile position at the constant low speed 2; the callee blocks until
         // arrival (script.c:133-197), so the successor stays sequential.
         new(0x0070, "partyWalkToSlow", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
-        new(0x0073, "fadeScene", [new("mode", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #110: "Wave the screen" (script.c:2132-2138) - gpGlobals->wScreenWave =
+        // operand0 (global.h:379 "level of screen waving"; the wave amplitude scales as
+        // level/256 per column, scene.c:415, and the effect stops once the level reaches
+        // 0 or >= 256, scene.c:389-397 - real data's top hit 255 sits just below the
+        // cutoff) and gpGlobals->sWaveProgression = (SHORT)operand1 (global.h:539, the
+        // signed per-update level increment wScreenWave += sWaveProgression, scene.c:389;
+        // real data carries -4 (0xFFFC), the signedWord evidence).
+        new(0x0071, "waveScreen", [new("level", OpcodeFieldKind.Word, 0), new("progression", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #110 review correction (was #78's "mode"): operand 0 is VIDEO_FadeScreen's
+        // wSpeed (script.c:2140-2146, video.c:1129-1290) - the pacing of the
+        // backup-screen-to-scene cross-fade ("the larger value, the slower"), not a mode
+        // selector: VIDEO_BackupScreen(gpScreen) + PAL_MakeScene() rebuild the scene
+        // first, then the callee blends the two buffers over 12 passes of (speed + 1) * 10
+        // ms (video.c:1175-1179).
+        new(0x0073, "fadeScene", [new("speed", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0074, "partyHpNotFullJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0075, "setParty", [new("roleId0", OpcodeFieldKind.Word, 0), new("roleId1", OpcodeFieldKind.Word, 1), new("roleId2", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0078, "noop", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
