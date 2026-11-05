@@ -189,6 +189,16 @@ public static class ObjectUnionTable
                     throw new InvalidDataException($"{FileId}.json: view evidence conflict: object {index} is referenced both as {views[first].View} ({views[first].Source}) and as {views[second].View} ({views[second].Source}); one record must not be expressed under two views.");
     }
 
+    /// Fails with the source located when a view's evidence references an object index
+    /// outside the decoded table: every evidence index must land inside the union's
+    /// records (parameterized like RejectConflicts above).
+    private static void RejectViewEvidenceOutsideTable(int recordCount, params (string View, IReadOnlySet<int> Indices)[] views)
+    {
+        foreach (var (view, indices) in views)
+            foreach (int index in indices.Where(index => index >= recordCount).Order())
+                throw new InvalidDataException($"{FileId}.json: {view} view evidence object {index} is outside the {recordCount}-record table ({Archive} chunk {Chunk}).");
+    }
+
     /// Decodes SSS.MKF chunk 2 into the strict object.json document. Each record
     /// declares exactly one view ("player" / "item" / "magic" / "enemy" / "poison"
     /// from evidence, otherwise "undetermined" with the raw little-endian WORDs
@@ -198,16 +208,12 @@ public static class ObjectUnionTable
         ObjectUnionVariant variant = DetectVariant(chunk.Length);
         int wordsPerRecord = (int)variant;
         int recordCount = chunk.Length / (wordsPerRecord * 2);
-        foreach (int index in evidence.PlayerObjectIndices.Where(index => index >= recordCount).Order())
-            throw new InvalidDataException($"{FileId}.json: player view evidence object {index} is outside the {recordCount}-record table ({Archive} chunk {Chunk}).");
-        foreach (int index in evidence.ItemObjectIndices.Where(index => index >= recordCount).Order())
-            throw new InvalidDataException($"{FileId}.json: item view evidence object {index} is outside the {recordCount}-record table ({Archive} chunk {Chunk}).");
-        foreach (int index in evidence.MagicObjectIndices.Where(index => index >= recordCount).Order())
-            throw new InvalidDataException($"{FileId}.json: magic view evidence object {index} is outside the {recordCount}-record table ({Archive} chunk {Chunk}).");
-        foreach (int index in evidence.EnemyObjectIndices.Where(index => index >= recordCount).Order())
-            throw new InvalidDataException($"{FileId}.json: enemy view evidence object {index} is outside the {recordCount}-record table ({Archive} chunk {Chunk}).");
-        foreach (int index in evidence.PoisonObjectIndices.Where(index => index >= recordCount).Order())
-            throw new InvalidDataException($"{FileId}.json: poison view evidence object {index} is outside the {recordCount}-record table ({Archive} chunk {Chunk}).");
+        RejectViewEvidenceOutsideTable(recordCount,
+            ("player", evidence.PlayerObjectIndices),
+            ("item", evidence.ItemObjectIndices),
+            ("magic", evidence.MagicObjectIndices),
+            ("enemy", evidence.EnemyObjectIndices),
+            ("poison", evidence.PoisonObjectIndices));
         var records = new JsonArray();
         for (int index = 0; index < recordCount; index++)
         {
