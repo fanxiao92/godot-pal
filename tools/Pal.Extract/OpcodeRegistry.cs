@@ -397,6 +397,15 @@ public static class OpcodeRegistry
         new(0x0073, "fadeScene", [new("speed", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0074, "partyHpNotFullJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0075, "setParty", [new("roleId0", OpcodeFieldKind.Word, 0), new("roleId1", OpcodeFieldKind.Word, 1), new("roleId2", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #111: "Show FBP picture" (script.c:2199-2213) - the WIN95 build only
+        // clears the screen; otherwise PAL_EndingSetEffectSprite(0) clears the pending
+        // ending effect sprite and PAL_ShowFBP(fbpId, fade) (ending.c:49-150)
+        // decompresses fbp.mkf chunk fbpId and shows it: a non-zero fade runs the
+        // 16-iteration 6-plane palette blend at (fade + 1) * 10 ms per pass while
+        // WORD 0 blits directly (runtime-only distinction, encoding stays 0). Real
+        // data's four hits all carry fbpId 0xFFFF - the decompress fails and the
+        // buffer clears to black, i.e. the fade-to-black transition form.
+        new(0x0076, "showFbp", [new("fbpId", OpcodeFieldKind.Word, 0), new("fade", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0078, "noop", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0079, "roleInPartyJump", [new("roleNameWord", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         // #107: the normal-speed party walk - PAL_PartyWalkTo(x, y, h, 4) (script.c:2249);
@@ -430,6 +439,13 @@ public static class OpcodeRegistry
         // coordinates and places the viewport absolutely at (x*32 - 160, y*16 - 112,
         // script.c:2333-2339). The signed scroll form is the field semantics.
         new(0x007F, "moveViewport", [new("xOffset", OpcodeFieldKind.SignedWord, 0), new("yOffset", OpcodeFieldKind.SignedWord, 1), new("frames", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #111: "Toggle day/night palette" (script.c:2381-2389) - flips the
+        // fNightPalette global (the 0x0053/0x0054 pair's flag) and fades the video
+        // palette to it over 32 blend steps (PAL_PaletteFade, palette.c:381-446);
+        // the truthy WORD operand inverts the callee's fUpdateScene: WORD 0
+        // re-renders the scene every step (FRAME_TIME = 100 ms pacing), a non-zero
+        // form fades the palette only (FRAME_TIME/4 = 25 ms pacing).
+        new(0x0080, "toggleDayNightPalette", [new("paletteOnly", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0081, "notFacingObjectJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("zoneUnits", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         // #107: the fastest walk of the 0x0010/0x0011 family without the frame-parity gate -
         // PAL_NPCWalkTo(caller, x, y, h, 8) (script.c:2441-2442); until arrival the entry
@@ -468,6 +484,20 @@ public static class OpcodeRegistry
         // #104: gpGlobals->fAutoBattle = TRUE (script.c:2570) - enables auto-battle for the next
         // battle; no operands.
         new(0x008A, "enableAutoBattle", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #111: "change the current palette" (script.c:2573-2582) -
+        // gpGlobals->wNumPalette = operand0: the pat.mkf palette segment number
+        // every fade callee consumes through PAL_GetPalette (palette.c:40-60); the
+        // screen palette is applied immediately (PAL_SetPalette day half,
+        // palette.c:93) only while no fade-in is pending - fNeedToFadeIn defers the
+        // apply to that fade.
+        new(0x008B, "setPalette", [new("paletteId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #111: "Fade from/to color" (script.c:2584-2592) - PAL_ColorFade(delay,
+        // (BYTE)color, from) (palette.c:462-560) blends all 256 palette entries
+        // toward (from WORD 0) or from (any non-zero form - real data uses 0xFFFF)
+        // the solid palette color over 64 steps of delay * 10 ms (WORD 0
+        // normalizes to 10 ms at runtime only); the color takes the operand's low
+        // byte through the (BYTE) cast; the case also clears fNeedToFadeIn.
+        new(0x008C, "colorFade", [new("color", OpcodeFieldKind.LowByte, 0), new("delay", OpcodeFieldKind.Word, 1), new("fromColor", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x008D, "increaseLevel", [new("levels", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x008E, "restoreScreen", NoFields, OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x008F, "halveCash", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
@@ -476,8 +506,24 @@ public static class OpcodeRegistry
         // WORD 0 picks no single player and only the party-wide color-shift loop runs - a fifth
         // player-addressing shape (0 = none, unlike roleOperand's 0 = caller).
         new(0x0092, "showMagicCastAnimation", [new("playerOperand", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #111: "Fade the screen. Update scene in the process." (script.c:2666-2674)
+        // - PAL_SceneFade(wNumPalette, fNightPalette, (SHORT)operand0)
+        // (palette.c:262-375): a positive step fades in (the palette scale ramps
+        // 0 -> 63, a larger magnitude = fewer, faster 100 ms iterations with a
+        // scene re-render each pass) and a negative step fades out (63 -> 0); WORD
+        // 0 normalizes to 1 at runtime only; a negative step also arms
+        // fNeedToFadeIn so the next scene fades back in (script.c:2672). The
+        // (SHORT) cast with real hits at -4/-2/-1 (0xFFFC/0xFFFE/0xFFFF) is the
+        // signedWord evidence.
+        new(0x0093, "sceneFade", [new("step", OpcodeFieldKind.SignedWord, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0094, "stateMatchJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0095, "sceneMatchJump", [new("sceneId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #111: "Show the ending animation" (script.c:2695-2700) - non-WIN95 only:
+        // PAL_EndingAnimation() (ending.c:282-553) plays the whole ending sequence
+        // (RNG movies, FBP stills, the credits and AVI/CD fallbacks) and returns;
+        // the case reads no operand (real data has no chunk-4 hit - the ending's
+        // own FBP/RNG sequence is hardcoded in ending.c, not scripted).
+        new(0x0096, "showEndingAnimation", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #107: the fastest ride - PAL_PartyRideEventObject(wEventObjectID, x, y, h, 8)
         // (script.c:2707-2708); same x/y/h tile operands as the 0x003F/0x0044 speeds.
         new(0x0097, "rideEventObjectFast", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
@@ -487,6 +533,12 @@ public static class OpcodeRegistry
         // 1-based role operands of setParty (real data 82/83); WORD 0 skips the slot and
         // all-zero operands clear every follower (nFollower = 0, script.c:2737-2739).
         new(0x0098, "setFollower", [new("spriteNum0", OpcodeFieldKind.Word, 0), new("spriteNum1", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #111: "Fade to the current scene" (script.c:2768-2775, FIXME'd upstream)
+        // - the 0x0073 fadeScene shape at the fixed speed 2: VIDEO_BackupScreen +
+        // PAL_MakeScene rebuild the scene, then VIDEO_FadeScreen(2) cross-fades
+        // from the backup buffer; the case reads no operand (both real hits carry
+        // ignored operand words 2/0xFFFF/0, preserved as source WORDs).
+        new(0x009B, "fadeToScene", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #104: operand 0 counts the new copies (WORD 0 normalized to 1 at runtime only,
         // script.c:2805-2811: total parts = copies + 1, each keeping (hp + copies) / (copies + 1) HP);
         // operand 1 is the nullable no-division reference - WORD 0 means no jump (script.c:2792-2800),
@@ -507,6 +559,19 @@ public static class OpcodeRegistry
         // operands (real data all-zero).
         new(0x00A1, "gatherParty", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x00A2, "randomBranch", [new("count", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.RandomBranch),
+        // #111: "Scroll FBP to the screen" (script.c:3040-3054) - non-WIN95 only:
+        // fbpId 68 first shows chunk 69 directly (the upstream HACKHACK for the
+        // ending picture), then PAL_ScrollFBP(fbpId, speed, TRUE)
+        // (ending.c:153-278) scrolls the fbp.mkf picture onto the screen line by
+        // line downward; speed WORD 0 normalizes to 1 at runtime only
+        // (ending.c:211-214); operand 1 is unused and preserved.
+        new(0x00A4, "scrollFbp", [new("fbpId", OpcodeFieldKind.Word, 0), new("speed", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #111: "Show FBP picture with sprite effects" (script.c:3057-3070) -
+        // non-WIN95 only: unless the effect sprite word is the 0xFFFF
+        // keep-sentinel, PAL_EndingSetEffectSprite(operand1) selects the MGO.MKF
+        // sprite number that PAL_ShowFBP animates over the picture (frame = ticks /
+        // 150 % frames, ending.c:79-129); then PAL_ShowFBP(fbpId, fade) as 0x0076.
+        new(0x00A5, "showFbpWithEffectSprite", [new("fbpId", OpcodeFieldKind.Word, 0), new("effectSprite", OpcodeFieldKind.Word, 1), new("fade", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x00A6, "backupScreen", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #109 re-verified against script.c:2607-2613: the #78 conclusion holds - operand 0
         // indexes gpGlobals->g.rgObject directly with no -1, i.e. a 0-based object-union id

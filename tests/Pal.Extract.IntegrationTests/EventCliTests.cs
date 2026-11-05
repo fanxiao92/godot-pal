@@ -1729,6 +1729,112 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Scene_movement_screen_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement screen batch 2 (#111, the closing half of the 19-opcode
+        // screen subdomain, 9 opcodes): showFbp (the fbp.mkf still with its blend
+        // pacing - real data only uses the 0xFFFF black-transition form),
+        // toggleDayNightPalette (the 0x0053/0x0054 pair's flag flip through a
+        // 32-step palette fade, palette-only when the truthy word is set),
+        // setPalette (the pat.mkf palette segment behind every fade callee),
+        // colorFade (the solid-color blend with the (BYTE) color and the truthy
+        // from-direction), sceneFade (the signed scene-updating fade step - real
+        // data carries -4/-2/-1 fade-outs), showEndingAnimation (the parameterless
+        // whole-ending playback), fadeToScene (the 0x0073 shape at the fixed speed
+        // 2 - its real hits' operand words are ignored and preserved), scrollFbp
+        // (the line-by-line fbp.mkf scroll with the chunk-68 HACKHACK), and
+        // showFbpWithEffectSprite (the MGO.MKF overlay sentinel form). Hand-built
+        // stream, not retail data; every row with real hits takes a hit form, the
+        // three ending opcodes without chunk-4 hits take ending.c's own call forms.
+        byte[] original = Words(
+            0x0076, unchecked((int)0xFFFF), 0, 0,                   // showFbp: real-data @0B55 black-transition form
+            0x0080, 1, 0, 0,                                       // toggleDayNightPalette: real-data @3613 palette-only form
+            0x008B, 5, 0, 0,                                       // setPalette: real-data @56CF form
+            0x008C, 26, 4, unchecked((int)0xFFFF),                 // colorFade: real-data @4252 fade-from form
+            0x0093, unchecked((int)0xFFFC), 0, 0,                  // sceneFade: real-data @29E9 fade-out step -4
+            0x0096, 0, 0, 0,                                       // showEndingAnimation: parameterless, no real hit
+            0x009B, 2, unchecked((int)0xFFFF), 0,                  // fadeToScene: real-data @7C72 form (operands ignored)
+            0x00A4, 68, 5, unchecked((int)0x0F),                   // scrollFbp: the ending HACKHACK chunk at ending.c's own 0xF speed
+            0x00A5, 76, unchecked((int)0x027B), 7,                 // showFbpWithEffectSprite: ending.c's own chunk 76 / sprite 0x27B / fade 7
+            0, 0, 0, 0);                                          // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(10, commands.Count);
+        Assert.Equal("showFbp", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[0]!["fbpId"]!.GetValue<int>()); // the 0xFFFF black form stays the raw WORD
+        Assert.Equal(0, commands[0]!["fade"]!.GetValue<int>());
+        Assert.Equal("toggleDayNightPalette", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[1]!["paletteOnly"]!.GetValue<int>());
+        Assert.Equal("setPalette", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(5, commands[2]!["paletteId"]!.GetValue<int>());
+        Assert.Equal("colorFade", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(26, commands[3]!["color"]!.GetValue<int>()); // the (BYTE) low byte
+        Assert.Equal(4, commands[3]!["delay"]!.GetValue<int>());
+        Assert.Equal(65_535, commands[3]!["fromColor"]!.GetValue<int>()); // the truthy form stays the raw WORD
+        Assert.Equal("sceneFade", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(-4, commands[4]!["step"]!.GetValue<int>()); // 0xFFFC through the SHORT cast
+        Assert.Equal("showEndingAnimation", commands[5]!["op"]!.GetValue<string>()); // no mapped fields
+        Assert.Equal("fadeToScene", commands[6]!["op"]!.GetValue<string>()); // the ignored words stay source operands
+        Assert.Equal(new[] { 2, 65_535, 0 }, commands[6]!["source"]!["operands"]!.AsArray().Select(x => x!.GetValue<int>()));
+        Assert.Equal("scrollFbp", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(68, commands[7]!["fbpId"]!.GetValue<int>());
+        Assert.Equal(15, commands[7]!["speed"]!.GetValue<int>());
+        Assert.Equal("showFbpWithEffectSprite", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(76, commands[8]!["fbpId"]!.GetValue<int>());
+        Assert.Equal(635, commands[8]!["effectSprite"]!.GetValue<int>()); // 0x27B, the MGO.MKF sprite
+        Assert.Equal(7, commands[8]!["fade"]!.GetValue<int>());
+        Assert.Equal("end", commands[9]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the still switches to ending.c's own
+        // chunk 76 with its fade-7 pacing, the palette toggle returns to the
+        // scene-updating WORD-0 majority form, the palette segment takes the retail
+        // majority 0, the color blend takes the real top color with the delay-0 and
+        // fade-to forms, the scene fade turns to the real -1 fade-out step (arming
+        // fNeedToFadeIn), the scroll moves to ending.c's chunk 74 with the WORD-0
+        // runtime-1 speed, and the effect sprite takes the keep-current sentinel.
+        commands[0]!["fbpId"] = 76;
+        commands[0]!["fade"] = 7;
+        commands[1]!["paletteOnly"] = 0;
+        commands[2]!["paletteId"] = 0;
+        commands[3]!["color"] = 127;
+        commands[3]!["delay"] = 0; // WORD 0 = runtime 10 ms
+        commands[3]!["fromColor"] = 0; // the fade-to direction
+        commands[4]!["step"] = -1; // 0xFFFF
+        commands[7]!["fbpId"] = 74;
+        commands[7]!["speed"] = 0; // WORD 0 = runtime 1
+        commands[8]!["effectSprite"] = 65_535; // the keep-current sentinel
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0076, 76, 7, 0,
+            0x0080, 0, 0, 0,
+            0x008B, 0, 0, 0,
+            0x008C, 127, 0, 0,
+            0x0093, unchecked((int)0xFFFF), 0, 0,
+            0x0096, 0, 0, 0,
+            0x009B, 2, unchecked((int)0xFFFF), 0,
+            0x00A4, 74, 5, 0,
+            0x00A5, 76, unchecked((int)0xFFFF), 7,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A scene fade step beyond the signed WORD range is rejected without output.
+        commands[4]!["step"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var stepRejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, stepRejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
