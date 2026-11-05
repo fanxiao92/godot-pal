@@ -55,9 +55,12 @@ jobs:
           # texture import and failed 163 tests (#76 diagnosis). The index always holds the
           # pointer, so --cached catches this even on smudged local checkouts.
           $pointers = git grep --cached -l -e 'version https://git-lfs' -- src tests tools
-          if ($LASTEXITCODE -eq 0 -and $pointers) {
+          $grepExit = $LASTEXITCODE
+          if ($grepExit -gt 1) { throw "git grep failed with exit $grepExit" }
+          if ($grepExit -eq 0 -and $pointers) {
             throw "LFS pointers inside committable trees (src/tests/tools); either un-track them from LFS via .gitattributes or move the asset out: $($pointers -join ', ')"
           }
+          exit 0
       - name: Run Core Unit
         shell: pwsh
         timeout-minutes: 10
