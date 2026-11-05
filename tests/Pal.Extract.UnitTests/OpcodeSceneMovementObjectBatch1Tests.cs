@@ -1,7 +1,6 @@
-using System.Buffers.Binary;
-using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -39,42 +38,6 @@ namespace Pal.Extract.Tests;
 // are rejected.
 public sealed class OpcodeSceneMovementObjectBatch1Tests
 {
-    private const int ChunkCount = 8;
-
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> Labels =
-        new Dictionary<string, IReadOnlyDictionary<string, int>>
-        {
-            ["shared"] = Enumerable.Range(0, ChunkCount).ToDictionary(OpcodeRegistry.LabelAt, address => address),
-        };
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
-
-    private static JsonObject Decode(int index, params int[] instruction)
-    {
-        ushort opcode = unchecked((ushort)instruction[0]);
-        ushort a = unchecked((ushort)instruction[1]), b = unchecked((ushort)instruction[2]), c = unchecked((ushort)instruction[3]);
-        return OpcodeRegistry.DecodeCommand(index, ChunkCount, opcode, a, b, c);
-    }
-
-    private static byte[] Reencode(JsonObject command)
-    {
-        OpcodeRegistry.ValidateCommand(command, "shared", ChunkCount);
-        var bytes = new byte[8];
-        OpcodeRegistry.EncodeCommand(command, "shared", Labels, bytes);
-        return bytes;
-    }
-
-    private static byte[] EditAndReencode(JsonObject command, string field, JsonNode? value)
-    {
-        command[field] = value;
-        return Reencode(command);
-    }
-
     // --- 0x0024 setAutoEntry (#78-named, #108 re-verified, shared, script.c:1137-1145):
     //     pCurrent->wAutoScript = operand1 under the operand0 != 0 gate (1141) - the
     //     preamble-selected object (0/0xFFFF = caller, else 1-based, script.c:626-638), so

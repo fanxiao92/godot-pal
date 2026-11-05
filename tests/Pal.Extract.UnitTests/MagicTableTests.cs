@@ -1,8 +1,7 @@
-using System.Buffers.Binary;
 using System.Security.Cryptography;
-using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -34,13 +33,6 @@ public sealed class MagicTableTests
     private static byte[] Record2 => Words(5, 9, 0xABCD, 0, 1000,
         -1, 2, 65535, 1, 0, 4660, 65535,
         99, 32767, 5, -32768);
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
 
     [Fact]
     public void Descriptor_declares_the_frozen_sixteen_word_layout_with_the_dispatched_slot()

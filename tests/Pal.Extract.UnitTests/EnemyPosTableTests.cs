@@ -1,8 +1,8 @@
-using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -36,13 +36,6 @@ public sealed class EnemyPosTableTests
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 3, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 32768, 32768);
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
 
     private static JsonArray Row(JsonObject record, int index) => record["positions"]!.AsArray()[index]!.AsArray();
 

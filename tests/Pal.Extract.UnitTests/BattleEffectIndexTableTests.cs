@@ -1,8 +1,8 @@
-using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -30,13 +30,6 @@ public sealed class BattleEffectIndexTableTests
     // rows (4..9).
     private static byte[] Record1 => Words(0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 3, 2, 2, 4, 0, 6, 4, 3, 3);
     private static byte[] Record2 => Words(65535, 65535, 4660, 43981, 32768, 32768, 0, 65535, 1, 1, 5, 3, 2, 2, 4, 0, 6, 4, 3, 3);
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
 
     private static JsonArray Sprites(JsonObject record) => record["sprites"]!.AsArray();
 

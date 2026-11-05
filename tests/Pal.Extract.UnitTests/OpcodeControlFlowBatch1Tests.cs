@@ -1,7 +1,6 @@
-using System.Buffers.Binary;
-using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -12,42 +11,6 @@ namespace Pal.Extract.Tests;
 // the label at index 0 and re-encodes as WORD 0.
 public sealed class OpcodeControlFlowBatch1Tests
 {
-    private const int ChunkCount = 8;
-
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> Labels =
-        new Dictionary<string, IReadOnlyDictionary<string, int>>
-        {
-            ["shared"] = Enumerable.Range(0, ChunkCount).ToDictionary(OpcodeRegistry.LabelAt, address => address),
-        };
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
-
-    private static JsonObject Decode(int index, params int[] instruction)
-    {
-        ushort opcode = unchecked((ushort)instruction[0]);
-        ushort a = unchecked((ushort)instruction[1]), b = unchecked((ushort)instruction[2]), c = unchecked((ushort)instruction[3]);
-        return OpcodeRegistry.DecodeCommand(index, ChunkCount, opcode, a, b, c);
-    }
-
-    private static byte[] Reencode(JsonObject command)
-    {
-        OpcodeRegistry.ValidateCommand(command, "shared", ChunkCount);
-        var bytes = new byte[8];
-        OpcodeRegistry.EncodeCommand(command, "shared", Labels, bytes);
-        return bytes;
-    }
-
-    private static byte[] EditAndReencode(JsonObject command, string field, JsonNode? value)
-    {
-        command[field] = value;
-        return Reencode(command);
-    }
-
     // --- 0x0000 end keep: no mapped operands; mode is a fixed constant. ---
     [Fact]
     public void End_keep_round_trips_preserved_operands_and_rejects_mode_edits()

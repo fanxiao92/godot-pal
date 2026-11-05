@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Pal.Extract;
 using Xunit;
+using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
 
 namespace Pal.Extract.Tests;
 
@@ -98,13 +99,6 @@ public sealed class PlayerRolesTableTests
         .. WalkFrames, .. CooperativeMagic, .. Unknown5, .. Unknown6,
         .. DeathSound, .. AttackSound, .. WeaponSound, .. CriticalSound, .. MagicSound, .. CoverSound, .. DyingSound,
     ]);
-
-    private static byte[] Words(params int[] values)
-    {
-        var bytes = new byte[values.Length * 2];
-        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), unchecked((ushort)values[i]));
-        return bytes;
-    }
 
     [Fact]
     public void Descriptor_declares_the_frozen_layout()
