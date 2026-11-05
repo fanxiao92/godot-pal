@@ -44,6 +44,9 @@ public enum OpcodeExecutor
     BothSwitches,
     /// Handled by both switches with different behavior (e.g. idle counters, description text).
     BothSwitchesDiffer,
+    /// Handled directly by the PAL_RunAutoScript switch; a trigger execution would
+    /// terminate (the shared PAL_InterpretInstruction default TerminateOnError).
+    AutoSwitchOnly,
 }
 
 /// Declared control-flow successor kind of a named command.
@@ -228,11 +231,29 @@ public static class OpcodeRegistry
         // (SHORT): 0 or negative = caller slot wEventObjectID, positive = operand - 1 as a 1-based
         // enemy index (script.c:1634-1636); an apply-to-all magic overrides the target (fight.c:5321).
         new(0x0042, "simulateMagic", [new("magicId", OpcodeFieldKind.Word, 0), new("baseDamage", OpcodeFieldKind.Word, 1), new("enemyOperand", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #112 re-verified (mapping holds): "Set background music" (script.c:1642-1648) -
+        // gpGlobals->wNumMusic = operand0 and AUDIO_PlayMusic(operand0, operand1 != 1,
+        // (operand1 == 3 && operand0 != 9) ? 3.0f : 0.0f) (audio.c:547): operand0 is the RIX
+        // music.mkf segment number (the callee's iNumRIX) and operand1 the play-mode selector -
+        // mode 1 plays once, anything else loops, and mode 3 additionally fades in over 3
+        // seconds except for music 9; real data: mode 0 x148 / 1 x2 / 3 x5, musicId 0..87.
         new(0x0043, "setMusic", [new("musicId", OpcodeFieldKind.Word, 0), new("mode", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #106: the normal-speed ride variant - PAL_PartyRideEventObject(..., 4) (script.c:1653);
         // same x/y/h tile operands as 0x003F, whose callees scale x*32+h*16 / y*16+h*8 pixels.
         new(0x0044, "rideEventObject", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #112: "Set battle music" (script.c:1658-1663) - gpGlobals->wNumBattleMusic =
+        // operand0 (global.h:535): the RIX music.mkf segment the next battle plays looped
+        // (battle.c:728 AUDIO_PlayMusic(wNumBattleMusic, TRUE, 0) - the musicId naming
+        // precedent for MKF segments); the case reads no other operand (real data
+        // battleMusicId 14..86, operands 1/2 all zero).
+        new(0x0045, "setBattleMusic", [new("battleMusicId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0046, "setPartyPos", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #112: "Play sound effect" (script.c:1704-1709) - AUDIO_PlaySound(operand0)
+        // (audio.c:518): plays the voc.mkf / sounds.mkf segment operand0 (the parameter doc
+        // "number of the sound; the absolute value is used" - the case passes the unsigned
+        // WORD with no (SHORT) cast); the case reads no other operand (real data soundId
+        // 2..275, operands 1/2 all zero).
+        new(0x0047, "playSound", [new("soundId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #108 re-verified: the same preamble/gate shape as setAutoEntry (script.c:626-638,
         // 1715) writing pCurrent->sState - a SHORT field (global.h:103;
         // kObjStateHidden=0/Normal=1/Blocker=2, global.h:77-79); the signedWord binding
@@ -302,6 +323,14 @@ public static class OpcodeRegistry
         // (script.c:1852) and still encodes as 0.
         new(0x0057, "setMagicBaseDamageByMp", [new("magicId", OpcodeFieldKind.Word, 0), new("mpMultiplier", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0058, "itemShortageJump", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #112: "Change to the specified scene" (script.c:1870-1885) - when operand0 is
+        // 1..MAX_SCENES (palcommon.h:69 = 300) and differs from wNumScene, the case sets
+        // gpGlobals->wNumScene = operand0 and arms the next-frame scene load
+        // (PAL_SetLoadFlags(kLoadScene), fEnteringScene = TRUE, wLayer = 0); operand0 is
+        // the 1-based scene.json row (rgScene[sceneId - 1], the #80/#82 sceneId reference
+        // direction); an out-of-range or same-scene WORD is a runtime no-op and encodes
+        // unchanged (real data sceneId 2..294, operands 1/2 all zero).
+        new(0x0059, "changeScene", [new("sceneId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x005A, "halveHp", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #103: g_Battle.rgEnemy[wEventObjectID] loses min(wHealth / 2 + 1, operand 0) HP - operand 0
         // caps the halving damage (unsigned WORD arithmetic, script.c:1895-1904).
@@ -330,6 +359,15 @@ public static class OpcodeRegistry
         // monster's chase sensitivity (script.c:393) for the operand-0 cycles.
         new(0x0063, "speedUpEnemyChasing", [new("cycles", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0064, "enemyHpAboveJump", [new("percent", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #112: "Set the player's sprite" (script.c:1995-2005) - g.PlayerRoles.
+        // rgwSpriteNum[operand0] = operand1: operand0 is a direct 0-based PLAYERROLES role
+        // index (the removeEquipment 0x0023 playerRole shape, real data 0..3) and operand1
+        // the MGO.MKF sprite number shown in normal scenes (global.h:303, decompressed as
+        // an MGO chunk at res.c:325 - the setFollower spriteNum naming precedent, real data
+        // 2..632); a truthy operand2 reloads the player sprites immediately when not in
+        // battle (PAL_SetLoadFlags(kLoadPlayerSprite) + PAL_LoadResources(), real data
+        // 0 x41 / 0xFFFF x83 - the truthy WORD form).
+        new(0x0065, "setPlayerSprite", [new("playerRole", OpcodeFieldKind.Word, 0), new("spriteNum", OpcodeFieldKind.Word, 1), new("reload", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #103: PAL_BattleSimulateMagic((SHORT)wEventObjectID, operand0, operand1 * 5 +
         // moving-player attackStrength * RandomLong(0, 3)) - operand 0 is the thrown weapon's
         // object.json magic-view object ID (real data: 344/360, inside the magic evidence range),
@@ -360,6 +398,13 @@ public static class OpcodeRegistry
         // #99 review correction: script.c:3295 reads the delay from operand 1 ((0 -> 60) ms
         // normalization at runtime) and the gesture flag from operand 2; operand 0 is unused.
         new(0x0005, "redraw", [new("delayUnits", OpcodeFieldKind.Word, 1), new("updateGestures", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
+        // #112 re-verified (mapping holds): "Set the enter script and teleport script for a
+        // scene" (script.c:2065-2089) - rgScene[operand0 - 1].wScriptOnEnter/wScriptOnTeleport
+        // take operand1/2 when non-zero, a zero operand keeps that script, and both zero
+        // clear both (the case's explicit rule); operand0 gates the whole case (WORD 0 skips)
+        // and is the 1-based scene.json row (the #80/#82 sceneId direction); onEnter/
+        // onTeleport are cross-structure chunk-4 entry WORDs like setAutoEntry.entry - real
+        // data onEnter reaches 36203 past the signed range, keeping the unsigned binding.
         new(0x006D, "setSceneScripts", [new("sceneId", OpcodeFieldKind.Word, 0), new("onEnter", OpcodeFieldKind.Word, 1), new("onTeleport", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #107: "Move the player to the specified position in one step" - rgTrail is shifted,
         // the viewport jumps by the signed pixel offsets (script.c:2103-2105) and the party
@@ -396,6 +441,12 @@ public static class OpcodeRegistry
         // ms (video.c:1175-1179).
         new(0x0073, "fadeScene", [new("speed", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0074, "partyHpNotFullJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #112 re-verified (mapping holds): "Set the player party" (script.c:2164-2197) -
+        // each non-zero operand i fills the next rgParty slot with wPlayerRole = operand - 1
+        // (1-based PLAYERROLES role id, the roleId0/1/2 mapping), WORD 0 skips the slot, and
+        // all-zero operands leave the Dream 2.11 hack party of role 0; the case then reloads
+        // the player sprites, clears rgPoisonStatus and updates equipment. Real data:
+        // roleId0 1..5 (1 x80 majority), roleId1 0..6, roleId2 0/3/5.
         new(0x0075, "setParty", [new("roleId0", OpcodeFieldKind.Word, 0), new("roleId1", OpcodeFieldKind.Word, 1), new("roleId2", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #111: "Show FBP picture" (script.c:2199-2213) - the WIN95 build only
         // clears the screen; otherwise PAL_EndingSetEffectSprite(0) clears the pending
@@ -406,6 +457,16 @@ public static class OpcodeRegistry
         // data's four hits all carry fbpId 0xFFFF - the decompress fails and the
         // buffer clears to black, i.e. the fade-to-black transition form.
         new(0x0076, "showFbp", [new("fbpId", OpcodeFieldKind.Word, 0), new("fade", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #112: "Stop current playing music" (script.c:2215-2222) - the stop form of
+        // setMusic: AUDIO_PlayMusic(0, FALSE, (operand0 == 0) ? 2.0f : operand0 * 3) fades
+        // the current music out (2 s for WORD 0, otherwise operand0 * 3 s) and plays
+        // segment 0, then wNumMusic = 0; operands 1/2 are unused by the case and preserved
+        // (real data fadeUnits 0 x20 / 1 x24).
+        new(0x0077, "stopMusic", [new("fadeUnits", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #112 re-verified (mapping holds): the upstream "FIXME: ???" case (script.c:2224-2228)
+        // - an empty body that breaks straight into the InterpretInstruction tail return,
+        // i.e. a genuine no-operation; the case reads no operand and the reference offers no
+        // stronger semantics to declare (real data: 35 hits, all three operands zero).
         new(0x0078, "noop", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0079, "roleInPartyJump", [new("roleNameWord", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         // #107: the normal-speed party walk - PAL_PartyWalkTo(x, y, h, 4) (script.c:2249);
@@ -533,6 +594,14 @@ public static class OpcodeRegistry
         // 1-based role operands of setParty (real data 82/83); WORD 0 skips the slot and
         // all-zero operands clear every follower (nFollower = 0, script.c:2737-2739).
         new(0x0098, "setFollower", [new("spriteNum0", OpcodeFieldKind.Word, 0), new("spriteNum1", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #112: "Change the map for the specified scene" (script.c:2742-2756) - the
+        // scene.json row named by operand0 (1-based, rgScene[sceneId - 1]) takes operand1 as
+        // wMapNum (global.h:117, the map number PAL_LoadMap consumes at res.c:252); the
+        // 0xFFFF sentinel form retargets the current scene (rgScene[wNumScene - 1]) and
+        // reloads it immediately (kLoadScene + PAL_LoadResources()) - real data uses only
+        // the sentinel form (x2, mapNum 164/165); the sentinel stays the raw unsigned WORD
+        // like 0x007F frames.
+        new(0x0099, "changeSceneMap", [new("sceneId", OpcodeFieldKind.Word, 0), new("mapNum", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #111: "Fade to the current scene" (script.c:2768-2775, FIXME'd upstream)
         // - the 0x0073 fadeScene shape at the fixed speed 2: VIDEO_BackupScreen +
         // PAL_MakeScene rebuild the scene, then VIDEO_FadeScreen(2) cross-fades
@@ -559,6 +628,16 @@ public static class OpcodeRegistry
         // operands (real data all-zero).
         new(0x00A1, "gatherParty", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x00A2, "randomBranch", [new("count", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.RandomBranch),
+        // #112: "Play CD music. Use the RIX music for fallback." (script.c:3025-3038) -
+        // wNumMusic = operand1 and, with a CD available, AUDIO_PlayCDTrack reads operand0
+        // through the (SHORT) cast: -1 (0xFFFF) maps to -2, audio.c:576's "do NOTHING"
+        // (leave the CD untouched), any other value is the CD track number; a failed CD
+        // play falls back to AUDIO_PlayMusic(operand1, TRUE, 0) - the looped RIX music.mkf
+        // segment, also the no-CD path. track follows the simulateMagic 0x0042 enemyOperand /
+        // enemySummon 0x009E count signedWord precedent ((SHORT) cast + negative-domain
+        // sentinel; real data 4 hits all positive tracks 2/4/8/9 with musicId 14/22/27/67);
+        // operand2 is unused by the case and preserved.
+        new(0x00A3, "playCdMusic", [new("track", OpcodeFieldKind.SignedWord, 0), new("musicId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #111: "Scroll FBP to the screen" (script.c:3040-3054) - non-WIN95 only:
         // fbpId 68 first shows chunk 69 directly (the upstream HACKHACK for the
         // ending picture), then PAL_ScrollFBP(fbpId, speed, TRUE)
@@ -573,6 +652,14 @@ public static class OpcodeRegistry
         // 150 % frames, ending.c:79-129); then PAL_ShowFBP(fbpId, fade) as 0x0076.
         new(0x00A5, "showFbpWithEffectSprite", [new("fbpId", OpcodeFieldKind.Word, 0), new("effectSprite", OpcodeFieldKind.Word, 1), new("fade", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x00A6, "backupScreen", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #112: the one opcode handled by PAL_RunAutoScript's own switch with no shared or
+        // trigger case (script.c:3641-3643) - a bare wScriptEntry++ with no upstream comment
+        // and no operand read: the standard one-instruction-per-frame advance, i.e. a
+        // do-nothing entry; a trigger execution would fall into PAL_InterpretInstruction's
+        // default TerminateOnError (script.c:3077), so the executor is auto-only - the first
+        // AutoSwitchOnly descriptor. The verb reuses advanceEntry (0x0008's trigger-switch-
+        // only mirror - both bodies advance one entry); real data: 295 hits, all operands zero.
+        new(0x00A7, "advanceEntry", NoFields, OpcodeExecutor.AutoSwitchOnly, OpcodeSuccessor.Sequential),
         // #109 re-verified against script.c:2607-2613: the #78 conclusion holds - operand 0
         // indexes gpGlobals->g.rgObject directly with no -1, i.e. a 0-based object-union id
         // (object.json), not an event object; operand 2 selects the union's script slots

@@ -1835,6 +1835,126 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Scene_movement_music_scene_special_batch_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement music/scene/special batch (#112, the closing batch of
+        // the 75-opcode scene-movement domain and of all 165 opcodes, 12 opcodes):
+        // setMusic (re-verified: the RIX segment plus the loop/fade mode selector),
+        // setBattleMusic (the battle-looped segment), playSound (the voc.mkf/
+        // sounds.mkf segment), stopMusic (the fade-out stop with unit-scaled
+        // duration), playCdMusic (the (SHORT) CD track with the -1 do-nothing
+        // sentinel and the RIX fallback segment), changeScene (the 1-based scene
+        // row arming the next-frame load), setPlayerSprite (the 0-based role, the
+        // MGO.MKF sprite and the truthy reload word), setSceneScripts (re-verified:
+        // the scene row's onEnter/onTeleport entry WORDs), setParty (re-verified:
+        // the three 1-based role ids), changeSceneMap (the scene row, the map
+        // number and the 0xFFFF current-scene sentinel), noop (re-verified: the
+        // upstream FIXME no-operation) and advanceEntry (the auto-only bare
+        // advance - the first AutoSwitchOnly executor). Hand-built stream, not
+        // retail data; every row takes a real-data hit form.
+        byte[] original = Words(
+            0x0043, 1, 0, 0,                                        // setMusic: the real loop-default form
+            0x0045, 37, 0, 0,                                       // setBattleMusic: the real majority form
+            0x0047, 78, 0, 0,                                       // playSound: the real x104 majority form
+            0x0077, 1, 1, 0,                                        // stopMusic: the real unit-fade form with a preserved operand1
+            0x00A3, 2, 14, 0,                                       // playCdMusic: the real @234F form
+            0x0059, 2, 0, 0,                                        // changeScene: the real @0012 low form
+            0x0065, 0, 2, 0,                                        // setPlayerSprite: the real majority form
+            0x006D, 2, 19792, 0,                                    // setSceneScripts: the real x9 form (onEnter 0x4D50)
+            0x0075, 1, 2, 0,                                        // setParty: a real multi-member form
+            0x0099, unchecked((int)0xFFFF), 164, 0,                 // changeSceneMap: the real @7C71 sentinel form
+            0x0078, 0, 0, 0,                                        // noop: the real all-zero form
+            0x00A7, 0, 0, 0,                                        // advanceEntry: the real all-zero form (auto-only)
+            0, 0, 0, 0);                                            // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(13, commands.Count);
+        Assert.Equal("setMusic", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[0]!["musicId"]!.GetValue<int>());
+        Assert.Equal(0, commands[0]!["mode"]!.GetValue<int>());
+        Assert.Equal("setBattleMusic", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(37, commands[1]!["battleMusicId"]!.GetValue<int>());
+        Assert.Equal("playSound", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(78, commands[2]!["soundId"]!.GetValue<int>());
+        Assert.Equal("stopMusic", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[3]!["fadeUnits"]!.GetValue<int>());
+        Assert.Equal(new[] { 1, 1, 0 }, commands[3]!["source"]!["operands"]!.AsArray().Select(x => x!.GetValue<int>())); // the preserved operand1
+        Assert.Equal("playCdMusic", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[4]!["track"]!.GetValue<int>()); // a positive track through the (SHORT) cast
+        Assert.Equal(14, commands[4]!["musicId"]!.GetValue<int>());
+        Assert.Equal("changeScene", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[5]!["sceneId"]!.GetValue<int>());
+        Assert.Equal("setPlayerSprite", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[6]!["playerRole"]!.GetValue<int>()); // the 0-based role index
+        Assert.Equal(2, commands[6]!["spriteNum"]!.GetValue<int>());
+        Assert.Equal(0, commands[6]!["reload"]!.GetValue<int>());
+        Assert.Equal("setSceneScripts", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[7]!["sceneId"]!.GetValue<int>());
+        Assert.Equal(19792, commands[7]!["onEnter"]!.GetValue<int>());
+        Assert.Equal(0, commands[7]!["onTeleport"]!.GetValue<int>()); // WORD 0 keeps the existing teleport script
+        Assert.Equal("setParty", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[8]!["roleId0"]!.GetValue<int>());
+        Assert.Equal(2, commands[8]!["roleId1"]!.GetValue<int>());
+        Assert.Equal(0, commands[8]!["roleId2"]!.GetValue<int>()); // WORD 0 skips the third slot
+        Assert.Equal("changeSceneMap", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[9]!["sceneId"]!.GetValue<int>()); // the sentinel stays the raw WORD
+        Assert.Equal(164, commands[9]!["mapNum"]!.GetValue<int>());
+        Assert.Equal("noop", commands[10]!["op"]!.GetValue<string>()); // no mapped fields
+        Assert.Equal("advanceEntry", commands[11]!["op"]!.GetValue<string>()); // no mapped fields, auto-only executor
+        Assert.Equal("end", commands[12]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the music takes the mode-3 fade-in
+        // form, the battle band moves to its other majority segments, the sound
+        // takes the real top segment, the stop returns to the WORD-0 2 s default,
+        // the CD track takes the -1 do-nothing sentinel, the scene row moves to the
+        // real top row, the sprite reload takes the truthy 0xFFFF form, the scene
+        // scripts take the clear-both zero form, the party gains the real third
+        // slot, and the map takes the other real map number.
+        commands[0]!["mode"] = 3;
+        commands[1]!["battleMusicId"] = 38;
+        commands[2]!["soundId"] = 275;
+        commands[3]!["fadeUnits"] = 0;
+        commands[4]!["track"] = -1; // 0xFFFF
+        commands[5]!["sceneId"] = 294;
+        commands[6]!["reload"] = unchecked((int)0xFFFF);
+        commands[7]!["onEnter"] = 0; // both zero: the case's clear-both rule
+        commands[8]!["roleId2"] = 5;
+        commands[9]!["mapNum"] = 165;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0043, 1, 3, 0,
+            0x0045, 38, 0, 0,
+            0x0047, 275, 0, 0,
+            0x0077, 0, 1, 0,
+            0x00A3, unchecked((int)0xFFFF), 14, 0,
+            0x0059, 294, 0, 0,
+            0x0065, 0, 2, unchecked((int)0xFFFF),
+            0x006D, 2, 0, 0,
+            0x0075, 1, 2, 5,
+            0x0099, unchecked((int)0xFFFF), 165, 0,
+            0x0078, 0, 0, 0,
+            0x00A7, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A CD track beyond the signed WORD range is rejected without output.
+        commands[4]!["track"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
