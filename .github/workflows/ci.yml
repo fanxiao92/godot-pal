@@ -112,5 +112,6 @@ jobs:
             ${{ runner.temp }}/m0-evidence/discovery.json
             ${{ runner.temp }}/m0-evidence/discovery.log
             ${{ runner.temp }}/m0-evidence/processes-*.json
+            ${{ runner.temp }}/m0-evidence/boundary-tests/**
             ${{ runner.temp }}/m0-evidence/**/*.trx
             ${{ runner.temp }}/m0-evidence/godot/**
