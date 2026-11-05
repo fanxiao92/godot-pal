@@ -38,6 +38,26 @@ jobs:
       - name: Show selected SDK
         shell: pwsh
         run: dotnet --version
+      - name: Guard unit project boundaries (source scan)
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # M5 retro (#121): #113 shipped a unit test doing File/Directory I/O that only this
+          # script catches; dotnet test alone stayed green. Seconds-level source scan.
+          & (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-UnitBoundary.ps1')
+      - name: Guard committable trees against LFS pointers
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # M5 retro (#121): an LFS pointer checked out as text (CI uses lfs:false) broke the
+          # texture import and failed 163 tests (#76 diagnosis). The index always holds the
+          # pointer, so --cached catches this even on smudged local checkouts.
+          $pointers = git grep --cached -l -e 'version https://git-lfs' -- src tests tools
+          if ($LASTEXITCODE -eq 0 -and $pointers) {
+            throw "LFS pointers inside committable trees (src/tests/tools); either un-track them from LFS via .gitattributes or move the asset out: $($pointers -join ', ')"
+          }
       - name: Run Core Unit
         shell: pwsh
         timeout-minutes: 10
