@@ -1330,6 +1330,122 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Scene_movement_batch3_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement batch 3 (#107, movement part 3 - the movement subdomain's closing
+        // batch): moveParty, partyWalkToSlow/partyWalkTo/partyWalkToFast, walkToFast,
+        // moveObject, moveViewport (scroll + reset forms), walkToFastest, rideEventObjectFast,
+        // setFollower and gatherParty. Hand-built stream, not retail data. moveParty shifts the
+        // viewport by signed pixel offsets and writes the layer global (layerUnits * 8); the
+        // partyWalkTo ladder passes absolute x/y/h tiles at constant speeds 2/4/8; walkToFast
+        // is the gated speed-4 walkTo form and walkToFastest the ungated speed-8 one; moveObject
+        // shifts the preamble event object by signed pixel offsets without the walk animation;
+        // moveViewport scrolls by signed offsets for a frame count with the 0/0 reset form
+        // reusing the same WORDs; setFollower stores direct MGO sprite numbers (not roles);
+        // gatherParty reads no operands.
+        byte[] original = Words(
+            0x006E, unchecked((int)0xFFF0), 8, 1,               // moveParty: -16/+8 pixels, layer 1
+            0x0070, 12, 28, 1,                                    // partyWalkToSlow: tile (12,28) layer 1
+            0x007A, 5, 8, 0,                                      // partyWalkTo: tile (5,8) layer 0
+            0x007B, 10, 15, 1,                                    // partyWalkToFast: tile (10,15) layer 1
+            0x007C, 22, 49, 0,                                    // walkToFast: tile (22,49) layer 0
+            0x007D, unchecked((int)0xFFFF), unchecked((int)0xFFF0), 4, // moveObject: caller, -16/+4 pixels
+            0x007F, 4, 8, 16,                                     // moveViewport: scroll +4/+8 for 16 frames
+            0x007F, 0, 0, 16,                                     // moveViewport: the 0/0 reset form
+            0x0082, 24, 20, 1,                                    // walkToFastest: tile (24,20) layer 1
+            0x0097, 45, 120, 0,                                   // rideEventObjectFast: the real-data tile
+            0x0098, 82, 0, 0,                                     // setFollower: slot-1 sprite 82
+            0x00A1, 0, 0, 0,                                      // gatherParty
+            0, 0, 0, 0);                                          // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(13, commands.Count);
+        Assert.Equal("moveParty", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(-16, commands[0]!["xOffset"]!.GetValue<int>()); // 0xFFF0 through the SHORT cast
+        Assert.Equal(8, commands[0]!["yOffset"]!.GetValue<int>());
+        Assert.Equal(1, commands[0]!["layerUnits"]!.GetValue<int>());
+        Assert.Equal("partyWalkToSlow", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(12, commands[1]!["x"]!.GetValue<int>());
+        Assert.Equal("partyWalkTo", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[2]!["h"]!.GetValue<int>());
+        Assert.Equal("partyWalkToFast", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(15, commands[3]!["y"]!.GetValue<int>());
+        Assert.Equal("walkToFast", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(22, commands[4]!["x"]!.GetValue<int>());
+        Assert.Equal("moveObject", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[5]!["eventObjectId"]!.GetValue<int>()); // caller form
+        Assert.Equal(-16, commands[5]!["xOffset"]!.GetValue<int>());
+        Assert.Equal("moveViewport", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(4, commands[6]!["xOffset"]!.GetValue<int>());
+        Assert.Equal(16, commands[6]!["frames"]!.GetValue<int>());
+        Assert.Equal("moveViewport", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[7]!["xOffset"]!.GetValue<int>()); // the reset form encodes both WORDs 0
+        Assert.Equal("walkToFastest", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[8]!["h"]!.GetValue<int>());
+        Assert.Equal("rideEventObjectFast", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(45, commands[9]!["x"]!.GetValue<int>());
+        Assert.Equal(120, commands[9]!["y"]!.GetValue<int>());
+        Assert.Equal("setFollower", commands[10]!["op"]!.GetValue<string>());
+        Assert.Equal(82, commands[10]!["spriteNum0"]!.GetValue<int>());
+        Assert.Equal(0, commands[10]!["spriteNum1"]!.GetValue<int>());
+        Assert.Equal("gatherParty", commands[11]!["op"]!.GetValue<string>());
+        Assert.Equal("end", commands[12]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the party move flips to the real-data -32 tail
+        // with layer 10, the three party walks and two fast walks move tiles, the object shift
+        // switches to a 1-based object with the -80 y tail, the scroll becomes the 0xFFFF
+        // absolute-mode sentinel with a -16 x, the reset form changes its frame count, the ride
+        // changes tile line, and the second follower slot gains a sprite.
+        commands[0]!["xOffset"] = -32;
+        commands[0]!["layerUnits"] = 10;
+        commands[1]!["x"] = 50;
+        commands[2]!["h"] = 1;
+        commands[3]!["y"] = 96;
+        commands[4]!["x"] = 51;
+        commands[4]!["h"] = 1;
+        commands[5]!["eventObjectId"] = 57;
+        commands[5]!["yOffset"] = -80;
+        commands[6]!["xOffset"] = -16;
+        commands[6]!["frames"] = 65_535; // the unsigned-only absolute-mode sentinel
+        commands[7]!["frames"] = 150;
+        commands[8]!["y"] = 112;
+        commands[9]!["h"] = 1;
+        commands[10]!["spriteNum1"] = 83;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x006E, unchecked((int)0xFFE0), 8, 10,
+            0x0070, 50, 28, 1,
+            0x007A, 5, 8, 1,
+            0x007B, 10, 96, 1,
+            0x007C, 51, 49, 1,
+            0x007D, 57, unchecked((int)0xFFF0), unchecked((int)0xFFB0),
+            0x007F, unchecked((int)0xFFF0), 8, unchecked((int)0xFFFF),
+            0x007F, 0, 0, 150,
+            0x0082, 24, 112, 1,
+            0x0097, 45, 120, 1,
+            0x0098, 82, 83, 0,
+            0x00A1, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A signed pixel offset beyond the signed WORD range is rejected without output.
+        commands[0]!["xOffset"] = -32_769;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]

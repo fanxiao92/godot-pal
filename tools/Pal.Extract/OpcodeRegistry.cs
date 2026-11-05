@@ -275,12 +275,48 @@ public static class OpcodeRegistry
         // normalization at runtime) and the gesture flag from operand 2; operand 0 is unused.
         new(0x0005, "redraw", [new("delayUnits", OpcodeFieldKind.Word, 1), new("updateGestures", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x006D, "setSceneScripts", [new("sceneId", OpcodeFieldKind.Word, 0), new("onEnter", OpcodeFieldKind.Word, 1), new("onTeleport", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #107: "Move the player to the specified position in one step" - rgTrail is shifted,
+        // the viewport jumps by the signed pixel offsets (script.c:2103-2105) and the party
+        // layer global becomes operand2 * 8 (script.c:2107; drawn at rgParty[i].y + wLayer + 10,
+        // scene.c:225); gestures update only when an offset is non-zero (script.c:2109-2112).
+        new(0x006E, "moveParty", [new("xOffset", OpcodeFieldKind.SignedWord, 0), new("yOffset", OpcodeFieldKind.SignedWord, 1), new("layerUnits", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #107: PAL_PartyWalkTo(x, y, h, 2) (script.c:2129) - the whole party walks to the
+        // absolute map tile position at the constant low speed 2; the callee blocks until
+        // arrival (script.c:133-197), so the successor stays sequential.
+        new(0x0070, "partyWalkToSlow", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0073, "fadeScene", [new("mode", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0074, "partyHpNotFullJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0075, "setParty", [new("roleId0", OpcodeFieldKind.Word, 0), new("roleId1", OpcodeFieldKind.Word, 1), new("roleId2", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0078, "noop", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0079, "roleInPartyJump", [new("roleNameWord", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #107: the normal-speed party walk - PAL_PartyWalkTo(x, y, h, 4) (script.c:2249);
+        // same x/y/h tile operands as 0x0070 (callee scales x*32 + h*16 / y*16 + h*8 pixels).
+        new(0x007A, "partyWalkTo", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #107: the fastest party walk - PAL_PartyWalkTo(x, y, h, 8) (script.c:2256).
+        new(0x007B, "partyWalkToFast", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #107: the gated fast walk of the 0x0010/0x0011 family - the frame-parity gate
+        // ((wEventObjectID & 1) ^ (dwFrameNum & 1), script.c:2263) runs PAL_NPCWalkTo(caller,
+        // x, y, h, 4) (script.c:2265-2266) only every other frame; until arrival the entry
+        // re-executes (wScriptEntry--, script.c:2268/2273) - a runtime stall, not a jump.
+        new(0x007C, "walkToFast", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #107: moves the preamble-selected event object (pCurrent, script.c:626-638: 0/0xFFFF
+        // = caller, else a 1-based index) by the signed pixel offsets pCurrent->x += (SHORT)
+        // operand1 / y += (SHORT) operand2 (script.c:2281-2282) - the walkNpcStep shape
+        // without the walk-one-step animation call.
+        new(0x007D, "moveObject", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("xOffset", OpcodeFieldKind.SignedWord, 1), new("yOffset", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #107: "Move the viewport" with three forms (script.c:2296-2378): WORD 0/0 offsets
+        // reset the viewport to the normal state (party recentered at 160,112; redrawn unless
+        // frames is 0xFFFF, script.c:2296-2318); otherwise the signed pixel offsets scroll the
+        // viewport once per frame for the frames units (WORD 0 still runs the single do-while
+        // pass, script.c:2377); frames 0xFFFF switches the same operands to unsigned tile
+        // coordinates and places the viewport absolutely at (x*32 - 160, y*16 - 112,
+        // script.c:2333-2339). The signed scroll form is the field semantics.
+        new(0x007F, "moveViewport", [new("xOffset", OpcodeFieldKind.SignedWord, 0), new("yOffset", OpcodeFieldKind.SignedWord, 1), new("frames", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0081, "notFacingObjectJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("zoneUnits", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #107: the fastest walk of the 0x0010/0x0011 family without the frame-parity gate -
+        // PAL_NPCWalkTo(caller, x, y, h, 8) (script.c:2441-2442); until arrival the entry
+        // re-executes (wScriptEntry--, script.c:2444) - a runtime stall, not a jump.
+        new(0x0082, "walkToFastest", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0083, "objectOutOfZoneJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("zoneUnits", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0085, "delay", [new("delayUnits", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0086, "itemNotEquippedJump", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
@@ -305,6 +341,15 @@ public static class OpcodeRegistry
         new(0x0092, "showMagicCastAnimation", [new("playerOperand", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0094, "stateMatchJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0095, "sceneMatchJump", [new("sceneId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #107: the fastest ride - PAL_PartyRideEventObject(wEventObjectID, x, y, h, 8)
+        // (script.c:2707-2708); same x/y/h tile operands as the 0x003F/0x0044 speeds.
+        new(0x0097, "rideEventObjectFast", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #107: party followers - operands 0/1 select follower slots 1/2 (> 0 form) and are
+        // stored into rgParty[...].wPlayerRole with no -1 (script.c:2715-2733); a follower's
+        // wPlayerRole is consumed directly as an MGO.MKF sprite number (res.c:337), unlike the
+        // 1-based role operands of setParty (real data 82/83); WORD 0 skips the slot and
+        // all-zero operands clear every follower (nFollower = 0, script.c:2737-2739).
+        new(0x0098, "setFollower", [new("spriteNum0", OpcodeFieldKind.Word, 0), new("spriteNum1", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #104: operand 0 counts the new copies (WORD 0 normalized to 1 at runtime only,
         // script.c:2805-2811: total parts = copies + 1, each keeping (hp + copies) / (copies + 1) HP);
         // operand 1 is the nullable no-division reference - WORD 0 means no jump (script.c:2792-2800),
@@ -320,6 +365,10 @@ public static class OpcodeRegistry
         // with no jump; operands 1/2 are unused by the reference case.
         new(0x009F, "enemyTransform", [new("objectId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x00A0, "quitGame", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Stop),
+        // #107: snaps every party member and trail slot onto the leader's position (members
+        // stacked at y - 1, script.c:3004-3014, then PAL_UpdatePartyGestures(FALSE)) - no
+        // operands (real data all-zero).
+        new(0x00A1, "gatherParty", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x00A2, "randomBranch", [new("count", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.RandomBranch),
         new(0x00A6, "backupScreen", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0090, "setObjectScript", [new("objectId", OpcodeFieldKind.Word, 0), new("value", OpcodeFieldKind.Word, 1), new("slotIndex", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
