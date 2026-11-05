@@ -197,9 +197,9 @@ Console.WriteLine("""
       rebuild-events Reconstruct SSS.MKF chunk 4 from a complete faithful event set.
                      Writes a new file only; edited semantic fields are re-encoded.
 
-      export-data Extract the registered read-only data tables (event-object, scene, store, enemy, enemy-team, player-roles, object) and their index manifest.
+      export-data Extract the 13 registered read-only data tables (event-object, scene, store, enemy, enemy-team, player-roles, magic, battle-field, level-up-magic, battle-effect-index, enemy-pos, level-up-exp, object) and their index manifest.
                   Requires SSS.MKF and DATA.MKF in the input; writes a new or empty output directory.
-                  Tables are registered incrementally by the M5 data tickets; this command never re-encodes tables.
+                  All 13 frozen tables are registered (data-schema v1); this command never re-encodes tables.
 
       export-battle-images Decode a battle image MKF (abc, ball, f or fbp) into a complete image package and an index.json manifest.
                             Every chunk becomes a sprite document with authoritative indices/alpha planes, source hashes
