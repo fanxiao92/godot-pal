@@ -31,6 +31,12 @@ Game 测试继续使用现有 Godot 程序集、固定 GdUnit 包和 `tests/Pal.
 
 headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证据，不能相互代替。M3 当前交付状态和历史限制见[M3 验收检查点](../../../docs/milestones/m3/acceptance.md#当前状态)；这不是新的运行结论。
 
+## #127 M6-A T01：已声明面板的原生往返
+
+`PalBattlePlayer` 的默认零 `MagicPower` / `FleeRate` 与既有 Core WORD 域对称映射，格式仍为 1。`NativeBattleContentTests` 增 9 例：现代输入经原生保存/重载后保留互异非零及 0/65535，旧资源缺属性仍为零，并经公开 trigger/lifecycle 的 boss 逃跑观察基值；非法 WORD 与重复角色明确拒绝。既有全字段隔离用例也加入非零面板。`PrepareBattleDataTests` 增 12 例，覆盖正式 Prepare 的同类正例、非法 WORD、重复/缺失角色，核对不改源、不发布坏内容。现有 M4 生命周期和装备法力规则用例保留。
+
+源码登记为 Game 647 = 644 positives + 3 controls，native-map 433（原 412 + 21）；Prepare 进程库存仍为 89，Core 仍为 928。这是测试身份/计数登记，不是完整门、正式 Main 输入、GPU、人工桌面、真实资源或 CI 验收声明；本票执行证据由对应候选收据记录。
+
 ## 维护边界
 
 保持 `Main.tscn` 的真实入口和现有测试装配，不新增第二 Godot 项目、替代业务实现或内部测试 seam。变更时先冻结独立预期与完整身份，再同步脚本/config/本页；需要时序变异、输出捕获或完整门诊断，进入 Game 分层与当前异常规则，不在本页重写历史证据。

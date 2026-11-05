@@ -102,7 +102,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
             'Pal.Game.Tests.StoryRoundtripSceneTests.NonterminalActions', 'Pal.Game.Tests.StoryRoundtripSceneTests.NormalStoryArguments',
             'Pal.Game.Tests.StoryRoundtripSceneTests.PlayerPhysical', 'Pal.Game.Tests.StoryRoundtripSceneTests.StoryBattlePoseClock',
             'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects') }
-        @{ name = 'native-map'; count = 412; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
+        @{ name = 'native-map'; count = 433; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
         @{ name = 'scene-realfull'; count = 3; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.') }
     )
     $localOnly = if ($Scope -ceq 'committable') {
@@ -142,15 +142,15 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.class -CNE 'FailureControlTests' -and $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 626) { throw "Game inventory differs: $($inventory.Count)/626." }
+    if ($inventory.Count -ne 647) { throw "Game inventory differs: $($inventory.Count)/647." }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
         [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 928; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 464; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 360; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
-        # 623 full-scope positives; committable scope executes one fewer (#76 local-only split).
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (623 - $localOnly.Count); skipped = 0 }
+        # 644 full-scope positives; committable scope executes one fewer (#76 local-only split).
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (644 - $localOnly.Count); skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {

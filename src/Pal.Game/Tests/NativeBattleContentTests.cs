@@ -16,6 +16,43 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class NativeBattleContentTests
 {
+    [TestCase(321, 654)]
+    [TestCase(0, 65535)]
+    [TestCase(65535, 0)]
+    [TestCase(0, 0)]
+    public void PlayerPanelsSurviveNativeReloadAndFeedPublicBossFlee(int magicPower, int fleeRate)
+    {
+        var data = DataJson();
+        data["players"]![0]!["magicPower"] = magicPower;
+        data["players"]![0]!["fleeRate"] = fleeRate;
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/Panels.tres";
+            AssertThat(ResourceSaver.Save(NativeBattleContent.Write(ModernBattleContent.Parse(data.ToJsonString())), uri)).IsEqual(Error.Ok);
+            if (magicPower == 0 && fleeRate == 0)
+            {
+                // A format1 resource authored before these exports has neither property.
+                string path = ProjectSettings.GlobalizePath(uri);
+                File.WriteAllLines(path, File.ReadAllLines(path).Where(line =>
+                    !line.StartsWith("MagicPower =", StringComparison.Ordinal) && !line.StartsWith("FleeRate =", StringComparison.Ordinal)));
+            }
+            var loaded = NativeBattleContent.Load(uri);
+            AssertThat(loaded.Player.MagicPower).IsEqual(magicPower);
+            AssertThat(loaded.Player.FleeRate).IsEqual(fleeRate);
+            var script = Script(loaded, new BattleRandom());
+            script.Start("shared", "npc", 28);
+            var battle = script.PendingBattle!.Lifecycle;
+            battle.SelectFlee(0);
+            AssertThat(battle.ResolveNextAction()).IsTrue();
+            // fight.c: living enemy dex0 + (level0+6)*4; draw0 still fails for a boss.
+            AssertThat(battle.Current.Combat.LastFleeAttempt).IsEqual(new ClassicBattleFleeAttempt(1, 0, 1, fleeRate, 24, 0, false));
+            AssertThat(battle.Completion is null).IsTrue();
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
     [TestCase]
     public void PartyNativeRoundtripRetainsRoleKeysSlotsAndRealOwnedCompletion()
     {
@@ -231,6 +268,11 @@ public class NativeBattleContentTests
     [TestCase("player-null")]
     [TestCase("player-hp")]
     [TestCase("player-role")]
+    [TestCase("players-duplicate")]
+    [TestCase("player-magic-negative")]
+    [TestCase("player-magic-overflow")]
+    [TestCase("player-flee-negative")]
+    [TestCase("player-flee-overflow")]
     [TestCase("player-statuses")]
     [TestCase("player-poisons-null")]
     [TestCase("cover-conflict")]
@@ -279,6 +321,11 @@ public class NativeBattleContentTests
             case "player-null": native.Players = [null!]; break;
             case "player-hp": native.Players[0].Hp--; break;
             case "player-role": native.Players[0].RoleId = 0; break;
+            case "players-duplicate": native.Players = [native.Players[0], native.Players[0]]; break;
+            case "player-magic-negative": native.Players[0].MagicPower = -1; break;
+            case "player-magic-overflow": native.Players[0].MagicPower = 65536; break;
+            case "player-flee-negative": native.Players[0].FleeRate = -1; break;
+            case "player-flee-overflow": native.Players[0].FleeRate = 65536; break;
             case "player-statuses": native.Players[0].Statuses = new int[8]; break;
             case "player-poisons-null": native.Players[0].Poisons = null!; break;
             case "cover-conflict": native.Players[0].CoveredByRoleId = 1; break;

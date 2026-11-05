@@ -14,6 +14,59 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class PrepareBattleDataTests
 {
+    [TestCase(321, 654)]
+    [TestCase(0, 65535)]
+    [TestCase(65535, 0)]
+    [TestCase(0, 0)]
+    public void PublicPreparePreservesPlayerPanelsAndBossFleeBase(int magicPower, int fleeRate)
+    {
+        using var fixture = new Preparation();
+        var json = JsonNode.Parse(File.ReadAllText(fixture.Source))!;
+        if (magicPower != 0 || fleeRate != 0)
+        {
+            json["players"]![0]!["magicPower"] = magicPower;
+            json["players"]![0]!["fleeRate"] = fleeRate;
+        }
+        File.WriteAllText(fixture.Source, json.ToJsonString());
+        byte[] before = File.ReadAllBytes(fixture.Source);
+        var content = NativeBattleContent.Load(PrepareBattleData.Prepare(fixture.Input, fixture.Output));
+        AssertThat(content.Player.MagicPower).IsEqual(magicPower);
+        AssertThat(content.Player.FleeRate).IsEqual(fleeRate);
+        var battle = new ClassicBattleLifecycleSession(content.InitialRoles.Values.ToArray(), content.Players,
+            content.EnemyTeams[18], content.GrowthByRole, new BattleRandom(), isBossBattle: true);
+        battle.SelectFlee(0);
+        AssertThat(battle.ResolveNextAction()).IsTrue();
+        AssertThat(battle.Current.Combat.LastFleeAttempt).IsEqual(new ClassicBattleFleeAttempt(1, 0, 1, fleeRate, 24, 0, false));
+        AssertThat(File.ReadAllBytes(fixture.Source)).IsEqual(before);
+        AssertThat(Directory.GetFileSystemEntries(fixture.Output).Length).IsEqual(1);
+    }
+
+    [TestCase("magicPower", -1)]
+    [TestCase("magicPower", 65536)]
+    [TestCase("fleeRate", -1)]
+    [TestCase("fleeRate", 65536)]
+    [TestCase("duplicate-roles", 0)]
+    [TestCase("missing-roles", 0)]
+    [TestCase("duplicate-players", 0)]
+    [TestCase("missing-players", 0)]
+    public void PublicPrepareRejectsInvalidPanelsAndRoleIdentityWithoutPublishing(string defect, int value)
+    {
+        using var fixture = new Preparation();
+        var json = JsonNode.Parse(File.ReadAllText(fixture.Source))!;
+        if (defect is "magicPower" or "fleeRate") json["players"]![0]![defect] = value;
+        else
+        {
+            string field = defect.Split('-')[1];
+            if (defect.StartsWith("duplicate-", StringComparison.Ordinal)) json[field]!.AsArray().Add(json[field]![0]!.DeepClone());
+            else json[field]!.AsArray().Clear();
+        }
+        File.WriteAllText(fixture.Source, json.ToJsonString());
+        byte[] before = File.ReadAllBytes(fixture.Source);
+        Reject(fixture.Input, fixture.Output, defect is "magicPower" or "fleeRate" ? defect : "unique matching RoleId");
+        AssertThat(Directory.Exists(fixture.Output)).IsFalse();
+        AssertThat(File.ReadAllBytes(fixture.Source)).IsEqual(before);
+    }
+
     [TestCase]
     public void PublicPreparePublishesTwoRolesAndRepeatedEnemySlotsWithoutProjection()
     {
