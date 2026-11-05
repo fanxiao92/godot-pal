@@ -43,7 +43,7 @@ public sealed class OpcodeRegistryCompletenessTests
 
     // The test output lives under tests/<project>/bin/<config>/<tfm>; the repository
     // root is the nearest ancestor holding both the reference copy and AGENTS.md.
-    private static string FindRepositoryRoot()
+    internal static string FindRepositoryRootForTests()
     {
         for (string? directory = AppContext.BaseDirectory; directory is not null;
              directory = Path.GetDirectoryName(directory))
@@ -125,7 +125,7 @@ public sealed class OpcodeRegistryCompletenessTests
     [Fact]
     public void Script_switch_case_labels_match_the_registry_in_both_directions()
     {
-        string root = FindRepositoryRoot();
+        string root = FindRepositoryRootForTests();
         string code = StripCommentsAndLiterals(
             File.ReadAllText(Path.Combine(root, "reference", "sdlpal", "script.c")));
 
@@ -156,7 +156,7 @@ public sealed class OpcodeRegistryCompletenessTests
     [Fact]
     public void Every_registered_opcode_has_a_counterexample_test()
     {
-        string testsDirectory = Path.Combine(FindRepositoryRoot(), "tests", "Pal.Extract.UnitTests");
+        string testsDirectory = Path.Combine(FindRepositoryRootForTests(), "tests", "Pal.Extract.UnitTests");
         // The shared skeleton decodes hand-built little-endian bytes through
         // Decode(index, opcode, operand0, operand1, operand2); each Opcode*Tests.cs
         // batch lists its opcodes as 0x literals in those calls.

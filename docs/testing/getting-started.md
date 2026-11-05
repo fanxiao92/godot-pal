@@ -32,6 +32,8 @@ public void Constructor_keeps_row_major_indices_alpha_and_source_metadata()
 
 ## 2. 直接运行，失败停止
 
+`tests/unit.runsettings`（FailSkips=true）只随 **Unit 工程**（Core/CLI Unit）使用；`Pal.Extract.IntegrationTests` 不带 `--settings` 运行，其 2 个 `CaseSensitiveFileSystemFact` 在大小写不敏感文件系统上的跳过是 `GameTestBatches.ps1` 账本记录的设计内基线（带 FailSkips 跑集成工程会把它们误判为失败）。
+
 记录 cwd、HEAD 和 dirty 状态，使用本轮全新结果目录。通过终端或 agent 工具保留实际命令、原始输出和数字退出；不要求另写采证脚本。先运行所选工程之一，例如：
 
 ```powershell
