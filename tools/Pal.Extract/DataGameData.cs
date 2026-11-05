@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Pal.Extract;
@@ -82,14 +81,12 @@ internal static class DataGameData
                 ["tables"] = tables,
             };
             Directory.CreateDirectory(destination);
-            foreach (var (name, document) in files) WriteJson(Path.Combine(destination, name), document);
-            WriteJson(Path.Combine(destination, "index.json"), indexDocument);
+            foreach (var (name, document) in files) ExportSupport.WriteJson(destination, name, document);
+            ExportSupport.WriteJson(destination, "index.json", indexDocument);
         }
         finally
         {
             foreach (MkfArchive archive in archives) archive.Dispose();
         }
     }
-
-    private static void WriteJson(string path, JsonObject value) => File.WriteAllText(path, value.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
 }
