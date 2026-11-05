@@ -141,7 +141,16 @@ public static class OpcodeRegistry
         // unlike the 0x0019/0x001A roleOperand shape); operand 1 is 0 = remove every part,
         // 1..MAX_PLAYER_EQUIPMENTS = that part (1-based, script.c:1129 indexes operand1 - 1).
         new(0x0023, "removeEquipment", [new("playerRole", OpcodeFieldKind.Word, 0), new("partWord", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #108 re-verified: the preamble-selected event object (pCurrent, script.c:626-638:
+        // 0/0xFFFF = caller, else a 1-based index) gets wAutoScript = operand 1 - an
+        // EVENTOBJECT WORD entry into chunk 4 (global.h:102); the case is gated on
+        // operand 0 != 0 (script.c:1141), so the caller form is 0xFFFF only and WORD 0
+        // skips the case; real data entries reach 41099, past the signed range - entry
+        // stays an unsigned WORD, and entry 0 disables the auto script.
         new(0x0024, "setAutoEntry", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("entry", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #108 re-verified: the same preamble/gate shape as setAutoEntry (script.c:626-638,
+        // 1151) writing pCurrent->wTriggerScript (global.h:101); real data entries reach
+        // 43524 - entry stays an unsigned WORD, entry 0 clears the trigger script.
         new(0x0025, "setTriggerEntry", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("entry", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #104: PAL_MakeScene + PAL_BuyMenu(operand0) - operand 0 is the store table row read as
         // lprgStore[wStoreNum].rgwItems (script.c:1163, uigame.c:1629), i.e. store.json (DATA chunk 0).
@@ -188,6 +197,9 @@ public static class OpcodeRegistry
         // rides the caller event object to the absolute map tile position; speed 2 is the low
         // variant (script.c:1608-1610) and the ride loop blocks until arrival, so no stall.
         new(0x003F, "rideEventObjectSlow", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #108 re-verified: the same preamble/gate shape as setAutoEntry (script.c:626-638,
+        // 1617) writing pCurrent->wTriggerMode (global.h:104) - the kTrigger* constant
+        // 0..8 (global.h:84-92; real data exactly 0..8; WORD 0 = kTriggerNone).
         new(0x0040, "setTriggerMode", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("mode", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0041, "markFailed", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #103: PAL_BattleSimulateMagic(target, operand0, operand1) (fight.c:5301) - operand 0 is the
@@ -201,8 +213,20 @@ public static class OpcodeRegistry
         // same x/y/h tile operands as 0x003F, whose callees scale x*32+h*16 / y*16+h*8 pixels.
         new(0x0044, "rideEventObject", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0046, "setPartyPos", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #108 re-verified: the same preamble/gate shape as setAutoEntry (script.c:626-638,
+        // 1715) writing pCurrent->sState - a SHORT field (global.h:103;
+        // kObjStateHidden=0/Normal=1/Blocker=2, global.h:77-79); the signedWord binding
+        // follows the 0x0094 stateMatchJump (SHORT) comparison convention and the
+        // negative sState meaning hidden (scene.c:247); real data 0..3.
         new(0x0049, "setState", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x004A, "setBattlefield", [new("battlefieldId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #108: "Nullify the event object for a short while" (script.c:1726-1731) - the
+        // caller event object's vanish countdown becomes the fixed -15 with no operands:
+        // while sVanishTime != 0 the object's trigger-zone checks and auto scripts are
+        // skipped (play.c:87-94, play.c:178) and negative values count up toward zero
+        // while the sprite stays drawn (scene.c:247 hides only sVanishTime > 0, unlike
+        // hide 0x0052); real data's single hit has all three operands zero.
+        new(0x004B, "nullifyObject", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #106: PAL_MonsterChasePlayer(wEventObjectID, speed, chaseRange, floating) (script.c:310) -
         // the caller monster chases the party; operand 0 is the sensitive range in tile units
         // (|dx| + 2|dy| < range * 32 * global wChaseRange, script.c:393; WORD 0 is normalized to 8
@@ -213,6 +237,12 @@ public static class OpcodeRegistry
         new(0x004E, "requestReload", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Stop),
         new(0x004F, "fadeToRed", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0050, "fadeOut", [new("frames", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #108 re-verified: "hide the event object for a while, default 800 frames"
+        // (script.c:1794-1800) - acts on the caller pEvtObj, not the preamble pCurrent
+        // (so no eventObjectId field): sState *= -1 toggles the hidden sign
+        // (scene.c:247 draws only sState > 0) and the vanish countdown sVanishTime
+        // becomes operand 0 with WORD 0 normalized to 800 at runtime only (encoding
+        // stays 0; real data hits the 0 form); the case reads no other operand.
         new(0x0052, "hide", [new("frames", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #102: addMagic/removeMagic's operand 0 is the object.json magic-view object ID
         // (PAL_AddMagic/PAL_RemoveMagic store it into rgwMagic and compare by equality,
@@ -229,6 +259,15 @@ public static class OpcodeRegistry
         // #103: g_Battle.rgEnemy[wEventObjectID] loses min(wHealth / 2 + 1, operand 0) HP - operand 0
         // caps the halving damage (unsigned WORD arithmetic, script.c:1895-1904).
         new(0x005B, "halveEnemyHp", [new("maxDamage", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #108: "Hide for a while" (script.c:1907-1912) - writes the battle global
+        // g_Battle.iHidingTime = -(INT)operand0 (battle.h:202): the negative value is a
+        // pending form PAL_BattleCheckHidingEffect negates and scales by 20 outside
+        // PAL_CLASSIC (fight.c:3529-3542); while the countdown is positive the party's
+        // battle sprites are not drawn (battle.c:207) and enemy actions are skipped
+        // (fight.c:1716); WORD 0 clears the hiding state (-(INT)0 = 0). The encoding
+        // keeps the positive unit count - the negation is runtime-only; operands 1/2
+        // are unused by the case and preserved; real data's single hit uses 3 units.
+        new(0x005C, "setBattleHidingTime", [new("units", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x005D, "playerLacksPoisonJump", [new("objectId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x005E, "enemyLacksPoisonJump", [new("objectId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x005F, "killPlayer", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),

@@ -1446,6 +1446,95 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Scene_movement_object_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement object batch 1 (#108, the 13-opcode object subdomain's first
+        // batch of 7): the setState-family entry/mode/state writers (setAutoEntry,
+        // setTriggerEntry, setTriggerMode, setState - the preamble-selected pCurrent under
+        // the operand0 != 0 gate), nullifyObject (the fixed -15 vanish of the caller with
+        // no operands), hide in both real forms (the WORD 0 default-800 form and an
+        // explicit frame count, on the caller object), and setBattleHidingTime (the
+        // battle-global hiding countdown kept as positive units; the negation is
+        // runtime-only). Hand-built stream, not retail data.
+        byte[] original = Words(
+            0x0024, 57, 373, 0,                                    // setAutoEntry: real-data @0133 form
+            0x0025, unchecked((int)0xFFFF), 355, 0,                // setTriggerEntry: real-data @0180 caller form
+            0x0040, unchecked((int)0xFFFF), 4, 0,                  // setTriggerMode: real-data @0066 caller form
+            0x0049, 20, 2, 0,                                      // setState: real-data @0185 blocker form
+            0x004B, 0, 0, 0,                                       // nullifyObject: real-data @A071 single hit
+            0x0052, 150, 0, 0,                                     // hide: real-data @A0D8 explicit frames
+            0x0052, 0, 0, 0,                                       // hide: real-data @A0A7 default-800 form
+            0x005C, 3, 0, 0,                                       // setBattleHidingTime: real-data @9A53 single hit
+            0, 0, 0, 0);                                           // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(9, commands.Count);
+        Assert.Equal("setAutoEntry", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(57, commands[0]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(373, commands[0]!["entry"]!.GetValue<int>());
+        Assert.Equal("setTriggerEntry", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(65_535, commands[1]!["eventObjectId"]!.GetValue<int>()); // caller form
+        Assert.Equal(355, commands[1]!["entry"]!.GetValue<int>());
+        Assert.Equal("setTriggerMode", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(4, commands[2]!["mode"]!.GetValue<int>()); // kTriggerTouchNear
+        Assert.Equal("setState", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(20, commands[3]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[3]!["state"]!.GetValue<int>()); // blocker
+        Assert.Equal("nullifyObject", commands[4]!["op"]!.GetValue<string>()); // no fields to edit
+        Assert.Equal("hide", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(150, commands[5]!["frames"]!.GetValue<int>());
+        Assert.Equal("hide", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[6]!["frames"]!.GetValue<int>()); // the default-800 form encodes WORD 0
+        Assert.Equal("setBattleHidingTime", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[7]!["units"]!.GetValue<int>());
+        Assert.Equal("end", commands[8]!["op"]!.GetValue<string>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the auto entry switches to the caller form
+        // with the real-data entry top 41099, the trigger entry is cleared (WORD 0), the
+        // trigger mode becomes kTriggerNone, the state write becomes a negative hidden
+        // state on the real-data 1-based bottom object, the explicit hide grows to the
+        // runtime default, the default-800 form becomes explicit, and the hiding countdown
+        // is cleared.
+        commands[0]!["eventObjectId"] = 65_535;
+        commands[0]!["entry"] = 41_099; // 0xA08B, past the signed range - entry stays unsigned
+        commands[1]!["entry"] = 0;
+        commands[2]!["mode"] = 0;
+        commands[3]!["eventObjectId"] = 4;
+        commands[3]!["state"] = -123; // 0xFF85 through the SHORT cast
+        commands[5]!["frames"] = 800;
+        commands[6]!["frames"] = 100;
+        commands[7]!["units"] = 0;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0024, unchecked((int)0xFFFF), 41_099, 0,
+            0x0025, unchecked((int)0xFFFF), 0, 0,
+            0x0040, unchecked((int)0xFFFF), 0, 0,
+            0x0049, 4, unchecked((int)0xFF85), 0,
+            0x004B, 0, 0, 0,
+            0x0052, 800, 0, 0,
+            0x0052, 100, 0, 0,
+            0x005C, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A state beyond the signed WORD range is rejected without output.
+        commands[3]!["state"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
