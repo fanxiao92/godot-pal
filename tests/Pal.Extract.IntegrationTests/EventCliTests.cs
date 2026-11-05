@@ -888,6 +888,120 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Battle_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 battle batch 1 (#103): the ten new inflictDamageToEnemy / changeBattleSprite /
+        // collectEnemyForItems / transformCollectedEnemies / drainHpFromEnemy / playerFlee /
+        // simulateMagic / halveEnemyHp / killEnemy / throwWeapon verbs plus the re-verified
+        // startBattle / setBattlefield. Hand-built stream, not retail data. The three fail jumps
+        // (0x0033/0x0034/0x003A) are required references; simulateMagic's operand 2 is the (SHORT)
+        // enemy-target shape (0 or negative = caller slot, positive = operand - 1 enemy index);
+        // throwWeapon's operand 0 is the magic-view object of the thrown weapon.
+        byte[] original = Words(
+            0x0007, 44, 0, 0,        // startBattle: team 44, boss battle (no result targets)
+            0x0021, 1, 300, 0,       // inflictDamageToEnemy: every enemy, 300 damage
+            0x0031, 5, 0, 0,         // changeBattleSprite: sprite 5 for the caller role
+            0x0033, 11, 0, 0,        // collectEnemyForItems: nothing to collect -> L000B
+            0x0034, 10, 0, 0,        // transformCollectedEnemies: counter empty -> L000A
+            0x0039, 180, 0, 0,       // drainHpFromEnemy: 180 HP to the moving player
+            0x003A, 9, 0, 0,         // playerFlee: boss blocks fleeing -> L0009
+            0x0042, 323, 0, 0,       // simulateMagic: magic 323, damage 0, caller enemy slot
+            0x004A, 12, 0, 0,        // setBattlefield: battlefield 12
+            0x005B, 1000, 0, 0,      // halveEnemyHp: halving capped at 1000
+            0x0060, 0, 0, 0,         // killEnemy
+            0x0066, 344, 105, 0,     // throwWeapon: magic 344, 105 five-HP units
+            0, 0, 0, 0);             // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(13, commands.Count);
+        Assert.Equal("startBattle", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(44, commands[0]!["enemyTeamId"]!.GetValue<int>());
+        Assert.True(commands[0]!["isBoss"]!.GetValue<bool>());
+        Assert.Null(commands[0]!["lossTarget"]);
+        Assert.Null(commands[0]!["fleeTarget"]);
+        Assert.Equal("inflictDamageToEnemy", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[1]!["scope"]!.GetValue<int>());
+        Assert.Equal(300, commands[1]!["damage"]!.GetValue<int>());
+        Assert.Equal("changeBattleSprite", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(5, commands[2]!["battleSprite"]!.GetValue<int>());
+        Assert.Equal("collectEnemyForItems", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("L000B", commands[3]!["to"]!.GetValue<string>());
+        Assert.Equal("transformCollectedEnemies", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal("L000A", commands[4]!["to"]!.GetValue<string>());
+        Assert.Equal("drainHpFromEnemy", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(180, commands[5]!["amount"]!.GetValue<int>());
+        Assert.Equal("playerFlee", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal("L0009", commands[6]!["to"]!.GetValue<string>());
+        Assert.Equal("simulateMagic", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(323, commands[7]!["magicId"]!.GetValue<int>());
+        Assert.Equal(0, commands[7]!["baseDamage"]!.GetValue<int>());
+        Assert.Equal(0, commands[7]!["enemyOperand"]!.GetValue<int>());
+        Assert.Equal("setBattlefield", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(12, commands[8]!["battlefieldId"]!.GetValue<int>());
+        Assert.Equal("halveEnemyHp", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(1000, commands[9]!["maxDamage"]!.GetValue<int>());
+        Assert.Equal("killEnemy", commands[10]!["op"]!.GetValue<string>());
+        Assert.Equal("throwWeapon", commands[11]!["op"]!.GetValue<string>());
+        Assert.Equal(344, commands[11]!["magicId"]!.GetValue<int>());
+        Assert.Equal(105, commands[11]!["damageUnits"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the battle turns non-boss with explicit result
+        // targets, the damage/scope/amount/cap fields move, the fail jumps exercise the zero-target
+        // rule, simulateMagic gains an explicit 1-based enemy target and damage, and the thrown
+        // weapon switches to magic 360 with fewer five-HP units.
+        commands[0]!["enemyTeamId"] = 45;
+        commands[0]!["lossTarget"] = "L0001";
+        commands[0]!["isBoss"] = false;
+        commands[0]!["fleeTarget"] = "L0002";
+        commands[1]!["scope"] = 0;
+        commands[1]!["damage"] = 400;
+        commands[2]!["battleSprite"] = 2;
+        commands[3]!["to"] = "L0000";
+        commands[4]!["to"] = "L0001";
+        commands[5]!["amount"] = 999;
+        commands[6]!["to"] = "L0000";
+        commands[7]!["magicId"] = 349;
+        commands[7]!["baseDamage"] = 50;
+        commands[7]!["enemyOperand"] = 2;
+        commands[8]!["battlefieldId"] = 24;
+        commands[9]!["maxDamage"] = 100;
+        commands[11]!["magicId"] = 360;
+        commands[11]!["damageUnits"] = 10;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0007, 45, 1, 2,
+            0x0021, 0, 400, 0,
+            0x0031, 2, 0, 0,
+            0x0033, 0, 0, 0,
+            0x0034, 1, 0, 0,
+            0x0039, 999, 0, 0,
+            0x003A, 0, 0, 0,
+            0x0042, 349, 50, 2,
+            0x004A, 24, 0, 0,
+            0x005B, 100, 0, 0,
+            0x0060, 0, 0, 0,
+            0x0066, 360, 10, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // An enemy target beyond the signed WORD bound is rejected without output.
+        commands[7]!["enemyOperand"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]

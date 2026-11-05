@@ -115,6 +115,10 @@ public static class OpcodeRegistry
         // short), so it reuses the nullable-reference binding: null encodes WORD 0 and a reference
         // to address 0 is rejected; non-zero words are chunk-4 jump targets (script.c:1023).
         new(0x0020, "removeItem", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.Word, 1), new("shortageTarget", OpcodeFieldKind.BattleTarget, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #103: operand 0 is the #101 all-enemies boolean scope (0 = g_Battle.rgEnemy[wEventObjectID],
+        // non-zero = every non-empty enemy slot, script.c:1026-1049); operand 1 has no (SHORT) cast and
+        // subtracts from wHealth as an unsigned WORD.
+        new(0x0021, "inflictDamageToEnemy", [new("scope", OpcodeFieldKind.Word, 0), new("damage", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0022, "revivePlayer", [new("scope", OpcodeFieldKind.Word, 0), new("healthTenths", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #101: removeEquipment's operand 0 is a fourth player-addressing shape: a direct
         // 0-based PLAYERROLES role index operand (script.c:1108 assigns iPlayerRole with no -1,
@@ -132,12 +136,35 @@ public static class OpcodeRegistry
         new(0x002E, "setStatusEnemy", [new("status", OpcodeFieldKind.Word, 0), new("rounds", OpcodeFieldKind.Word, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x002F, "clearPlayerStatus", [new("status", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0030, "boostStat", [new("field", OpcodeFieldKind.Word, 0), new("percent", OpcodeFieldKind.SignedWord, 1), new("roleOperand", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #103: writes rgEquipmentEffect[kBodyPartExtra].rgwSpriteNumInBattle[wEventObjectID] - a
+        // temporary battle-sprite override for the caller's player role, cleared after battle
+        // (script.c:1429-1435, same extra register as 0x0030 boostStat).
+        new(0x0031, "changeBattleSprite", [new("battleSprite", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #103: jumps to operand 0 when g_Battle.rgEnemy[wEventObjectID].e.wCollectValue == 0
+        // (script.c:1437-1450); on success the value accumulates into gpGlobals->wCollectValue.
+        new(0x0033, "collectEnemyForItems", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #103: jumps to operand 0 when nothing has been collected (wCollectValue == 0,
+        // script.c:1452-1519); otherwise grants store[0].rgwItems[RandomLong(1, min(9, value)) - 1]
+        // and shows the obtained-item dialog.
+        new(0x0034, "transformCollectedEnemies", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #103: g_Battle.rgEnemy[wEventObjectID] loses operand 0 HP and the moving player gains the
+        // same amount, capped at max HP (script.c:1573-1586); unsigned WORD arithmetic.
+        new(0x0039, "drainHpFromEnemy", [new("amount", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #103: boss battles cannot flee - g_Battle.fIsBoss jumps to operand 0, otherwise
+        // PAL_BattlePlayerEscape() runs (script.c:1588-1602).
+        new(0x003A, "playerFlee", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x003B, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "center"), new("color", OpcodeFieldKind.LowByte, 0), new("rngWord", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x003C, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "upper"), new("portraitId", OpcodeFieldKind.Word, 0), new("color", OpcodeFieldKind.LowByte, 1), new("rngWord", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x003D, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "lower"), new("portraitId", OpcodeFieldKind.Word, 0), new("color", OpcodeFieldKind.LowByte, 1), new("rngWord", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x003E, "setDialog", [new("box", OpcodeFieldKind.ConstantString, ConstantString: "centerWindow"), new("color", OpcodeFieldKind.LowByte, 0)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x0040, "setTriggerMode", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("mode", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0041, "markFailed", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #103: PAL_BattleSimulateMagic(target, operand0, operand1) (fight.c:5301) - operand 0 is the
+        // object.json magic-view object ID (wMagicObjectID, consumed via rgObject[id].magic) and
+        // operand 1 the base damage. Operand 2 targets rgEnemy through the roleOperand shape read as
+        // (SHORT): 0 or negative = caller slot wEventObjectID, positive = operand - 1 as a 1-based
+        // enemy index (script.c:1634-1636); an apply-to-all magic overrides the target (fight.c:5321).
+        new(0x0042, "simulateMagic", [new("magicId", OpcodeFieldKind.Word, 0), new("baseDamage", OpcodeFieldKind.Word, 1), new("enemyOperand", OpcodeFieldKind.SignedWord, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0043, "setMusic", [new("musicId", OpcodeFieldKind.Word, 0), new("mode", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0046, "setPartyPos", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0049, "setState", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
@@ -159,11 +186,21 @@ public static class OpcodeRegistry
         new(0x0057, "setMagicBaseDamageByMp", [new("magicId", OpcodeFieldKind.Word, 0), new("mpMultiplier", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0058, "itemShortageJump", [new("itemId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x005A, "halveHp", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #103: g_Battle.rgEnemy[wEventObjectID] loses min(wHealth / 2 + 1, operand 0) HP - operand 0
+        // caps the halving damage (unsigned WORD arithmetic, script.c:1895-1904).
+        new(0x005B, "halveEnemyHp", [new("maxDamage", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x005D, "playerLacksPoisonJump", [new("objectId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x005E, "enemyLacksPoisonJump", [new("objectId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x005F, "killPlayer", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #103: g_Battle.rgEnemy[wEventObjectID].e.wHealth = 0 (script.c:1950-1954).
+        new(0x0060, "killEnemy", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0061, "notPoisonedJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0064, "enemyHpAboveJump", [new("percent", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #103: PAL_BattleSimulateMagic((SHORT)wEventObjectID, operand0, operand1 * 5 +
+        // moving-player attackStrength * RandomLong(0, 3)) - operand 0 is the thrown weapon's
+        // object.json magic-view object ID (real data: 344/360, inside the magic evidence range),
+        // operand 1 counts 5-HP damage units (script.c:2007-2014).
+        new(0x0066, "throwWeapon", [new("magicId", OpcodeFieldKind.Word, 0), new("damageUnits", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0068, "enemyTurnJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         // #99 review correction: script.c:3295 reads the delay from operand 1 ((0 -> 60) ms
         // normalization at runtime) and the gesture flag from operand 2; operand 0 is unused.
