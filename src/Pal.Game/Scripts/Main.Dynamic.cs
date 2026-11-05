@@ -152,7 +152,7 @@ public partial class Main
         uint now = unchecked((uint)Time.GetTicksMsec());
         if (dynamicTransitionDeadline == 0)
         {
-            // redraw carries its 60ms-unit delay; the fade mode word gets the frame boundary.
+            // redraw carries its 60ms-unit delay; the fade speed word gets the frame boundary.
             int delay = transition.Kind == "redraw" ? Math.Max(60, transition.Parameter) : 60;
             dynamicTransitionDeadline = unchecked(now + (uint)delay);
             mapScene!.UpdateScene(dynamicSession.Current.Plan); // BackupScreen + MakeScene boundary

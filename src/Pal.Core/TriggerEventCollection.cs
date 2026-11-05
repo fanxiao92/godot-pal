@@ -180,7 +180,7 @@ public sealed class TriggerEventCollection
                 "setAutoEntry" => ["eventObjectId", "entry"],
                 "setTriggerEntry" => ["eventObjectId", "entry"],
                 "setBattlefield" => ["battlefieldId"],
-                "fadeOut" => ["frames"],
+                "fadeOut" => ["delay"],
                 "setParty" => ["roleId0", "roleId1", "roleId2"],
                 "noop" => [],
                 "setStateRange" => ["fromEventObjectId", "toEventObjectId", "state"],
@@ -198,8 +198,8 @@ public sealed class TriggerEventCollection
                 "setPartyPos" => ["x", "y", "h"],
                 "setPartyFacing" => ["direction", "gesture", "memberIndex"],
                 "waitUpdate" => ["frames", "runTriggers", "updateGestures"],
-                "redraw" => ["delayUnits"],
-                "fadeScene" => ["mode"],
+                "redraw" => ["delayUnits", "updateGestures"],
+                "fadeScene" => ["speed"],
                 "markFailed" => [],
                 _ => throw new InvalidDataException($"Unknown op '{op}'.")
             };
@@ -335,9 +335,11 @@ public sealed class TriggerEventCollection
                     command.Frames = EventJson.Word(node, "battlefieldId");
                     break;
                 case "fadeOut":
-                    // script.c 0x0050: PAL_FadeOut(frames or 1) and the next scene fades back in.
+                    // script.c 0x0050: PAL_FadeOut(delay or 1) — the palette fade-to-black step
+                    // unit (total duration = delay * 600 ms), not a frame count; the next
+                    // scene fades back in afterwards.
                     if (opcode != 0x50) throw new InvalidDataException("Invalid fadeOut mapping.");
-                    command.Frames = EventJson.Word(node, "frames");
+                    command.FadeOutDelay = EventJson.Word(node, "delay");
                     break;
                 case "setParty":
                     // script.c 0x0075: party = operand+1 role words, 0 = empty; empty keeps role0.
@@ -453,14 +455,18 @@ public sealed class TriggerEventCollection
                     command.UpdateGestures = EventJson.Word(node, "updateGestures");
                     break;
                 case "redraw":
-                    // script.c 0x0005: redraw the scene and delay 60ms units (0 -> 1).
+                    // script.c 0x0005: redraw the scene and delay 60ms units (0 -> 1); the
+                    // delay word is operand 1 and the truthy gesture word is operand 2 (the
+                    // party-gesture update flag, retained here; #99 re-binding).
                     if (opcode != 5) throw new InvalidDataException("Invalid redraw mapping.");
                     command.Frames = EventJson.Word(node, "delayUnits");
+                    command.UpdateGestures = EventJson.Word(node, "updateGestures");
                     break;
                 case "fadeScene":
-                    // script.c 0x0073: backup screen, rebuild the scene, VIDEO_FadeScreen(mode).
+                    // script.c 0x0073: backup screen, rebuild the scene, VIDEO_FadeScreen(speed)
+                    // — the cross-fade pacing word (larger = slower), not a mode selector.
                     if (opcode != 0x73) throw new InvalidDataException("Invalid fadeScene mapping.");
-                    command.FadeMode = EventJson.Word(node, "mode");
+                    command.FadeSpeed = EventJson.Word(node, "speed");
                     break;
                 case "markFailed":
                     // script.c 0x0041: g_fScriptSuccess = FALSE.
@@ -525,8 +531,9 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int ObjectId { get; set; }
     internal int State { get; set; }
     internal int Frames { get; set; }
+    internal int FadeOutDelay { get; set; }
     internal int TriggerModeWord { get; set; }
-    internal int FadeMode { get; set; }
+    internal int FadeSpeed { get; set; }
     internal int SceneId { get; set; }
     internal int OnEnter { get; set; }
     internal int OnTeleport { get; set; }

@@ -111,6 +111,48 @@ public class TriggerEventCollectionTests
         Assert.Contains("unknown field", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
     }
 
+    [Theory]
+    [InlineData("{\"op\":\"fadeOut\",\"delay\":2}", 0x50)]
+    [InlineData("{\"op\":\"fadeScene\",\"speed\":3}", 0x73)]
+    [InlineData("{\"op\":\"redraw\",\"delayUnits\":5,\"updateGestures\":65535}", 5)]
+    public void Screen_verb_99_110_corrected_field_forms_load_strictly(string semanticJson, int opcode)
+    {
+        // #99/#110 corrected the tool-side spellings: fadeOut.frames -> delay (PAL_FadeOut's
+        // fade step unit), fadeScene.mode -> speed (VIDEO_FadeScreen's wSpeed), and redraw
+        // gained the operand-2 updateGestures word (its delayUnits re-binds to operand 1 on
+        // the export side; the field name and WORD range are unchanged, so only the new
+        // field is loader-visible). The FadeOutDelay/FadeSpeed/UpdateGestures property
+        // bindings are exercised by the session consumers and the real-package loadproof.
+        var fixture = new EventFixture();
+        var command = JsonNode.Parse(semanticJson)!.AsObject();
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(7, 8, 9) };
+        fixture.Commands[0] = command;
+        Assert.Equal(5, fixture.Load().InstructionCount);
+    }
+
+    [Theory]
+    [InlineData("{\"op\":\"fadeOut\",\"frames\":2}", 0x50, "unknown field 'frames'")]
+    [InlineData("{\"op\":\"fadeScene\",\"mode\":2}", 0x73, "unknown field 'mode'")]
+    [InlineData("{\"op\":\"redraw\",\"delayUnits\":2}", 5, "missing field 'updateGestures'")]
+    public void Pre_115_reference_field_shapes_stay_rejected(string semanticJson, int opcode, string fault)
+    {
+        // The pre-correction shapes must keep failing strict load: fadeOut.frames and
+        // fadeScene.mode arrive as unknown fields, and the pre-#99 redraw shape (no
+        // updateGestures word) as a missing field. The pre-#99 redraw *binding* itself
+        // (delayUnits = operand 0) is not expressible as a JSON rejection: the field name
+        // and WORD range are identical under both bindings and the loader never sees which
+        // source operand produced the value.
+        var fixture = new EventFixture();
+        var command = JsonNode.Parse(semanticJson)!.AsObject();
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(7, 8, 9) };
+        fixture.Commands[0] = command;
+        Assert.Contains(fault, Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+    }
+
     [Fact]
     public void StartBattle_cross_file_result_targets_resolve_and_legacy_raw7_stays_non_executable()
     {

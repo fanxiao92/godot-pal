@@ -272,7 +272,8 @@
      0
     ]
    },
-   "delayUnits": 1
+   "delayUnits": 0,
+   "updateGestures": 0
   },
   {
    "label": "L0015",

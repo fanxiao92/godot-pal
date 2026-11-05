@@ -545,9 +545,9 @@ public sealed class TriggerScriptSession
                     _address = Next(command);
                     break;
                 case "fadeOut" when _world is not null:
-                    // script.c 0x0050: fade out (0 -> 1 frame unit); the host fades back in after.
+                    // script.c 0x0050: fade out at the delay step unit (0 -> 1); the host fades back in after.
                     PendingTransition = new TriggerTransitionRequest(Guid.NewGuid(), command.Position, "fadeOut",
-                        command.Frames == 0 ? 1 : command.Frames);
+                        command.FadeOutDelay == 0 ? 1 : command.FadeOutDelay);
                     _address = Next(command);
                     Phase = TriggerScriptPhase.WaitingForTransition;
                     return;
@@ -603,8 +603,8 @@ public sealed class TriggerScriptSession
                     Phase = TriggerScriptPhase.WaitingForTransition;
                     return;
                 case "fadeScene" when _world is not null:
-                    // script.c 0x0073: backup screen, rebuild the scene, fade by mode word.
-                    PendingTransition = new TriggerTransitionRequest(Guid.NewGuid(), command.Position, "fadeScene", command.FadeMode);
+                    // script.c 0x0073: backup screen, rebuild the scene, cross-fade at the speed word.
+                    PendingTransition = new TriggerTransitionRequest(Guid.NewGuid(), command.Position, "fadeScene", command.FadeSpeed);
                     _address = Next(command);
                     Phase = TriggerScriptPhase.WaitingForTransition;
                     return;
