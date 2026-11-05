@@ -90,13 +90,28 @@ jobs:
           $actual = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($actual -cne $env:GITHUB_SHA) { throw 'Full gate checkout does not match GITHUB_SHA.' }
-      - name: Committable-scope full gate (Test-M0)
+      - name: Install pinned Godot and warm the project import cache
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $godot = & (Join-Path $env:GITHUB_WORKSPACE 'scripts/Get-Godot.ps1') -Destination (Join-Path $env:RUNNER_TEMP 'godot')
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "GODOT_ENGINE=$godot`n")
+          $project = Join-Path $env:GITHUB_WORKSPACE 'src/Pal.Game'
+          # CI checks out a cold .godot cache. Godot's first editor scan on a cold cache can emit
+          # benign ERROR lines (e.g. placeholder SVG preview loads during editor-layout startup)
+          # that the gate's checked invocations legitimately refuse. Warm the import cache first;
+          # this step's output is diagnostic only and is not error-checked, and no gate assertion
+          # is relaxed. Exit 0 is still required so a genuinely broken engine fails fast.
+          $p = Start-Process -FilePath $godot -ArgumentList @('--headless','--path',"$project",'--editor','--import') -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP/godot-import-warmup.log" -RedirectStandardError "$env:RUNNER_TEMP/godot-import-warmup.err.log"
+          Get-Content "$env:RUNNER_TEMP/godot-import-warmup.log" -Tail 5
+          if ($p.ExitCode -ne 0) { throw "Godot import warm-up exited $($p.ExitCode); see runner temp logs." }
+      - name: Committable-scope full gate (Test-M0)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:GODOT_ENGINE -or -not (Test-Path $env:GODOT_ENGINE)) { throw 'Pinned Godot engine from the warm-up step is missing.' }
           $evidence = Join-Path $env:RUNNER_TEMP 'm0-evidence'
-          & (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-M0.ps1') -GodotPath $godot -EvidenceDirectory $evidence -Scope committable
+          & (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-M0.ps1') -GodotPath $env:GODOT_ENGINE -EvidenceDirectory $evidence -Scope committable
           Get-Content -LiteralPath (Join-Path $evidence 'PASS.txt')
       - name: Upload full gate evidence
         if: always()
