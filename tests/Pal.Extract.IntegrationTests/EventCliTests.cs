@@ -22,13 +22,13 @@ public sealed class EventCliTests : IDisposable
             Words(12, 1, 0, 0, 0, 0, 0, 1),
             Words(0, 0, 0, 0, 0, 0, 0, 0),
             [],
-            Words(0x003c, 59, 79, 1, 0xffff, 61, 17, 7, 0, 0, 0, 0, 0x0011, 0, 65535, 7));
+            Words(0x003c, 59, 79, 1, 0xffff, 61, 17, 7, 0, 0, 0, 0, 0x0032, 0, 65535, 7));
     }
 
     [Fact]
     public async Task StartBattle_export_roundtrip_and_semantic_edits_use_resolved_targets_not_source_words()
     {
-        byte[] original = Words(7, 65535, 0, 0, 7, 18, 4, 3, 0x0011, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10);
+        byte[] original = Words(7, 65535, 0, 0, 7, 18, 4, 3, 0x0032, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10);
         WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
@@ -72,14 +72,14 @@ public sealed class EventCliTests : IDisposable
         var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
         Assert.True(edited.ExitCode == 0, edited.Stderr);
         Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
-        Assert.Equal(Words(7, 19, 4, 1, 7, 20, 0, 0, 0x0011, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+        Assert.Equal(Words(7, 19, 4, 1, 7, 20, 0, 0, 0x0032, 65535, 7, 9, 0, 5, 6, 7, 0, 8, 9, 10), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
     }
 
     [Fact]
     public async Task Legacy_raw7_package_rebuilds_without_a_named_mapping_migration()
     {
-        byte[] original = Words(0x0011, 0, 65535, 8, 7, 18, 65535, 0, 0, 7, 8, 9);
-        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0011, 0, 65535, 8, 0x0011, 18, 65535, 0, 0, 7, 8, 9));
+        byte[] original = Words(0x0032, 0, 65535, 8, 7, 18, 65535, 0, 0, 7, 8, 9);
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0032, 0, 65535, 8, 0x0032, 18, 65535, 0, 0, 7, 8, 9));
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
         string path = Path.Combine(exported, "shared.json");
@@ -111,7 +111,7 @@ public sealed class EventCliTests : IDisposable
     [InlineData("duplicate-key")]
     public async Task StartBattle_at_true_chunk_end_rejects_invalid_fields_and_result_references_without_output(string fault)
     {
-        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0011, 0, 65535, 8, 7, 18, 0, 0));
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], Words(0x0032, 0, 65535, 8, 7, 18, 0, 0));
         var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
         Assert.True(export.ExitCode == 0, export.Stderr);
         string path = Path.Combine(exported, "shared.json");
@@ -1102,6 +1102,107 @@ public sealed class EventCliTests : IDisposable
 
         // A summon count beyond the signed WORD bound is rejected without output.
         commands[10]!["count"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
+    [Fact]
+    public async Task Scene_movement_batch1_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 scene-movement batch 1 (#105, movement part 1): the four walkStep opcode bits,
+        // face, walkTo, walkToSlow (new), setObjectPositionRelativeToParty (new),
+        // setObjectPosition and setObjectGesture. Hand-built stream, not retail data. Direction
+        // comes from the opcode for walkStep (opcode - 0x000B); face's 0xFFFF operands are
+        // no-change sentinels kept as plain WORDs; walkToSlow walks every other frame at speed 2
+        // (both runtime constants, not operands); the party-relative verb takes the
+        // preamble-selected event object id plus offsets from the party's map position (real data
+        // encodes -128 as 0xFF80); setObjectGesture hardcodes direction kDirSouth, no operand.
+        byte[] original = Words(
+            0x000B, 0, 0, 0,                              // walkStep: one step south
+            0x000D, 0, 0, 0,                              // walkStep: one step north
+            0x000F, 2, unchecked((int)0xFFFF), 5,         // face: north, frame unchanged, operand2 preserved
+            0x0010, 24, 60, 1,                            // walkTo: map position, layer 1
+            0x0011, 33, 48, 0,                            // walkToSlow: slower walk on layer 0
+            0x0012, 84, unchecked((int)0xFF80), 56,       // setObjectPositionRelativeToParty: object 84, -128/+56 around the party
+            0x0013, 28, 1280, 256,                        // setObjectPosition: object 28 to the absolute position
+            0x0014, 7, 0, 0,                              // setObjectGesture: frame 7 (direction hardcoded south)
+            0x000E, 0, 0, 0,                              // walkStep: one step east
+            0x000C, 0, 0, 0,                              // walkStep: one step west
+            0, 0, 0, 0);                                  // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(11, commands.Count);
+        Assert.Equal("walkStep", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[0]!["direction"]!.GetValue<int>());
+        Assert.Equal("walkStep", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[1]!["direction"]!.GetValue<int>());
+        Assert.Equal("face", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[2]!["direction"]!.GetValue<int>());
+        Assert.Equal(65_535, commands[2]!["frame"]!.GetValue<int>()); // no-change sentinel
+        Assert.Equal("walkTo", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal(24, commands[3]!["x"]!.GetValue<int>());
+        Assert.Equal(1, commands[3]!["h"]!.GetValue<int>());
+        Assert.Equal("walkToSlow", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(33, commands[4]!["x"]!.GetValue<int>());
+        Assert.Equal(0, commands[4]!["h"]!.GetValue<int>());
+        Assert.Equal("setObjectPositionRelativeToParty", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(84, commands[5]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(65_408, commands[5]!["xOffset"]!.GetValue<int>());
+        Assert.Equal(56, commands[5]!["yOffset"]!.GetValue<int>());
+        Assert.Equal("setObjectPosition", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(28, commands[6]!["eventObjectId"]!.GetValue<int>());
+        Assert.Equal(1280, commands[6]!["x"]!.GetValue<int>());
+        Assert.Equal(256, commands[6]!["y"]!.GetValue<int>());
+        Assert.Equal("setObjectGesture", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal(7, commands[7]!["frame"]!.GetValue<int>());
+        Assert.Equal("walkStep", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[8]!["direction"]!.GetValue<int>());
+        Assert.Equal("walkStep", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(1, commands[9]!["direction"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the sentinel frame becomes an explicit 23, the
+        // walk targets and layer move, the party-relative verb switches to the caller's object
+        // (0) with offsets 0/64, the absolute position moves, and the gesture frame resets to 0.
+        commands[2]!["direction"] = 3;
+        commands[2]!["frame"] = 23;
+        commands[3]!["x"] = 40;
+        commands[3]!["h"] = 0;
+        commands[4]!["y"] = 50;
+        commands[4]!["h"] = 1;
+        commands[5]!["eventObjectId"] = 0; // the caller's object via the shared preamble
+        commands[5]!["xOffset"] = 0; // exactly at the party
+        commands[5]!["yOffset"] = 64;
+        commands[6]!["x"] = 1360;
+        commands[6]!["y"] = 1376;
+        commands[7]!["frame"] = 0;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x000B, 0, 0, 0,
+            0x000D, 0, 0, 0,
+            0x000F, 3, 23, 5,
+            0x0010, 40, 60, 0,
+            0x0011, 33, 50, 1,
+            0x0012, 0, 0, 64,
+            0x0013, 28, 1360, 1376,
+            0x0014, 0, 0, 0,
+            0x000E, 0, 0, 0,
+            0x000C, 0, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A walkStep direction that contradicts its source opcode is rejected without output.
+        commands[0]!["direction"] = 2;
         File.WriteAllText(path, events.ToJsonString());
         var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
         Assert.Equal(1, rejected.ExitCode);

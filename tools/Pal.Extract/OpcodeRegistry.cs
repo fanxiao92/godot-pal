@@ -99,6 +99,17 @@ public static class OpcodeRegistry
         new(0x000E, "walkStep", [new("direction", OpcodeFieldKind.OpcodeOffset, Base: 0x000B)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x000F, "face", [new("direction", OpcodeFieldKind.Word, 0), new("frame", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0010, "walkTo", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #105: same x/y/h operands as walkTo (0x0010) but at a lower speed - the frame-parity
+        // gate ((wEventObjectID & 1) ^ (dwFrameNum & 1), script.c:692) runs the walk only every
+        // other frame and PAL_NPCWalkTo is called at speed 2 instead of 3 (script.c:694); until
+        // arrival the entry re-executes (wScriptEntry--), a runtime stall rather than a jump.
+        new(0x0011, "walkToSlow", [new("x", OpcodeFieldKind.Word, 0), new("y", OpcodeFieldKind.Word, 1), new("h", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #105: the operand-0-selected event object (shared preamble pCurrent: 0/0xFFFF = caller,
+        // else operand 0 is a 1-based event-object index, script.c:626-638) is placed at
+        // xOffset + viewport.x + partyoffset.x, yOffset likewise (script.c:710-713) - offsets
+        // relative to the party's map position, stored into the unsigned WORD x/y with no
+        // (SHORT) cast (real data encodes -128 as 0xFF80).
+        new(0x0012, "setObjectPositionRelativeToParty", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("xOffset", OpcodeFieldKind.Word, 1), new("yOffset", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0013, "setObjectPosition", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("x", OpcodeFieldKind.Word, 1), new("y", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0014, "setObjectGesture", [new("frame", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0015, "setPartyFacing", [new("direction", OpcodeFieldKind.Word, 0), new("gesture", OpcodeFieldKind.Word, 1), new("memberIndex", OpcodeFieldKind.Word, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),

@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（114 个 opcode 位、106 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二、批4 #99 对话表现、状态物品批1 #100、状态物品批2 #101、状态物品批3 #102（状态物品域 29 个 opcode 收官）、战斗批1 #103、战斗批2+菜单 #104（战斗域 22 个 opcode 收官、菜单域 2 个 opcode 收官），见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（116 个 opcode 位、108 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二、批4 #99 对话表现、状态物品批1 #100、状态物品批2 #101、状态物品批3 #102（状态物品域 29 个 opcode 收官）、战斗批1 #103、战斗批2+菜单 #104（战斗域 22 个 opcode 收官、菜单域 2 个 opcode 收官）、场景移动批1 #105，见第 4 节注册表章节）；其余 opcode 保留为 `raw`。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -230,14 +230,14 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 
 | opcode | 参考实际寻址（[script.c](../../reference/sdlpal/script.c)） | 结论 |
 |---|---|---|
-| 0x0024 setAutoEntry / 0x0025 setTriggerEntry / 0x0040 setTriggerMode / 0x0049 setState / 0x0013 setObjectPosition | `PAL_InterpretInstruction` 前奏按 operand 0 选 `pCurrent`：0 或 0xFFFF=调用者，否则 `lprgEventObject[operand0−1]`（1 基）；case 体写 `pCurrent->wAutoScript`/`wTriggerScript`/`wTriggerMode`/`sState`/`x,y`（0x0024/0x0025/0x0040/0x0049 另有 operand0≠0 守卫） | **event object 下标** → `eventObjectId` |
+| 0x0024 setAutoEntry / 0x0025 setTriggerEntry / 0x0040 setTriggerMode / 0x0049 setState / 0x0013 setObjectPosition / 0x0012 setObjectPositionRelativeToParty（#105 新增） | `PAL_InterpretInstruction` 前奏按 operand 0 选 `pCurrent`：0 或 0xFFFF=调用者，否则 `lprgEventObject[operand0−1]`（1 基）；case 体写 `pCurrent->wAutoScript`/`wTriggerScript`/`wTriggerMode`/`sState`/`x,y`（0x0024/0x0025/0x0040/0x0049 另有 operand0≠0 守卫；0x0012/0x0013 无守卫直接写 x/y） | **event object 下标** → `eventObjectId` |
 | 0x0090 setObjectScript | case 0x0090：`gpGlobals->g.rgObject[operand0].rgwData[2 + operand2] = operand1` | **object union 下标，不是 event object** → 保留 `objectId`（配合 `slotIndex`；语义槽随 union 视图而定，与第 3.2 节对象表入口槽对应） |
 | 0x009A setStateRange | case 0x009A：`for (i = operand0; i <= operand1; i++) lprgEventObject[i−1].sState = operand2` | **event object 闭区间** → `fromEventObjectId`/`toEventObjectId` |
 | 0x0007 startBattle | `PAL_StartBattle(wEnemyTeam, ...)`；敌队表为 DATA chunk 2（enemy-team.json） | → `enemyTeamId` |
 | 0x006D setSceneScripts | case 0x006D：`rgScene[operand0−1].wScriptOnEnter/wScriptOnTeleport = operand1/2` | scene 下标 → `sceneId`（1 基） |
 | 0x004A setBattlefield | case 0x004A：`gpGlobals->wNumBattleField = operand0` | 战场编号 → `battlefieldId` |
 
-#### 当前注册表（114 个 opcode 位，106 个动词）
+#### 当前注册表（116 个 opcode 位，108 个动词）
 
 | opcode | op | 字段（绑定） | 执行方式 | 后继 |
 |---|---|---|---|---|
@@ -254,6 +254,8 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x000B–0x000E | `walkStep` | `direction`(opcodeOffset, base 0x000B) | shared | sequential |
 | 0x000F | `face` | `direction`(word,0)、`frame`(word,1) | shared | sequential |
 | 0x0010 | `walkTo` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
+| 0x0011 | `walkToSlow` | `x`(word,0)、`y`(word,1)、`h`(word,2) | shared | sequential |
+| 0x0012 | `setObjectPositionRelativeToParty` | `eventObjectId`(word,0)、`xOffset`(word,1)、`yOffset`(word,2) | shared | sequential |
 | 0x0013 | `setObjectPosition` | `eventObjectId`(word,0)、`x`(word,1)、`y`(word,2) | shared | sequential |
 | 0x0014 | `setObjectGesture` | `frame`(word,0) | shared | sequential |
 | 0x0015 | `setPartyFacing` | `direction`(word,0)、`gesture`(word,1)、`memberIndex`(word,2) | shared | sequential |
@@ -532,6 +534,22 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x0027 | `showSellMenu` | 无操作数映射：1172 `PAL_SellMenu()`（uigame.c:1755-1790）按玩家库存 `PAL_ItemSelectMenu(kItemFlagSellable)` 列可售物并按半价出售——无商店表行参与；三操作数保留源 WORD | shared（1166：1170 重绘场景；break） | sequential | 三操作数保留源 WORD | 5（三操作数全 0） |
 
 真实数据核对：菜单域命中合计 28（0x0026 23 + 0x0027 5，全部新具名）；storeId 1..20 全部在 store.json 21 行（0..20）内。export→rebuild SHA `f36cf853…b39e72a` 字节一致。**菜单域（#77 六域之一，共 2 个 opcode：0x0026、0x0027）至此全部具名。**
+
+#### M5 场景移动批1 条目（#105，场景移动域-移动批1）
+
+本批核对结论：全部操作数仍为立即 WORD（同前批，`pScript->rgwOperand[n]` 直读，无变量寻址）；十个 opcode 位全部位于两执行器共享的 `PAL_InterpretInstruction`（trigger 开关 3206-3440 / auto 开关 3522-3641 逐一核对无对应 case，每个 case 在 script.c 仅出现一次，executor 一律 `shared`），后继一律 sequential（break 后函数尾 3085 `return wScriptEntry + 1`；0x0010/0x0011 未到达目的地的 `wScriptEntry--`（684/697/702）是同一条目的运行时重试停等，非跳转，与 sequential 声明不冲突）。**0x000B-0x000E 是单一 fall-through「walk one step」块**：四个 case 落入同一注释块（652-661），方向由 `wDirection = opcode − 0x000B` 差值决定（659，0..3 = kDirSouth/kDirWest/kDirNorth/kDirEast，palcommon.h:92-95），调用者对象 `pEvtObj`/`wEventObjectID` 走一步（660 `PAL_NPCWalkOneStep(wEventObjectID, 2)`），case 体不消费任何操作数（真实数据三操作数全 0 佐证）——既有 `direction`(opcodeOffset, base 0x000B) 绑定复核维持。**对象寻址分两形状**：0x000B-0x000F/0x0010/0x0011/0x0014 作用于调用者对象（pEvtObj/wEventObjectID，无对象操作数）；0x0013/0x0012 写共享前奏的 `pCurrent->x/y`（626-638：operand 0 为 0/0xFFFF=调用者、否则 operand0−1 的 1 基 event-object 表下标，含 Dream 2.11 的 >0x9000 回绕 hack，与 setState 族同口径）→ 0x0013 复核维持 `eventObjectId`(word,0)，0x0012 新增同形字段。**0x0012 锚点语义**：`pCurrent->x = operand1 + PAL_X(viewport) + PAL_X(partyoffset)`（710-713），即相对队伍当前地图位置（viewport+partyoffset）的偏移；写入目标是 WORD 型 x/y、无 `(SHORT)` 转型（真实数据唯一命中的 0xFF80 是原版作者把 −128 相对偏移按无符号 WORD 编码的形态，提取按无符号原样保留，同 #103 越表 380 的「原版数据事实如实保留」口径），定名 `xOffset`/`yOffset` 区别于 0x0013 的绝对 `x`/`y`。signed/unsigned：本批十个 case 全无 `(SHORT)` 转型，全部数值字段为无符号 WORD（0x000F 的 0xFFFF 不变哨兵按普通 WORD 保留、0 是显式值非哨兵；0x0014 的 kDirSouth 是硬编码常量非操作数）。行号与逐条语义如下。
+
+| opcode | 动词 | 字段映射与寻址 | 执行方式（script.c 行号） | 后继 | 反向编码 | 真实数据 |
+|---|---|---|---|---|---|---|
+| 0x000B-0x000E | `walkStep`（#78 已具名，四 opcode 位复核） | `direction`=opcode−0x000B（opcodeOffset，659，单一 fall-through 块 652-661；0..3=south/west/north/east）；case 体不读操作数，三操作数保留源 WORD | shared（652：660 `PAL_NPCWalkOneStep(wEventObjectID, 2)`——调用者对象走一步；661 break） | sequential | direction 编码时校验 opcode 一致；三操作数保留源 WORD | 385（0x000B×94/0x000C×95/0x000D×91/0x000E×105，即方向 0..3 各自命中；三操作数全 0 佐证 case 体不读） |
+| 0x000F | `face`（#78 已具名，复核） | `direction`=operand0（667-670：非 0xFFFF 才写 `pEvtObj->wDirection`，0 为显式朝向非哨兵）、`frame`=operand1（671-674：非 0xFFFF 才写 `pEvtObj->wCurrentFrameNum`）；两者均无符号 WORD、哨兵按原值编码；作用于调用者对象（无对象操作数）；operand2 参考 case 未用 | shared（663：break） | sequential | 两字段重编码；operand2 保留 | 493（direction 0×157/1×84/2×110/3×137/0xFFFF×5（不变哨兵）；frame 0×437、1..23 共 56（无 0xFFFF）；operand2 全 0） |
+| 0x0010 | `walkTo`（#78 已具名，复核） | `x`=operand0、`y`=operand1、`h`=operand2（681-682 `PAL_NPCWalkTo(wEventObjectID, x, y, h, 3)` 直走至绝对地图坐标，速度 3 为常量非操作数；未到达时 684 `wScriptEntry--` 同条目重试）；行走者=调用者对象（非前奏 pCurrent，无对象操作数） | shared（677：break） | sequential | 三字段重编码；无保留操作数 | 387（x 5..55、y 7..116、h 0×212/1×175） |
+| 0x0011 | `walkToSlow`（新） | `x`=operand0、`y`=operand1、`h`=operand2（692 帧奇偶门控 `(wEventObjectID&1)^(dwFrameNum&1)` 隔帧行走 + 694 `PAL_NPCWalkTo(wEventObjectID, x, y, h, 2)` 速度 2，两常量均非操作数；未到达时 697/702 同条目重试）；行走者=调用者对象（无对象操作数）；与 0x0010 仅速度与隔帧差异，操作数形状全同 | shared（688：break） | sequential | 三字段重编码；无保留操作数 | 421（x 1..57、y 7..115、h 0×221/1×200——与 0x0010 同形的坐标/层分布） |
+| 0x0012 | `setObjectPositionRelativeToParty`（新） | `eventObjectId`=operand0（共享前奏选 pCurrent：0/0xFFFF=调用者、否则 operand0−1 的 1 基下标，626-638；无 ≠0 守卫）、`xOffset`=operand1、`yOffset`=operand2（710-713 `pCurrent->x = operand1 + PAL_X(viewport) + PAL_X(partyoffset)`、y 同理——相对队伍当前地图位置（viewport+partyoffset）的偏移写入 WORD 型 x/y；无 `(SHORT)` 转型，真实 0xFF80 为作者以无符号 WORD 编码的 −128）；case 体不写层（sLayer） | shared（706：break） | sequential | 三字段重编码；无保留操作数 | 1（eventObjectId 84、xOffset 0xFF80(65408)、yOffset 56） |
+| 0x0013 | `setObjectPosition`（#78 已具名，复核维持） | `eventObjectId`=operand0（同 0x0012 前奏选 pCurrent，#78 重命名先例，复核成立：case 写 `pCurrent->x/y` 非调用者）、`x`=operand1、`y`=operand2（720-721 绝对地图坐标直写）；无层写入 | shared（716：break） | sequential | 三字段重编码；无保留操作数 | 48（eventObjectId 9..1783 全部非零非哨兵（无 0/0xFFFF，明确指定对象）；x 85..1616、y 0..1712 多为 16 的倍数） |
+| 0x0014 | `setObjectGesture`（#78 已具名，复核维持） | `frame`=operand0（728 `pEvtObj->wCurrentFrameNum = operand0`；729 方向硬编码 `kDirSouth`（palcommon.h:92，值 0）**非操作数**——无 direction 字段）；作用于调用者对象 pEvtObj（无对象操作数）；operand1、2 参考 case 未用 | shared（724：break） | sequential | frame 重编码；operand1、2 保留 | 475（frame 0..35；operand1/2 全 0） |
+
+真实数据核对：本批命中合计 2210（新具名 422 = 0x0011 421 + 0x0012 1；复核 1788 = walkStep 385 + face 493 + walkTo 387 + setObjectPosition 48 + setObjectGesture 475 本已具名）。raw 命中从 #104 的 5222 降至 4800（−422）。本批无引用字段、无跳转目标，无悬空拒绝面变化；0x0012 唯一命中的 0xFF80 按无符号 WORD 原样往返（有符号解读无参考转型佐证，不设 signedWord）。export→rebuild SHA `f36cf853…b39e72a` 字节一致。框架零扩展：`eventObjectId`/`xOffset`/`yOffset`/`x`/`y`/`h`/`direction`/`frame` 全部沿用既有 word 类型、walkStep 的 `direction` 沿用既有 opcodeOffset 绑定；`DecodeValidatesReferenceRange` 导出期预检不启用（与前批同口径，悬空拒绝仍在重建标签解析处）。场景移动域（#77 六域之一，共 75 个 opcode 拆 8 批）本批为移动批1，剩余移动批2/3（#106/#107）、对象批1/2（#108/#109）、屏幕批1/2（#110/#111）、音乐场景特殊（#112）待后续批次。
 
 #### raw 保底与反向编码规则
 
