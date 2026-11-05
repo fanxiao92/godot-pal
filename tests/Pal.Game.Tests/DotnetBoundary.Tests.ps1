@@ -96,6 +96,9 @@ foreach ($name in $modes) {
     $casePath = Join-Path $root $name
     & dotnet exec $DriverDll case $casePath $name $pwsh $PSCommandPath *> (Join-Path $root "$name-supervisor.log")
     $exit = $LASTEXITCODE
+    # Echo the case summary line (driver prints `mode: PASS/FAIL; root=...; failure=...`) so CI job logs
+    # show per-case outcomes even when a later case fails; full evidence stays in the case directory.
+    Get-Content (Join-Path $root "$name-supervisor.log") -Tail 3 | Where-Object { $_ } | ForEach-Object { Write-Host "[boundary:$name] $_" }
     $resultPath = Join-Path $casePath 'result.json'
     $result = if (Test-Path $resultPath) { Get-Content $resultPath -Raw | ConvertFrom-Json } else { $null }
     $results.Add(@{ name = $name; exitCode = $exit; result = $result })

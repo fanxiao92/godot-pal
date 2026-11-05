@@ -67,9 +67,9 @@ public class Fixture
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
             'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
         $expectedProjects = @{
-            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 914, 0)
-            'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 142, 0)
-            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 279, 2)
+            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 928, 0)
+            'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 464, 0)
+            'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 359, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 89, 0)
             game = @('src/Pal.Game/Pal.Game.csproj', 623, 0)
         }
@@ -92,9 +92,39 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 914 passed; CLI unit 142 passed; CLI integration 279 passed + 2 skipped (281 total); Prepare 89 passed; Godot source/discovery 626; positives 623 as serial 85/74/2/5/6/3/5/28/412/3 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 928 passed; CLI unit 464 passed; CLI integration 359 passed + 2 skipped (361 total); Prepare 89 passed; Godot source/discovery 626; positives 623 as serial 85/74/2/5/6/3/5/28/412/3 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
+    }
+    Case 'committable scope executes only the synthetic scene-realfull positives' {
+        $plan = Get-GameBatchPlan $repository -Scope committable
+        Assert ($plan.scope -ceq 'committable') 'Plan must record its scope.'
+        $realfull = @($plan.batches | Where-Object name -CEQ 'scene-realfull')
+        Assert ($realfull.Count -eq 1 -and $realfull[0].count -eq 2) 'scene-realfull must drop exactly its local-only real positive.'
+        Assert ($realfull[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.SyntheticFirstBattleClosureTests.') 'Committable scene-realfull filter must exclude the private-asset class.'
+        Assert (($plan.batches | ForEach-Object count) -join ',' -ceq '85,74,2,5,6,3,5,28,412,2') 'Wrong committable batch sizes/order.'
+        $game = @($plan.projects | Where-Object name -CEQ 'game')[0]
+        Assert ($game.passed -eq 622) 'Committable game positives must drop the local-only case.'
+        Assert ($plan.inventory.Count -eq 626) 'Committable scope keeps the real class compiled and discoverable.'
+        Assert-ExactTestNames @($plan.localOnly) @('Pal.Game.Tests.RealFirstBattleFlowTests.Real_phases_search_pages_engagement_and_bounded_damage_trajectory') 'Local-only positive identity'
+        Assert-ExactTestNames @($plan.batches.expected) @($plan.inventory | Where-Object { $_.class -NE 'FailureControlTests' -and $_.name -cnotin $plan.localOnly } | ForEach-Object name) 'committable partition'
+    }
+    Case 'full scope keeps the real positive, original filter and no exclusions' {
+        $full = Get-GameBatchPlan $repository
+        Assert ($full.scope -ceq 'full' -and @($full.localOnly).Count -eq 0) 'Full scope must stay the default with no exclusions.'
+        $realfull = @($full.batches | Where-Object name -CEQ 'scene-realfull')[0]
+        Assert ($realfull.count -eq 3) 'Full scene-realfull count changed.'
+        Assert ($realfull.filter -cmatch 'RealFirstBattleFlowTests') 'Full scene-realfull filter must still select the real positive.'
+    }
+    Case 'committable gate PASS summary declares scope and the private-asset boundary' {
+        $summary = Get-GatePassSummary (Get-GameBatchPlan $repository -Scope committable)
+        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 928 passed; CLI unit 464 passed; CLI integration 359 passed + 2 skipped (361 total); Prepare 89 passed; Godot source/discovery 626; positives 622 as serial 85/74/2/5/6/3/5/28/412/2 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
+        Assert ($summary -ceq $expected) "Wrong committable gate PASS summary: $summary"
+        Assert ($summary -cmatch 'committable-scope full gate') 'Committable identity missing.'
+        Assert ($summary -cmatch 'local-only real-asset positives excluded') 'Private-asset boundary missing.'
+    }
+    Case 'unknown gate scope fails closed' {
+        Fails { Get-GameBatchPlan $repository -Scope bogus } 'Cannot validate argument|ValidateSet'
     }
     Case 'gate PASS summary follows changed plan counts instead of static CLI text' {
         $cli = @($plan.projects | Where-Object name -CEQ 'cli-integration')[0]
@@ -105,7 +135,7 @@ public class Fixture
             $cli.skipped = 3
             $summary = Get-GatePassSummary $plan
             Assert ($summary -match 'CLI integration 246 passed \+ 3 skipped \(249 total\)') 'Changed CLI plan counts were not rendered.'
-            Assert ($summary -notmatch 'CLI integration 279|CLI integration 188') 'Static CLI plan count remained in changed summary.'
+            Assert ($summary -notmatch 'CLI integration 359|CLI integration 188') 'Static CLI plan count remained in changed summary.'
         } finally {
             $cli.passed = $originalPassed
             $cli.skipped = $originalSkipped

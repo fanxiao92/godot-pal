@@ -208,7 +208,13 @@ internal static class Program
         if (!File.Exists(path)) return null;
         try
         {
-            using var d = JsonDocument.Parse(File.ReadAllText(path));
+            // Share-compatible read: the concurrent production writer (Set-Content) must never
+            // be blocked by a poll, otherwise it records a spurious CaptureFailure sharing
+            // violation (#76 round3 CI flake). Torn writes still surface as JsonException
+            // (pending while in flight, fatal for the final strict read).
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            using var d = JsonDocument.Parse(reader.ReadToEnd());
             return (d.RootElement.ValueKind == JsonValueKind.Array ? d.RootElement[0] : d.RootElement).Clone();
         }
         // Only an explicitly in-flight read may treat a torn write or Windows

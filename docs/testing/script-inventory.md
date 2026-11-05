@@ -35,7 +35,7 @@
 
 | 路径 | 职责 | 已知调用方／边界 | 入口身份与处置 |
 | --- | --- | --- | --- |
-| [`Get-Godot.ps1`](../../scripts/Get-Godot.ps1) | 下载固定 Windows .NET 引擎到新目录并核 SHA512，不安装/PATH | 搜索范围内未查到运行调用或当前文档入口；外部未知 | 显式工具链准备；保留，后续是否退役另核 |
+| [`Get-Godot.ps1`](../../scripts/Get-Godot.ps1) | 下载固定 Windows .NET 引擎到新目录并核 SHA512，不安装/PATH | CI full-check（#76）每次运行下载核验；搜索范围内无本地自动调用；外部未知 | 显式工具链准备；保留 |
 | [`Get-GdUnitPackages.ps1`](../../scripts/Get-GdUnitPackages.ps1) | 校验锁定四文件 bundle 并 bootstrap | M0、Range；GdUnitPackages 回归；[包说明](gdunit-source-packages.md) | 显式 Game 前置；保留，普通 Unit 无需调用 |
 | [`gdunit-packages.lock.json`](../../scripts/gdunit-packages.lock.json) | 固定包来源、recipe、文件长度/散列与地址 | Get-GdUnitPackages、Engineering、Range；GdUnitPackages 回归 | 资源身份数据，不可执行；保留 |
 | [`Prepare-GameScene.ps1`](../../scripts/Prepare-GameScene.ps1) | M1 包显式离线转换为 Godot native 场景/资源，拒绝覆盖 | `Test-GameStartup.ps1`；PreparePathSafety/PrepareProcess 回归；根 README | 显式资源准备；保留，不自动提取/同步、不创建探索 profile |
@@ -56,7 +56,7 @@
 | [`Test-CiCandidate.ps1`](../../scripts/Test-CiCandidate.ps1) | 校验实际 checkout/tree/parents、run/attempt/mode 与候选证明 | Candidate/Candidate-Inputs 维护回归；已退出 workflow start/end | 显式强审计；保留，不把 Unit 身份当 FullProof |
 | [`New-CiCostInput.ps1`](../../scripts/New-CiCostInput.ps1) | 旧完整 CI 的成本输入与候选证据关联 | 当前无 workflow/脚本运行调用；CiCostInput、CiFullProof 回归仍消费；外部未知 | 原自动路径暂停；保留兼容证据工具，恢复另立任务 |
 | [`Test-CiFullProof.ps1`](../../scripts/Test-CiFullProof.ps1) | 旧完整验收候选、产物和成本证明校验，拒绝 Unit mode | 当前无 workflow/脚本运行调用；CiFullProof 回归与 CI 文档仍消费；外部未知 | 原自动路径暂停；显式维护保留，不以旧成功满足 Unit 要求 |
-| [`Test-M0.ps1`](../../scripts/Test-M0.ps1) | 唯一保留的重型完整门：缓存/solution、各测试层、Game 重复轮/负控制及 startup | 根 README、Game README；DotnetBoundary/GdUnitPackages 回归检查定义；无当前自动调用 | 显式完整验收；保留，Unit 阶段不默认运行 |
+| [`Test-M0.ps1`](../../scripts/Test-M0.ps1) | 唯一保留的重型完整门：缓存/solution、各测试层、Game 重复轮/负控制及 startup；`-Scope committable` 为 CI 可提交子集（#76） | 根 README、Game README；CI full-check（committable，#76）；DotnetBoundary/GdUnitPackages 回归检查定义 | 显式完整验收（full 默认）与 CI 可提交子集入口（committable）；保留 |
 | [`Test-GameStartup.ps1`](../../scripts/Test-GameStartup.ps1) | 人工资源真实 Godot import/Main 启动与指定拒绝控制 | `Test-M0.ps1` 直接调用，内部用 Prepare-GameScene | 显式验收子入口；保留，不证明 GPU/物理桌面 |
 | [`Test-GodotCompatibility.ps1`](../../scripts/Test-GodotCompatibility.ps1) | 外部人工项目、生成器/net10 构建/引擎兼容与负控制探针 | 搜索范围内未查到运行调用或当前文档入口；外部未知 | 特殊兼容调查；保留，不能从历史探针推断当前运行成功 |
 | [`Test-RealDialogueGpu.ps1`](../../scripts/Test-RealDialogueGpu.ps1) | 选定语言/可选真实 Main 的 GPU 回读及程序输入；保护真实资源身份 | 无仓内脚本运行调用；[对话](../design/dialogue-display.md)和[NPC 宿主](../design/npc-interaction-host.md)为显式入口；外部未知 | 显式 GPU 证据，不是物理/人工验收；保留，不自动 prepare/build/清理 |
