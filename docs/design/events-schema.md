@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**M5 终态已交付：165/165 opcode 全具名（156 个动词），注册表完整性与反例覆盖机器核对常驻 CI，真实数据逐字节往返终验通过（#113 收官）。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（#96–#112 共 17 批逐批核对交付，各批清单与收官行见第 4 节注册表章节及各批条目小节）；#112 交付全部 165 位后，#113 将「注册表位集合与 script.c 三个 switch（共享 `PAL_InterpretInstruction`、trigger 专属、auto 专属）的去重 `case 0x…:` 清单双向差集为空」落为常驻 Unit 断言（`tests/Pal.Extract.UnitTests/OpcodeRegistryCompletenessTests.cs`），并同一测试机核「每个具名 opcode 至少一个反向编码反例测试」（见[反向编码反例覆盖](#反向编码反例覆盖113-终验)）。无 opcode 保留为 `raw`：`raw` 仅作为遗留/未知 opcode 的保底编码形态保留（兼容旧 M2/M3 包的 raw opcode 7 例外，见 startBattle 章节）。真实 `SSS.MKF` chunk 4（43538 条指令）export→rebuild SHA-256 `f36cf853…b39e72a` 逐字节一致、raw 命中 0（#78–#112 各批及 #113 终验，证据见各票回执）。此离线能力不表示运行时支持或全游戏入口/可达性已核实；运行时执行全量 opcode 留后续里程碑。对话使用原始消息引用，正文由独立语言包提供（格式见后文「语言包现代格式 v1」）；阶段边界见 [总体路线](development-plan.md)。
+状态：**M5 终态已交付：165/165 opcode 全具名（156 个动词），注册表完整性与反例覆盖机器核对为常驻 Integration 测试断言（#116 迁层；unit-only CI 当前不含该工程，在共享验收层与本地 dotnet test 重复执行），真实数据逐字节往返终验通过（#113 收官）。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（#96–#112 共 17 批逐批核对交付，各批清单与收官行见第 4 节注册表章节及各批条目小节）；#112 交付全部 165 位后，#113 将「注册表位集合与 script.c 三个 switch（共享 `PAL_InterpretInstruction`、trigger 专属、auto 专属）的去重 `case 0x…:` 清单双向差集为空」落为常驻 Integration 测试断言（#116 迁层，unit-only CI 不含该工程；`tests/Pal.Extract.IntegrationTests/OpcodeRegistryCompletenessTests.cs`），并同一测试机核「每个具名 opcode 至少一个反向编码反例测试」（见[反向编码反例覆盖](#反向编码反例覆盖113-终验)）。无 opcode 保留为 `raw`：`raw` 仅作为遗留/未知 opcode 的保底编码形态保留（兼容旧 M2/M3 包的 raw opcode 7 例外，见 startBattle 章节）。真实 `SSS.MKF` chunk 4（43538 条指令）export→rebuild SHA-256 `f36cf853…b39e72a` 逐字节一致、raw 命中 0（#78–#112 各批及 #113 终验，证据见各票回执）。此离线能力不表示运行时支持或全游戏入口/可达性已核实；运行时执行全量 opcode 留后续里程碑。对话使用原始消息引用，正文由独立语言包提供（格式见后文「语言包现代格式 v1」）；阶段边界见 [总体路线](development-plan.md)。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -13,7 +13,7 @@ pal-extract rebuild-events --input <events目录> --output <新文件>
 
 `export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
 
-具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 **165 条描述符（156 个动词）** 承载，script.c 三个 switch 的全部 165 个 opcode 位已全部具名：#96–#112 共 17 批逐批核对交付（控制流 3 批、对话表现 1 批、状态物品 3 批、战斗 2 批＋菜单、场景移动 8 批；各批的逐条语义、字段绑定与真实数据命中见第 4 节各批条目小节）。完整性自 #113 起由常驻测试 `OpcodeRegistryCompletenessTests` 在 CI 重复断言：注册表位集合与 script.c 去重 case 清单（173 个标签：共享 147 + trigger 17 + auto 9）双向差集为空，缺失位 0x0032/0x0048/0x0072/0x009D 为原版未使用（不在任何 switch）；每个具名 opcode 至少一个反向编码反例（[反向编码反例覆盖](#反向编码反例覆盖113-终验)）。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 **165 条描述符（156 个动词）** 承载，script.c 三个 switch 的全部 165 个 opcode 位已全部具名：#96–#112 共 17 批逐批核对交付（控制流 3 批、对话表现 1 批、状态物品 3 批、战斗 2 批＋菜单、场景移动 8 批；各批的逐条语义、字段绑定与真实数据命中见第 4 节各批条目小节）。完整性自 #113 起由常驻测试 `OpcodeRegistryCompletenessTests` 断言（#116 起位于 Integration 层：unit-only CI 当前不含该工程，在共享验收层与本地 dotnet test 重复执行）：注册表位集合与 script.c 去重 case 清单（173 个标签：共享 147 + trigger 17 + auto 9）双向差集为空，缺失位 0x0032/0x0048/0x0072/0x009D 为原版未使用（不在任何 switch）；每个具名 opcode 至少一个反向编码反例（[反向编码反例覆盖](#反向编码反例覆盖113-终验)）。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
 
 导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
@@ -239,7 +239,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 
 #### 当前注册表（165 个 opcode 位，156 个动词）
 
-完整性声明（#113 起常驻 CI）：本表 165 行与 `reference/sdlpal/script.c` 三个 switch 的去重 `case 0x…:` 清单双向差集为空（173 个标签：共享 `PAL_InterpretInstruction` 147 + trigger 开关 17 + auto 开关 9；缺失位 0x0032/0x0048/0x0072/0x009D 为原版未使用，不在任何 switch，见[盘点文档](../milestones/m5/opcode-inventory.md)）。机器断言：`tests/Pal.Extract.UnitTests/OpcodeRegistryCompletenessTests.cs`（`Script_switch_case_labels_match_the_registry_in_both_directions`）。
+完整性声明（#113 起常驻测试断言；#116 迁至 Integration 层，unit-only CI 不含该工程）：本表 165 行与 `reference/sdlpal/script.c` 三个 switch 的去重 `case 0x…:` 清单双向差集为空（173 个标签：共享 `PAL_InterpretInstruction` 147 + trigger 开关 17 + auto 开关 9；缺失位 0x0032/0x0048/0x0072/0x009D 为原版未使用，不在任何 switch，见[盘点文档](../milestones/m5/opcode-inventory.md)）。机器断言：`tests/Pal.Extract.IntegrationTests/OpcodeRegistryCompletenessTests.cs`（`Script_switch_case_labels_match_the_registry_in_both_directions`）。
 
 | opcode | op | 字段（绑定） | 执行方式 | 后继 |
 |---|---|---|---|---|

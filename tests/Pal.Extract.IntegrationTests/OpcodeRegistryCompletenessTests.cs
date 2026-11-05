@@ -5,7 +5,9 @@ using Xunit;
 namespace Pal.Extract.Tests;
 
 // M5 final acceptance (#113): two permanent machine checks on the opcode registry,
-// both reading the repository's own files (never real game data):
+// both reading the repository's own files (never real game data). This file lives in the
+// integration layer (#116): unit-boundary.md forbids File/Directory tokens in unit test
+// sources, and both checks are repository-file reads, so the unit layer cannot host them.
 //   1) The deduplicated `case 0x…:` label set of PAL_InterpretInstruction /
 //      PAL_RunTriggerScript / PAL_RunAutoScript in the read-only reference
 //      reference/sdlpal/script.c must equal OpcodeRegistry.ByOpcode's key set in
@@ -15,7 +17,9 @@ namespace Pal.Extract.Tests;
 //      instead of a one-off scan (the #112 receipt's closing self-check).
 //   2) Every registered opcode must have at least one reverse-encoding
 //      counterexample test: the Opcode*Tests.cs sources are scanned for
-//      Decode(<index>, 0xOPCODE, ...) literals and compared with the registry.
+//      Decode(<index>, 0xOPCODE, ...) literals and compared with the registry. The scan
+//      deliberately still targets tests/Pal.Extract.UnitTests: the Opcode*Tests.cs batches
+//      it measures remain unit-layer sources (their Decode call shapes feed this check).
 //      The only test-side opcode outside the registry is OpcodeCounterexampleTests'
 //      raw sample 0x0032, which has no case anywhere in script.c and stays raw.
 // The shared counterexample skeleton (edit one semantic field -> the re-encoded

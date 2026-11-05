@@ -59,7 +59,7 @@ opcode 的精确分批在 T0 之后从 `script.c` 的 `case` 清单机器核对�
 
 ## 交付结果与勘误（#113 收官）
 
-M5 全部任务已交付：基座与 13 张数据表（#78–#91）、4 件 MKF 图像完整包（#92–#95）、17 批 165 个 opcode（#96–#112）、src 侧加载器字段迁移（#114/#115，M5 期间并入并已在 base 集成）。#113 终验收口：注册表完整性（165 位 vs script.c 173 个 `case` 标签去重清单双向差集为空）与反例覆盖（每 opcode ≥1）落为常驻 Unit 测试 `tests/Pal.Extract.UnitTests/OpcodeRegistryCompletenessTests.cs`；真实数据终验全绿（export-events→rebuild-events SHA `f36cf853…b39e72a` 逐字节一致、raw 命中 0；export-data 13 表 recordCount/byteLength/chunk SHA 与 object 视图分布核对；export-battle-images ×4）；CLI Unit / CLI Integration / Core Unit 三层终门全绿（Prepare/Game 不重跑，引用 #115 同源全绿留档）。证据：`C:/evidence/m5/113/receipt.md`。
+M5 全部任务已交付：基座与 13 张数据表（#78–#91）、4 件 MKF 图像完整包（#92–#95）、17 批 165 个 opcode（#96–#112）、src 侧加载器字段迁移（#114/#115，M5 期间并入并已在 base 集成）。#113 终验收口：注册表完整性（165 位 vs script.c 173 个 `case` 标签去重清单双向差集为空）与反例覆盖（每 opcode ≥1）落为常驻测试 `tests/Pal.Extract.IntegrationTests/OpcodeRegistryCompletenessTests.cs`（#116 起迁至 Integration 层：unit-only CI 不覆盖该工程——完整性机检脱离 CI 属 #76 full-check 复启待覆盖范围，如实登记）；真实数据终验全绿（export-events→rebuild-events SHA `f36cf853…b39e72a` 逐字节一致、raw 命中 0；export-data 13 表 recordCount/byteLength/chunk SHA 与 object 视图分布核对；export-battle-images ×4）；CLI Unit / CLI Integration / Core Unit 三层终门全绿（Prepare/Game 不重跑，引用 #115 同源全绿留档）。证据：`C:/evidence/m5/113/receipt.md`。
 
 票面勘误与裁定记录：
 
