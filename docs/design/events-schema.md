@@ -1,6 +1,6 @@
 # events.json 契约
 
-状态：**转换策略与 v1 契约已定义；Pal.Extract 的完整 chunk 4 导出/重建已实现基础离线子集。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（165 个 opcode 位、156 个动词：M5 批1 #96 基础控制流、批2 #97 条件跳转一、批3 #98 条件跳转二、批4 #99 对话表现、状态物品批1 #100、状态物品批2 #101、状态物品批3 #102（状态物品域 29 个 opcode 收官）、战斗批1 #103、战斗批2+菜单 #104（战斗域 22 个 opcode 收官、菜单域 2 个 opcode 收官）、场景移动批1 #105、场景移动批2 #106、场景移动批3 #107（移动子域 31 个 opcode 收官）、场景移动对象批1 #108、场景移动对象批2 #109（对象子域 13 个 opcode 收官）、场景移动屏幕批1 #110、场景移动屏幕批2 #111（屏幕子域 19 个 opcode 收官）、场景移动音乐场景特殊 #112（场景移动域 75 个 opcode 收官、165 个 opcode 全量收官），见第 4 节注册表章节）；#112 机器核对注册表位集合与 script.c case 清单双向差集为空，无 opcode 保留为 `raw`（`raw` 仅作为遗留/未知 opcode 的保底编码形态保留）。此离线能力不表示运行时支持或全游戏入口/可达性已核实。对话使用原始消息引用，正文由独立语言包提供；语言包格式与 SLF 显示语义的集成留到 M3 事件里程碑，阶段边界见 [总体路线](development-plan.md)。M1/M2 仅处理静态场景资源与构建，不要求转换或执行事件。全量 opcode 注册表、真实数据验证与运行时支持按里程碑补齐，不将本文描述当成已存在的工具能力。
+状态：**M5 终态已交付：165/165 opcode 全具名（156 个动词），注册表完整性与反例覆盖机器核对常驻 CI，真实数据逐字节往返终验通过（#113 收官）。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（#96–#112 共 17 批逐批核对交付，各批清单与收官行见第 4 节注册表章节及各批条目小节）；#112 交付全部 165 位后，#113 将「注册表位集合与 script.c 三个 switch（共享 `PAL_InterpretInstruction`、trigger 专属、auto 专属）的去重 `case 0x…:` 清单双向差集为空」落为常驻 Unit 断言（`tests/Pal.Extract.UnitTests/OpcodeRegistryCompletenessTests.cs`），并同一测试机核「每个具名 opcode 至少一个反向编码反例测试」（见[反向编码反例覆盖](#反向编码反例覆盖113-终验)）。无 opcode 保留为 `raw`：`raw` 仅作为遗留/未知 opcode 的保底编码形态保留（兼容旧 M2/M3 包的 raw opcode 7 例外，见 startBattle 章节）。真实 `SSS.MKF` chunk 4（43538 条指令）export→rebuild SHA-256 `f36cf853…b39e72a` 逐字节一致、raw 命中 0（#78–#112 各批及 #113 终验，证据见各票回执）。此离线能力不表示运行时支持或全游戏入口/可达性已核实；运行时执行全量 opcode 留后续里程碑。对话使用原始消息引用，正文由独立语言包提供（格式见后文「语言包现代格式 v1」）；阶段边界见 [总体路线](development-plan.md)。
 
 原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
@@ -13,7 +13,7 @@ pal-extract rebuild-events --input <events目录> --output <新文件>
 
 `export-events` 只读 `SSS.MKF` 的 chunk 0（32-byte `EVENTOBJECT` 数组）、chunk 1（8-byte `SCENE` 数组）及 chunk 4（8-byte `SCRIPTENTRY` 数组）。它完整转写 chunk 4 到 `shared.json`，全部命令保留原地址、顺序后继及三个 WORD 操作数；当前场景和场景对象的非零 trigger/auto 根也被枚举为入口。由于尚未核实足以安全划分的完整可达性，全部命令保守放在 `shared`，不声称对象表 union 根或全局可达性已完成分类。
 
-实现的具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 165 条描述符承载（`end` 三变体（keep/advance/redirect，#96）、`goto`（#96）、`call`（#96）、`advanceEntry`（#96）、`confirmNoJump`（#96）、`itemShortageJump`（#97）、`playerLacksPoisonJump`（#97）、`enemyLacksPoisonJump`（#97）、`notPoisonedJump`（#97）、`enemyHpAboveJump`（#97）、`enemyTurnJump`（#97）、`partyHpNotFullJump`（#97）、`waitForAnyKey`（#97）、`roleInPartyJump`（#98）、`notFacingObjectJump`（#98）、`objectOutOfZoneJump`（#98）、`delay`（#98）、`itemNotEquippedJump`（#98）、`notFirstOfKindJump`（#98）、`stateMatchJump`（#98）、`sceneMatchJump`（#98）、`quitGame`（#98）、`randomBranch`（#98）、`restoreScreen`（#99）、`backupScreen`（#99）、`setExtraAttr`（#100）、`equipItem`（#100）、`incPlayerAttr`（#100）、`setPlayerStat`（#100）、`changeCash`（#100）、`addItem`（#100）、`removeItem`（#100）、`removeEquipment`（#101）、`applyPoisonToEnemy`（#101）、`applyPoisonToPlayer`（#101）、`curePoisonByObjectIdForEnemy`（#101）、`curePoisonByObjectIdForPlayer`（#101）、`curePoisonsByLevel`（#101）、`setStatusPlayer`（#101）、`setStatusEnemy`（#101）、`clearPlayerStatus`（#101）、`addMagic`（#102）、`removeMagic`（#102）、`setMagicBaseDamageByMp`（#102）、`halveHp`（#102）、`killPlayer`（#102）、`setMagicBaseDamageByCash`（#102）、`increaseLevel`（#102）、`halveCash`（#102）、`inflictDamageToEnemy`（#103）、`changeBattleSprite`（#103）、`collectEnemyForItems`（#103）、`transformCollectedEnemies`（#103）、`teleportParty`（#106）、`drainHpFromEnemy`（#103）、`playerFlee`（#103）、`simulateMagic`（#103）、`halveEnemyHp`（#103）、`killEnemy`（#103）、`pauseEnemyChasing`（#106）、`speedUpEnemyChasing`（#106）、`throwWeapon`（#103）、`enemyUseMagic`（#104）、`enemyEscape`（#104）、`stealFromEnemy`（#104）、`blowAwayEnemies`（#104）、`walkNpcStep`（#106）、`setBattleResult`（#104）、`enableAutoBattle`（#104）、`showMagicCastAnimation`（#104）、`enemyDivide`（#104）、`enemySummon`（#104）、`enemyTransform`（#104）、`showBuyMenu`（#104）、`showSellMenu`（#104）、`randomJump`、`startBattle`（#103 复核）、`changeHp`（#100 复核）、`changeMp`（#100 复核）、`boostStat`（#102 复核）、`setDialog` 四变体（#99 复核）、`showDialog`（#99 复核）、`redraw`（#99 复核修正）、`waitUpdate`、`walkStep`、`face`、`walkTo`、`walkToSlow`（#105）、`setObjectPosition`、`setObjectPositionRelativeToParty`（#105）、`setObjectGesture`、`setPartyFacing`、`setObjectFacing`（#106）、`changeHpMp`（#100 复核）、`revivePlayer`（#101 复核）、`setAutoEntry`（#108 复核）、`setTriggerEntry`（#108 复核）、`rideEventObjectSlow`（#106）、`setTriggerMode`（#108 复核）、`markFailed`、`setMusic`（#112 复核）、`rideEventObject`（#106）、`setPartyPos`、`setState`（#108 复核）、`setBattlefield`（#103 复核）、`chasePlayer`（#106）、`requestReload`、`fadeToRed`（#110 复核维持）、`fadeOut`（#110 复核修正：frames→delay）、`hide`（#108 复核）、`setSceneScripts`（#112 复核）、`fadeScene`（#110 复核修正：mode→speed）、`setParty`（#112 复核）、`noop`（#112 复核）、`setObjectScript`（#109 复核）、`setStateRange`（#109 复核）、`moveParty`、`partyWalkToSlow`、`partyWalkTo`、`partyWalkToFast`、`walkToFast`、`moveObject`、`moveViewport`、`walkToFastest`、`rideEventObjectFast`、`setFollower`、`gatherParty`（#107，移动子域收官）、`nullifyObject`、`setBattleHidingTime`（#108，对象批1）、`syncState`、`setObjectLayer`、`placeUsedItem`、`animateObject`（#109，对象批2，对象子域收官）、`shakeScreen`、`setPlayingRng`、`playRng`、`fadeIn`、`useDayPalette`、`useNightPalette`、`waveScreen`（#110，屏幕批1）、`showFbp`、`toggleDayNightPalette`、`setPalette`、`colorFade`、`sceneFade`、`showEndingAnimation`、`fadeToScene`、`scrollFbp`、`showFbpWithEffectSprite`（#111，屏幕批2，屏幕子域收官）、`setBattleMusic`、`playSound`、`stopMusic`、`playCdMusic`、`changeScene`、`setPlayerSprite`、`changeSceneMap`、`advanceEntry` auto 位（#112，音乐场景特殊，场景移动域 75 个收官 + 165 个全量收官））；script.c 全部 165 个 opcode 位至此全部具名（#112 机器核对：注册表位集合与 script.c case 清单双向差集为空），其余 opcode—including 契约的其他基础动作—不再存在，`raw` 仅保留为遗留编码形态的保底。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
+具名映射由[opcode 注册表](#opcode-注册表表驱动78-冻结)的 **165 条描述符（156 个动词）** 承载，script.c 三个 switch 的全部 165 个 opcode 位已全部具名：#96–#112 共 17 批逐批核对交付（控制流 3 批、对话表现 1 批、状态物品 3 批、战斗 2 批＋菜单、场景移动 8 批；各批的逐条语义、字段绑定与真实数据命中见第 4 节各批条目小节）。完整性自 #113 起由常驻测试 `OpcodeRegistryCompletenessTests` 在 CI 重复断言：注册表位集合与 script.c 去重 case 清单（173 个标签：共享 147 + trigger 17 + auto 9）双向差集为空，缺失位 0x0032/0x0048/0x0072/0x009D 为原版未使用（不在任何 switch）；每个具名 opcode 至少一个反向编码反例（[反向编码反例覆盖](#反向编码反例覆盖113-终验)）。`rebuild-events` 校验版本、严格字段、重复 JSON 键、WORD 范围、地址完整性、next 与入口引用，并按具名映射重编码；未映射操作数和低字节字段高位保留。只写 chunk 4 字节，不重建整个 MKF。输入必须是完整事件集合，输出不会覆盖既有内容。重建后比较实际 chunk SHA-256 与清单记录；匹配时可证明字节相同，具名语义编辑导致不匹配时，成功输出会明确提示差异而不回退复制旧 source 字节。
 
 导出目前因无法证明所有权而将完整指令集放在 `shared`；重建器接受符合 v1 清单的多文件集合，并按全局文件/标签表校验跨文件 `next` 与入口引用。工具仍不支持通过 JSON 更改脚本长度/地址、对象表 union 根分类或运行时加载；真实原始资源不属于测试或仓库输入。CLI 人工回归覆盖完整 65,536 地址空间与 WORD 后继回绕、跨文件集合、重复地址/标签及悬空引用；这不替代真实数据往返。
 
@@ -238,6 +238,8 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 | 0x004A setBattlefield | case 0x004A：`gpGlobals->wNumBattleField = operand0` | 战场编号 → `battlefieldId` |
 
 #### 当前注册表（165 个 opcode 位，156 个动词）
+
+完整性声明（#113 起常驻 CI）：本表 165 行与 `reference/sdlpal/script.c` 三个 switch 的去重 `case 0x…:` 清单双向差集为空（173 个标签：共享 `PAL_InterpretInstruction` 147 + trigger 开关 17 + auto 开关 9；缺失位 0x0032/0x0048/0x0072/0x009D 为原版未使用，不在任何 switch，见[盘点文档](../milestones/m5/opcode-inventory.md)）。机器断言：`tests/Pal.Extract.UnitTests/OpcodeRegistryCompletenessTests.cs`（`Script_switch_case_labels_match_the_registry_in_both_directions`）。
 
 | opcode | op | 字段（绑定） | 执行方式 | 后继 |
 |---|---|---|---|---|
@@ -733,6 +735,178 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 - 未登记 opcode 一律 `raw`，仅携带公共字段；已登记 opcode 不得用 `raw`（唯一例外：兼容旧 M2/M3 包的 raw opcode 7 仍可无损重建，其操作数不按引用解释，见 startBattle 章节）。
 - 反向编码以 `source.opcode` 与三个源操作数为底，**全部映射字段重新编码**；未映射操作数原样保留；`lowByte` 字段保留源 WORD 高位；动词与源 opcode 不匹配时拒绝。
 - 单元层的反例测试骨架（编辑语义字段 → 产物字节必须不同于源字节且等于手工重算值）作为后续每批 opcode 票的强制样板。
+
+### 反向编码反例覆盖（#113 终验）
+
+每个具名 opcode 至少一个反向编码反例测试，骨架为「解码具名命令 → 编辑一个语义字段 → 校验并重编码：产物字节必须不同于源字节（证明真实重编码而非复制 source WORD）且等于独立手工重算的期望值；未知字段、越界值与悬空引用必须拒绝」（`OpcodeCounterexampleTests` 定义的样板，各批 `Opcode*Tests` 复用）。覆盖由常驻测试 `OpcodeRegistryCompletenessTests.Every_registered_opcode_has_a_counterexample_test` 机器核对：扫描各 `Opcode*Tests.cs` 源中的 `Decode(<下标>, 0x…, …)` 字面量并与注册表比对——注册表 165 位全部命中；测试侧唯一未注册 opcode 是 raw 样例 0x0032（script.c 全文无 case，保持 `raw`）。下表为同一扫描机器生成的覆盖清单（opcode → 动词 → 反例测试类）：
+
+| opcode | 动词 | 反例测试类 |
+|---|---|---|
+| 0x0000 | `end` | `OpcodeControlFlowBatch1Tests` |
+| 0x0001 | `end` | `OpcodeControlFlowBatch1Tests` |
+| 0x0002 | `end` | `OpcodeControlFlowBatch1Tests` |
+| 0x0003 | `goto` | `OpcodeControlFlowBatch1Tests` |
+| 0x0004 | `call` | `OpcodeControlFlowBatch1Tests` |
+| 0x0005 | `redraw` | `OpcodeDialogBatch4Tests` |
+| 0x0006 | `randomJump` | `OpcodeControlFlowBatch1Tests`, `OpcodeCounterexampleTests` |
+| 0x0007 | `startBattle` | `OpcodeBattleBatch1Tests`, `OpcodeCounterexampleTests` |
+| 0x0008 | `advanceEntry` | `OpcodeControlFlowBatch1Tests`, `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x0009 | `waitUpdate` | `OpcodeControlFlowBatch1Tests` |
+| 0x000A | `confirmNoJump` | `OpcodeControlFlowBatch1Tests` |
+| 0x000B | `walkStep` | `OpcodeSceneMovementBatch1Tests` |
+| 0x000C | `walkStep` | `OpcodeSceneMovementBatch1Tests` |
+| 0x000D | `walkStep` | `OpcodeSceneMovementBatch1Tests` |
+| 0x000E | `walkStep` | `OpcodeSceneMovementBatch1Tests` |
+| 0x000F | `face` | `OpcodeSceneMovementBatch1Tests` |
+| 0x0010 | `walkTo` | `OpcodeSceneMovementBatch1Tests` |
+| 0x0011 | `walkToSlow` | `OpcodeSceneMovementBatch1Tests` |
+| 0x0012 | `setObjectPositionRelativeToParty` | `OpcodeSceneMovementBatch1Tests` |
+| 0x0013 | `setObjectPosition` | `OpcodeSceneMovementBatch1Tests` |
+| 0x0014 | `setObjectGesture` | `OpcodeSceneMovementBatch1Tests` |
+| 0x0015 | `setPartyFacing` | `OpcodeSceneMovementBatch2Tests` |
+| 0x0016 | `setObjectFacing` | `OpcodeSceneMovementBatch2Tests` |
+| 0x0017 | `setExtraAttr` | `OpcodeStatusItemBatch1Tests` |
+| 0x0018 | `equipItem` | `OpcodeStatusItemBatch1Tests` |
+| 0x0019 | `incPlayerAttr` | `OpcodeStatusItemBatch1Tests` |
+| 0x001A | `setPlayerStat` | `OpcodeStatusItemBatch1Tests` |
+| 0x001B | `changeHp` | `OpcodeStatusItemBatch1Tests` |
+| 0x001C | `changeMp` | `OpcodeCounterexampleTests`, `OpcodeStatusItemBatch1Tests` |
+| 0x001D | `changeHpMp` | `OpcodeStatusItemBatch1Tests` |
+| 0x001E | `changeCash` | `OpcodeStatusItemBatch1Tests` |
+| 0x001F | `addItem` | `OpcodeStatusItemBatch1Tests` |
+| 0x0020 | `removeItem` | `OpcodeStatusItemBatch1Tests` |
+| 0x0021 | `inflictDamageToEnemy` | `OpcodeBattleBatch1Tests` |
+| 0x0022 | `revivePlayer` | `OpcodeStatusItemBatch2Tests` |
+| 0x0023 | `removeEquipment` | `OpcodeStatusItemBatch2Tests` |
+| 0x0024 | `setAutoEntry` | `OpcodeSceneMovementObjectBatch1Tests` |
+| 0x0025 | `setTriggerEntry` | `OpcodeSceneMovementObjectBatch1Tests` |
+| 0x0026 | `showBuyMenu` | `OpcodeBattleBatch2Tests` |
+| 0x0027 | `showSellMenu` | `OpcodeBattleBatch2Tests` |
+| 0x0028 | `applyPoisonToEnemy` | `OpcodeStatusItemBatch2Tests` |
+| 0x0029 | `applyPoisonToPlayer` | `OpcodeStatusItemBatch2Tests` |
+| 0x002A | `curePoisonByObjectIdForEnemy` | `OpcodeStatusItemBatch2Tests` |
+| 0x002B | `curePoisonByObjectIdForPlayer` | `OpcodeStatusItemBatch2Tests` |
+| 0x002C | `curePoisonsByLevel` | `OpcodeStatusItemBatch2Tests` |
+| 0x002D | `setStatusPlayer` | `OpcodeStatusItemBatch2Tests` |
+| 0x002E | `setStatusEnemy` | `OpcodeStatusItemBatch2Tests` |
+| 0x002F | `clearPlayerStatus` | `OpcodeStatusItemBatch2Tests` |
+| 0x0030 | `boostStat` | `OpcodeStatusItemBatch3Tests` |
+| 0x0031 | `changeBattleSprite` | `OpcodeBattleBatch1Tests` |
+| 0x0033 | `collectEnemyForItems` | `OpcodeBattleBatch1Tests` |
+| 0x0034 | `transformCollectedEnemies` | `OpcodeBattleBatch1Tests` |
+| 0x0035 | `shakeScreen` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0036 | `setPlayingRng` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0037 | `playRng` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0038 | `teleportParty` | `OpcodeSceneMovementBatch2Tests` |
+| 0x0039 | `drainHpFromEnemy` | `OpcodeBattleBatch1Tests` |
+| 0x003A | `playerFlee` | `OpcodeBattleBatch1Tests` |
+| 0x003B | `setDialog` | `OpcodeDialogBatch4Tests` |
+| 0x003C | `setDialog` | `OpcodeCounterexampleTests`, `OpcodeDialogBatch4Tests` |
+| 0x003D | `setDialog` | `OpcodeDialogBatch4Tests` |
+| 0x003E | `setDialog` | `OpcodeDialogBatch4Tests` |
+| 0x003F | `rideEventObjectSlow` | `OpcodeSceneMovementBatch2Tests` |
+| 0x0040 | `setTriggerMode` | `OpcodeSceneMovementObjectBatch1Tests` |
+| 0x0041 | `markFailed` | `OpcodeControlFlowBatch2Tests` |
+| 0x0042 | `simulateMagic` | `OpcodeBattleBatch1Tests` |
+| 0x0043 | `setMusic` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x0044 | `rideEventObject` | `OpcodeSceneMovementBatch2Tests` |
+| 0x0045 | `setBattleMusic` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x0046 | `setPartyPos` | `OpcodeSceneMovementBatch2Tests` |
+| 0x0047 | `playSound` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x0049 | `setState` | `OpcodeSceneMovementObjectBatch1Tests` |
+| 0x004A | `setBattlefield` | `OpcodeBattleBatch1Tests` |
+| 0x004B | `nullifyObject` | `OpcodeSceneMovementObjectBatch1Tests` |
+| 0x004C | `chasePlayer` | `OpcodeSceneMovementBatch2Tests` |
+| 0x004D | `waitForAnyKey` | `OpcodeControlFlowBatch2Tests` |
+| 0x004E | `requestReload` | `OpcodeControlFlowBatch2Tests` |
+| 0x004F | `fadeToRed` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0050 | `fadeOut` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0051 | `fadeIn` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0052 | `hide` | `OpcodeSceneMovementObjectBatch1Tests` |
+| 0x0053 | `useDayPalette` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0054 | `useNightPalette` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0055 | `addMagic` | `OpcodeStatusItemBatch3Tests` |
+| 0x0056 | `removeMagic` | `OpcodeStatusItemBatch3Tests` |
+| 0x0057 | `setMagicBaseDamageByMp` | `OpcodeStatusItemBatch3Tests` |
+| 0x0058 | `itemShortageJump` | `OpcodeControlFlowBatch2Tests` |
+| 0x0059 | `changeScene` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x005A | `halveHp` | `OpcodeStatusItemBatch3Tests` |
+| 0x005B | `halveEnemyHp` | `OpcodeBattleBatch1Tests` |
+| 0x005C | `setBattleHidingTime` | `OpcodeSceneMovementObjectBatch1Tests` |
+| 0x005D | `playerLacksPoisonJump` | `OpcodeControlFlowBatch2Tests` |
+| 0x005E | `enemyLacksPoisonJump` | `OpcodeControlFlowBatch2Tests` |
+| 0x005F | `killPlayer` | `OpcodeStatusItemBatch3Tests` |
+| 0x0060 | `killEnemy` | `OpcodeBattleBatch1Tests` |
+| 0x0061 | `notPoisonedJump` | `OpcodeControlFlowBatch2Tests` |
+| 0x0062 | `pauseEnemyChasing` | `OpcodeSceneMovementBatch2Tests` |
+| 0x0063 | `speedUpEnemyChasing` | `OpcodeSceneMovementBatch2Tests` |
+| 0x0064 | `enemyHpAboveJump` | `OpcodeControlFlowBatch2Tests` |
+| 0x0065 | `setPlayerSprite` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x0066 | `throwWeapon` | `OpcodeBattleBatch1Tests` |
+| 0x0067 | `enemyUseMagic` | `OpcodeBattleBatch2Tests` |
+| 0x0068 | `enemyTurnJump` | `OpcodeControlFlowBatch2Tests` |
+| 0x0069 | `enemyEscape` | `OpcodeBattleBatch2Tests` |
+| 0x006A | `stealFromEnemy` | `OpcodeBattleBatch2Tests` |
+| 0x006B | `blowAwayEnemies` | `OpcodeBattleBatch2Tests` |
+| 0x006C | `walkNpcStep` | `OpcodeSceneMovementBatch2Tests` |
+| 0x006D | `setSceneScripts` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x006E | `moveParty` | `OpcodeSceneMovementBatch3Tests` |
+| 0x006F | `syncState` | `OpcodeSceneMovementObjectBatch2Tests` |
+| 0x0070 | `partyWalkToSlow` | `OpcodeSceneMovementBatch3Tests` |
+| 0x0071 | `waveScreen` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0073 | `fadeScene` | `OpcodeSceneMovementScreenBatch1Tests` |
+| 0x0074 | `partyHpNotFullJump` | `OpcodeControlFlowBatch2Tests` |
+| 0x0075 | `setParty` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x0076 | `showFbp` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x0077 | `stopMusic` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x0078 | `noop` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x0079 | `roleInPartyJump` | `OpcodeControlFlowBatch3Tests` |
+| 0x007A | `partyWalkTo` | `OpcodeSceneMovementBatch3Tests` |
+| 0x007B | `partyWalkToFast` | `OpcodeSceneMovementBatch3Tests` |
+| 0x007C | `walkToFast` | `OpcodeSceneMovementBatch3Tests` |
+| 0x007D | `moveObject` | `OpcodeSceneMovementBatch3Tests` |
+| 0x007E | `setObjectLayer` | `OpcodeSceneMovementObjectBatch2Tests` |
+| 0x007F | `moveViewport` | `OpcodeSceneMovementBatch3Tests` |
+| 0x0080 | `toggleDayNightPalette` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x0081 | `notFacingObjectJump` | `OpcodeControlFlowBatch3Tests` |
+| 0x0082 | `walkToFastest` | `OpcodeSceneMovementBatch3Tests` |
+| 0x0083 | `objectOutOfZoneJump` | `OpcodeControlFlowBatch3Tests` |
+| 0x0084 | `placeUsedItem` | `OpcodeSceneMovementObjectBatch2Tests` |
+| 0x0085 | `delay` | `OpcodeControlFlowBatch3Tests` |
+| 0x0086 | `itemNotEquippedJump` | `OpcodeControlFlowBatch3Tests` |
+| 0x0087 | `animateObject` | `OpcodeSceneMovementObjectBatch2Tests` |
+| 0x0088 | `setMagicBaseDamageByCash` | `OpcodeStatusItemBatch3Tests` |
+| 0x0089 | `setBattleResult` | `OpcodeBattleBatch2Tests` |
+| 0x008A | `enableAutoBattle` | `OpcodeBattleBatch2Tests` |
+| 0x008B | `setPalette` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x008C | `colorFade` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x008D | `increaseLevel` | `OpcodeStatusItemBatch3Tests` |
+| 0x008E | `restoreScreen` | `OpcodeDialogBatch4Tests` |
+| 0x008F | `halveCash` | `OpcodeStatusItemBatch3Tests` |
+| 0x0090 | `setObjectScript` | `OpcodeSceneMovementObjectBatch2Tests` |
+| 0x0091 | `notFirstOfKindJump` | `OpcodeControlFlowBatch3Tests` |
+| 0x0092 | `showMagicCastAnimation` | `OpcodeBattleBatch2Tests` |
+| 0x0093 | `sceneFade` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x0094 | `stateMatchJump` | `OpcodeControlFlowBatch3Tests` |
+| 0x0095 | `sceneMatchJump` | `OpcodeControlFlowBatch3Tests` |
+| 0x0096 | `showEndingAnimation` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x0097 | `rideEventObjectFast` | `OpcodeSceneMovementBatch3Tests` |
+| 0x0098 | `setFollower` | `OpcodeSceneMovementBatch3Tests` |
+| 0x0099 | `changeSceneMap` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x009A | `setStateRange` | `OpcodeSceneMovementObjectBatch2Tests` |
+| 0x009B | `fadeToScene` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x009C | `enemyDivide` | `OpcodeBattleBatch2Tests` |
+| 0x009E | `enemySummon` | `OpcodeBattleBatch2Tests` |
+| 0x009F | `enemyTransform` | `OpcodeBattleBatch2Tests` |
+| 0x00A0 | `quitGame` | `OpcodeControlFlowBatch3Tests` |
+| 0x00A1 | `gatherParty` | `OpcodeSceneMovementBatch3Tests` |
+| 0x00A2 | `randomBranch` | `OpcodeControlFlowBatch3Tests` |
+| 0x00A3 | `playCdMusic` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0x00A4 | `scrollFbp` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x00A5 | `showFbpWithEffectSprite` | `OpcodeSceneMovementScreenBatch2Tests` |
+| 0x00A6 | `backupScreen` | `OpcodeDialogBatch4Tests` |
+| 0x00A7 | `advanceEntry` | `OpcodeSceneMovementMusicSceneSpecialTests` |
+| 0xFFFF | `showDialog` | `OpcodeDialogBatch4Tests` |
 
 ### `startBattle` 的完整双向映射（M4 codec 检查点）
 

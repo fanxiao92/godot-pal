@@ -31,6 +31,8 @@ _Avoid_：反编译成结构化剧情
 
 **opcode 注册表**：离线工具中每条指令码的语义契约集合，声明动词、操作数字段映射、有符号/引用/特殊值、trigger/auto 差异与反向编码规则。
 
+**执行方式声明（executor）**：opcode 描述符声明的 switch 归属：`shared`（两执行器都经共享 `PAL_InterpretInstruction`）、`triggerSwitchOnly`/`autoSwitchOnly`（仅对应执行器自有 switch 处理，如 0x0008 与 0x00A7 的 advanceEntry 对偶；另一执行器到达时按未支持处理）、`bothSwitches`/`bothSwitchesDiffer`（两个执行器各有 case，语义一致或相异）。
+
 **具名命令（named）**：已核实语义、具有字段映射与反向编码规则的指令转写。
 （相对：raw 命令）
 

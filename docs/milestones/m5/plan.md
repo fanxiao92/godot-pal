@@ -2,7 +2,7 @@
 
 ## 权威范围与当前状态
 
-状态：**范围已确认，尚未实施。** 忠实还原以 `reference/sdlpal/` 为权威参考（[ADR-0001](../../adr/0001-faithful-event-transcription.md)、[ADR-0004](../../adr/0004-data-and-script-layers.md)）。本计划落盘已确认决策与拆解骨架；不发布 GitHub Issues、不认领任务、不编码、不准备资源、不运行 Godot/测试、不提交或推送。
+状态：**已交付（#113 收官）。** 全部 38 张前置票（#78–#112、#114、#115）集成后，#113 完成机器化总验收（注册表完整性常驻核对、真实数据终验、反例覆盖机检）与文档收口；交付结果与票面勘误见[交付结果与勘误](#交付结果与勘误113-收官)。忠实还原以 `reference/sdlpal/` 为权威参考（[ADR-0001](../../adr/0001-faithful-event-transcription.md)、[ADR-0004](../../adr/0004-data-and-script-layers.md)）。
 
 M5 是**纯离线**里程碑：交付 opcode 注册表 + 反向编译器 + 全量数据提取与验证。运行时执行全量 opcode 留后续里程碑，M5 不承诺可执行，只保证逐字节/字段验证证明转写保真。
 
@@ -56,3 +56,20 @@ opcode 的精确分批在 T0 之后从 `script.c` 的 `case` 清单机器核对�
 - 每个具名 opcode 的反向编码定向反例（编辑语义字段后真实重编码，非复制 source 字节）。
 - CI 用人工构造完整地址数组 + 微型归档夹具，覆盖 0 下标、WORD 回绕、raw、全 opcode 样例、数据表正反例。
 - 完整门按离线 CLI 的 unit/integration 层执行；无 Godot/GdUnit/GPU/人工验收（纯离线里程碑）。
+
+## 交付结果与勘误（#113 收官）
+
+M5 全部任务已交付：基座与 13 张数据表（#78–#91）、4 件 MKF 图像完整包（#92–#95）、17 批 165 个 opcode（#96–#112）、src 侧加载器字段迁移（#114/#115，M5 期间并入并已在 base 集成）。#113 终验收口：注册表完整性（165 位 vs script.c 173 个 `case` 标签去重清单双向差集为空）与反例覆盖（每 opcode ≥1）落为常驻 Unit 测试 `tests/Pal.Extract.UnitTests/OpcodeRegistryCompletenessTests.cs`；真实数据终验全绿（export-events→rebuild-events SHA `f36cf853…b39e72a` 逐字节一致、raw 命中 0；export-data 13 表 recordCount/byteLength/chunk SHA 与 object 视图分布核对；export-battle-images ×4）；CLI Unit / CLI Integration / Core Unit 三层终门全绿（Prepare/Game 不重跑，引用 #115 同源全绿留档）。证据：`C:/evidence/m5/113/receipt.md`。
+
+票面勘误与裁定记录：
+
+1. **ball.mkf 实为物品位图（票面命名勘误）**：本计划把 `abc/ball/f/fbp` 统称「MKF 图像类覆盖」，CLI 动词冻结为 `export-battle-images`；实施核对（#93）确认 `ball.mkf` 是物品位图单元（BALL.MKF，item 视图 `bitmap` 字段指向的段，itemmenu/uigame 原样 RLE 读取、无 YJ2/无帧表），非战斗精灵——冻结动词不改，语义按 #93 登记于 [battle-image-schema](../../design/battle-image-schema.md)。
+2. **throwWeapon=magicId（#103 裁定）**：票面预留「throwWeapon 的 itemId」方向按证据裁定为 `magicId`：0x0066 被投掷物对象经 `PAL_BattleSimulateMagic` 的 wMagicObjectID 按 object.json magic 视图消费（fight.c:5301/5321），真实数据 344/360 全落 magic 视图证据并集 295..394。
+3. **enemyTeamId=敌队表行号（#78 定名、#103 复核）**：0x0007 operand0 是 enemy-team.json（DATA chunk 2）行号（battle.c:1602 `lprgEnemyTeam[wEnemyTeam]`），不是 object union 下标。
+4. **越界数据事实（原版数据如实保留，提取不校验表范围）**：0x0007 真实数据 1 条 @42205 的 enemyTeamId=380 越敌队表 380 行（0..379）上沿，参考运行时按越界行读取（#103）；0x0067 enemyUseMagic 的 magicId 395/396/397 越 magic 视图证据并集 295..394 上沿（另 0x0042 的 24 不落任何已冻结证据区间，同口径按消费视图命名，#104/#103）；0x009E/0x009F 的 enemy 视图 objectId（403..512/410..470）脚本侧首次全落冻结区间 398..550 内（佐证不并入提取期证据，#104）；0x0058 的 itemId 281..283 越 item 证据并集 61..278 上沿（#97，留后续视图判定票）。另 setAutoEntry/setTriggerEntry 的 entry 上探 41099/43524 与 setSceneScripts 的 onEnter 36203 越 0x7FFF，为 entry 保持无符号 WORD 的直接证据（#108/#112）。
+5. **M4RealBattle 资产前置不计入**：M5 交付不含 `Assets/M4RealBattle53*` 系列的原生战斗资产前置（gitignored，属 M4 义务）；#115 同源 Prepare/Game 运行中 `RealFirstBattleFlowTests` 的唯一失败即此前置缺失（错误与 #114 留档逐字相同），按留档口径不计入。M5 的 abc/ball/f/fbp 完整包供 M6 战斗 Prepare 复用。
+6. **CI 夹具覆盖映射**（「验收」节「CI 用人工构造完整地址数组 + 微型归档夹具」的落地对号）：
+   - 完整 65,536 地址数组 + WORD 后继回绕 + 跨文件集合/重复地址标签/悬空引用 → `EventCliTests`（如 `Rebuild_events_supports_full_word_address_space_and_wraps_next_to_zero`，Integration 层微归档夹具）；
+   - raw → `OpcodeCounterexampleTests.Unregistered_opcode_decodes_raw_and_round_trips_source_operands`（Unit，raw 样例 0x0032）+ `EventCliTests.Legacy_raw7_package_rebuilds_without_a_named_mapping_migration`（旧 M2/M3 包兼容）；
+   - 全 opcode 样例 → 各批 `Opcode*Tests` 反例（165 位全覆盖，#113 起常驻机检）+ 各批 `EventCliTests` 真实命中形态往返样例；
+   - 数据表正反例 → 各表 `*TableTests`（Unit，人工字节正反例）+ `ExportData*Tests`（Integration，微型归档夹具与 index 清单）。

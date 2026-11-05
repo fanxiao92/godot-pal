@@ -1,6 +1,6 @@
 # 数据表 JSON 契约（data-schema）v1
 
-状态：**契约框架与逐字段 schema 已冻结（#78）。** 通用规则、文件组织、13 张表的逐字段 schema 与引用命名约定已锁定；各表的提取实现由 #79–#91 逐票登记。分层依据见 [ADR-0004](../adr/0004-data-and-script-layers.md)。
+状态：**M5 终态已交付（#113 收官）：13 张表全部实现只读提取 + 严格校验 + 语义解析。** 通用规则、文件组织、13 张表的逐字段 schema 与引用命名约定由 #78 冻结，各表提取实现由 #79–#91 逐票交付；#113 在最终 tip 以真实数据复核全部 13 表 recordCount/byteLength/chunk SHA-256 与 object 视图分布，汇总见[验收](#验收)节的「M5 终验」表。分层依据见 [ADR-0004](../adr/0004-data-and-script-layers.md)。
 
 ## 范围与边界
 
@@ -368,6 +368,31 @@ player 视图定义 4 WORD、enemy/poison 视图各定义 5 WORD（global.h）�
 真实数据核对：200 ÷ 200 = 1 条。
 
 ## 验收
+
+### M5 终验：13 表真实数据核对汇总（#113）
+
+在最终 tip 对本机 `data/raw/sdlpal`（绝对路径只读）执行 `export-data`（退出码 0），13 张表的 recordCount/byteLength/chunk SHA-256 与上文各表「真实数据核对」记录值逐项一致：
+
+| file | archive | chunk | recordCount | byteLength | chunk sha256 |
+|---|---|---|---|---|---|
+| battle-effect-index.json | DATA.MKF | 11 | 1 | 40 | `b815c493870790c3649e950cfb8ecb62249972a84ced7371641d4a7e4b4be68d` |
+| battle-field.json | DATA.MKF | 5 | 58 | 696 | `4c3572956692cef1cafed44aa1e031272a1b949323588eb12ff2a2778fba650d` |
+| enemy-pos.json | DATA.MKF | 13 | 1 | 100 | `97a101a8dd6cad71b95692bdb07ee3a34a4c2875ff01db6a7e2f175a47a42741` |
+| enemy-team.json | DATA.MKF | 2 | 380 | 3800 | `b1f9df44eeb267874fdb0a387b1dd689f1376798da1d745c37cb68f39e3989b0` |
+| enemy.json | DATA.MKF | 1 | 154 | 10780 | `40db95b3b8bfb9c3634af2bc0e42713758183ce0da4f4b13f9d14729540ba182` |
+| event-object.json | SSS.MKF | 0 | 5077 | 162464 | `44f407eab01da199797ceca160fa77c9d3efe2ceeb347e242babee2494c0b679` |
+| level-up-exp.json | DATA.MKF | 14 | 1 | 200 | `0be60aa1b94bac99651d61d649150103a4011b8059c9dfb17a48646f339ac087` |
+| level-up-magic.json | DATA.MKF | 6 | 20 | 400 | `0ddeecbb127886a6b6febb5c5464c23f6d9be2bd25f9d9f265f3856ed5eebd96` |
+| magic.json | DATA.MKF | 4 | 104 | 3328 | `d82885c5a8a4046db10eca47c0e26f5811b98289e60e443f2fa3af526a5e1bed` |
+| object.json | SSS.MKF | 2 | 565 | 7910 | `778b09793609dca55a363516b1af646022f3ef1bb757b4fa781f5d34dc6b2151` |
+| player-roles.json | DATA.MKF | 3 | 1 | 900 | `e19685ed54732cc689122acc6cbba3a18a22fe63f5ac28eea7e93226d1314353` |
+| scene.json | SSS.MKF | 1 | 295 | 2360 | `7f59702b4b09ad5fad8dad2c17b81056db7e411e9e08361a9382f3910f76971f` |
+| store.json | DATA.MKF | 0 | 21 | 378 | `699a4902ca9355642a9f207cd0379c304a1d6ed0133be8ea7865119f8d5d6569` |
+
+SSS.MKF file sha256: `942cb898f14d609475e3bcef0944e4d082ca88f76f4a7171028b451584a5e2ff`
+DATA.MKF file sha256: `c0bc968e5322b06fe669dd6e34483dd1f12dd223ac25b03b6dc74d3742635c1b`
+
+object.json 视图分布终值：player 6 / item 159 / magic 65 / enemy 152 / undetermined 183（共 565，与 #81/#82 冻结值一致）。各表首次核对与提取交付的票证 evidence：#79 event-object、#80 scene、#81/#82 object、#83 store、#84 enemy、#85 enemy-team、#86/#87 player-roles、#88 magic、#89 battle-field、#90 level-up-magic、#91 battle-effect-index/enemy-pos/level-up-exp（各票回执 `C:/evidence/m5/<票号>/receipt.md`）；#113 终验命令、逐表核对与原始输出见 `C:/evidence/m5/113/receipt.md` 与 `C:/evidence/m5/113/tmp/`（真实数据产物仅存临时目录，不入库）。
 
 - 每张表字段值与 SDLPal 加载后的结构**独立核对**（对照 `global.h` 布局与 `LOAD_DATA`/`DO_BYTESWAP`；上文各表「真实数据核对」即以本机只读数据的 chunk 长度 ÷ 结构大小验证记录数整除性）。
 - 语义解析：字段值正确 + 来源散列/长度一致即可，不要求重编码回原始字节（区别于脚本的逐字节往返）。
