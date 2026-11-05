@@ -127,6 +127,12 @@ public static class OpcodeRegistry
         new(0x0023, "removeEquipment", [new("playerRole", OpcodeFieldKind.Word, 0), new("partWord", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0024, "setAutoEntry", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("entry", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0025, "setTriggerEntry", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("entry", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #104: PAL_MakeScene + PAL_BuyMenu(operand0) - operand 0 is the store table row read as
+        // lprgStore[wStoreNum].rgwItems (script.c:1163, uigame.c:1629), i.e. store.json (DATA chunk 0).
+        new(0x0026, "showBuyMenu", [new("storeId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #104: PAL_MakeScene + PAL_SellMenu() (script.c:1172) - no operands; the sold items come
+        // from the player's inventory via PAL_ItemSelectMenu, not from a store row.
+        new(0x0027, "showSellMenu", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0028, "applyPoisonToEnemy", [new("scope", OpcodeFieldKind.Word, 0), new("objectId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0029, "applyPoisonToPlayer", [new("scope", OpcodeFieldKind.Word, 0), new("objectId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x002A, "curePoisonByObjectIdForEnemy", [new("scope", OpcodeFieldKind.Word, 0), new("objectId", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
@@ -201,7 +207,23 @@ public static class OpcodeRegistry
         // object.json magic-view object ID (real data: 344/360, inside the magic evidence range),
         // operand 1 counts 5-HP damage units (script.c:2007-2014).
         new(0x0066, "throwWeapon", [new("magicId", OpcodeFieldKind.Word, 0), new("damageUnits", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #104: unlike simulateMagic (0x0042) this issues no cast call - it writes the caller enemy
+        // slot's e.wMagic/e.wMagicRate (script.c:2020-2022); operand 0 is the object.json magic-view
+        // object ID consumed at fight.c:4671 (0xFFFF = dual magic, 0 = no magic), operand 1 is the
+        // cast rate with WORD 0 normalized to 10 at runtime only (encoding stays 0).
+        new(0x0067, "enemyUseMagic", [new("magicId", OpcodeFieldKind.Word, 0), new("magicRate", OpcodeFieldKind.Word, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0068, "enemyTurnJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #104: PAL_BattleEnemyEscape() (script.c:2039, battle.c:1376-1435) - animates every
+        // remaining enemy off-screen and terminates the battle (result 0); no operands.
+        new(0x0069, "enemyEscape", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #104: PAL_BattleStealFromEnemy(wEventObjectID, operand0) (script.c:2046, fight.c:5193) -
+        // the target is the caller enemy slot; operand 0 is the steal rate, checked as
+        // RandomLong(0, 10) <= rate with rate 0 always succeeding (fight.c:5254).
+        new(0x006A, "stealFromEnemy", [new("stealRate", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #104: (SHORT) cast into g_Battle.iBlow (script.c:2053) - a signed wind offset applied to
+        // every enemy during magic animations (fight.c:2681: positive blows right/down, negative
+        // left/up), reset at battle boundaries (fight.c:3608/4576).
+        new(0x006B, "blowAwayEnemies", [new("strength", OpcodeFieldKind.SignedWord, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         // #99 review correction: script.c:3295 reads the delay from operand 1 ((0 -> 60) ms
         // normalization at runtime) and the gesture flag from operand 2; operand 0 is unused.
         new(0x0005, "redraw", [new("delayUnits", OpcodeFieldKind.Word, 1), new("updateGestures", OpcodeFieldKind.Word, 2)], OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
@@ -219,12 +241,37 @@ public static class OpcodeRegistry
         // min(cash, 5000) * 2 / 5 written into the magic table entry named by operand 0, and
         // the same amount is deducted from cash (script.c:2549-2557).
         new(0x0088, "setMagicBaseDamageByCash", [new("magicId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #104: g_Battle.BattleResult = operand0 (script.c:2563) - the raw BATTLERESULT value kept
+        // as an unsigned WORD like status rows (battle.h:33-40: 0 terminated, 1 lost, 3 won,
+        // 0xFFFF fleed, 1000..1002 ongoing phases).
+        new(0x0089, "setBattleResult", [new("result", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
+        // #104: gpGlobals->fAutoBattle = TRUE (script.c:2570) - enables auto-battle for the next
+        // battle; no operands.
+        new(0x008A, "enableAutoBattle", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x008D, "increaseLevel", [new("levels", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x008E, "restoreScreen", NoFields, OpcodeExecutor.TriggerSwitchOnly, OpcodeSuccessor.Sequential),
         new(0x008F, "halveCash", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0091, "notFirstOfKindJump", [new("to", OpcodeFieldKind.Reference, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #104: operand 0 is a 1-based battle player slot (rgPlayer[operand0 - 1], script.c:2645-2648);
+        // WORD 0 picks no single player and only the party-wide color-shift loop runs - a fifth
+        // player-addressing shape (0 = none, unlike roleOperand's 0 = caller).
+        new(0x0092, "showMagicCastAnimation", [new("playerOperand", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x0094, "stateMatchJump", [new("eventObjectId", OpcodeFieldKind.Word, 0), new("state", OpcodeFieldKind.SignedWord, 1), new("to", OpcodeFieldKind.Reference, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
         new(0x0095, "sceneMatchJump", [new("sceneId", OpcodeFieldKind.Word, 0), new("to", OpcodeFieldKind.Reference, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #104: operand 0 counts the new copies (WORD 0 normalized to 1 at runtime only,
+        // script.c:2805-2811: total parts = copies + 1, each keeping (hp + copies) / (copies + 1) HP);
+        // operand 1 is the nullable no-division reference - WORD 0 means no jump (script.c:2792-2800),
+        // so it reuses the nullable-reference binding like removeItem.shortageTarget.
+        new(0x009C, "enemyDivide", [new("copies", OpcodeFieldKind.Word, 0), new("failTarget", OpcodeFieldKind.BattleTarget, 1)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #104: operand 0 is the summoned monster's object.json enemy-view object ID (0/0xFFFF = the
+        // summoner's own object, script.c:2884-2890, consumed via rgObject[w].enemy.wEnemyID at 2919);
+        // operand 1 is read as (SHORT) with non-positive values normalized to 1 (script.c:2885);
+        // operand 2 is the nullable cannot-summon reference (WORD 0 = no jump, script.c:2905-2907).
+        new(0x009E, "enemySummon", [new("objectId", OpcodeFieldKind.Word, 0), new("count", OpcodeFieldKind.SignedWord, 1), new("failTarget", OpcodeFieldKind.BattleTarget, 2)], OpcodeExecutor.Shared, OpcodeSuccessor.ConditionalJump),
+        // #104: the caller enemy becomes operand 0's object.json enemy-view object, keeping its
+        // current HP (script.c:2967-2972); blocked silently by hiding/sleep/paralysis/confusion
+        // with no jump; operands 1/2 are unused by the reference case.
+        new(0x009F, "enemyTransform", [new("objectId", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),
         new(0x00A0, "quitGame", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Stop),
         new(0x00A2, "randomBranch", [new("count", OpcodeFieldKind.Word, 0)], OpcodeExecutor.Shared, OpcodeSuccessor.RandomBranch),
         new(0x00A6, "backupScreen", NoFields, OpcodeExecutor.Shared, OpcodeSuccessor.Sequential),

@@ -1002,6 +1002,112 @@ public sealed class EventCliTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
     }
 
+    [Fact]
+    public async Task Battle_batch2_verbs_export_roundtrip_and_reencode_named_fields_from_labels()
+    {
+        // M5 battle batch 2 (#104) - the battle-domain closing batch plus the two menu verbs:
+        // showBuyMenu/showSellMenu, enemyUseMagic, enemyEscape, stealFromEnemy, blowAwayEnemies,
+        // setBattleResult, enableAutoBattle, showMagicCastAnimation, enemyDivide, enemySummon and
+        // enemyTransform. Hand-built stream, not retail data. enemyUseMagic's operand 0 is the
+        // magic-view object with the cast rate on operand 1; blowAwayEnemies reads a (SHORT) wind
+        // strength (real data uses -3/-2); setBattleResult keeps the raw BATTLERESULT WORD (0xFFFF
+        // = fleed); enemyDivide/enemySummon fail jumps are nullable references (WORD 0 = no jump);
+        // enemySummon's count is a (SHORT) with non-positive values normalized to 1 at runtime.
+        byte[] original = Words(
+            0x0026, 12, 0, 0,        // showBuyMenu: store row 12
+            0x0027, 0, 0, 0,         // showSellMenu: player inventory, no table row
+            0x0067, 318, 5, 0,       // enemyUseMagic: magic 318, rate 5
+            0x0069, 0, 0, 0,         // enemyEscape: all enemies flee, battle terminates
+            0x006A, 6, 0, 0,         // stealFromEnemy: steal rate 6 from the caller enemy
+            0x006B, unchecked((int)0xFFFD), 0, 0, // blowAwayEnemies: (SHORT) -3 wind
+            0x0089, 3, 0, 0,         // setBattleResult: won
+            0x008A, 0, 0, 0,         // enableAutoBattle
+            0x0092, 2, 0, 0,         // showMagicCastAnimation: player slot 2
+            0x009C, 0, 0, 0,         // enemyDivide: copies 0 (runtime 1), no fail target
+            0x009E, 433, 2, 0,       // enemySummon: enemy 433 x2, no fail target
+            0x009F, 410, 0, 0,       // enemyTransform: become enemy 410
+            0, 0, 0, 0);             // end keep
+        WriteArchive("SSS.MKF", new byte[32], Words(0, 1, 0, 0), [], [], original);
+        var export = await CliProcess.Run(root, "export-events", "--input", input, "--output", exported);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        string path = Path.Combine(exported, "shared.json");
+        var events = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var commands = events["commands"]!.AsArray();
+        Assert.Equal(13, commands.Count);
+        Assert.Equal("showBuyMenu", commands[0]!["op"]!.GetValue<string>());
+        Assert.Equal(12, commands[0]!["storeId"]!.GetValue<int>());
+        Assert.Equal("showSellMenu", commands[1]!["op"]!.GetValue<string>());
+        Assert.Equal("enemyUseMagic", commands[2]!["op"]!.GetValue<string>());
+        Assert.Equal(318, commands[2]!["magicId"]!.GetValue<int>());
+        Assert.Equal(5, commands[2]!["magicRate"]!.GetValue<int>());
+        Assert.Equal("enemyEscape", commands[3]!["op"]!.GetValue<string>());
+        Assert.Equal("stealFromEnemy", commands[4]!["op"]!.GetValue<string>());
+        Assert.Equal(6, commands[4]!["stealRate"]!.GetValue<int>());
+        Assert.Equal("blowAwayEnemies", commands[5]!["op"]!.GetValue<string>());
+        Assert.Equal(-3, commands[5]!["strength"]!.GetValue<int>());
+        Assert.Equal("setBattleResult", commands[6]!["op"]!.GetValue<string>());
+        Assert.Equal(3, commands[6]!["result"]!.GetValue<int>());
+        Assert.Equal("enableAutoBattle", commands[7]!["op"]!.GetValue<string>());
+        Assert.Equal("showMagicCastAnimation", commands[8]!["op"]!.GetValue<string>());
+        Assert.Equal(2, commands[8]!["playerOperand"]!.GetValue<int>());
+        Assert.Equal("enemyDivide", commands[9]!["op"]!.GetValue<string>());
+        Assert.Equal(0, commands[9]!["copies"]!.GetValue<int>());
+        Assert.Null(commands[9]!["failTarget"]);
+        Assert.Equal("enemySummon", commands[10]!["op"]!.GetValue<string>());
+        Assert.Equal(433, commands[10]!["objectId"]!.GetValue<int>());
+        Assert.Equal(2, commands[10]!["count"]!.GetValue<int>());
+        Assert.Null(commands[10]!["failTarget"]);
+        Assert.Equal("enemyTransform", commands[11]!["op"]!.GetValue<string>());
+        Assert.Equal(410, commands[11]!["objectId"]!.GetValue<int>());
+        var rebuild = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", rebuilt);
+        Assert.True(rebuild.ExitCode == 0, rebuild.Stderr);
+        Assert.Equal(original, File.ReadAllBytes(rebuilt)); // byte-exact round trip of the named batch
+
+        // Semantic edits re-encode from fields: the store row, enemy magic/rate (0 keeps the
+        // runtime-normalized encoding), steal rate, a positive wind, the fleed result WORD, no
+        // single caster, an explicit divide fail target with 2 copies, a summon of the summoner's
+        // own object (WORD 0) with a runtime-normalized count of -1 and an explicit fail target,
+        // and another transform target.
+        commands[0]!["storeId"] = 1;
+        commands[2]!["magicId"] = 375;
+        commands[2]!["magicRate"] = 0;
+        commands[4]!["stealRate"] = 0;
+        commands[5]!["strength"] = 3;
+        commands[6]!["result"] = 65_535;
+        commands[8]!["playerOperand"] = 0;
+        commands[9]!["copies"] = 2;
+        commands[9]!["failTarget"] = "L0002";
+        commands[10]!["objectId"] = 0;
+        commands[10]!["count"] = -1;
+        commands[10]!["failTarget"] = "L0001";
+        commands[11]!["objectId"] = 434;
+        File.WriteAllText(path, events.ToJsonString());
+        var edited = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "edited.bin"));
+        Assert.True(edited.ExitCode == 0, edited.Stderr);
+        Assert.Contains("differs from the recorded source SHA-256", edited.Stdout);
+        Assert.Equal(Words(
+            0x0026, 1, 0, 0,
+            0x0027, 0, 0, 0,
+            0x0067, 375, 0, 0,
+            0x0069, 0, 0, 0,
+            0x006A, 0, 0, 0,
+            0x006B, 3, 0, 0,
+            0x0089, unchecked((int)0xFFFF), 0, 0,
+            0x008A, 0, 0, 0,
+            0x0092, 0, 0, 0,
+            0x009C, 2, 2, 0,
+            0x009E, 0, unchecked((int)0xFFFF), 1,
+            0x009F, 434, 0, 0,
+            0, 0, 0, 0), File.ReadAllBytes(Path.Combine(root, "edited.bin")));
+
+        // A summon count beyond the signed WORD bound is rejected without output.
+        commands[10]!["count"] = 32_768;
+        File.WriteAllText(path, events.ToJsonString());
+        var rejected = await CliProcess.Run(root, "rebuild-events", "--input", exported, "--output", Path.Combine(root, "rejected.bin"));
+        Assert.Equal(1, rejected.ExitCode);
+        Assert.False(File.Exists(Path.Combine(root, "rejected.bin")));
+    }
+
     [Theory]
     [InlineData(65535, 0)]
     [InlineData(0, 65535)]
