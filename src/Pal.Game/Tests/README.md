@@ -35,7 +35,9 @@ headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证�
 
 `PalBattlePlayer` 的默认零 `MagicPower` / `FleeRate` 与既有 Core WORD 域对称映射，格式仍为 1。`NativeBattleContentTests` 增 9 例：现代输入经原生保存/重载后保留互异非零及 0/65535，旧资源缺属性仍为零，并经公开 trigger/lifecycle 的 boss 逃跑观察基值；非法 WORD 与重复角色明确拒绝。既有全字段隔离用例也加入非零面板。`PrepareBattleDataTests` 增 12 例，覆盖正式 Prepare 的同类正例、非法 WORD、重复/缺失角色，核对不改源、不发布坏内容。现有 M4 生命周期和装备法力规则用例保留。
 
-源码登记为 Game 647 = 644 positives + 3 controls，native-map 433（原 412 + 21）；Prepare 进程库存仍为 89，Core 仍为 928。这是测试身份/计数登记，不是完整门、正式 Main 输入、GPU、人工桌面、真实资源或 CI 验收声明；本票执行证据由对应候选收据记录。
+`ModernBattleContentTests` 再增 8 例公开 typed 内容验证回归：互异非零、缺省与 WORD 边界经公开 boss 逃跑消费，两个面板的负值/越界拒绝并定位到字段。原生旧资源夹具只移除 `PalBattlePlayer` 子资源中的两项导出，不改隐藏经验引用；typed 校验与 JSON 输入一致要求 0..65535。
+
+源码登记为 Game 647 = 644 positives + 3 controls，native-map 433（原 412 + 21）；Prepare 进程库存仍为 89，Core 为 936（原 928 + 8）。这是测试身份/计数登记，不是完整门、正式 Main 输入、GPU、人工桌面、真实资源或 CI 验收声明；本票执行证据由对应候选收据记录，恢复后的成功不覆盖先前失败原件。
 
 ## 维护边界
 

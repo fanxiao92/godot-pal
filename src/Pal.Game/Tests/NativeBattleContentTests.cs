@@ -30,13 +30,31 @@ public class NativeBattleContentTests
         try
         {
             string uri = root + "/Panels.tres";
-            AssertThat(ResourceSaver.Save(NativeBattleContent.Write(ModernBattleContent.Parse(data.ToJsonString())), uri)).IsEqual(Error.Ok);
+            var native = NativeBattleContent.Write(ModernBattleContent.Parse(data.ToJsonString()));
             if (magicPower == 0 && fleeRate == 0)
             {
-                // A format1 resource authored before these exports has neither property.
+                // Save non-default sentinels so the legacy fixture must actually remove both exports.
+                native.Players[0].MagicPower = 321;
+                native.Players[0].FleeRate = 654;
+            }
+            AssertThat(ResourceSaver.Save(native, uri)).IsEqual(Error.Ok);
+            if (magicPower == 0 && fleeRate == 0)
+            {
+                // Only the PalBattlePlayer sub-resource predates these exports, not Hidden.MagicPower.
                 string path = ProjectSettings.GlobalizePath(uri);
-                File.WriteAllLines(path, File.ReadAllLines(path).Where(line =>
-                    !line.StartsWith("MagicPower =", StringComparison.Ordinal) && !line.StartsWith("FleeRate =", StringComparison.Ordinal)));
+                string[] lines = File.ReadAllLines(path);
+                string declaration = lines.Single(line => line.StartsWith("[ext_resource ", StringComparison.Ordinal)
+                    && line.Contains("path=\"res://Scripts/Resources/PalBattlePlayer.cs\"", StringComparison.Ordinal));
+                string scriptId = declaration.Split(" id=\"", StringSplitOptions.None)[1].Split('"')[0];
+                int scriptLine = Array.IndexOf(lines, "script = ExtResource(\"" + scriptId + "\")");
+                AssertThat(scriptLine >= 0).IsTrue();
+                int start = Array.FindLastIndex(lines, scriptLine, line => line.StartsWith("[sub_resource ", StringComparison.Ordinal));
+                int end = Array.FindIndex(lines, scriptLine + 1, line => line.StartsWith("[", StringComparison.Ordinal));
+                AssertThat(start >= 0 && end > scriptLine).IsTrue();
+                string[] legacy = lines.Where((line, index) => index < start || index >= end
+                    || (!line.StartsWith("MagicPower =", StringComparison.Ordinal) && !line.StartsWith("FleeRate =", StringComparison.Ordinal))).ToArray();
+                AssertThat(lines.Length - legacy.Length).IsEqual(2);
+                File.WriteAllLines(path, legacy);
             }
             var loaded = NativeBattleContent.Load(uri);
             AssertThat(loaded.Player.MagicPower).IsEqual(magicPower);

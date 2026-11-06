@@ -5,6 +5,46 @@ namespace Pal.Core.Tests;
 
 public sealed class ModernBattleContentTests
 {
+    [Theory]
+    [InlineData("magicPower", -1)]
+    [InlineData("magicPower", 65536)]
+    [InlineData("fleeRate", -1)]
+    [InlineData("fleeRate", 65536)]
+    public void Typed_player_panels_reject_values_outside_WORD_with_field_location(string field, int value)
+    {
+        var content = ModernBattleContent.Parse(Data().ToJsonString());
+        var player = field == "magicPower" ? content.Player with { MagicPower = value } : content.Player with { FleeRate = value };
+        var invalid = new TriggerBattleContent(content.InitialRole, player, content.Growth, content.Teams);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(invalid));
+        Assert.Contains("players[0]." + field, error.Message);
+        Assert.Contains("expected integer in 0..65535", error.Message);
+    }
+
+    [Theory]
+    [InlineData(321, 654)]
+    [InlineData(0, 65535)]
+    [InlineData(65535, 0)]
+    [InlineData(0, 0)]
+    public void Typed_player_panel_WORDs_validate_and_feed_public_boss_flee(int magicPower, int fleeRate)
+    {
+        var legacy = ModernBattleContent.Parse(Data().ToJsonString());
+        Assert.Equal(0, legacy.Player.MagicPower);
+        Assert.Equal(0, legacy.Player.FleeRate);
+        var content = new TriggerBattleContent(legacy.InitialRole, legacy.Player with { MagicPower = magicPower, FleeRate = fleeRate },
+            legacy.Growth, legacy.Teams);
+        ModernBattleContent.Validate(content);
+        Assert.Equal(magicPower, content.Player.MagicPower);
+        Assert.Equal(fleeRate, content.Player.FleeRate);
+        var script = Script(content, new BattleRandom());
+        script.Start("shared", "npc", 28);
+        var battle = script.PendingBattle!.Lifecycle;
+        battle.SelectFlee(0);
+        Assert.True(battle.ResolveNextAction());
+        // fight.c: enemy dex0 + (level0+6)*4; draw0 cannot escape a boss even at WORD max.
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, fleeRate, 24, 0, false), battle.Current.Combat.LastFleeAttempt);
+        Assert.Null(battle.Completion);
+    }
+
     [Fact]
     public void Two_roles_and_duplicate_enemy_slots_enter_the_same_owned_lifecycle()
     {

@@ -38,6 +38,7 @@ public static partial class ModernBattleContent
             Words(r.Equipment, rp + ".equipment", 6); Words(r.Magics, rp + ".magics", 32); Words(r.Statuses, rp + ".statuses", 9);
             if (r.RoleId != p.RoleId || r.Hp != p.Hp || r.MaxHp != p.MaxHp) throw Error(pp, "role, HP and maxHp mismatch");
             Range(p.Attack, pp + ".attack"); Range(p.Defense, pp + ".defense"); Range(p.Dexterity, pp + ".dexterity");
+            Range(p.MagicPower, pp + ".magicPower"); Range(p.FleeRate, pp + ".fleeRate");
             Words(p.Equipment, pp + ".equipment", 6); Words(p.Statuses, pp + ".statuses", 9); Words(p.Poisons, pp + ".poisons");
             Range(p.DyingScript, pp + ".dyingScript"); Range(p.FriendDeathScript, pp + ".friendDeathScript");
             if (p.CoveredByRoleId is int cover) Range(cover, pp + ".coveredByRoleId", 0, 5);
