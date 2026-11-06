@@ -510,6 +510,7 @@ public partial class Main
         // A child display must not consume this battle callback's delta.
         resumeStoryDisplay = true;
         CompleteTrigger();
+        CompleteFirstBattleTrigger();
     }
 
     private void AdvanceStoryGesture(int pose)

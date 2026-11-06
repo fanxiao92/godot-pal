@@ -173,7 +173,7 @@ public partial class Main : Node2D
                 // Seed the validated battle declarations once; party order is explicit and
                 // independent of how many role records the content declares.
                 roleLiveState = new RoleLiveState(real.Resources.BattleContent.InitialRoles.Values.ToArray());
-                var world = DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
+                var world = DynamicEventWorld.ForHost(extendedRules, Battle.Current.Leader,
                     map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
                     roleLiveState, real.Resources.BattleContent.Players.Select(player => player.RoleId).ToArray());
                 Dialogue.FirstBattleWorld = world;
@@ -185,6 +185,8 @@ public partial class Main : Node2D
                     DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
                         map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport));
                 Dialogue.Initialize(Display, real.Resources, language, firstBattleSeedRandom, map.Data);
+                if (!Battle.InitializeTrigger(Dialogue.Session!))
+                    throw new InvalidOperationException("First battle trigger could not initialize its production world before exploration.");
                 // The verified closure reuses the production story-battle machinery: the facade
                 // carries the same checked exploration, scene, palette and settlement words, so
                 // team18's real battle, hooks and settlement run through the identical host.
@@ -347,6 +349,7 @@ public partial class Main : Node2D
                     firstBattleWorldTick = now;
                     world.AdvanceTriggerTick(trigger);
                     Dialogue!.BindPendingDisplays();
+                    CompleteFirstBattleTrigger();
                 }
             }
             if (changed) mapScene.UpdateScene(Exploration.Plan);
@@ -394,7 +397,12 @@ public partial class Main : Node2D
         {
             var entry = Dialogue!.Session!.Entries.Single(e =>
                 e is { OwnerType: "eventObject", OwnerId: 28, Slot: "wTriggerScript", Kind: "trigger" } && e.SourceAddress == request.EntryAddress);
-            Dialogue.Start(entry.FileId, entry.Id, request.OwnerId);
+            Guid requestId = Battle.PendingRequestId;
+            if (requestId == Guid.Empty)
+                throw new InvalidOperationException("First battle search request has no origin.");
+            Dialogue.Start(entry.FileId, entry.Id, request.OwnerId, requestId);
+            if (!Battle.BindTrigger(requestId, Dialogue.Session!))
+                throw new InvalidOperationException("First battle trigger call could not bind its search request.");
             CompleteFirstBattleTrigger(); // also handles synchronous, no-display completion
         }
         catch (Exception e) { Fail($"First battle trigger failed: {e.Message}"); }
@@ -423,6 +431,7 @@ public partial class Main : Node2D
         _ = Dialogue.Session.AcknowledgeTransition(transition.Id);
         // The call advanced past its transition; a newly parked display must be bound.
         Dialogue.BindPendingDisplays();
+        CompleteFirstBattleTrigger();
     }
 
     private static PackedScene mapScenePackedScene(string staticResources) =>
@@ -430,25 +439,14 @@ public partial class Main : Node2D
 
     private void CompleteFirstBattleTrigger()
     {
-        if (Failure is not null || exited || firstBattleActiveTrigger is not { } request
+        if (Failure is not null || exited || firstBattleActiveTrigger is null
             || Dialogue?.Session is not { Phase: TriggerScriptPhase.Completed } session) return;
-        // The completed pre-battle/Won/Lost call has done its world mutations; hand control
-        // back to the changed exploration. PendingBattle states are an error here because the
-        // battle request path is driven by the story-battle host wiring delivered with it.
+        // Core owns the call identity, current scene publication and return deadline. A
+        // refused receipt must leave both the facade request and Main's active call intact.
+        if (!Battle!.CompleteTrigger(Battle.PendingRequestId, session, unchecked((uint)Time.GetTicksMsec())))
+            throw new InvalidOperationException("First battle trigger completion does not match the active search request.");
         firstBattleActiveTrigger = null;
-        // The completed call's world mutations become the changed exploration state: entry
-        // rewrites/states/positions flow back into the session's observable object words.
-        if (firstBattleWorld is { } changed)
-            foreach (var source in changed.Objects)
-            {
-                var target = Battle!.State.World.EventObjects.SingleOrDefault(item => item.OwnerId == source.Id);
-                if (target is null) continue;
-                target.X = source.X; target.Y = source.Y; target.Direction = source.Direction;
-                target.State = source.State; target.VanishTime = source.VanishTime;
-                target.TriggerMode = source.TriggerMode; target.TriggerEntry = source.TriggerEntry;
-                target.AutoEntry = source.AutoEntry; target.CurrentFrame = source.CurrentFrame;
-            }
-        mapScene!.UpdateScene(Exploration!.Plan);
+        mapScene!.UpdateScene(Battle.Current.Plan);
     }
 
     private void CompleteTrigger()

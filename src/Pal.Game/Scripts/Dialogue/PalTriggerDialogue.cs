@@ -173,7 +173,8 @@ public partial class PalTriggerDialogue : Node
             while (request.Display.Current.Phase != DialogueDisplayPhase.Completed) request.Display.Update(request.Display.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
             preview.AcknowledgeDisplay(request.Id);
         }
-        Session.Start(fileId, entryId, caller);
+        if (sourceRequestId is { } origin) Session.Start(fileId, entryId, caller, origin);
+        else Session.Start(fileId, entryId, caller);
         BindPendingDisplay();
     }
 
