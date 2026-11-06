@@ -25,6 +25,7 @@ public partial class Main : Node2D
     private bool awaitingFirstBattleDraw;
     private bool firstBattleRendererSubscribed;
     private GodotBattleRandom? firstBattleRandom;
+    internal GodotBattleRandom? FirstBattleRandom => firstBattleRandom;
     private DynamicEventWorld? firstBattleWorld;
     private RoleLiveState? roleLiveState;
     private bool awaitingSceneDraw;
@@ -178,13 +179,20 @@ public partial class Main : Node2D
                     roleLiveState, real.Resources.BattleContent.Players.Select(player => player.RoleId).ToArray());
                 Dialogue.FirstBattleWorld = world;
                 firstBattleWorld = world;
-                var firstBattleSeedRandom = new GodotBattleRandom(selected.BattleSeed);
-                Dialogue.PreviewSessionFactory = () => new TriggerScriptSession(real.Resources.Events,
-                    language == "zh-Hans" ? real.Resources.Chinese : real.Resources.English,
-                    real.Resources.BattleContent, new GodotBattleRandom(selected.BattleSeed),
-                    DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
-                        map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport));
-                Dialogue.Initialize(Display, real.Resources, language, firstBattleSeedRandom, map.Data);
+                firstBattleRandom = new GodotBattleRandom(selected.BattleSeed);
+                Dialogue.PreviewSessionFactory = () =>
+                {
+                    var fork = firstBattleRandom.Fork();
+                    try
+                    {
+                        return (new TriggerScriptSession(real.Resources.Events,
+                            language == "zh-Hans" ? real.Resources.Chinese : real.Resources.English,
+                            real.Resources.BattleContent, fork, world.CreateIsolatedCopy(),
+                            Dialogue.Session!.Context.Color), fork);
+                    }
+                    catch { fork.Dispose(); throw; }
+                };
+                Dialogue.Initialize(Display, real.Resources, language, firstBattleRandom, map.Data);
                 if (!Battle.InitializeTrigger(Dialogue.Session!))
                     throw new InvalidOperationException("First battle trigger could not initialize its production world before exploration.");
                 // The verified closure reuses the production story-battle machinery: the facade
@@ -204,7 +212,6 @@ public partial class Main : Node2D
                 Display.UpdateCompleted += CompleteFirstBattleTrigger;
                 RenderingServer.FramePostDraw += StartFirstBattleAfterSceneDraw;
                 firstBattleRendererSubscribed = true;
-                firstBattleRandom = new GodotBattleRandom(selected.BattleSeed);
                 GD.Print($"PAL_M4_FIRST_BATTLE_REAL:scene2/map12; owner28/09C3; language={language}; closure verified; teams=[{string.Join(",", real.Closure.VerifiedBattleTeamIds)}]");
             }
             else if (firstBattle is not null) GD.Print($"PAL_M4_FIRST_BATTLE_CONTEXT:scene2/map12; owner28/09C3; language={language}; trigger closure unavailable");
@@ -493,6 +500,7 @@ public partial class Main : Node2D
         DisconnectRuntime();
         ReleaseStory();
         ReleaseDynamic();
+        ReleaseFirstBattleRandom();
         Failed?.Invoke(message);
     }
 
@@ -510,12 +518,19 @@ public partial class Main : Node2D
         }
     }
 
+    private void ReleaseFirstBattleRandom()
+    {
+        if (Dialogue is not null) Dialogue.PreviewSessionFactory = null;
+        firstBattleRandom?.Dispose(); firstBattleRandom = null;
+    }
+
     public override void _ExitTree()
     {
         exited = true;
         DisconnectRuntime();
         ReleaseStory();
         ReleaseDynamic();
+        ReleaseFirstBattleRandom();
         activeTrigger = null; firstBattleActiveTrigger = null; Interaction = null; input = null; battle = null; mapScene = null;
         if (firstBattleRendererSubscribed)
         {

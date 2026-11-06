@@ -48,6 +48,8 @@ public class SyntheticFirstBattleClosureTests
         using var fixture = new SyntheticFirstBattleFixture(statics, statics.ResourceRoot, staticProfile, lost: false);
         var main = new Main();
         main.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
+        Pal.Game.Dialogue.GodotBattleRandom? productionRandom = null;
+        Pal.Game.Dialogue.PalTriggerDialogue? ownedDialogue = null;
         Pal.Core.DynamicEventWorld? observedWorld = null;
         Pal.Core.RoleLiveState? observedOwner = null;
         Pal.Core.TriggerScriptSession? observedSession = null;
@@ -77,6 +79,9 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(world!.PartyRoles.SequenceEqual(new[] { 0, 1 })).IsTrue();
                     AssertThat(initialRoleOne.Hp).IsEqual(100);
                     AssertThat(initialRoleOne.Mp).IsEqual(5);
+                    productionRandom = main.FirstBattleRandom;
+                    ownedDialogue = main.Dialogue;
+                    AssertCurrentPreview(main);
                 }
                 AssertThat(ReferenceEquals(world, observedWorld)).IsTrue();
                 AssertThat(ReferenceEquals(owner, observedOwner)).IsTrue();
@@ -130,6 +135,7 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(current.Leader.StepPhase).IsEqual(expectedPhase);
                     AssertThat(current.Plan.LeaderFrameIndex).IsEqual(expectedPhase % 2 == 0 ? 0 : (expectedPhase + 1) / 2);
                     AssertThat(ReferenceEquals(returnedRoleOne, owner.Roles[1])).IsTrue();
+                    AssertCurrentPreview(main);
                 }
                 if (navigation != 0 && !observedNavigation)
                 {
@@ -236,11 +242,15 @@ public class SyntheticFirstBattleClosureTests
             scene.AssertHealthy();
         }
         finally { main.UpdateCompleted -= ObserveSharedRoles; }
+        AssertThat(productionRandom!.IsDisposed).IsTrue();
+        AssertThat(ownedDialogue!.PreviewSessionFactory).IsNull();
+        AssertThat(ownedDialogue.FirstBattleWorld).IsNull();
     }
 
     [TestCase(Timeout = 280000)]
     public async Task Synthetic_closure_Lost_ends_in_the_real_reload_todo_terminal()
     {
+        AssertNativeRandomFork();
         using var battleFixture = new NativeBattleProfileFixture();
         var statics = battleFixture.Static;
         // The bound branch re-tints every scene frame when the display palette changes
@@ -292,6 +302,99 @@ public class SyntheticFirstBattleClosureTests
         AssertThat(main.StoryLostTerminal).IsTrue();
         AssertThat(main.StoryLostReloadDiagnostics).IsEqual(1);
         scene.AssertHealthy();
+    }
+
+    private static void AssertCurrentPreview(Main main)
+    {
+        var source = main.Dialogue!.Session!;
+        var world = main.Dialogue.FirstBattleWorld!;
+        var random = main.FirstBattleRandom!;
+        var state = random.CurrentState;
+        var phase = source.Phase;
+        var call = source.CallId;
+        var origin = source.SourceRequestId;
+        var leader = world.Leader;
+        var objects = world.Objects.Select(obj => (obj.Id, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
+            obj.State, obj.VanishTime, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount)).ToArray();
+        var roles = world.RoleLiveState!.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var lease = main.Dialogue.PreviewSessionFactory!();
+        var fork = (Pal.Game.Dialogue.GodotBattleRandom)lease.Lifetime;
+        using (lease.Lifetime)
+        {
+            var preview = lease.Session;
+            AssertThat(fork.CurrentState).IsEqual(state);
+            AssertThat(preview.Context.Color).IsEqual(source.Context.Color);
+            foreach (int roleId in new[] { 0, 1 })
+            {
+                var previewRole = preview.BattleRoles![roleId];
+                var currentRole = roles[roleId];
+                if (previewRole.Level != currentRole.Level || previewRole.Hp != currentRole.Hp
+                    || previewRole.Mp != currentRole.Mp || previewRole.MaxHp != currentRole.MaxHp
+                    || previewRole.PrimaryExperience != currentRole.PrimaryExperience)
+                    throw new InvalidOperationException("U3 preview must copy NOW roles after the owned settlement, not startup templates.");
+                AssertThat(ReferenceEquals(previewRole, currentRole)).IsFalse();
+                AssertThat(previewRole.HiddenExperience.SequenceEqual(currentRole.HiddenExperience)).IsTrue();
+                AssertThat(previewRole.Equipment.SequenceEqual(currentRole.Equipment)).IsTrue();
+                AssertThat(previewRole.Magics.SequenceEqual(currentRole.Magics)).IsTrue();
+                AssertThat(previewRole.Statuses.SequenceEqual(currentRole.Statuses)).IsTrue();
+            }
+            // Exercise the actual factory's world verbs and park at battle without issuing a
+            // battle receipt. Neither this throwaway call nor its RNG draws own production.
+            var entry = preview.Entries.Single(e => e.OwnerId == 28 && e.Slot == "wTriggerScript");
+            preview.Start(entry.FileId, entry.Id, 28);
+            while (preview.PendingDisplay is { } display)
+            {
+                while (display.Display.Current.Phase != Pal.Core.DialogueDisplayPhase.Completed)
+                    display.Display.Update(display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
+                preview.AcknowledgeDisplay(display.Id);
+            }
+            AssertThat(preview.PendingBattle).IsNotNull();
+            fork.NextInclusive(0, 1000); fork.NextInclusive(0f, 1f);
+        }
+        AssertThat(fork.IsDisposed).IsTrue();
+        AssertThat(random.IsDisposed).IsFalse();
+        AssertThat(random.CurrentState).IsEqual(state);
+        AssertThat(source.Phase).IsEqual(phase);
+        AssertThat(source.CallId).IsEqual(call);
+        AssertThat(source.SourceRequestId).IsEqual(origin);
+        AssertThat(world.Leader).IsEqual(leader);
+        AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1 })).IsTrue();
+        AssertThat(world.Objects.Select(obj => (obj.Id, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
+            obj.State, obj.VanishTime, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount)).SequenceEqual(objects)).IsTrue();
+        foreach (var pair in roles) AssertThat(ReferenceEquals(pair.Value, world.RoleLiveState.Roles[pair.Key])).IsTrue();
+    }
+
+    private static void AssertNativeRandomFork()
+    {
+        const ulong seed = 928451;
+        using var native = new RandomNumberGenerator { Seed = seed };
+        using var source = new Pal.Game.Dialogue.GodotBattleRandom(seed);
+        for (int i = 0; i < 7; i++)
+        {
+            AssertThat(source.NextInclusive(-20, 300)).IsEqual(native.RandiRange(-20, 300));
+            AssertThat(source.NextInclusive(-1f, 2f)).IsEqual(native.RandfRange(-1f, 2f));
+        }
+        var state = source.CurrentState;
+        var first = source.Fork();
+        using var second = source.Fork();
+        try
+        {
+            using var expected = new RandomNumberGenerator { Seed = native.Seed, State = native.State };
+            for (int i = 0; i < 12; i++)
+            {
+                AssertThat(first.NextInclusive(-100, 100)).IsEqual(expected.RandiRange(-100, 100));
+                AssertThat(first.NextInclusive(-3f, 7f)).IsEqual(expected.RandfRange(-3f, 7f));
+            }
+            AssertThat(source.CurrentState).IsEqual(state);
+            AssertThat(second.CurrentState).IsEqual(state);
+        }
+        finally { first.Dispose(); }
+        AssertThat(first.IsDisposed).IsTrue();
+        AssertThat(second.IsDisposed).IsFalse();
+        int next = native.RandiRange(-100, 100);
+        AssertThat(second.NextInclusive(-100, 100)).IsEqual(next);
+        AssertThat(source.CurrentState).IsEqual(state);
+        AssertThat(source.NextInclusive(-100, 100)).IsEqual(next);
     }
 
     private static void ReleaseKey(Key key)

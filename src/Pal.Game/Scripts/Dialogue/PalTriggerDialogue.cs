@@ -60,9 +60,9 @@ public partial class PalTriggerDialogue : Node
     private CheckedStoryProfile? _story;
     private TriggerBattleContent? _previewContent;
     private IBattleRandom? _previewRandom;
-    /// <summary>Host factory for the preflight executor; the real @09C3 mixes world verbs with
-    /// battles, so its preview needs its own throwaway world (never the production one).</summary>
-    internal Func<TriggerScriptSession>? PreviewSessionFactory { private get; set; }
+    /// <summary>Transfers a throwaway executor and its owned native lifetime to StartCall.
+    /// The factory must release its own allocations if construction fails before transfer.</summary>
+    internal Func<(TriggerScriptSession Session, IDisposable Lifetime)>? PreviewSessionFactory { get; set; }
 
     /// <summary>The active 256-color scene palette, set by the host before the first-battle
     /// initialization (the #53 host owns the scene, not a story profile).</summary>
@@ -161,21 +161,37 @@ public partial class PalTriggerDialogue : Node
         ValidateOwner(entry);
         // Preflight every selected display and native resource before modifying the real call.
         // This separate executor uses the same public rules; it never advances request.Display.
-        var preview = PreviewSessionFactory is { } factory
-            ? factory()
-            : _previewContent is { } content && _previewRandom is { } previewRandom
-                ? new TriggerScriptSession(_events, _language, content, previewRandom, Session.Context.Color)
-                : new TriggerScriptSession(_events, _language, Session.Context.Color);
-        preview.Start(fileId, entryId, caller);
-        while (preview.PendingDisplay is { } request)
+        var lease = CreatePreviewSession();
+        using (lease.Lifetime)
         {
-            ValidateRequest(request);
-            while (request.Display.Current.Phase != DialogueDisplayPhase.Completed) request.Display.Update(request.Display.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
-            preview.AcknowledgeDisplay(request.Id);
+            var preview = lease.Session;
+            preview.Start(fileId, entryId, caller);
+            while (preview.PendingDisplay is { } request)
+            {
+                ValidateRequest(request);
+                while (request.Display.Current.Phase != DialogueDisplayPhase.Completed) request.Display.Update(request.Display.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
+                preview.AcknowledgeDisplay(request.Id);
+            }
         }
         if (sourceRequestId is { } origin) Session.Start(fileId, entryId, caller, origin);
         else Session.Start(fileId, entryId, caller);
         BindPendingDisplay();
+    }
+
+    private (TriggerScriptSession Session, IDisposable? Lifetime) CreatePreviewSession()
+    {
+        if (PreviewSessionFactory is { } factory) return factory();
+        // Unknown legacy IBattleRandom implementations remain borrowed. Only the concrete
+        // Godot adapter promises a fork; Main always supplies its owned world + RNG factory.
+        var fork = (_previewRandom as GodotBattleRandom)?.Fork();
+        try
+        {
+            var preview = _previewContent is { } content && (fork ?? _previewRandom) is { } random
+                ? new TriggerScriptSession(_events!, _language!, content, random, Session!.Context.Color)
+                : new TriggerScriptSession(_events!, _language!, Session!.Context.Color);
+            return (preview, fork);
+        }
+        catch { fork?.Dispose(); throw; }
     }
 
     private void ValidateOwner(TriggerEventEntry entry)
@@ -258,6 +274,7 @@ public partial class PalTriggerDialogue : Node
         if (_display is not null) _display.UpdateCompleted -= OnDisplayUpdated;
         _display = null; Session = null; _story = null; _events = null; _language = null;
         _font = null; _scene = null; _prompts = []; _portraits.Clear(); _palette = [];
-        FirstBattleWorld = null;
+        FirstBattleWorld = null; PreviewSessionFactory = null;
+        _previewContent = null; _previewRandom = null; PaletteFromScene = null;
     }
 }
