@@ -74,6 +74,108 @@ public class TriggerEventCollectionTests
     public void Battle_and_screen_named_content_retains_literal_fields_and_zero_defaults(int opcode, string semanticJson)
         => AssertContentOnlyLiteral(opcode, semanticJson);
 
+    [Theory]
+    [InlineData(0x003F, "{\"op\":\"rideEventObjectSlow\",\"x\":65535,\"y\":0,\"h\":65535}")]
+    [InlineData(0x0042, "{\"op\":\"simulateMagic\",\"magicId\":65535,\"baseDamage\":0,\"enemyOperand\":-32768}")]
+    [InlineData(0x0042, "{\"op\":\"simulateMagic\",\"magicId\":0,\"baseDamage\":65535,\"enemyOperand\":32767}")]
+    [InlineData(0x0044, "{\"op\":\"rideEventObject\",\"x\":0,\"y\":65535,\"h\":65535}")]
+    [InlineData(0x0045, "{\"op\":\"setBattleMusic\",\"battleMusicId\":65535}")]
+    [InlineData(0x0047, "{\"op\":\"playSound\",\"soundId\":65535}")]
+    [InlineData(0x004B, "{\"op\":\"nullifyObject\"}")]
+    [InlineData(0x004C, "{\"op\":\"chasePlayer\",\"chaseRange\":0,\"speed\":0,\"floating\":65535}")]
+    [InlineData(0x004D, "{\"op\":\"waitForAnyKey\"}")]
+    [InlineData(0x0051, "{\"op\":\"fadeIn\",\"delay\":65535}")]
+    [InlineData(0x0051, "{\"op\":\"fadeIn\",\"delay\":0}")]
+    [InlineData(0x0053, "{\"op\":\"useDayPalette\"}")]
+    [InlineData(0x0054, "{\"op\":\"useNightPalette\"}")]
+    public void Ride_magic_and_palette_named_content_preserves_WORDs_without_runtime_clamps(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(0x0055, "{\"op\":\"addMagic\",\"magicId\":65535,\"roleOperand\":0}")]
+    [InlineData(0x0056, "{\"op\":\"removeMagic\",\"magicId\":0,\"roleOperand\":65535}")]
+    [InlineData(0x0057, "{\"op\":\"setMagicBaseDamageByMp\",\"magicId\":65535,\"mpMultiplier\":0}")]
+    [InlineData(0x0058, "{\"op\":\"itemShortageJump\",\"itemId\":65535,\"count\":-32768,\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0058, "{\"op\":\"itemShortageJump\",\"itemId\":0,\"count\":32767,\"to\":\"L0004\"}")]
+    [InlineData(0x0059, "{\"op\":\"changeScene\",\"sceneId\":65535}")]
+    [InlineData(0x0059, "{\"op\":\"changeScene\",\"sceneId\":0}")]
+    [InlineData(0x005A, "{\"op\":\"halveHp\"}")]
+    [InlineData(0x005B, "{\"op\":\"halveEnemyHp\",\"maxDamage\":65535}")]
+    [InlineData(0x005C, "{\"op\":\"setBattleHidingTime\",\"units\":65535}")]
+    [InlineData(0x005D, "{\"op\":\"playerLacksPoisonJump\",\"objectId\":65535,\"to\":\"L0004\"}")]
+    [InlineData(0x005E, "{\"op\":\"enemyLacksPoisonJump\",\"objectId\":0,\"to\":\"shared#L0000\"}")]
+    [InlineData(0x005F, "{\"op\":\"killPlayer\"}")]
+    [InlineData(0x0060, "{\"op\":\"killEnemy\"}")]
+    public void Magic_inventory_and_health_named_content_retains_literal_fields_and_full_offline_domains(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(0x0061, "{\"op\":\"notPoisonedJump\",\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0062, "{\"op\":\"pauseEnemyChasing\",\"cycles\":65535}")]
+    [InlineData(0x0063, "{\"op\":\"speedUpEnemyChasing\",\"cycles\":0}")]
+    [InlineData(0x0064, "{\"op\":\"enemyHpAboveJump\",\"percent\":65535,\"to\":\"L0004\"}")]
+    [InlineData(0x0065, "{\"op\":\"setPlayerSprite\",\"playerRole\":65535,\"spriteNum\":0,\"reload\":65535}")]
+    [InlineData(0x0066, "{\"op\":\"throwWeapon\",\"magicId\":65535,\"damageUnits\":0}")]
+    [InlineData(0x0067, "{\"op\":\"enemyUseMagic\",\"magicId\":65535,\"magicRate\":0}")]
+    [InlineData(0x0068, "{\"op\":\"enemyTurnJump\",\"to\":\"shared#L0000\"}")]
+    public void Chase_sprite_and_enemy_named_content_retains_literal_fields_without_execution(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(0x0042, "{\"op\":\"simulateMagic\",\"magicId\":0,\"baseDamage\":65535,\"enemyOperand\":0}", "enemyOperand")]
+    [InlineData(0x0058, "{\"op\":\"itemShortageJump\",\"itemId\":65535,\"count\":0,\"to\":\"L0000\"}", "count")]
+    public void U3_signed_fields_reject_values_outside_SHORT_even_with_valid_source(int opcode, string semantics, string field)
+    {
+        var fixture = new EventFixture();
+        var command = JsonNode.Parse(semantics)!.AsObject();
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(0, 0, 0) };
+        fixture.Commands[0] = command;
+        Assert.Equal(0, fixture.Load().GetCommandContent(0).GetProperty(field).GetInt32());
+        foreach (string invalid in new[] { "-32769", "32768", "65535", "true", "null", "\"1\"", "1.5" })
+        {
+            command[field] = JsonNode.Parse(invalid);
+            var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+            Assert.Contains(field, error.Message);
+            Assert.Contains("@0000", error.Message);
+        }
+    }
+
+    [Theory]
+    [InlineData(0x0058, "{\"op\":\"itemShortageJump\",\"itemId\":65535,\"count\":-1,\"to\":\"targets#L0004\"}")]
+    [InlineData(0x005D, "{\"op\":\"playerLacksPoisonJump\",\"objectId\":65535,\"to\":\"targets#L0004\"}")]
+    [InlineData(0x005E, "{\"op\":\"enemyLacksPoisonJump\",\"objectId\":0,\"to\":\"targets#L0004\"}")]
+    [InlineData(0x0061, "{\"op\":\"notPoisonedJump\",\"to\":\"targets#L0004\"}")]
+    [InlineData(0x0064, "{\"op\":\"enemyHpAboveJump\",\"percent\":65535,\"to\":\"targets#L0004\"}")]
+    [InlineData(0x0068, "{\"op\":\"enemyTurnJump\",\"to\":\"targets#L0004\"}")]
+    public void U3_content_references_are_checked_even_at_unselected_zero_and_remain_immutable(int opcode, string semantics)
+    {
+        var fixture = new EventFixture();
+        fixture.Index["files"] = new JsonArray("shared", "targets");
+        var last = fixture.Commands[4]!.DeepClone();
+        fixture.Commands.RemoveAt(4);
+        fixture.Commands[3]!["next"] = "targets#L0004";
+        fixture.Files["targets"] = new JsonObject { ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "targets",
+            ["entries"] = new JsonArray(), ["commands"] = new JsonArray(last) };
+        var command = JsonNode.Parse(semantics)!.AsObject();
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(123, 456, 789) };
+        fixture.Commands[0] = command;
+        var collection = fixture.Load();
+        foreach (string invalid in new[] { "\"targets#missing\"", "\"missing#L0004\"", "\"targets##L0004\"", "null", "0" })
+        {
+            command["to"] = JsonNode.Parse(invalid);
+            var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+            Assert.Contains("@0000", error.Message);
+        }
+        command["to"] = "shared#L0000";
+        Assert.Equal("shared#L0000", fixture.Load().GetCommandContent(0).GetProperty("to").GetString());
+        Assert.Equal("targets#L0004", collection.GetCommandContent(0).GetProperty("to").GetString());
+        Assert.Equal(new[] { 123, 456, 789 }, collection.GetSource(0).Operands);
+    }
+
     private static void AssertContentOnlyLiteral(int opcode, string semanticJson)
     {
         var fixture = new EventFixture();
