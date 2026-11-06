@@ -73,7 +73,7 @@ shared world 的 copy 拥有独立 `RoleLiveState`，包含当前完整角色记
 
 `AuthoredStoryFixture` 末尾增加可选 `partyHpMpPrefixAmount`，默认 null 保持原 events/index 字节和旧五位置参数；显式值仅支持 PartyWin 的 SHORT（含0），在自有输入 entry1 插入命名 `changeHpMp`/0x001D、scope1，而非修改初始数值。正常-3用例经原 Prepare、双语 typed Story/Visual strict Load 核对完整11行/88字节、独立源流 SHA 与输出 manifest；准备后的 HP100/95、MP20 保持初值。这是准备能力，不证明 Main 执行前缀、全队效果或当前值入战。
 
-本切片只新增一个无参 case：当前登记648（645 positives +3 controls）、native-map434，committable644；SHORT边缘/拒绝另外两例及最终完整436影响另行验证，不预填通过数。过滤RED/GREEN只读复用已验证的同内容完整433 marker，不签发新增case完整批证明；不等于 fullgate/GPU/人工/CI 或 #150/Main 交付。
+本票累计新增三个无参 case：正常-3、SHORT边缘（-32768/0/32767）和准确参数拒绝；显式0保留11条命令，65533不当作-3接受。原默认PartyWin/PartyLoss继续核原字节/初值；既有用例覆盖PartyWin旧合法numeric/presentation选项与第六位置prefix0组合，另以Win旧五位置调用核enemyHp、以PartyEquip核去dual装备，保持原选项的scenario域，不扩大fixture支持。当前登记650（647 positives +3 controls）、native-map436，committable646；这些是实际源码库存，不预填最终完整批通过数。正常-3指定RED/GREEN和SHORT边缘精确GREEN只读复用已验证的同内容完整433 marker，不签发或刷新新增case完整批证明；首次无Filter完整native-map因测试新增的非法PartyWin/重复enemy7 numeric组合失败，原件和R1 marker保留；父控批准按各旧选项的合法scenario修正测试后，fresh无Filter完整native-map实际Completed、436/436 Passed、RunInfo0、四条命令exit0且输出/清理完整，包含默认兼容增强；仅该完整成功通过Range正常更新marker。实测为be432ddd + dirty候选，不称后续clean checkpoint重跑；运行后仅README补本结果。该bounded准备影响仍待父控独立整票审核/实际集成，不等于 fullgate/GPU/人工/CI 或 #150/Main 交付。
 
 ## 维护边界
 
