@@ -289,6 +289,234 @@ public class TriggerEventCollectionTests
         Assert.Equal(new[] { 123, 456, 789 }, collection.GetSource(0).Operands);
     }
 
+    [Theory]
+    [InlineData(0x008B, "{\"op\":\"setPalette\",\"paletteId\":65535}")]
+    [InlineData(0x008C, "{\"op\":\"colorFade\",\"color\":255,\"delay\":0,\"fromColor\":65535}")]
+    [InlineData(0x008D, "{\"op\":\"increaseLevel\",\"levels\":65535}")]
+    [InlineData(0x008E, "{\"op\":\"restoreScreen\"}")]
+    [InlineData(0x008F, "{\"op\":\"halveCash\"}")]
+    [InlineData(0x0091, "{\"op\":\"notFirstOfKindJump\",\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0092, "{\"op\":\"showMagicCastAnimation\",\"playerOperand\":65535}")]
+    [InlineData(0x0093, "{\"op\":\"sceneFade\",\"step\":-32768}")]
+    [InlineData(0x0094, "{\"op\":\"stateMatchJump\",\"eventObjectId\":65535,\"state\":32767,\"to\":\"L0004\"}")]
+    public void U5_palette_level_and_conditional_content_retains_literal_shapes(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Fact]
+    public void U5_colorFade_lowByte_is_independent_of_source_and_fromColor_stays_a_truthy_WORD()
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[0] = JsonNode.Parse("""
+            {"label":"L0000","op":"colorFade","color":26,"delay":0,"fromColor":65535,"next":"L0001",
+             "source":{"index":0,"opcode":140,"operands":[65407,2,0]}}
+            """);
+        var command = fixture.Commands[0]!;
+        var original = fixture.Load();
+        Assert.Equal(26, original.GetCommandContent(0).GetProperty("color").GetInt32());
+        Assert.Equal(65535, original.GetCommandContent(0).GetProperty("fromColor").GetInt32());
+        Assert.Equal(new[] { 65407, 2, 0 }, original.GetSource(0).Operands);
+        foreach (int valid in new[] { 0, 127, 255 })
+        {
+            command["color"] = valid;
+            Assert.Equal(valid, fixture.Load().GetCommandContent(0).GetProperty("color").GetInt32());
+        }
+        foreach (string invalid in new[] { "-1", "256", "65535", "true", "null", "\"26\"", "1.5" })
+        {
+            command["color"] = JsonNode.Parse(invalid);
+            var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+            Assert.Contains("color", error.Message);
+            Assert.Contains("@0000", error.Message);
+        }
+        command["color"] = 0;
+        foreach (int valid in new[] { 0, 1, 65535 })
+        {
+            command["fromColor"] = valid;
+            Assert.Equal(valid, fixture.Load().GetCommandContent(0).GetProperty("fromColor").GetInt32());
+        }
+        foreach (string invalid in new[] { "-1", "65536", "true", "null", "\"1\"", "1.5" })
+        {
+            command["fromColor"] = JsonNode.Parse(invalid);
+            Assert.Contains("fromColor", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+        }
+        Assert.Equal(26, original.GetCommandContent(0).GetProperty("color").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(0x0095, "{\"op\":\"sceneMatchJump\",\"sceneId\":65535,\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0096, "{\"op\":\"showEndingAnimation\"}")]
+    [InlineData(0x0097, "{\"op\":\"rideEventObjectFast\",\"x\":65535,\"y\":0,\"h\":65535}")]
+    [InlineData(0x0098, "{\"op\":\"setFollower\",\"spriteNum0\":0,\"spriteNum1\":65535}")]
+    [InlineData(0x0099, "{\"op\":\"changeSceneMap\",\"sceneId\":65535,\"mapNum\":65535}")]
+    [InlineData(0x009B, "{\"op\":\"fadeToScene\"}")]
+    [InlineData(0x009C, "{\"op\":\"enemyDivide\",\"copies\":0,\"failTarget\":null}")]
+    [InlineData(0x009C, "{\"op\":\"enemyDivide\",\"copies\":65535,\"failTarget\":\"shared#L0004\"}")]
+    [InlineData(0x009E, "{\"op\":\"enemySummon\",\"objectId\":65535,\"count\":-32768,\"failTarget\":null}")]
+    [InlineData(0x009E, "{\"op\":\"enemySummon\",\"objectId\":0,\"count\":32767,\"failTarget\":\"L0004\"}")]
+    [InlineData(0x009F, "{\"op\":\"enemyTransform\",\"objectId\":65535}")]
+    public void U5_scene_follower_and_enemy_content_retains_full_offline_domains(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(0x00A0, "{\"op\":\"quitGame\"}")]
+    [InlineData(0x00A1, "{\"op\":\"gatherParty\"}")]
+    [InlineData(0x00A2, "{\"op\":\"randomBranch\",\"count\":65535}")]
+    [InlineData(0x00A2, "{\"op\":\"randomBranch\",\"count\":0}")]
+    [InlineData(0x00A3, "{\"op\":\"playCdMusic\",\"track\":-1,\"musicId\":65535}")]
+    [InlineData(0x00A4, "{\"op\":\"scrollFbp\",\"fbpId\":65535,\"speed\":0}")]
+    [InlineData(0x00A5, "{\"op\":\"showFbpWithEffectSprite\",\"fbpId\":0,\"effectSprite\":65535,\"fade\":65535}")]
+    [InlineData(0x00A6, "{\"op\":\"backupScreen\"}")]
+    [InlineData(0x00A7, "{\"op\":\"advanceEntry\"}")]
+    public void U5_final_screen_music_and_control_content_preserves_literals_without_execution(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData("{\"label\":\"L0001\",\"op\":\"advanceEntry\",\"next\":\"L0002\",\"source\":{\"index\":1,\"opcode\":8,\"operands\":[65535,17,123]}}", 8)]
+    [InlineData("{\"label\":\"L0001\",\"op\":\"advanceEntry\",\"next\":\"L0002\",\"source\":{\"index\":1,\"opcode\":167,\"operands\":[65535,17,123]}}", 167)]
+    public void U5_advanceEntry_dual_source_mappings_are_legal_content_but_neither_executor_is_enabled(string literal, int opcode)
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[1] = JsonNode.Parse(literal);
+        var events = fixture.Load();
+        Assert.Equal("advanceEntry", events.GetCommandContent(1).GetProperty("op").GetString());
+        Assert.Equal(opcode, events.GetSource(1).Opcode);
+        Assert.Equal(new[] { 65535, 17, 123 }, events.GetSource(1).Operands);
+        var trigger = new TriggerScriptSession(events, TriggerScriptSessionTests.Language());
+        var error = Assert.Throws<InvalidDataException>(() => trigger.Start("shared", "npc", 60));
+        Assert.Contains("content-only command 'advanceEntry'", error.Message);
+        Assert.Contains("trigger context", error.Message);
+        Assert.Equal(TriggerScriptPhase.Ready, trigger.Phase);
+        Assert.Null(trigger.CurrentPosition);
+
+        var autoFixture = new DynamicEventSessionTests.DynamicFixture();
+        var autoCommand = JsonNode.Parse(literal)!;
+        autoCommand["label"] = "L0016";
+        autoCommand["next"] = "L0017";
+        autoCommand["source"]!["index"] = 16;
+        autoFixture.Commands[16] = autoCommand;
+        var autoEvents = autoFixture.Load();
+        var rules = autoFixture.Rules();
+        var autoError = Assert.Throws<InvalidDataException>(() => new DynamicEventSession(rules,
+            DynamicEventSessionTests.DynamicFixture.Leader(), autoEvents, TriggerScriptSessionTests.Language(),
+            autoEvents.GetEntry("scene", "npc"), 1, 0, 0));
+        Assert.Contains("content-only command 'advanceEntry'", autoError.Message);
+        Assert.Contains("auto context", autoError.Message);
+        Assert.Contains("@0010", autoError.Message);
+        Assert.Equal(352, rules.Objects.Single(o => o.Id == 6).X);
+        Assert.Equal(15, rules.Objects.Single(o => o.Id == 6).AutoEntry);
+    }
+
+    [Theory]
+    [InlineData(0x0093, "{\"op\":\"sceneFade\",\"step\":0}", "step")]
+    [InlineData(0x0094, "{\"op\":\"stateMatchJump\",\"eventObjectId\":65535,\"state\":0,\"to\":\"L0000\"}", "state")]
+    [InlineData(0x009E, "{\"op\":\"enemySummon\",\"objectId\":65535,\"count\":0,\"failTarget\":null}", "count")]
+    [InlineData(0x00A3, "{\"op\":\"playCdMusic\",\"track\":-1,\"musicId\":65535}", "track")]
+    public void U5_signed_fields_preserve_SHORT_boundaries_and_sentinels(int opcode, string semantics, string field)
+    {
+        var fixture = new EventFixture();
+        var command = JsonNode.Parse(semantics)!;
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(123, 456, 789) };
+        fixture.Commands[0] = command;
+        foreach (int valid in new[] { -32768, -1, 0, 32767 })
+        {
+            command[field] = valid;
+            var events = fixture.Load();
+            Assert.Equal(valid, events.GetCommandContent(0).GetProperty(field).GetInt32());
+            Assert.Equal(new[] { 123, 456, 789 }, events.GetSource(0).Operands);
+        }
+        foreach (string invalid in new[] { "-32769", "32768", "65535", "true", "null", "\"1\"", "1.5" })
+        {
+            command[field] = JsonNode.Parse(invalid);
+            var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+            Assert.Contains(field, error.Message);
+            Assert.Contains("@0000", error.Message);
+        }
+    }
+
+    [Theory]
+    [InlineData(0x0091, "{\"op\":\"notFirstOfKindJump\",\"to\":\"targets#L0004\"}", "to", false)]
+    [InlineData(0x0094, "{\"op\":\"stateMatchJump\",\"eventObjectId\":65535,\"state\":-1,\"to\":\"targets#L0004\"}", "to", false)]
+    [InlineData(0x0095, "{\"op\":\"sceneMatchJump\",\"sceneId\":65535,\"to\":\"targets#L0004\"}", "to", false)]
+    [InlineData(0x009C, "{\"op\":\"enemyDivide\",\"copies\":0,\"failTarget\":\"targets#L0004\"}", "failTarget", true)]
+    [InlineData(0x009E, "{\"op\":\"enemySummon\",\"objectId\":0,\"count\":-1,\"failTarget\":\"targets#L0004\"}", "failTarget", true)]
+    public void U5_all_supplied_references_validate_at_unselected_zero_with_exact_nullable_rules(int opcode, string semantics, string field, bool nullable)
+    {
+        var fixture = new EventFixture();
+        fixture.Index["files"] = new JsonArray("shared", "targets");
+        var last = fixture.Commands[4]!.DeepClone();
+        fixture.Commands.RemoveAt(4);
+        fixture.Commands[3]!["next"] = "targets#L0004";
+        fixture.Files["targets"] = new JsonObject { ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "targets",
+            ["entries"] = new JsonArray(), ["commands"] = new JsonArray(last) };
+        var command = JsonNode.Parse(semantics)!;
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(123, 456, 789) };
+        fixture.Commands[0] = command;
+        var original = fixture.Load();
+        foreach (string invalid in new[] { "\"targets#missing\"", "\"missing#L0004\"", "\"targets##L0004\"", "0", "true" })
+        {
+            command[field] = JsonNode.Parse(invalid);
+            Assert.Contains("@0000", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+        }
+        command[field] = "shared#L0000";
+        if (nullable)
+            Assert.Contains("address zero must use null", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+        else
+            Assert.Equal("shared#L0000", fixture.Load().GetCommandContent(0).GetProperty(field).GetString());
+        command[field] = null;
+        if (nullable)
+            Assert.Equal(System.Text.Json.JsonValueKind.Null, fixture.Load().GetCommandContent(0).GetProperty(field).ValueKind);
+        else
+            Assert.Contains("must be a reference", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+        Assert.Equal("targets#L0004", original.GetCommandContent(0).GetProperty(field).GetString());
+        Assert.Equal(new[] { 123, 456, 789 }, original.GetSource(0).Operands);
+    }
+
+    [Theory]
+    [InlineData(0x008B, "{\"op\":\"setPalette\",\"paletteId\":0}", "paletteId")]
+    [InlineData(0x008C, "{\"op\":\"colorFade\",\"color\":26,\"delay\":0,\"fromColor\":0}", "delay,fromColor")]
+    [InlineData(0x008D, "{\"op\":\"increaseLevel\",\"levels\":0}", "levels")]
+    [InlineData(0x0092, "{\"op\":\"showMagicCastAnimation\",\"playerOperand\":0}", "playerOperand")]
+    [InlineData(0x0094, "{\"op\":\"stateMatchJump\",\"eventObjectId\":0,\"state\":-1,\"to\":\"L0000\"}", "eventObjectId")]
+    [InlineData(0x0095, "{\"op\":\"sceneMatchJump\",\"sceneId\":0,\"to\":\"L0000\"}", "sceneId")]
+    [InlineData(0x0097, "{\"op\":\"rideEventObjectFast\",\"x\":0,\"y\":0,\"h\":0}", "x,y,h")]
+    [InlineData(0x0098, "{\"op\":\"setFollower\",\"spriteNum0\":0,\"spriteNum1\":0}", "spriteNum0,spriteNum1")]
+    [InlineData(0x0099, "{\"op\":\"changeSceneMap\",\"sceneId\":0,\"mapNum\":0}", "sceneId,mapNum")]
+    [InlineData(0x009C, "{\"op\":\"enemyDivide\",\"copies\":0,\"failTarget\":null}", "copies")]
+    [InlineData(0x009E, "{\"op\":\"enemySummon\",\"objectId\":0,\"count\":-1,\"failTarget\":null}", "objectId")]
+    [InlineData(0x009F, "{\"op\":\"enemyTransform\",\"objectId\":0}", "objectId")]
+    [InlineData(0x00A2, "{\"op\":\"randomBranch\",\"count\":0}", "count")]
+    [InlineData(0x00A3, "{\"op\":\"playCdMusic\",\"track\":-1,\"musicId\":0}", "musicId")]
+    [InlineData(0x00A4, "{\"op\":\"scrollFbp\",\"fbpId\":0,\"speed\":0}", "fbpId,speed")]
+    [InlineData(0x00A5, "{\"op\":\"showFbpWithEffectSprite\",\"fbpId\":0,\"effectSprite\":0,\"fade\":0}", "fbpId,effectSprite,fade")]
+    public void U5_WORD_fields_preserve_full_offline_boundaries_without_gameplay_clamps(int opcode, string semantics, string wordFields)
+    {
+        var fixture = new EventFixture();
+        var command = JsonNode.Parse(semantics)!;
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(123, 456, 789) };
+        fixture.Commands[0] = command;
+        foreach (string field in wordFields.Split(','))
+        {
+            foreach (int valid in new[] { 0, 32768, 65535 })
+            {
+                command[field] = valid;
+                Assert.Equal(valid, fixture.Load().GetCommandContent(0).GetProperty(field).GetInt32());
+            }
+            foreach (string invalid in new[] { "-1", "65536", "true", "null", "\"1\"", "1.5" })
+            {
+                command[field] = JsonNode.Parse(invalid);
+                var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+                Assert.Contains(field, error.Message);
+                Assert.Contains("@0000", error.Message);
+            }
+            command[field] = 0;
+        }
+    }
+
     private static void AssertContentOnlyLiteral(int opcode, string semanticJson)
     {
         var fixture = new EventFixture();
@@ -333,7 +561,7 @@ public class TriggerEventCollectionTests
         command["unexpected"] = 1;
         Assert.Contains("unknown field", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
         command.Remove("unexpected");
-        command["source"]!["opcode"] = 0x00A7; // Same verb as 0008, but outside this batch.
+        command["source"]!["opcode"] = 0x0000; // Registered end, never any content-only verb.
         Assert.Contains("mapping", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
     }
 

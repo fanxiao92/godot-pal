@@ -5,7 +5,7 @@ namespace Pal.Core;
 /// <summary>Content shapes only. Registration here never grants trigger or auto execution.</summary>
 internal static class TriggerNamedContentProfile
 {
-    private enum FieldKind { Word, SignedWord, Reference, NullableReference }
+    private enum FieldKind { Word, SignedWord, LowByte, Reference, NullableReference }
     private sealed record Field(string Name, FieldKind Kind);
     private sealed record Shape(int Opcode, string Op, Field[] Fields);
 
@@ -104,6 +104,32 @@ internal static class TriggerNamedContentProfile
         new(0x0088, "setMagicBaseDamageByCash", [new("magicId", FieldKind.Word)]),
         new(0x0089, "setBattleResult", [new("result", FieldKind.Word)]),
         new(0x008A, "enableAutoBattle", []),
+        new(0x008B, "setPalette", [new("paletteId", FieldKind.Word)]),
+        new(0x008C, "colorFade", [new("color", FieldKind.LowByte), new("delay", FieldKind.Word), new("fromColor", FieldKind.Word)]),
+        new(0x008D, "increaseLevel", [new("levels", FieldKind.Word)]),
+        new(0x008E, "restoreScreen", []),
+        new(0x008F, "halveCash", []),
+        new(0x0091, "notFirstOfKindJump", [new("to", FieldKind.Reference)]),
+        new(0x0092, "showMagicCastAnimation", [new("playerOperand", FieldKind.Word)]),
+        new(0x0093, "sceneFade", [new("step", FieldKind.SignedWord)]),
+        new(0x0094, "stateMatchJump", [new("eventObjectId", FieldKind.Word), new("state", FieldKind.SignedWord), new("to", FieldKind.Reference)]),
+        new(0x0095, "sceneMatchJump", [new("sceneId", FieldKind.Word), new("to", FieldKind.Reference)]),
+        new(0x0096, "showEndingAnimation", []),
+        new(0x0097, "rideEventObjectFast", [new("x", FieldKind.Word), new("y", FieldKind.Word), new("h", FieldKind.Word)]),
+        new(0x0098, "setFollower", [new("spriteNum0", FieldKind.Word), new("spriteNum1", FieldKind.Word)]),
+        new(0x0099, "changeSceneMap", [new("sceneId", FieldKind.Word), new("mapNum", FieldKind.Word)]),
+        new(0x009B, "fadeToScene", []),
+        new(0x009C, "enemyDivide", [new("copies", FieldKind.Word), new("failTarget", FieldKind.NullableReference)]),
+        new(0x009E, "enemySummon", [new("objectId", FieldKind.Word), new("count", FieldKind.SignedWord), new("failTarget", FieldKind.NullableReference)]),
+        new(0x009F, "enemyTransform", [new("objectId", FieldKind.Word)]),
+        new(0x00A0, "quitGame", []),
+        new(0x00A1, "gatherParty", []),
+        new(0x00A2, "randomBranch", [new("count", FieldKind.Word)]),
+        new(0x00A3, "playCdMusic", [new("track", FieldKind.SignedWord), new("musicId", FieldKind.Word)]),
+        new(0x00A4, "scrollFbp", [new("fbpId", FieldKind.Word), new("speed", FieldKind.Word)]),
+        new(0x00A5, "showFbpWithEffectSprite", [new("fbpId", FieldKind.Word), new("effectSprite", FieldKind.Word), new("fade", FieldKind.Word)]),
+        new(0x00A6, "backupScreen", []),
+        new(0x00A7, "advanceEntry", []),
     ];
 
     private static Shape Find(string op, int opcode)
@@ -125,6 +151,11 @@ internal static class TriggerNamedContentProfile
             {
                 if (EventJson.Number(node, field.Name) is < short.MinValue or > short.MaxValue)
                     throw new InvalidDataException($"{op}.{field.Name} must be a signed WORD.");
+            }
+            else if (field.Kind == FieldKind.LowByte)
+            {
+                if (EventJson.Number(node, field.Name) is < byte.MinValue or > byte.MaxValue)
+                    throw new InvalidDataException($"{op}.{field.Name} must be a low byte.");
             }
             else
             {
