@@ -5,7 +5,7 @@ namespace Pal.Core;
 /// <summary>Content shapes only. Registration here never grants trigger or auto execution.</summary>
 internal static class TriggerNamedContentProfile
 {
-    private enum FieldKind { Word, Reference, NullableReference }
+    private enum FieldKind { Word, SignedWord, Reference, NullableReference }
     private sealed record Field(string Name, FieldKind Kind);
     private sealed record Shape(int Opcode, string Op, Field[] Fields);
 
@@ -17,7 +17,33 @@ internal static class TriggerNamedContentProfile
         new(0x0011, "walkToSlow", [new("x", FieldKind.Word), new("y", FieldKind.Word), new("h", FieldKind.Word)]),
         new(0x0012, "setObjectPositionRelativeToParty", [new("eventObjectId", FieldKind.Word), new("xOffset", FieldKind.Word), new("yOffset", FieldKind.Word)]),
         new(0x0016, "setObjectFacing", [new("eventObjectId", FieldKind.Word), new("direction", FieldKind.Word), new("frame", FieldKind.Word)]),
+        new(0x0017, "setExtraAttr", [new("equipPartWord", FieldKind.Word), new("field", FieldKind.Word), new("value", FieldKind.SignedWord)]),
+        new(0x0018, "equipItem", [new("equipPartWord", FieldKind.Word), new("itemId", FieldKind.Word)]),
+        new(0x0019, "incPlayerAttr", [new("field", FieldKind.Word), new("delta", FieldKind.SignedWord), new("roleOperand", FieldKind.Word)]),
+        new(0x001A, "setPlayerStat", [new("field", FieldKind.Word), new("value", FieldKind.SignedWord), new("roleOperand", FieldKind.Word)]),
+        new(0x001E, "changeCash", [new("amount", FieldKind.SignedWord), new("to", FieldKind.Reference)]),
         new(0x0020, "removeItem", [new("itemId", FieldKind.Word), new("count", FieldKind.Word), new("shortageTarget", FieldKind.NullableReference)]),
+        new(0x0021, "inflictDamageToEnemy", [new("scope", FieldKind.Word), new("damage", FieldKind.Word)]),
+        new(0x0023, "removeEquipment", [new("playerRole", FieldKind.Word), new("partWord", FieldKind.Word)]),
+        new(0x0026, "showBuyMenu", [new("storeId", FieldKind.Word)]),
+        new(0x0027, "showSellMenu", []),
+        new(0x0028, "applyPoisonToEnemy", [new("scope", FieldKind.Word), new("objectId", FieldKind.Word)]),
+        new(0x0029, "applyPoisonToPlayer", [new("scope", FieldKind.Word), new("objectId", FieldKind.Word)]),
+        new(0x002A, "curePoisonByObjectIdForEnemy", [new("scope", FieldKind.Word), new("objectId", FieldKind.Word)]),
+        new(0x002B, "curePoisonByObjectIdForPlayer", [new("scope", FieldKind.Word), new("objectId", FieldKind.Word)]),
+        new(0x002C, "curePoisonsByLevel", [new("scope", FieldKind.Word), new("maxLevel", FieldKind.Word)]),
+        new(0x002D, "setStatusPlayer", [new("status", FieldKind.Word), new("rounds", FieldKind.Word)]),
+        new(0x002E, "setStatusEnemy", [new("status", FieldKind.Word), new("rounds", FieldKind.Word), new("to", FieldKind.Reference)]),
+        new(0x002F, "clearPlayerStatus", [new("status", FieldKind.Word)]),
+        new(0x0031, "changeBattleSprite", [new("battleSprite", FieldKind.Word)]),
+        new(0x0033, "collectEnemyForItems", [new("to", FieldKind.Reference)]),
+        new(0x0034, "transformCollectedEnemies", [new("to", FieldKind.Reference)]),
+        new(0x0035, "shakeScreen", [new("times", FieldKind.Word), new("level", FieldKind.Word)]),
+        new(0x0036, "setPlayingRng", [new("rngId", FieldKind.Word)]),
+        new(0x0037, "playRng", [new("startFrame", FieldKind.Word), new("endFrame", FieldKind.Word), new("speed", FieldKind.Word)]),
+        new(0x0038, "teleportParty", [new("to", FieldKind.Reference)]),
+        new(0x0039, "drainHpFromEnemy", [new("amount", FieldKind.Word)]),
+        new(0x003A, "playerFlee", [new("to", FieldKind.Reference)]),
     ];
 
     private static Shape Find(string op, int opcode)
@@ -35,6 +61,11 @@ internal static class TriggerNamedContentProfile
         foreach (var field in Find(op, opcode).Fields)
         {
             if (field.Kind == FieldKind.Word) _ = EventJson.Word(node, field.Name);
+            else if (field.Kind == FieldKind.SignedWord)
+            {
+                if (EventJson.Number(node, field.Name) is < short.MinValue or > short.MaxValue)
+                    throw new InvalidDataException($"{op}.{field.Name} must be a signed WORD.");
+            }
             else
             {
                 string? reference = EventJson.Reference(node, field.Name);

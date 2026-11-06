@@ -16,6 +16,64 @@ public class TriggerEventCollectionTests
     public void Early_named_content_retains_literal_fields_without_granting_execution(int opcode, string semanticJson)
         => AssertContentOnlyLiteral(opcode, semanticJson);
 
+    [Theory]
+    [InlineData(0x0017, "{\"op\":\"setExtraAttr\",\"equipPartWord\":17,\"field\":27,\"value\":-32768}")]
+    [InlineData(0x0018, "{\"op\":\"equipItem\",\"equipPartWord\":11,\"itemId\":65535}")]
+    [InlineData(0x0019, "{\"op\":\"incPlayerAttr\",\"field\":65535,\"delta\":32767,\"roleOperand\":0}")]
+    [InlineData(0x001A, "{\"op\":\"setPlayerStat\",\"field\":0,\"value\":-1,\"roleOperand\":65535}")]
+    [InlineData(0x001E, "{\"op\":\"changeCash\",\"amount\":-32768,\"to\":\"shared#L0000\"}")]
+    public void Attribute_named_content_retains_signed_WORDs_and_reference_zero(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(-32769)]
+    [InlineData(32768)]
+    [InlineData("-1")]
+    [InlineData(true)]
+    [InlineData(null)]
+    public void Content_signed_WORD_rejects_out_of_range_and_non_integer_values(object? value)
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[0] = JsonNode.Parse("""
+            {"label":"L0000","op":"setExtraAttr","equipPartWord":11,"field":17,"value":0,"next":"L0001",
+             "source":{"index":0,"opcode":23,"operands":[11,17,0]}}
+            """);
+        Assert.Equal(0, fixture.Load().GetCommandContent(0).GetProperty("value").GetInt32());
+        fixture.Commands[0]!["value"] = System.Text.Json.JsonSerializer.SerializeToNode(value);
+        var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+        Assert.Contains("@0000", error.Message);
+        Assert.Contains("value", error.Message);
+    }
+
+    [Theory]
+    [InlineData(0x0021, "{\"op\":\"inflictDamageToEnemy\",\"scope\":65535,\"damage\":65535}")]
+    [InlineData(0x0023, "{\"op\":\"removeEquipment\",\"playerRole\":0,\"partWord\":6}")]
+    [InlineData(0x0026, "{\"op\":\"showBuyMenu\",\"storeId\":65535}")]
+    [InlineData(0x0027, "{\"op\":\"showSellMenu\"}")]
+    [InlineData(0x0028, "{\"op\":\"applyPoisonToEnemy\",\"scope\":0,\"objectId\":551}")]
+    [InlineData(0x0029, "{\"op\":\"applyPoisonToPlayer\",\"scope\":65535,\"objectId\":564}")]
+    [InlineData(0x002A, "{\"op\":\"curePoisonByObjectIdForEnemy\",\"scope\":1,\"objectId\":562}")]
+    [InlineData(0x002B, "{\"op\":\"curePoisonByObjectIdForPlayer\",\"scope\":0,\"objectId\":0}")]
+    [InlineData(0x002C, "{\"op\":\"curePoisonsByLevel\",\"scope\":1,\"maxLevel\":65535}")]
+    [InlineData(0x002D, "{\"op\":\"setStatusPlayer\",\"status\":8,\"rounds\":65535}")]
+    [InlineData(0x002E, "{\"op\":\"setStatusEnemy\",\"status\":0,\"rounds\":32760,\"to\":\"shared#L0000\"}")]
+    [InlineData(0x002F, "{\"op\":\"clearPlayerStatus\",\"status\":65535}")]
+    public void Status_and_menu_named_content_retains_unsigned_fields_and_no_operand_shapes(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(0x0031, "{\"op\":\"changeBattleSprite\",\"battleSprite\":65535}")]
+    [InlineData(0x0033, "{\"op\":\"collectEnemyForItems\",\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0034, "{\"op\":\"transformCollectedEnemies\",\"to\":\"L0004\"}")]
+    [InlineData(0x0035, "{\"op\":\"shakeScreen\",\"times\":65535,\"level\":0}")]
+    [InlineData(0x0036, "{\"op\":\"setPlayingRng\",\"rngId\":0}")]
+    [InlineData(0x0037, "{\"op\":\"playRng\",\"startFrame\":65535,\"endFrame\":0,\"speed\":0}")]
+    [InlineData(0x0038, "{\"op\":\"teleportParty\",\"to\":\"L0000\"}")]
+    [InlineData(0x0039, "{\"op\":\"drainHpFromEnemy\",\"amount\":65535}")]
+    [InlineData(0x003A, "{\"op\":\"playerFlee\",\"to\":\"L0004\"}")]
+    public void Battle_and_screen_named_content_retains_literal_fields_and_zero_defaults(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
     private static void AssertContentOnlyLiteral(int opcode, string semanticJson)
     {
         var fixture = new EventFixture();
@@ -38,6 +96,63 @@ public class TriggerEventCollectionTests
         Assert.Contains("trigger context", error.Message);
         Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
         Assert.Null(script.CurrentPosition);
+
+        // Reusable strict-shape regressions for every literal descriptor row.
+        foreach (var field in semantic.Where(field => field.Key != "op"))
+        {
+            command.Remove(field.Key);
+            Assert.Contains("missing field", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+            command[field.Key] = field.Value?.DeepClone();
+            command[field.Key] = true;
+            Assert.Throws<InvalidDataException>(() => fixture.Load());
+            command[field.Key] = field.Value?.DeepClone();
+            if (field.Value is JsonValue value && value.TryGetValue<int>(out _))
+            {
+                command[field.Key] = 65536;
+                Assert.Throws<InvalidDataException>(() => fixture.Load());
+                command[field.Key] = -32769;
+                Assert.Throws<InvalidDataException>(() => fixture.Load());
+                command[field.Key] = field.Value.DeepClone();
+            }
+        }
+        command["unexpected"] = 1;
+        Assert.Contains("unknown field", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+        command.Remove("unexpected");
+        command["source"]!["opcode"] = 0x00A7; // Same verb as 0008, but outside this batch.
+        Assert.Contains("mapping", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+    }
+
+    [Theory]
+    [InlineData(0x000A, "confirmNoJump")]
+    [InlineData(0x001E, "changeCash")]
+    [InlineData(0x002E, "setStatusEnemy")]
+    [InlineData(0x0033, "collectEnemyForItems")]
+    [InlineData(0x0034, "transformCollectedEnemies")]
+    [InlineData(0x0038, "teleportParty")]
+    [InlineData(0x003A, "playerFlee")]
+    public void Batch_content_references_resolve_across_files_even_when_unselected(int opcode, string op)
+    {
+        var fixture = new EventFixture();
+        fixture.Index["files"] = new JsonArray("shared", "targets");
+        var last = fixture.Commands[4]!.DeepClone();
+        fixture.Commands.RemoveAt(4);
+        fixture.Commands[3]!["next"] = "targets#L0004";
+        fixture.Files["targets"] = new JsonObject { ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "targets",
+            ["entries"] = new JsonArray(), ["commands"] = new JsonArray(last) };
+        var command = new JsonObject { ["label"] = "L0000", ["op"] = op, ["to"] = "targets#L0004", ["next"] = "L0001",
+            ["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(0, 0, 0) } };
+        if (op == "changeCash") command["amount"] = -1;
+        if (op == "setStatusEnemy") { command["status"] = 3; command["rounds"] = 65535; }
+        fixture.Commands[0] = command;
+        Assert.Equal("targets#L0004", fixture.Load().GetCommandContent(0).GetProperty("to").GetString());
+        command["to"] = "targets#missing";
+        var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+        Assert.Contains(op + ".to", error.Message);
+        Assert.Contains("dangling", error.Message);
+        command["to"] = null;
+        Assert.Throws<InvalidDataException>(() => fixture.Load());
+        command["to"] = "shared#L0000";
+        Assert.Equal("shared#L0000", fixture.Load().GetCommandContent(0).GetProperty("to").GetString());
     }
 
     [Fact]
