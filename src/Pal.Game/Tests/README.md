@@ -92,6 +92,22 @@ U9 扩展原方法的 shared owner/world/trigger、两人顺序、结算连续�
 
 #155 随后已由父控独立整票验收并实际本地集成至 `67be98f9de1178239e2d1def41cb9f60f6886e45`（Issue155已关闭，非Main交付）。#150 普通合并该已验收前置及其154/156祖先，保留自身U10精确路由；合并后实际源码库存650、full647/committable646，分区85/74/2/5/6/3/4/28/436/4（committable最后3），process/scene-dialogue/native-map合计595。这是合并后的metadata，不冒称在#150重跑了#155完整436或shared/full gate；#150真实前缀消费和其余验收仍待完成。
 
+## #150 U13 Story 前缀消费者（仅源码候选，未运行 SDK）
+
+原 `PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin` 现在显式消费 `new AuthoredStoryFixture("PartyWin", partyHpMpPrefixAmount: -3)`；仍由原 Prepare、native profile 和 Main 真实 search 装配，不修改启动 HP100/95、MP20 或 prepared 文件。入树前已安装的 `StoryHost` 观察器在本次 search 交付且新 `Session.CallId` 出现后的首个 `Main.UpdateCompleted` 内无条件取样，记录前 CallId/request/phase 与新身份；不等 HP/phase 成功形状才采样，也不把尚未 Start 的排队回调当作前缀效果。原5s driver等待同时要求观察器已采样，避免FramePostDraw先建立display、但新CallId尚未经过Main完成回调时提前检查；不增加超时或等待正确数值。预期全队 HP97/92、MP17；实际 battle 入场先核当前 HP 与完整角色初值，再核 pending/lifecycle 引用，避免 current-value 数字负控被引用检查抢先截获。
+
+owned 最终 ACK 发布后的首个适用 Main 完成回调按独立完整分支表核 HP：evade→123/121；命中 role0，damage20/21→113/121、22/23→112/121；命中 role1，damage21/22→123/110、23/24→123/109。两人 MP 均33，XP/cash 奖励0、level2、maxHP150/maxMP50不变；分支来自真实动作，数字不是由 owner/lifecycle 的实测 HP 反算。保留完整结算记录对接、同 owner/world/live view、party[0,1]、原真实动作/队列/目标/显示/后缀/探索返回及同 URI 新 Main 未 search 前原初值隔离检查。
+
+本单元只冻结两路径 source patch、独立数值及实际行级 startup-value 消费负控方案；没有 SDK/build/discovery/Prepare/Godot/test/变异运行，不宣称新增断言已编译或通过，不复跑 U11 顺序 RED。原无参 FQN、RequireGodotRuntime、90000ms 方法、5s 观测和公开 scene-realfull 精确路由/300000ms 会话预算、650库存及所有分区不变。后续须父控实读 patch/数值/负控并另给原生预算；#150 其余验收及最终新 source-bound 影响证据仍欠，#155 准备436不是本候选 Main 证据。
+
+## #150 U14 Story 当前值数字反例与恢复验证
+
+U13 更正候选现已通过有界真实验证：临时仅在 Main 的 Story 入战消费点改为 startup lifecycle，prefix/owner/world/party 保持，公开 `scene-realfull` 精确 PartyTwo 单例产生指定 HP 数字 RED；精确恢复完整生产源码后，另一次 fresh 单例实际 `Completed / Passed1 / RunInfo0`，两轮 discovery650、所选/实际精确1，四命令均完整退出/双 EOF/清理（RED 0/0/0/1、GREEN 全0）。未重跑 U11 party-order RED，未修改 timeout/guard/allowlist。父控独立复核每轮221项源码、6项工具身份及原TRX/精确集合/实际DLL-PDB归档与恢复构建绑定；实测是 `4c11731 + dirty`、patch SHA `569d080ac5568ab69a3fae15d19493d761d16947c9f209a10a5f120b011f3f68`，不是后续 clean checkpoint 重跑。实测后仅本 README 补结果。
+
+原 GREEN case stdout 记录 prefix HP97/92、MP17/17，以及动作34/44/敌对role1伤24/36、combatHP97/68；独立分支表的战后预期 HP123/109、MP33、完整 owned 提交与同URI新Main原初值，由冻结源码的无条件断言及完整方法通过作证，不称原日志独立输出了最终ACK/MP数值。RED原生栈定位 ObserveSharedOwner → StoryHost.Updated → Main._Process，未显示Wait/协程帧，不臆断adapter原因或动态证明该转抛。原GREEN证据helper错从dotnet成功摘要找prefix导致失败并停止；父控批准一次新SDK-free reader从原TRX唯一case stdout读取，原helper/STOP/日志保留，不重跑native。
+
+父控收据见 `C:/evidence/m6/execution/tickets/150/coordinator-u14-verification.json`，原件在 `U14-story-current-value-red-green/`。这是独立复核后的当前值消费者小步，不是 #150 整票验收或集成；错/旧receipt、Enter echo/replay、完整资源hash、异常lifetime、legacy兼容及最终新源shared影响仍欠。#130/#126/#148/M6、GPU/人工/private-real/远端CI边界不变。
+
 ## 维护边界
 
 保持 `Main.tscn` 的真实入口和现有测试装配，不新增第二 Godot 项目、替代业务实现或内部测试 seam。变更时先冻结独立预期与完整身份，再同步脚本/config/本页；需要时序变异、输出捕获或完整门诊断，进入 Game 分层与当前异常规则，不在本页重写历史证据。

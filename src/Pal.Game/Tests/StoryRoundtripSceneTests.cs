@@ -271,17 +271,21 @@ public class StoryRoundtripSceneTests
         // fight.c157-170 bounds: one player hit deals 43..297, so each 43hp slot dies to its first hit;
         // the second member retargets when both picked the same slot, and the dead enemies' own
         // queue entries pass without producing a new LastAction.
-        using var fixture = new AuthoredStoryFixture("PartyWin");
+        using var fixture = new AuthoredStoryFixture("PartyWin", partyHpMpPrefixAmount: -3);
         var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
         DynamicEventWorld? observedWorld = null;
         RoleLiveState? observedOwner = null;
         TriggerScriptSession? observedSession = null;
         IReadOnlyDictionary<int, BattleRoleSnapshot>? liveProjection = null;
-        BattleRoleSnapshot[] initialRoles = [], settledRoles = [];
+        BattleRoleSnapshot[] initialRoles = [], prefixRoles = [], settledRoles = [];
         ClassicBattleLifecycleSession? observedBattle = null;
         ClassicBattleAction? enemyResponse = null;
         Guid observedCall = Guid.Empty, observedOrigin = Guid.Empty;
+        bool searchDelivered = false, observedPrefix = false;
+        Guid beforeCall = Guid.Empty;
+        Guid? beforeSourceRequest = null, beforeInteractionRequest = null;
+        TriggerScriptPhase beforePhase = TriggerScriptPhase.Ready;
         bool observedInitial = false, observedEntry = false, observedCommit = false, observedSuffix = false, observedReturn = false;
         void AssertInitialRole(BattleRoleSnapshot role, int roleId)
         {
@@ -294,6 +298,12 @@ public class StoryRoundtripSceneTests
             AssertThat(role.Magics.SequenceEqual(new int[32])).IsTrue();
             AssertThat(role.Statuses.SequenceEqual(new int[9])).IsTrue();
             AssertThat(role.HiddenExperience.Values.All(track => track.Value == 0 && track.Level == 1 && track.Count == 0)).IsTrue();
+        }
+        void AssertPrefixRole(BattleRoleSnapshot role, int roleId)
+        {
+            AssertThat(role.Hp).IsEqual(roleId == 0 ? 97 : 92);
+            AssertThat(role.Mp).IsEqual(17);
+            AssertInitialRole(role with { Hp = roleId == 0 ? 100 : 95, Mp = 20 }, roleId);
         }
         void ObserveSharedOwner(Main main)
         {
@@ -310,6 +320,43 @@ public class StoryRoundtripSceneTests
                 initialRoles = [owner.Roles[0], owner.Roles[1]];
                 AssertThat(session.CallId).IsEqual(Guid.Empty);
                 AssertThat(main.StoryBattle).IsNull();
+                AssertInitialRole(initialRoles[0], 0); AssertInitialRole(initialRoles[1], 1);
+            }
+            // Search is queued before StartAfterSceneDraw actually starts the call. The first
+            // completion with its new CallId is applicable regardless of phase or HP/MP shape.
+            if (searchDelivered && !observedPrefix && session.CallId != beforeCall)
+            {
+                observedPrefix = true;
+                observedCall = session.CallId;
+                observedOrigin = main.Interaction!.PendingTrigger!.Id;
+                prefixRoles = [owner.Roles[0], owner.Roles[1]];
+                GD.Print($"PAL_STORY_PREFIX:beforeCall={beforeCall};beforeSource={beforeSourceRequest};"
+                    + $"beforeRequest={beforeInteractionRequest};beforePhase={beforePhase};newCall={observedCall};"
+                    + $"source={session.SourceRequestId};request={observedOrigin};phase={session.Phase};"
+                    + $"hp={prefixRoles[0].Hp}/{prefixRoles[1].Hp};mp={prefixRoles[0].Mp}/{prefixRoles[1].Mp}");
+                AssertPrefixRole(prefixRoles[0], 0); AssertPrefixRole(prefixRoles[1], 1);
+                AssertThat(observedCall != Guid.Empty && observedOrigin != Guid.Empty).IsTrue();
+                AssertThat(session.SourceRequestId).IsEqual(observedOrigin);
+                AssertThat(session.Phase).IsEqual(TriggerScriptPhase.WaitingForDisplay);
+                AssertThat(session.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
+                for (int roleId = 0; roleId < 2; roleId++)
+                    AssertThat(ReferenceEquals(prefixRoles[roleId], initialRoles[roleId])).IsFalse();
+            }
+            // Numeric consumption precedes pending/lifecycle identity checks so a startup-value
+            // consumer cannot be intercepted by an incidental request-reference mismatch.
+            if (main.StoryBattle is { } entering && !observedEntry)
+            {
+                observedEntry = true;
+                observedBattle = entering;
+                AssertThat(entering.Current.Combat.Players.Select(p => p.Hp).SequenceEqual(new[] { 97, 92 }))
+                    .OverrideFailureMessage("Story battle must consume prefix-current HP [97,92], not startup [100,95].").IsTrue();
+                AssertPrefixRole(entering.Current.Roles[0], 0); AssertPrefixRole(entering.Current.Roles[1], 1);
+                AssertThat(observedPrefix).IsTrue();
+                AssertThat(ReferenceEquals(session.PendingBattle!.Lifecycle, entering)).IsTrue();
+                AssertThat(entering.Current.Combat.Players.Select(p => p.RoleId).SequenceEqual(new[] { 0, 1 })).IsTrue();
+                AssertThat(entering.Current.Combat.Players.Select(p => p.Attack).SequenceEqual(new[] { 40, 35 })).IsTrue();
+                AssertThat(entering.Current.Combat.Players.Select(p => p.Defense).SequenceEqual(new[] { 20, 18 })).IsTrue();
+                AssertThat(entering.Current.Combat.Players.All(p => p.Dexterity == 100)).IsTrue();
             }
             AssertThat(ReferenceEquals(world, observedWorld) && ReferenceEquals(owner, observedOwner)
                 && ReferenceEquals(session, observedSession)).IsTrue();
@@ -327,33 +374,17 @@ public class StoryRoundtripSceneTests
                 AssertThat(vitals.Hp).IsEqual(role.Hp); AssertThat(vitals.Mp).IsEqual(role.Mp);
                 AssertThat(vitals.MaxHp).IsEqual(role.MaxHp); AssertThat(vitals.MaxMp).IsEqual(role.MaxMp);
             }
-            if (observedCall == Guid.Empty && session.CallId != Guid.Empty)
-            {
-                observedCall = session.CallId;
-                observedOrigin = main.Interaction!.PendingTrigger!.Id;
-                AssertThat(session.SourceRequestId).IsEqual(observedOrigin);
-                AssertThat(observedOrigin != Guid.Empty).IsTrue();
-            }
             if (main.StoryBattle is { } lifecycle)
             {
-                if (!observedEntry)
-                {
-                    observedEntry = true;
-                    observedBattle = lifecycle;
-                    AssertThat(ReferenceEquals(session.PendingBattle!.Lifecycle, lifecycle)).IsTrue();
-                    AssertThat(lifecycle.Current.Combat.Players.Select(p => p.RoleId).SequenceEqual(new[] { 0, 1 })).IsTrue();
-                    AssertThat(lifecycle.Current.Combat.Players.Select(p => p.Hp).SequenceEqual(new[] { 100, 95 })).IsTrue();
-                    AssertThat(lifecycle.Current.Combat.Players.Select(p => p.Attack).SequenceEqual(new[] { 40, 35 })).IsTrue();
-                    AssertThat(lifecycle.Current.Combat.Players.Select(p => p.Defense).SequenceEqual(new[] { 20, 18 })).IsTrue();
-                    AssertThat(lifecycle.Current.Combat.Players.All(p => p.Dexterity == 100)).IsTrue();
-                    AssertInitialRole(lifecycle.Current.Roles[0], 0); AssertInitialRole(lifecycle.Current.Roles[1], 1);
-                }
                 AssertThat(ReferenceEquals(lifecycle, observedBattle)).IsTrue();
                 AssertThat(session.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
                 AssertThat(session.PendingDisplay).IsNull();
                 // Neither combat damage nor intermediate settlement may publish before final ACK.
                 for (int roleId = 0; roleId < 2; roleId++)
-                    AssertThat(ReferenceEquals(owner.Roles[roleId], initialRoles[roleId])).IsTrue();
+                {
+                    AssertPrefixRole(owner.Roles[roleId], roleId);
+                    AssertThat(ReferenceEquals(owner.Roles[roleId], prefixRoles[roleId])).IsTrue();
+                }
                 if (lifecycle.Current.Combat.LastAction is { Attacker: ClassicBattleSide.Enemy } response)
                     enemyResponse ??= response;
             }
@@ -367,22 +398,37 @@ public class StoryRoundtripSceneTests
                 AssertThat(session.PendingBattle).IsNull();
                 AssertThat(session.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
                 AssertThat(enemyResponse).IsNotNull();
+                // Independent exhaustive bank: one enemy response, role0 damage20..23 or
+                // role1 damage21..24 (fight.c), then half-missing recovery (battle.c1347-1350).
+                // Select a legal branch by the action, never calculate expected from live HP.
+                int[] expectedHp = enemyResponse switch
+                {
+                    { Evaded: true, Damage: 0, TargetIndex: 0 or 1 } => [123, 121],
+                    { Evaded: false, TargetIndex: 0, Damage: 20 or 21 } => [113, 121],
+                    { Evaded: false, TargetIndex: 0, Damage: 22 or 23 } => [112, 121],
+                    { Evaded: false, TargetIndex: 1, Damage: 21 or 22 } => [123, 110],
+                    { Evaded: false, TargetIndex: 1, Damage: 23 or 24 } => [123, 109],
+                    _ => throw new InvalidOperationException("Story enemy response is outside the independent HP recovery table.")
+                };
                 settledRoles = [owner.Roles[0], owner.Roles[1]];
                 for (int roleId = 0; roleId < 2; roleId++)
                 {
                     var role = settledRoles[roleId];
-                    // battle.c1347-1350: half-missing recovery; authored reward0 cannot level up.
-                    // Independent table: untouched/evade125,122; hit role0=113..115, role1=110..112.
-                    bool hit = !enemyResponse!.Evaded && enemyResponse.TargetIndex == roleId;
-                    AssertThat(hit ? role.Hp >= (roleId == 0 ? 113 : 110) && role.Hp <= (roleId == 0 ? 115 : 112)
-                        : role.Hp == (roleId == 0 ? 125 : 122)).IsTrue();
-                    AssertThat(role.Mp).IsEqual(35);
+                    AssertThat(role.Hp).IsEqual(expectedHp[roleId]);
+                    AssertThat(role.Mp).IsEqual(33);
                     AssertThat(role.MaxHp).IsEqual(150); AssertThat(role.MaxMp).IsEqual(50);
                     AssertThat(role.Level).IsEqual(2); AssertThat(role.PrimaryExperience.Value).IsEqual(0);
                     AssertThat(ReferenceEquals(role, initialRoles[roleId])).IsFalse();
                     var settled = observedBattle.Current.Roles[roleId];
                     AssertThat(ReferenceEquals(role, settled)).IsFalse();
                     AssertThat(role.Hp).IsEqual(settled.Hp); AssertThat(role.Mp).IsEqual(settled.Mp);
+                    AssertThat(role.RoleId).IsEqual(settled.RoleId);
+                    AssertThat(role.Level).IsEqual(settled.Level);
+                    AssertThat(role.MaxHp).IsEqual(settled.MaxHp); AssertThat(role.MaxMp).IsEqual(settled.MaxMp);
+                    AssertThat(role.CoveredByRoleId).IsEqual(settled.CoveredByRoleId);
+                    AssertThat(role.Attack).IsEqual(settled.Attack); AssertThat(role.MagicPower).IsEqual(settled.MagicPower);
+                    AssertThat(role.Defense).IsEqual(settled.Defense); AssertThat(role.Dexterity).IsEqual(settled.Dexterity);
+                    AssertThat(role.FleeRate).IsEqual(settled.FleeRate);
                     AssertThat(role.PrimaryExperience).IsEqual(settled.PrimaryExperience);
                     AssertThat(role.HiddenExperience.OrderBy(p => p.Key).SequenceEqual(settled.HiddenExperience.OrderBy(p => p.Key))).IsTrue();
                     AssertThat(role.Equipment.SequenceEqual(settled.Equipment) && role.Magics.SequenceEqual(settled.Magics)
@@ -413,8 +459,14 @@ public class StoryRoundtripSceneTests
             old = host.Main;
             AssertThat(old.Failure).IsNull();
             await host.Wait(() => observedInitial);
+            beforeCall = old.Dialogue!.Session!.CallId;
+            beforeSourceRequest = old.Dialogue.Session.SourceRequestId;
+            beforeInteractionRequest = old.Interaction!.PendingTrigger?.Id;
+            beforePhase = old.Dialogue.Session.Phase;
             host.Tap(Key.Enter);
-            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            searchDelivered = true;
+            await host.Wait(() => observedPrefix && old.Dialogue!.Session!.PendingDisplay is not null);
+            AssertThat(observedPrefix).IsTrue();
             var script = old.Dialogue!.Session!;
             Guid call = script.CallId;
             await host.FinishDisplay();
@@ -498,7 +550,7 @@ public class StoryRoundtripSceneTests
             AssertThat(host.Actions[3].Attacker == ClassicBattleSide.Player && host.Actions[3].ActorIndex == 1
                 && host.Actions[3].TargetIndex == 1 && host.Actions[3].Damage is >= 33 and <= 38).IsTrue();
             // Members only lost HP to that one enemy action (0 or 20..24).
-            int[] startHp = [100, 95];
+            int[] startHp = [97, 92];
             for (int i = 0; i < 2; i++)
             {
                 int hp = battle.Current.Combat.Players[i].Hp;
@@ -515,7 +567,7 @@ public class StoryRoundtripSceneTests
             AssertThat(old.Exploration!.Leader.X).IsEqual(leaderX);
             AssertThat(old.Exploration!.Leader.Y).IsEqual(leaderY);
             AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
-            AssertThat(observedInitial && observedEntry && observedCommit && observedSuffix && observedReturn).IsTrue();
+            AssertThat(observedInitial && observedPrefix && observedEntry && observedCommit && observedSuffix && observedReturn).IsTrue();
             AssertThat(old.Failure).IsNull();
         }
         AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
