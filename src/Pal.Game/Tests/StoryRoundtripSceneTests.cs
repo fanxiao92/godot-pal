@@ -1328,15 +1328,25 @@ public class StoryRoundtripSceneTests
             // The hook's changeHp +9999 healed the coverer full (capped at maxHp 150) before the
             // Won half recovery, and the boost panel exposed the applied boost registers.
             AssertThat(observedBoosts.Count > 0).IsTrue();
+            // Midbattle declares attack=40, magicPower=20, dexterity=100 and fleeRate=10.
+            // script.c 0x0030 scales each base word; the visible panel sums all five registers.
+            // Check the actual dialogue branch, not a union that accepts another branch's boost.
+            int expectedBoost = friendFirstText switch
+            {
+                "兄弟" => 2,    // L0044: 40 * 5 / 100
+                "我会胜" => 2,  // L0051: 20 * 10 / 100
+                "悲为力" => 15, // L0057-L0058: 40 * 25 / 100 + 20 * 25 / 100
+                "回家" => 99,   // L0062-L0063: 100 * 90 / 100 + 10 * 90 / 100
+                _ => throw new InvalidOperationException($"Unexpected friend-death dialogue block: {friendFirstText}.")
+            };
+            GD.Print($"PAL_FRIEND_BOOST_EXPECTED:block={friendFirstText};value={expectedBoost}");
             foreach (var panel in observedBoosts)
             {
                 GD.Print("PAL_BOOST_PANEL:" + string.Join('/', panel));
                 AssertThat(panel.Count).IsEqual(2);
                 AssertThat(panel[1]).IsEqual(0); // only the caller (coverer) is boosted
-                // Native battle content declares no base magicPower/flee panels (PalBattlePlayer),
-                // so only the attack/dexterity-scaled registers surface through the authored chain:
-                // 5% attack band=2, 25% band=10 (40*25%), 90% dexterity band=90 (100*90%).
-                AssertThat(panel[0] is 2 or 10 or 90).OverrideFailureMessage("panel=" + string.Join('/', panel)).IsTrue();
+                AssertThat(panel[0]).OverrideFailureMessage("panel=" + string.Join('/', panel)
+                    + $"; block={friendFirstText}; expected={expectedBoost}").IsEqual(expectedBoost);
             }
             GD.Print("PAL_BOOST_PANELS:" + string.Join("|", observedBoosts.Select(p => string.Join('/', p))));
             AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);

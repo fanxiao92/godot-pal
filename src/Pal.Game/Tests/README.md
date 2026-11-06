@@ -146,6 +146,16 @@ U13 更正候选现已通过有界真实验证：临时仅在 Main 的 Story 入
 
 父控收据见 `C:/evidence/m6/execution/tickets/150/coordinator-u14-verification.json`，原件在 `U14-story-current-value-red-green/`。这是独立复核后的当前值消费者小步，不是 #150 整票验收或集成；错/旧receipt、Enter echo/replay、完整资源hash、异常lifetime、legacy兼容及最终新源shared影响仍欠。#130/#126/#148/M6、GPU/人工/private-real/远端CI边界不变。
 
+## #150 U21/U22 兼容失败与 U23 boost 预期修正候选
+
+U21 使用既有正常 direct-dotnet 路由执行 heavy-a（5 Passed）及 heavy-b（5 Passed/1 Failed）；唯一失败为 `FriendDeathHookHealsCovererAndBattleStillEndsWon` 的 `panel=99/0`，原 Failed/唯一同文 Error RunInfo、四条 root 的 0/0/0/1 退出与完整双流保留，heavy-c/d/light 的35例未执行。没有把剩余预算自动续用。U22 在不含 #150 的已准备 `67be98f` 工作树，使用相同 heavy-b 六例 filter/expected 做一次独立基线：真实 5 Passed/1 Failed、同一唯一 `panel=99/0`，无其它原生诊断；两条 root 为 0/1，仍是 FAILED 而不是 GREEN。父控独立核验两轮原件、源码、实际 DLL/PDB、包/marker 与历史残留保留，分别见 `coordinator-u21-verification.json`、`coordinator-u22-verification.json`，证据位于 `C:/evidence/m6/execution/tickets/150/`。
+
+旧断言的“native magicPower/flee 未声明、按零计算”前提未跟随 #127：Midbattle 原始现代 players 明确声明 attack40/magicPower20/dexterity100/fleeRate10，typed pipeline 已批准保留这些值。只读 SDLPal `script.c` 的 0x0030 按各 base word 乘百分比，面板是五个 boost 寄存器之和；独立脚本分支表为兄弟→2、我会胜→2、悲为力→10+5=15、回家→90+9=99。U23 仅把原方法的宽泛 `2/10/90` 枚举替换为与已观察对话分支一一对应的精确预期，仍逐项核两成员/仅caller非零，保留所有 HP/MP/Won/后缀/返回/cleanup 断言；不让被测实现生成预期，不修改生产、raw输入、fixture、Seed、timeout、分区或库存。
+
+冻结时此两路径修正仅 source 候选；随后 U23 已实际完成原 heavy-b/c/d/light（6+3+4+28=41例）及 build/discovery：六条 root 全 exit0、四个独立 TRX 均 Completed/全部 Passed/RunInfo0，其余 counter0，实际 discovery650、完整输出/清理，无 timeout/cancel 或额外原生诊断。唯一 FriendDeathHook case stdout 直接记录回家分支 expected99、panel99/0、HP149/MP35/actions7；本 case 没有动态覆盖其余三个分支，不补写其通过。实际运行目录 DLL/PDB 与新 source/CodeBase 绑定，不借 U21 旧产物。
+
+父控独立核518原件、221源码/6工具、1463 tracked、四 TRX 精确集合/完整身份图/原诊断/实际产物与包/marker不变；首次父控 helper 错从 dotnet 成功摘要寻找 engine banner 而停止，原 exit1 保留，另一次 SDK-free reader 从各原 TRX Summary/Output/StdOut 核对4.7.2 banner成功，未复跑 native，case trace仍只取唯一 UnitTestResult。收据见 `coordinator-u23-verification.json`。U21 heavy-a5按未变所选方法/helpers/生产依赖责任复用，联合兼容范围46不是同轮新46，也不是 clean checkpoint 重跑。运行后仅 README 补本实测结果；仍欠最终新 source-bound shared 影响、整票 review/实际 integration，不是 #150/#130/M6、GPU/人工/private-real/CI 验收。
+
 ## 维护边界
 
 保持 `Main.tscn` 的真实入口和现有测试装配，不新增第二 Godot 项目、替代业务实现或内部测试 seam。变更时先冻结独立预期与完整身份，再同步脚本/config/本页；需要时序变异、输出捕获或完整门诊断，进入 Game 分层与当前异常规则，不在本页重写历史证据。
