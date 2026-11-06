@@ -91,8 +91,8 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
             'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:1',
             'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:2',
             'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:3') }
-        @{ name = 'scene-battle-heavy-d'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
-            'Pal.Game.Tests.StoryRoundtripSceneTests.PartyLoss', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwo',
+        @{ name = 'scene-battle-heavy-d'; count = 4; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.PartyLoss',
             'Pal.Game.Tests.StoryRoundtripSceneTests.RemovingTheDual', 'Pal.Game.Tests.StoryRoundtripSceneTests.VictorySettlement') }
         @{ name = 'scene-battle-light'; count = 28; classes = @('StoryRoundtripSceneTests', 'MainSceneTests'); matches = @(
             'Pal.Game.Tests.MainSceneTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.BaseFormat', 'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyFeedback',
@@ -103,7 +103,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
             'Pal.Game.Tests.StoryRoundtripSceneTests.PlayerPhysical', 'Pal.Game.Tests.StoryRoundtripSceneTests.StoryBattlePoseClock',
             'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects') }
         @{ name = 'native-map'; count = 433; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
-        @{ name = 'scene-realfull'; count = 3; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.') }
+        @{ name = 'scene-realfull'; count = 4; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin') }
     )
     $localOnly = if ($Scope -ceq 'committable') {
         @($inventory | Where-Object { $name = $_.name; $script:LocalOnlyRealMatches | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)

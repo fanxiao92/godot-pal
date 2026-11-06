@@ -67,6 +67,21 @@ shared world 的 copy 拥有独立 `RoleLiveState`，包含当前完整角色记
 
 #152 仍待父控最终 Standards/Spec 及实际本地集成；之后 #150 才能合入并消费当前 copy，继续验证真实 Main/preview/RNG/lifetime/Story 与原票其余验收。复制 Core 能力不代表 Main 已全部接线，不自动关闭 #152 或 #130/#126/#148，也不是 full gate、GPU、人工桌面、私有真实资源或 CI/M6 交付。
 
+## #150 当前有界候选：公开 Story party 精确分区
+
+唯一既有方法 `Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin` 从 `scene-battle-heavy-d` 迁入既有公开 `scene-realfull`，不是新增 batch、扩大 `Test-Range` allowlist 或选择整个 Story 类。以下仅为父控审查后的计划命令，本次 metadata 维护未执行 SDK / Game，也不授予运行权限；变量仍须指向批准的引擎、已验证 bundle 与全新输出目录：
+
+```powershell
+& ./scripts/Test-Range.ps1 -Scope game -GameBatch scene-realfull `
+  -Filter FullyQualifiedName=Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin `
+  -GodotPath $ApprovedGodotConsole -FixedPackageDirectory $VerifiedFourFileBundle `
+  -OutputDirectory $NewEvidenceDirectory
+```
+
+当前分区权威仍为 `scripts/GameTestBatches.ps1` 与离线 `GameBatches.Tests.ps1`：heavy-d 5→4；realfull full 3→4 / committable 2→3。full 保留原私有 `RealFirstBattleFlowTests` 正例，committable 只排除该原正例，保留两例 Synthetic 与上述完整 Story 方法匹配；公开精确 filter 仅选该一个 Story 方法，不消费私有真实资产。库存仍为 647 = full 644 positives + 3 controls，committable 643 positives + 1 private exclusion + 3 controls；仅迁移执行归属，完整门执行集合/总数、10 batches、三轮/37 TRX 与 realfull 300000ms 预算均不变。native-map 433 及 process / scene-dialogue / native-map 合计 592 不变。这些是源码/离线 metadata 登记，不是本轮 runtime discovery 或 full gate 通过。
+
+U9 扩展原方法的 shared owner/world/trigger、两人顺序、结算连续与同 URI 新 Main 初值观察。U11 已通过正常公开入口验证：临时反转初始 party 顺序时，在真实 Main 完成回调中发生指定断言失败；精确恢复后，同一方法在一次新运行中通过（647 discovery，单例 Completed/Passed，14 次 warning，原预算不变）。父控独立复核通过；这是有界观察器与分区候选验收，不是整票验收，也不能把初始 HP/MP 当作脚本前缀效果。真实 Story 全队 `0x001D` HP/MP 前缀及当前值消费、其余整票兼容/回执/资源 hash/lifetime 和新 source-bound shared-impact 证据仍欠。#150 尚未整票验收或集成，既有有界历史证据不重写；headless 合成证据也不替代私有真实资产、GPU、人工桌面或 CI/M6 交付。
+
 ## 维护边界
 
 保持 `Main.tscn` 的真实入口和现有测试装配，不新增第二 Godot 项目、替代业务实现或内部测试 seam。变更时先冻结独立预期与完整身份，再同步脚本/config/本页；需要时序变异、输出捕获或完整门诊断，进入 Game 分层与当前异常规则，不在本页重写历史证据。

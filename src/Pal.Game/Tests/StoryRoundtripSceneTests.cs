@@ -274,12 +274,145 @@ public class StoryRoundtripSceneTests
         using var fixture = new AuthoredStoryFixture("PartyWin");
         var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        DynamicEventWorld? observedWorld = null;
+        RoleLiveState? observedOwner = null;
+        TriggerScriptSession? observedSession = null;
+        IReadOnlyDictionary<int, BattleRoleSnapshot>? liveProjection = null;
+        BattleRoleSnapshot[] initialRoles = [], settledRoles = [];
+        ClassicBattleLifecycleSession? observedBattle = null;
+        ClassicBattleAction? enemyResponse = null;
+        Guid observedCall = Guid.Empty, observedOrigin = Guid.Empty;
+        bool observedInitial = false, observedEntry = false, observedCommit = false, observedSuffix = false, observedReturn = false;
+        void AssertInitialRole(BattleRoleSnapshot role, int roleId)
+        {
+            AssertThat(role.RoleId).IsEqual(roleId);
+            AssertThat(role.Hp).IsEqual(roleId == 0 ? 100 : 95);
+            AssertThat(role.Mp).IsEqual(20);
+            AssertThat(role.MaxHp).IsEqual(150); AssertThat(role.MaxMp).IsEqual(50);
+            AssertThat(role.Level).IsEqual(2); AssertThat(role.PrimaryExperience.Value).IsEqual(0);
+            AssertThat(role.Equipment.SequenceEqual(new int[6])).IsTrue();
+            AssertThat(role.Magics.SequenceEqual(new int[32])).IsTrue();
+            AssertThat(role.Statuses.SequenceEqual(new int[9])).IsTrue();
+            AssertThat(role.HiddenExperience.Values.All(track => track.Value == 0 && track.Level == 1 && track.Count == 0)).IsTrue();
+        }
+        void ObserveSharedOwner(Main main)
+        {
+            var world = main.Dialogue?.FirstBattleWorld
+                ?? throw new InvalidOperationException("Story completion is missing its shared world.");
+            var owner = world.RoleLiveState
+                ?? throw new InvalidOperationException("Story completion is missing its live role owner.");
+            var session = main.Dialogue!.Session!;
+            if (!observedInitial)
+            {
+                observedInitial = true;
+                observedWorld = world; observedOwner = owner; observedSession = session;
+                liveProjection = session.BattleRoles;
+                initialRoles = [owner.Roles[0], owner.Roles[1]];
+                AssertThat(session.CallId).IsEqual(Guid.Empty);
+                AssertThat(main.StoryBattle).IsNull();
+            }
+            AssertThat(ReferenceEquals(world, observedWorld) && ReferenceEquals(owner, observedOwner)
+                && ReferenceEquals(session, observedSession)).IsTrue();
+            AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1 }))
+                .OverrideFailureMessage("Story shared-owner party order must be the authored [0,1].").IsTrue();
+            AssertThat(owner.Roles.Count).IsEqual(2); // PartyWin declares no spectators.
+            AssertThat(session.BattleRoles!.Count).IsEqual(2);
+            AssertThat(ReferenceEquals(session.BattleRoles, liveProjection)).IsTrue();
+            foreach (int roleId in new[] { 0, 1 })
+            {
+                AssertInitialRole(initialRoles[roleId], roleId); // Held history must never change.
+                AssertThat(ReferenceEquals(liveProjection![roleId], owner.Roles[roleId])).IsTrue();
+                var vitals = world.PartyVitals[roleId];
+                var role = owner.Roles[roleId];
+                AssertThat(vitals.Hp).IsEqual(role.Hp); AssertThat(vitals.Mp).IsEqual(role.Mp);
+                AssertThat(vitals.MaxHp).IsEqual(role.MaxHp); AssertThat(vitals.MaxMp).IsEqual(role.MaxMp);
+            }
+            if (observedCall == Guid.Empty && session.CallId != Guid.Empty)
+            {
+                observedCall = session.CallId;
+                observedOrigin = main.Interaction!.PendingTrigger!.Id;
+                AssertThat(session.SourceRequestId).IsEqual(observedOrigin);
+                AssertThat(observedOrigin != Guid.Empty).IsTrue();
+            }
+            if (main.StoryBattle is { } lifecycle)
+            {
+                if (!observedEntry)
+                {
+                    observedEntry = true;
+                    observedBattle = lifecycle;
+                    AssertThat(ReferenceEquals(session.PendingBattle!.Lifecycle, lifecycle)).IsTrue();
+                    AssertThat(lifecycle.Current.Combat.Players.Select(p => p.RoleId).SequenceEqual(new[] { 0, 1 })).IsTrue();
+                    AssertThat(lifecycle.Current.Combat.Players.Select(p => p.Hp).SequenceEqual(new[] { 100, 95 })).IsTrue();
+                    AssertThat(lifecycle.Current.Combat.Players.Select(p => p.Attack).SequenceEqual(new[] { 40, 35 })).IsTrue();
+                    AssertThat(lifecycle.Current.Combat.Players.Select(p => p.Defense).SequenceEqual(new[] { 20, 18 })).IsTrue();
+                    AssertThat(lifecycle.Current.Combat.Players.All(p => p.Dexterity == 100)).IsTrue();
+                    AssertInitialRole(lifecycle.Current.Roles[0], 0); AssertInitialRole(lifecycle.Current.Roles[1], 1);
+                }
+                AssertThat(ReferenceEquals(lifecycle, observedBattle)).IsTrue();
+                AssertThat(session.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+                AssertThat(session.PendingDisplay).IsNull();
+                // Neither combat damage nor intermediate settlement may publish before final ACK.
+                for (int roleId = 0; roleId < 2; roleId++)
+                    AssertThat(ReferenceEquals(owner.Roles[roleId], initialRoles[roleId])).IsTrue();
+                if (lifecycle.Current.Combat.LastAction is { Attacker: ClassicBattleSide.Enemy } response)
+                    enemyResponse ??= response;
+            }
+            else if (observedEntry && !observedCommit)
+            {
+                observedCommit = true; // First publication after the owned final ACK, regardless of values.
+                var receipt = observedBattle!.Completion!;
+                AssertThat(observedBattle.OwnsCompletion(receipt)).IsTrue();
+                AssertThat(receipt.Outcome).IsEqual(ClassicBattlePhase.Won);
+                AssertThat(receipt.ExperienceGranted).IsEqual(0); AssertThat(receipt.CashGranted).IsEqual(0);
+                AssertThat(session.PendingBattle).IsNull();
+                AssertThat(session.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
+                AssertThat(enemyResponse).IsNotNull();
+                settledRoles = [owner.Roles[0], owner.Roles[1]];
+                for (int roleId = 0; roleId < 2; roleId++)
+                {
+                    var role = settledRoles[roleId];
+                    // battle.c1347-1350: half-missing recovery; authored reward0 cannot level up.
+                    // Independent table: untouched/evade125,122; hit role0=113..115, role1=110..112.
+                    bool hit = !enemyResponse!.Evaded && enemyResponse.TargetIndex == roleId;
+                    AssertThat(hit ? role.Hp >= (roleId == 0 ? 113 : 110) && role.Hp <= (roleId == 0 ? 115 : 112)
+                        : role.Hp == (roleId == 0 ? 125 : 122)).IsTrue();
+                    AssertThat(role.Mp).IsEqual(35);
+                    AssertThat(role.MaxHp).IsEqual(150); AssertThat(role.MaxMp).IsEqual(50);
+                    AssertThat(role.Level).IsEqual(2); AssertThat(role.PrimaryExperience.Value).IsEqual(0);
+                    AssertThat(ReferenceEquals(role, initialRoles[roleId])).IsFalse();
+                    var settled = observedBattle.Current.Roles[roleId];
+                    AssertThat(ReferenceEquals(role, settled)).IsFalse();
+                    AssertThat(role.Hp).IsEqual(settled.Hp); AssertThat(role.Mp).IsEqual(settled.Mp);
+                    AssertThat(role.PrimaryExperience).IsEqual(settled.PrimaryExperience);
+                    AssertThat(role.HiddenExperience.OrderBy(p => p.Key).SequenceEqual(settled.HiddenExperience.OrderBy(p => p.Key))).IsTrue();
+                    AssertThat(role.Equipment.SequenceEqual(settled.Equipment) && role.Magics.SequenceEqual(settled.Magics)
+                        && role.Statuses.SequenceEqual(settled.Statuses)).IsTrue();
+                }
+            }
+            if (observedCommit)
+            {
+                AssertThat(session.CallId).IsEqual(observedCall);
+                AssertThat(session.SourceRequestId).IsEqual(observedOrigin);
+                for (int roleId = 0; roleId < 2; roleId++)
+                    AssertThat(ReferenceEquals(owner.Roles[roleId], settledRoles[roleId])).IsTrue();
+                if (!observedSuffix && session.Phase == TriggerScriptPhase.Completed)
+                {
+                    observedSuffix = true;
+                    AssertThat(main.Interaction!.PendingTrigger).IsNull();
+                    AssertThat(main.Interaction.Phase is NpcInteractionPhase.Returning or NpcInteractionPhase.Exploring).IsTrue();
+                }
+                if (observedSuffix && !observedReturn && main.Interaction!.Phase == NpcInteractionPhase.Exploring)
+                    observedReturn = true;
+            }
+        }
         Main old;
         using (var host = new StoryHost(selection,
-            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)],
+            updateObserver: ObserveSharedOwner))
         {
             old = host.Main;
             AssertThat(old.Failure).IsNull();
+            await host.Wait(() => observedInitial);
             host.Tap(Key.Enter);
             await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
             var script = old.Dialogue!.Session!;
@@ -382,15 +515,40 @@ public class StoryRoundtripSceneTests
             AssertThat(old.Exploration!.Leader.X).IsEqual(leaderX);
             AssertThat(old.Exploration!.Leader.Y).IsEqual(leaderY);
             AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(observedInitial && observedEntry && observedCommit && observedSuffix && observedReturn).IsTrue();
             AssertThat(old.Failure).IsNull();
         }
         AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
         AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
         AssertThat(Input.IsKeyPressed(Key.Right)).IsFalse();
         // Same-URI fresh Main: prepared resources are reused read-only, no session state leaks.
-        using (var fresh = new StoryHost(selection,
-            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        bool observedFresh = false;
+        void ObserveFreshOwner(Main main)
         {
+            if (observedFresh) return;
+            observedFresh = true;
+            var world = main.Dialogue!.FirstBattleWorld!;
+            var owner = world.RoleLiveState!;
+            var session = main.Dialogue.Session!;
+            AssertThat(ReferenceEquals(world, observedWorld) || ReferenceEquals(owner, observedOwner)
+                || ReferenceEquals(session, observedSession)).IsFalse();
+            AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1 })).IsTrue();
+            AssertThat(session.CallId).IsEqual(Guid.Empty);
+            for (int roleId = 0; roleId < 2; roleId++)
+            {
+                AssertInitialRole(owner.Roles[roleId], roleId);
+                AssertThat(ReferenceEquals(session.BattleRoles![roleId], owner.Roles[roleId])).IsTrue();
+                AssertThat(ReferenceEquals(owner.Roles[roleId], initialRoles[roleId])
+                    || ReferenceEquals(owner.Roles[roleId], settledRoles[roleId])).IsFalse();
+                AssertThat(world.PartyVitals[roleId].Hp).IsEqual(roleId == 0 ? 100 : 95);
+                AssertThat(world.PartyVitals[roleId].Mp).IsEqual(20);
+            }
+        }
+        using (var fresh = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)],
+            updateObserver: ObserveFreshOwner))
+        {
+            await fresh.Wait(() => observedFresh);
             AssertThat(fresh.Main.Failure).IsNull();
             AssertThat(fresh.Main.Dialogue!.Session!.CallId).IsEqual(Guid.Empty);
             AssertThat(fresh.Main.StoryBattle).IsNull();
@@ -1558,7 +1716,9 @@ public class StoryRoundtripSceneTests
         private PalDialogueDisplay? display;
         private readonly bool party;
         private readonly Vector2[] partyPlayers = [], partyEnemies = [];
-        internal StoryHost(GameSceneConfiguration selection, Vector2[]? enemySlots = null, Vector2[]? players = null)
+        private readonly Action<Main>? updateObserver;
+        internal StoryHost(GameSceneConfiguration selection, Vector2[]? enemySlots = null, Vector2[]? players = null,
+            Action<Main>? updateObserver = null)
         {
             // Party hosts reuse the same production scene; only the observer switches to party checks.
             party = enemySlots is not null;
@@ -1568,6 +1728,7 @@ public class StoryRoundtripSceneTests
                     throw new ArgumentException("Party hosts require exactly two enemy slots and two player origins.");
                 partyEnemies = enemySlots; partyPlayers = players!;
             }
+            this.updateObserver = updateObserver;
             Main.Configure(selection); Main.UpdateCompleted += Updated;
             // Runner owns the container, so an actual Main removal can be inspected before final Free.
             var container = new Node();
@@ -1581,6 +1742,7 @@ public class StoryRoundtripSceneTests
             updates++;
             try
             {
+                updateObserver?.Invoke(Main);
                 var combat = Main.StoryBattle?.Current.Combat;
                 var pose = Main.StoryBattlePose;
                 var draw = Main.StoryDrawSnapshot;
