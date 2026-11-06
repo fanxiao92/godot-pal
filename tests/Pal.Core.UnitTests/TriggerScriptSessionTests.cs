@@ -7,6 +7,58 @@ namespace Pal.Core.Tests;
 public class TriggerScriptSessionTests
 {
     [Fact]
+    public void Content_only_named_branch_rejects_before_call_state_or_random_draws()
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[1] = JsonNode.Parse("""
+            {"label":"L0001","op":"randomJump","rate":0,"to":"L0003","next":"L0002",
+             "source":{"index":1,"opcode":6,"operands":[0,3,0]}}
+            """);
+        fixture.Commands[2] = JsonNode.Parse("""
+            {"label":"L0002","op":"end","mode":"keep","next":"L0003","source":{"index":2,"opcode":0,"operands":[0,0,0]}}
+            """);
+        fixture.Commands[3] = JsonNode.Parse("""
+            {"label":"L0003","op":"removeItem","itemId":76,"count":1,"shortageTarget":null,"next":"L0004",
+             "source":{"index":3,"opcode":32,"operands":[76,1,0]}}
+            """);
+        var events = fixture.Load();
+        var role = new BattleRoleSnapshot(1, 2, 100, 150, 20, 50, new(5, 2, 17),
+            new Dictionary<string, BattleExperienceSnapshot>(), new int[6], new int[32], new int[9], 0);
+        var content = new TriggerBattleContent(role, new(1, 100, 150, 40, 20, 100), new([], []),
+            new Dictionary<int, ClassicBattleEnemy>());
+        var random = new ContentPreflightRandom();
+        var script = new TriggerScriptSession(events, Language(), content, random);
+        var before = script.Context;
+        var roles = script.BattleRoles;
+        var error = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 60));
+        Assert.Contains("content-only", error.Message);
+        Assert.Contains("trigger", error.Message);
+        Assert.Contains("removeItem", error.Message);
+        Assert.Contains("shared.json#L0003 @0003", error.Message);
+        Assert.Equal(0, random.Draws);
+        Assert.Same(roles, script.BattleRoles);
+        Assert.Equal(100, script.BattleRole!.Hp);
+        Assert.Equal(before, script.Context);
+        Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+        Assert.Equal(Guid.Empty, script.CallId);
+        Assert.Null(script.StartedEntry);
+        Assert.Null(script.CurrentPosition);
+        Assert.Null(script.PendingDisplay);
+        Assert.Null(script.PendingBattle);
+        Assert.Equal(0, script.Caller);
+        Assert.Equal(0, script.ReturnEntry);
+        Assert.Contains("content-only", Assert.Throws<InvalidDataException>(() =>
+            TriggerScriptSession.ValidateEntry(events, Language(), content, "shared", "npc")).Message);
+    }
+
+    private sealed class ContentPreflightRandom : IBattleRandom
+    {
+        public int Draws { get; private set; }
+        public int NextInclusive(int from, int to) { Draws++; return from; }
+        public float NextInclusive(float from, float to) { Draws++; return from; }
+    }
+
+    [Fact]
     public void Real_script_shape_runs_to_display_boundary_and_returns_saved_entry_only_after_completion_receipt()
     {
         var fixture = RealShape();

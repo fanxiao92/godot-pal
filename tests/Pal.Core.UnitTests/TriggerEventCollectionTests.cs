@@ -7,6 +7,116 @@ namespace Pal.Core.Tests;
 public class TriggerEventCollectionTests
 {
     [Fact]
+    public void Unselected_named_call_and_removeItem_load_without_reinterpreting_source()
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[0] = JsonNode.Parse("""
+            {"label":"L0000","op":"call","to":"shared#L0004","eventObjectId":65535,"next":"L0001",
+             "source":{"index":0,"opcode":4,"operands":[2,3,4]}}
+            """);
+        fixture.Commands[4] = JsonNode.Parse("""
+            {"label":"L0004","op":"removeItem","itemId":76,"count":65535,"shortageTarget":"shared#L0001","next":null,
+             "source":{"index":4,"opcode":32,"operands":[99,0,0]}}
+            """);
+        // End the selected supported path before the archival command.
+        fixture.Commands[3] = JsonNode.Parse("""
+            {"label":"L0003","op":"end","mode":"keep","next":"L0004","source":{"index":3,"opcode":0,"operands":[0,0,0]}}
+            """);
+        var collection = fixture.Load();
+        Assert.Equal(5, collection.InstructionCount);
+        Assert.Equal(new[] { 99, 0, 0 }, collection.GetSource(4).Operands);
+        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("A")])]);
+        var script = new TriggerScriptSession(collection, language);
+        script.Start("shared", "npc", 60);
+        var display = script.PendingDisplay!;
+        display.Display.Update(24, false, true);
+        display.Display.Update(100, true, false);
+        Assert.True(script.AcknowledgeDisplay(display.Id));
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+    }
+
+    [Fact]
+    public void Unselected_named_references_are_validated_across_files_including_nullable_zero_rules()
+    {
+        var fixture = new EventFixture();
+        fixture.Index["files"] = new JsonArray("shared", "targets");
+        var last = fixture.Commands[4]!.DeepClone();
+        fixture.Commands.RemoveAt(4);
+        fixture.Commands[3]!["next"] = "targets#L0004";
+        fixture.Files["targets"] = new JsonObject { ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "targets",
+            ["entries"] = new JsonArray(), ["commands"] = new JsonArray(last) };
+        fixture.Commands[0] = JsonNode.Parse("""
+            {"label":"L0000","op":"removeItem","itemId":76,"count":0,"shortageTarget":"targets#L0004","next":"L0001",
+             "source":{"index":0,"opcode":32,"operands":[76,0,0]}}
+            """);
+        Assert.Equal(5, fixture.Load().InstructionCount);
+        fixture.Commands[0]!["shortageTarget"] = "targets#missing";
+        var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+        Assert.Contains("shared.json#L0000 @0000", error.Message);
+        Assert.Contains("removeItem.shortageTarget", error.Message);
+        Assert.Contains("dangling", error.Message);
+        fixture.Commands[0]!["shortageTarget"] = "shared#L0000";
+        Assert.Contains("address zero must use null", Assert.Throws<InvalidDataException>(() => fixture.Load()).Message);
+    }
+
+    [Theory]
+    [InlineData("unknown-op")]
+    [InlineData("mapping")]
+    [InlineData("unknown-field")]
+    [InlineData("missing-field")]
+    [InlineData("word-type")]
+    [InlineData("word-negative")]
+    [InlineData("word-overflow")]
+    [InlineData("reference-null")]
+    [InlineData("reference-malformed")]
+    [InlineData("reference-dangling")]
+    public void Unselected_named_call_requires_exact_mapping_shape_and_complete_references(string fault)
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[0] = JsonNode.Parse("""
+            {"label":"L0000","op":"call","to":"L0000","eventObjectId":65535,"next":"L0001",
+             "source":{"index":0,"opcode":4,"operands":[2,3,4]}}
+            """);
+        Assert.Equal(5, fixture.Load().InstructionCount); // Ordinary references may address zero.
+        var command = fixture.Commands[0]!.AsObject();
+        switch (fault)
+        {
+            case "unknown-op": command["op"] = "unknownNamed"; break;
+            case "mapping": command["source"]!["opcode"] = 32; break;
+            case "unknown-field": command["count"] = 1; break;
+            case "missing-field": command.Remove("eventObjectId"); break;
+            case "word-type": command["eventObjectId"] = "1"; break;
+            case "word-negative": command["eventObjectId"] = -1; break;
+            case "word-overflow": command["eventObjectId"] = 65536; break;
+            case "reference-null": command["to"] = null; break;
+            case "reference-malformed": command["to"] = "shared##L0000"; break;
+            case "reference-dangling": command["to"] = "missing#L0000"; break;
+        }
+        var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+        Assert.Contains("shared.json", error.Message);
+        Assert.Contains("@0000", error.Message);
+    }
+
+    [Fact]
+    public void Named_content_keeps_immutable_semantics_after_parse_document_and_input_are_gone()
+    {
+        var fixture = new EventFixture();
+        fixture.Commands[0] = JsonNode.Parse("""
+            {"label":"L0000","op":"removeItem","itemId":76,"count":65535,"shortageTarget":null,"next":"L0001",
+             "source":{"index":0,"opcode":32,"operands":[99,0,4]},"_note":{"text":"edited"}}
+            """);
+        var collection = fixture.Load();
+        fixture.Commands[0]!["count"] = 1;
+        var content = collection.GetCommandContent(0);
+        Assert.Equal("removeItem", content.GetProperty("op").GetString());
+        Assert.Equal(76, content.GetProperty("itemId").GetInt32());
+        Assert.Equal(65535, content.GetProperty("count").GetInt32());
+        Assert.Equal("edited", content.GetProperty("_note").GetProperty("text").GetString());
+        Assert.Equal(new[] { 99, 0, 4 }, collection.GetSource(0).Operands);
+        Assert.Throws<ArgumentOutOfRangeException>(() => collection.GetCommandContent(5));
+    }
+
+    [Fact]
     public void Named_startBattle_loads_without_enabling_execution_or_changing_source()
     {
         var fixture = new EventFixture();

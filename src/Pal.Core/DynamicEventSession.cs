@@ -381,6 +381,8 @@ public sealed class DynamicEventSession
         {
             if (address == 0 || !visited.Add(address)) continue;
             var command = events.CommandAt(address);
+            if (command.IsContentOnly)
+                throw new InvalidDataException($"{command.Position}: content-only command '{command.Op}' is unsupported in auto context.");
             switch (command.Op)
             {
                 case "end" when command.Mode == "keep":

@@ -274,6 +274,8 @@ public sealed class TriggerScriptSession
             address = item.Address;
             if (address == 0 || !visited.Add(item)) continue;
             var command = events.CommandAt(address);
+            if (command.IsContentOnly)
+                throw new InvalidDataException($"{command.Position}: content-only command '{command.Op}' is unsupported in trigger context {item.Context}.");
             if (command.Op == "end" && command.Mode == "keep") continue;
             if (command.Op == "startBattle" && battleContent is not null && item.Context == TriggerScriptContext.Event)
             {

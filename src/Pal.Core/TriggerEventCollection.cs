@@ -16,6 +16,11 @@ public sealed class TriggerEventCollection
     public TriggerCommandSource GetSource(int sourceAddress) => _commands.TryGetValue(sourceAddress, out var command)
         ? command.Source : throw new ArgumentOutOfRangeException(nameof(sourceAddress));
 
+    /// <summary>Immutable supplied modern command, including semantic fields and diagnostic source.
+    /// Content retention does not grant execution capability.</summary>
+    public JsonElement GetCommandContent(int sourceAddress) => _commands.TryGetValue(sourceAddress, out var command)
+        ? command.Content : throw new ArgumentOutOfRangeException(nameof(sourceAddress));
+
     public TriggerEventEntry GetEntry(string fileId, string id) => _entries.TryGetValue((fileId, id), out var entry)
         ? entry : throw new InvalidDataException($"{fileId}.json: missing entry '{id}'.");
 
@@ -93,6 +98,12 @@ public sealed class TriggerEventCollection
             {
                 int target = collection.Resolve(command.TargetReference, command.Position.FileId, command.Position.ToString());
                 if (command.Op == "randomJump") command.TargetAddress = target;
+            }
+            foreach (var reference in command.ContentReferences)
+            {
+                int target = collection.Resolve(reference.Reference, command.Position.FileId, $"{command.Position} {command.Op}.{reference.Field}");
+                if (reference.RequiresNonzeroAddress && target == 0)
+                    throw new InvalidDataException($"{command.Position} {command.Op}.{reference.Field}: address zero must use null, not a reference.");
             }
             if (command.Op == "startBattle")
             {
@@ -201,12 +212,12 @@ public sealed class TriggerEventCollection
                 "redraw" => ["delayUnits", "updateGestures"],
                 "fadeScene" => ["speed"],
                 "markFailed" => [],
-                _ => throw new InvalidDataException($"Unknown op '{op}'.")
+                _ => TriggerNamedContentProfile.Fields(op, opcode)
             };
             EventJson.Keys(node, context, ["label", "op", "next", "source", ..fields]);
             var position = new TriggerPosition(fileId, label, address);
             var retainedSource = new TriggerCommandSource(position, opcode, Array.AsReadOnly(operands.Select(value => value.GetInt32()).ToArray()));
-            var command = new TriggerCommand(retainedSource, op, EventJson.Reference(node, "next"));
+            var command = new TriggerCommand(retainedSource, op, EventJson.Reference(node, "next"), node.Clone());
             switch (op)
             {
                 case "raw":
@@ -473,6 +484,10 @@ public sealed class TriggerEventCollection
                     // script.c 0x0041: g_fScriptSuccess = FALSE.
                     if (opcode != 0x41) throw new InvalidDataException("Invalid markFailed mapping.");
                     break;
+                default:
+                    command.IsContentOnly = true;
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    break;
             }
             return command;
         }
@@ -492,11 +507,14 @@ public sealed record TriggerPosition(string FileId, string Label, int SourceAddr
 
 public sealed record TriggerCommandSource(TriggerPosition Position, int Opcode, IReadOnlyList<int> Operands);
 
-internal sealed class TriggerCommand(TriggerCommandSource source, string op, string? nextReference)
+internal sealed class TriggerCommand(TriggerCommandSource source, string op, string? nextReference, JsonElement content)
 {
+    internal JsonElement Content { get; } = content;
     internal TriggerCommandSource Source { get; } = source;
     internal TriggerPosition Position => Source.Position;
     internal string Op { get; } = op;
+    internal bool IsContentOnly { get; set; }
+    internal IReadOnlyList<TriggerContentReference> ContentReferences { get; set; } = [];
     internal string? NextReference { get; } = nextReference;
     internal int? NextAddress { get; set; }
     internal string? TargetReference { get; set; }
