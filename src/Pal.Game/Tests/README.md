@@ -45,7 +45,17 @@ headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证�
 
 combat 中间态及战后脚本等待期间不提前发布最终角色记录。仅当 `AcknowledgeBattle(requestId, receipt)` 的 phase、requestId 与 lifecycle `OwnsCompletion` 全部通过，才 merge 此次参战者的完整结算记录（含既有成长、装备、法术等字段），保留旁观记录，然后继续外层脚本后缀；拒绝的旧、重复或 foreign 回执不提交。legacy dialogue-only、world-only + `InitializePartyVitals`、battle-only 路径保留；shared world 拒绝重复 `InitializePartyVitals` seed，显式 shared trigger 拒绝未绑定同一 owner 的 world。
 
-未来外层 content loader 负责从已验证内容/恢复记录重新构造 owner，再将 world/trigger 重新绑定；本票不设计存档 schema。#148 的 D3/D4 已批准，其正式存读档规格不由这里重开或实现。当前 Main、preview、SceneRunner **尚未接入此 shared 路径**，#149 的公开 Core 能力及兼容回归不能替代 #130 的正式 Main 接线与验收，也不代表完整 revive 毒/状态、#139 或整个 M6 已交付。当前计数登记 Core 1195、CLI Unit 465；完整 Unit 证据复用 #149 U5 新鲜 Core 1195/1195、CLI Unit 465/465 收据：实际运行源码为 `feeea21523b75c0b43bc28ef03a971da6e6d7664 + dirty.patch`，其 patch 与 `b7c07e43efcb696af8808125f5feab0a8c3d725e` 提交差异逐字节相同，并非在后续 metadata checkpoint 重跑。Game 库存与批次未因本票改变。metadata 登记及 bounded shared-impact 不是完整门、GPU、人工或 CI 验收。
+未来外层 content loader 负责从已验证内容/恢复记录重新构造 owner，再将 world/trigger 重新绑定；本票不设计存档 schema。#148 的 D3/D4 已批准，其正式存读档规格不由这里重开或实现。当前 Main、preview、SceneRunner **尚未接入此 shared 路径**，#149 的公开 Core 能力及兼容回归不能替代 #130 的正式 Main 接线与验收，也不代表完整 revive 毒/状态、#139 或整个 M6 已交付。该 #149 交付时的历史计数登记为 Core 1195、CLI Unit 465（不是当前计数）；完整 Unit 证据复用 #149 U5 新鲜 Core 1195/1195、CLI Unit 465/465 收据：实际运行源码为 `feeea21523b75c0b43bc28ef03a971da6e6d7664 + dirty.patch`，其 patch 与 `b7c07e43efcb696af8808125f5feab0a8c3d725e` 提交差异逐字节相同，并非在后续 metadata checkpoint 重跑。Game 库存与批次未因本票改变。metadata 登记及 bounded shared-impact 不是完整门、GPU、人工或 CI 验收。
+
+## #151 M6-A T04c：Core 首战所属调用与返回边界
+
+`FirstMandatoryBattleSession.PendingRequestId` 是每次真实搜索的独立非空 origin，不参与原两字段 `FirstMandatoryBattleTriggerRequest` record 的构造、deconstruct 或值相等。worldful 宿主须在任何 facade `Update` / trigger `Start` 前，一次性 `InitializeTrigger` 关联实际生产 trigger；Core 通过 trigger 的 internal readonly `BoundWorld` 读取实际 world，不接受另传 world 或运行中 rebind。真实调用顺序为搜索 → `Start` 传 origin → `BindTrigger` 固定实际 session + CallId → 外层 `Completed` / endkeep → `CompleteTrigger`；未完成、旧请求、旧 call、foreign session 和重复完成不能释放。battle 最终 ACK 与外层脚本完成是两层不同的所有权，不以其中之一冒充另一层。
+
+合法完成保存本次实际返回入口，再进入 50ms 返回保护；保留正常 100ms 探索节拍、uint wrap、晚到不补步，保护到期清瞬时 search 而保留 held 方向及优先顺序。legacy worldless 路径继续兼容。投影仅更新原当前场景对象集合及 legacy 已声明记录，保留 map、sprites/frames 身份，不把实际 world 的额外 global 上下文加入碰撞/搜索/渲染。首次 Start 前及返回后的正常探索都同步同一个 world 的 leader；不重 seed、重发奖励或重 merge #149 的角色结算。legacy `AutoIdleFrameCount` 保留原始 opaque WORD：此路径既不 materialize 也不执行 auto，不能用 world 默认零覆盖；不新增完整 auto、VM 或 save schema。
+
+当前计数登记 Core 1212、CLI Unit 465；复用 #151 U3 实际 focused 66/66、Core 1212/1212、CLI Unit 465/465 的完整 Unit 原件。其真实运行源码为 `883dc4b3515508bd016492059cb6a5325b3b911d + dirty.patch`，patch 与 `c1e7b0ed31ce93a604eeb230e8d683135b2ce06f` 提交差异逐字节相同，不是在后续 metadata HEAD 重跑。U3 非零 counter 17/65535 → 0 的指定 RED 与修复后原件各自保留。Game 库存及批次未变；最终 metadata 候选的新 source-bound headless shared range 以对应候选收据为准，不预告通过，也不拼成完整门、GPU、人工桌面、私有真实资源或 CI 验收。
+
+本 Core 交付不修复或接入正式 Main：#150 仍须实际消费初始化 / Start origin / Bind / Complete，证明 post-Won 后新的 committed 探索更新、第二次真实搜索入战，以及 shared / preview / RNG / Story 的剩余接线与活性。#151 仍待父控最终 Standards/Spec、实际本地集成与叶子收尾；不能据此关闭 #130、#126 或 #148。
 
 ## 维护边界
 

@@ -17,6 +17,7 @@ public sealed class TriggerScriptSession
     private readonly TriggerBattleContent? _battleContent;
     private readonly IBattleRandom? _battleRandom;
     private readonly DynamicEventWorld? _world;
+    internal DynamicEventWorld? BoundWorld => _world;
     private RoleLiveState? _roleLiveState;
     private IReadOnlyDictionary<int, BattleRoleSnapshot>? _battleRoles;
     private ClassicBattleRoleHook? _battleHook;
