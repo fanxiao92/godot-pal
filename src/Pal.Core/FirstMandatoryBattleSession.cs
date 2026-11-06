@@ -10,6 +10,8 @@ public sealed class FirstMandatoryBattleSession
     private readonly ExplorationInput input;
     private readonly FirstMandatoryBattleClosureReceipt? closure;
     private bool searchPressed;
+    private bool hasUpdated;
+    private TriggerScriptSession? initializedTrigger;
     private TriggerScriptSession? boundTrigger;
     private Guid boundCall;
     private bool returning;
@@ -69,6 +71,23 @@ public sealed class FirstMandatoryBattleSession
     public void Release(ExplorationKey key) => input.Release(key);
     public void PressSearch() => searchPressed = true;
 
+    /// <summary>Associates the production world once, before any exploration update or script Start.</summary>
+    public bool InitializeTrigger(TriggerScriptSession trigger)
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        if (initializedTrigger is not null || hasUpdated || PendingTrigger is not null
+            || trigger.CallId != Guid.Empty || trigger.BoundWorld is not { SceneId: 2 } world
+            || world.Leader with { Sprite = Current.Leader.Sprite } != Current.Leader
+            || world.Leader.Sprite.SpriteId != Current.Leader.Sprite.SpriteId
+            || !trigger.Entries.Any(entry => entry is { OwnerType: "eventObject", OwnerId: 28,
+                Slot: "wTriggerScript", Kind: "trigger", SourceAddress: 0x09c3 })
+            || Objects.Any(item => world.Find(item.Id) is not { } actual
+                || actual.Initial.SpriteNumber != item.SpriteNumber || actual.Initial.SpriteFrames != item.SpriteFrames
+                || actual.Initial.Layer != item.Layer)) return false;
+        initializedTrigger = trigger;
+        return true;
+    }
+
     /// <summary>Binds the actual successful Start once, including synchronous endkeep calls.</summary>
     public bool BindTrigger(Guid requestId, TriggerScriptSession trigger)
     {
@@ -87,10 +106,47 @@ public sealed class FirstMandatoryBattleSession
             || trigger.CallId != boundCall || trigger.Phase != TriggerScriptPhase.Completed
             || trigger.ReturnEntry != PendingTrigger!.EntryAddress) return false;
 
-        // The supported outer executor ends with keep. This saves the legacy/worldless word;
-        // bound dynamic-world projection is a separate synchronization boundary.
-        exploration.SaveTriggerEntry((ushort)PendingTrigger.OwnerId, (ushort)trigger.ReturnEntry);
-        State.World.EventObjects.Single(item => item.OwnerId == PendingTrigger.OwnerId).TriggerEntry = trigger.ReturnEntry;
+        if (trigger.BoundWorld is { } world)
+        {
+            // Only the original current-scene set belongs in exploration. Global hook contexts
+            // remain in the production world, never becoming collision/search/render objects.
+            var objects = Objects.Select(item =>
+            {
+                var actual = world.Find(item.Id)!;
+                return item with
+                {
+                    X = unchecked((ushort)actual.X), Y = unchecked((ushort)actual.Y),
+                    Direction = unchecked((ushort)actual.Direction), CurrentFrame = unchecked((ushort)actual.CurrentFrame),
+                    State = unchecked((short)actual.State), VanishTime = unchecked((short)actual.VanishTime),
+                    TriggerMode = unchecked((ushort)actual.TriggerMode), AutoEntry = unchecked((ushort)actual.AutoEntry),
+                    TriggerEntry = item.Id == PendingTrigger.OwnerId ? (ushort)trigger.ReturnEntry : unchecked((ushort)actual.TriggerEntry)
+                };
+            }).ToArray();
+            var rules = Rules.WithObjects(objects);
+            var leader = world.Leader with { Sprite = Current.Leader.Sprite };
+            // ReplaceRules builds a plan after assigning its rules: validate first so rejection
+            // cannot publish a partial rule set or consume the owned request.
+            try { rules.BuildPlan(leader); }
+            catch (InvalidOperationException) { return false; }
+            catch (ArgumentException) { return false; }
+            exploration.ReplaceRules(rules, leader);
+            world.Find(PendingTrigger.OwnerId)!.TriggerEntry = trigger.ReturnEntry;
+            foreach (var row in State.World.EventObjects)
+            {
+                if (world.Find(row.OwnerId) is not { } actual) continue;
+                row.X = unchecked((ushort)actual.X); row.Y = unchecked((ushort)actual.Y);
+                row.Direction = unchecked((ushort)actual.Direction); row.CurrentFrame = unchecked((ushort)actual.CurrentFrame);
+                row.State = unchecked((short)actual.State); row.VanishTime = unchecked((short)actual.VanishTime);
+                row.TriggerMode = unchecked((ushort)actual.TriggerMode); row.TriggerEntry = unchecked((ushort)actual.TriggerEntry);
+                row.AutoEntry = unchecked((ushort)actual.AutoEntry); row.AutoIdleFrameCount = actual.AutoIdleCount;
+            }
+            SaveLegacyLeader(leader);
+        }
+        else
+        {
+            exploration.SaveTriggerEntry((ushort)PendingTrigger.OwnerId, (ushort)trigger.ReturnEntry);
+            State.World.EventObjects.Single(item => item.OwnerId == PendingTrigger.OwnerId).TriggerEntry = trigger.ReturnEntry;
+        }
         PendingTrigger = null;
         PendingRequestId = Guid.Empty;
         boundTrigger = null;
@@ -101,7 +157,8 @@ public sealed class FirstMandatoryBattleSession
     }
 
     private bool OwnsRequest(Guid requestId, TriggerScriptSession trigger) =>
-        PendingTrigger is { } request && requestId != Guid.Empty && requestId == PendingRequestId
+        (initializedTrigger is null ? trigger.BoundWorld is null : ReferenceEquals(trigger, initializedTrigger))
+        && PendingTrigger is { } request && requestId != Guid.Empty && requestId == PendingRequestId
         && trigger.SourceRequestId == requestId && trigger.CallId != Guid.Empty
         && trigger.Caller == request.OwnerId
         && trigger.StartedEntry is { OwnerType: "eventObject", OwnerId: 28, Slot: "wTriggerScript",
@@ -109,6 +166,7 @@ public sealed class FirstMandatoryBattleSession
 
     public bool Update(uint ticksMilliseconds)
     {
+        hasUpdated = true;
         if (PendingTrigger is not null) return false;
         if (returning)
         {
@@ -123,7 +181,8 @@ public sealed class FirstMandatoryBattleSession
             searchPressed = false;
             if (exploration.FindSearchTarget() is { ObjectId: 28 })
             {
-                if (closure is null) throw new InvalidOperationException(UnsupportedTriggerDiagnostic);
+                if (closure is null || Objects.Single(item => item.Id == 28).TriggerEntry != 0x09c3)
+                    throw new InvalidOperationException(UnsupportedTriggerDiagnostic);
                 // The real entry is open: hand @09C3 to the host before any side effect. The
                 // unit 2 host executes it; exploration stays parked at this boundary.
                 PendingTrigger = new FirstMandatoryBattleTriggerRequest(0x09c3, 28);
@@ -135,13 +194,19 @@ public sealed class FirstMandatoryBattleSession
         if (updated)
         {
             StaticLeader leader = exploration.Current.Leader;
-            State.World.Leader.X = leader.X;
-            State.World.Leader.Y = leader.Y;
-            State.World.Leader.Direction = DirectionName(leader.Direction);
-            State.World.Leader.Layer = leader.Layer;
-            State.World.Leader.Phase = leader.StepPhase;
+            if (initializedTrigger?.BoundWorld is { } world) world.Leader = leader;
+            SaveLegacyLeader(leader);
         }
         return updated;
+    }
+
+    private void SaveLegacyLeader(StaticLeader leader)
+    {
+        State.World.Leader.X = leader.X;
+        State.World.Leader.Y = leader.Y;
+        State.World.Leader.Direction = DirectionName(leader.Direction);
+        State.World.Leader.Layer = leader.Layer;
+        State.World.Leader.Phase = leader.StepPhase;
     }
 
     private static string DirectionName(int direction) => direction switch
