@@ -1,5 +1,7 @@
 # Offline metadata regression: synthetic C#/XML/text only. No SDK, Godot, CIM or network.
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 . (Join-Path $repository 'scripts/GameTestBatches.ps1')
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('pal-batch-metadata-' + [guid]::NewGuid().ToString('N'))
@@ -36,6 +38,14 @@ function Fixture([string]$Text) {
     return $path
 }
 try {
+    Case 'filtered native-map without a record requires full verification' {
+        $guardRoot = Join-Path $temp 'filtered-missing'
+        [IO.Directory]::CreateDirectory((Join-Path $guardRoot 'src/Pal.Game/Scripts/Profiles')) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $guardRoot 'src/Pal.Game/Scripts/Profiles/One.cs'), 'class One { }', [Text.UTF8Encoding]::new($false))
+        $guard = Test-NativeMapAffectedBatchGuard -RepositoryRoot $guardRoot -Head 'aaa' -GameBatches @('native-map') -Filter 'FullyQualifiedName~Pal.Game.Tests.ViewportTests.'
+        Assert ($guard.status -ceq 'required') "Filtered native-map without a record must be required, got '$($guard.status)'."
+        Assert (-not [IO.File]::Exists((Get-NativeMapVerificationPath $guardRoot))) 'Guard must not create a record.'
+    }
     $plan = Get-GameBatchPlan $repository
     Case 'literal source identities, enum values and parameter indices' {
         $source = Join-Path $temp 'source'

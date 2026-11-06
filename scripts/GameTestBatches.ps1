@@ -291,7 +291,7 @@ function Assert-GameDiscovery([string]$Text, $Plan) {
 # Twice during M4 (#49/#50 authored content, #53 aea456d binding Require) a change under the
 # guarded roots below shipped without rerunning the native-map batch and only the full gate
 # caught it. Writing the rule down did not prevent recurrence, so Test-Range now enforces it:
-# a Game run whose selection does not include native-map requires a recorded native-map
+# a Game run other than unfiltered native-map requires a recorded native-map
 # verification whose guarded-content fingerprint still matches.
 $script:NativeMapGuardedRoots = @('src/Pal.Game/Scripts/Profiles', 'src/Pal.Game/Scripts/Resources', 'src/Pal.Game/Editor', 'samples/authored-battle', 'src/Pal.Game/Samples')
 function Get-NativeMapGuardFingerprint([string]$RepositoryRoot) {
@@ -315,7 +315,7 @@ function Get-NativeMapVerificationPath([string]$RepositoryRoot) { Join-Path (Joi
 function Read-NativeMapVerification([string]$RepositoryRoot) {
     $path = Get-NativeMapVerificationPath $RepositoryRoot
     if (-not [IO.File]::Exists($path)) { return $null }
-    try { return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable) } catch { return @{ invalid = $true } }
+    try { return (Get-Content -LiteralPath $path -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable) } catch { return @{ invalid = $true } }
 }
 function Write-NativeMapVerification([string]$RepositoryRoot, [string]$Head) {
     $directory = Join-Path $RepositoryRoot 'TestResults'
@@ -323,10 +323,10 @@ function Write-NativeMapVerification([string]$RepositoryRoot, [string]$Head) {
     $record = @{ recordedUtc = [DateTime]::UtcNow.ToString('o'); head = $Head; fingerprint = (Get-NativeMapGuardFingerprint $RepositoryRoot) }
     [IO.File]::WriteAllText((Get-NativeMapVerificationPath $RepositoryRoot), ($record | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 }
-function Test-NativeMapAffectedBatchGuard([string]$RepositoryRoot, [string]$Head, [string[]]$GameBatches) {
+function Test-NativeMapAffectedBatchGuard([string]$RepositoryRoot, [string]$Head, [string[]]$GameBatches, [string]$Filter) {
     $fingerprint = Get-NativeMapGuardFingerprint $RepositoryRoot
     if ($null -eq $fingerprint) { return @{ status = 'none' } }
-    if ($GameBatches -ccontains 'native-map') { return @{ status = 'self-verifying'; fingerprint = $fingerprint } }
+    if ($GameBatches -ccontains 'native-map' -and -not $Filter) { return @{ status = 'self-verifying'; fingerprint = $fingerprint } }
     $record = Read-NativeMapVerification $RepositoryRoot
     if ($record -is [hashtable] -and -not $record.invalid -and $record.fingerprint -ceq $fingerprint) {
         return @{ status = 'satisfied'; fingerprint = $fingerprint; verifiedHead = $record.head }
