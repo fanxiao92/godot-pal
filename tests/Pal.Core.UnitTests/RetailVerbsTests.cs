@@ -8,6 +8,180 @@ namespace Pal.Core.Tests;
 public sealed class RetailVerbsTests
 {
     [Fact]
+    public void CreateIsolatedCopy_owns_current_roles_live_vitals_and_independent_repeated_copies()
+    {
+        var spectator = Role(5) with
+        {
+            Level = 9, Hp = 73, Mp = 11, CoveredByRoleId = 4,
+            Attack = 71, MagicPower = 72, Defense = 73, Dexterity = 74, FleeRate = 75,
+            Equipment = new[] { 81, 0, 0, 0, 0, 0 },
+            Magics = new[] { 82, 0 }, Statuses = new[] { 83, 0 }
+        };
+        var owner = new RoleLiveState([Role(0), Role(4), spectator]);
+        var source = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 7, 8, owner, new[] { 4, 0 });
+        VitalScript(source, 1, 10).Start("story", "owner28", 0);
+        var copy = source.CreateIsolatedCopy();
+        var copiedOwner = Assert.IsType<RoleLiveState>(copy.RoleLiveState);
+        Assert.NotSame(owner, copiedOwner);
+        Assert.Equal(new[] { 4, 0 }, copy.PartyRoles);
+        Assert.NotSame(source.PartyRoles, copy.PartyRoles);
+        Assert.Equal(3, copiedOwner.Roles.Count);
+        foreach (int id in new[] { 0, 4, 5 })
+        {
+            Assert.NotSame(owner.Roles[id], copiedOwner.Roles[id]);
+            Assert.NotSame(owner.Roles[id].Equipment, copiedOwner.Roles[id].Equipment);
+            Assert.NotSame(owner.Roles[id].Magics, copiedOwner.Roles[id].Magics);
+            Assert.NotSame(owner.Roles[id].Statuses, copiedOwner.Roles[id].Statuses);
+            Assert.NotSame(owner.Roles[id].HiddenExperience, copiedOwner.Roles[id].HiddenExperience);
+        }
+        var heldVitals = copy.PartyVitals[4];
+        var records = copiedOwner.Roles;
+        Assert.Equal((110, 30, 150, 50), (heldVitals.Hp, heldVitals.Mp, heldVitals.MaxHp, heldVitals.MaxMp));
+        var copiedSpectator = records[5];
+        Assert.Equal((5, 9, 73, 150, 11, 50, 4), (copiedSpectator.RoleId, copiedSpectator.Level,
+            copiedSpectator.Hp, copiedSpectator.MaxHp, copiedSpectator.Mp, copiedSpectator.MaxMp, copiedSpectator.CoveredByRoleId));
+        Assert.Equal((71, 72, 73, 74, 75), (copiedSpectator.Attack, copiedSpectator.MagicPower,
+            copiedSpectator.Defense, copiedSpectator.Dexterity, copiedSpectator.FleeRate));
+        Assert.Equal(new BattleExperienceSnapshot(5, 2, 17), copiedSpectator.PrimaryExperience);
+        Assert.Equal(new BattleExperienceSnapshot(17, 3, 4), copiedSpectator.HiddenExperience["attack"]);
+        Assert.Equal(new[] { 81, 0, 0, 0, 0, 0 }, copiedSpectator.Equipment);
+        Assert.Equal(new[] { 82, 0 }, copiedSpectator.Magics);
+        Assert.Equal(new[] { 83, 0 }, copiedSpectator.Statuses);
+        Assert.Throws<NotSupportedException>(() => ((IList<int>)copiedSpectator.Equipment)[0] = 9);
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<string, BattleExperienceSnapshot>)copiedSpectator.HiddenExperience).Clear());
+
+        VitalScript(copy, 0, -7).Start("story", "owner28", 4);
+        Assert.Equal((103, 23), (heldVitals.Hp, heldVitals.Mp));
+        Assert.Equal((103, 23), (records[4].Hp, records[4].Mp));
+        Assert.Equal((110, 30), (owner.Roles[4].Hp, owner.Roles[4].Mp));
+        VitalScript(source, 0, 5).Start("story", "owner28", 4);
+        var second = source.CreateIsolatedCopy();
+        Assert.Equal((115, 35), (second.PartyVitals[4].Hp, second.PartyVitals[4].Mp));
+        Assert.Equal((103, 23), (heldVitals.Hp, heldVitals.Mp));
+        VitalScript(second, 0, -10).Start("story", "owner28", 4);
+        Assert.Equal((105, 25), (second.RoleLiveState!.Roles[4].Hp, second.RoleLiveState.Roles[4].Mp));
+        Assert.Equal((115, 35), (owner.Roles[4].Hp, owner.Roles[4].Mp));
+        Assert.Equal((103, 23), (heldVitals.Hp, heldVitals.Mp));
+        Assert.Equal((73, 11), (records[5].Hp, records[5].Mp));
+    }
+
+    [Fact]
+    public void CreateIsolatedCopy_preserves_current_object_words_leader_party_and_all_script_slots()
+    {
+        var source = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 5, 6);
+        source.InitializePartyVitals(0, 1, 150, 100, 100);
+        source.InitializePartyVitals(1, 28, 240, 10, 240);
+        var fixture = Fixture(false);
+        fixture.EventFile["commands"]![6]!["roleId0"] = 2;
+        fixture.EventFile["commands"]![6]!["roleId1"] = 1;
+        CopyCommand(fixture, 10, 0x46, """{"op":"setPartyPos","x":11,"y":10,"h":1}""");
+        CopyCommand(fixture, 11, 0x15, """{"op":"setPartyFacing","direction":3,"gesture":2,"memberIndex":0}""");
+        CopyCommand(fixture, 12, 0x6d, """{"op":"setSceneScripts","sceneId":2,"onEnter":7,"onTeleport":8}""");
+        CopyCommand(fixture, 13, 0x6d, """{"op":"setSceneScripts","sceneId":9,"onEnter":17,"onTeleport":18}""");
+        CopyCommand(fixture, 14, 0x90, """{"op":"setObjectScript","objectId":777,"value":13,"slotIndex":4}""");
+        CopyCommand(fixture, 15, 0x90, """{"op":"setObjectScript","objectId":888,"value":23,"slotIndex":2}""");
+        CopyCommand(fixture, 16, 0x40, """{"op":"setTriggerMode","eventObjectId":28,"mode":2}""");
+        CopyCommand(fixture, 17, 0x52, """{"op":"hide","frames":9}""");
+        CopyCommand(fixture, 18, 0x0f, """{"op":"face","direction":3,"frame":2}""");
+        CopyCommand(fixture, 19, 0, """{"op":"end","mode":"keep"}""");
+        new TriggerScriptSession(fixture.Load(), Language(), source).Start("story", "owner28", 28);
+        var copy = source.CreateIsolatedCopy();
+        Assert.Equal(2, copy.SceneId);
+        Assert.Equal((368, 168, 3, 0), (copy.Leader.X, copy.Leader.Y, copy.Leader.Direction, copy.Leader.StepPhase));
+        Assert.Same(source.Leader.Sprite, copy.Leader.Sprite);
+        Assert.Equal(new[] { 1, 0 }, copy.PartyRoles);
+        Assert.Equal(24, copy.Battlefield);
+        Assert.Equal(2, copy.SceneScripts.Count);
+        Assert.Equal(Tuple.Create(7, 8), copy.SceneScripts[2]);
+        Assert.Equal(Tuple.Create(17, 18), copy.SceneScripts[9]);
+        Assert.Equal(2, copy.ObjectScripts.Count);
+        Assert.Equal(13, copy.ObjectScripts[(777, 4)]);
+        Assert.Equal(23, copy.ObjectScripts[(888, 2)]);
+        var obj = copy.Objects.Single(o => o.Id == 28);
+        Assert.Equal((1280, 256, 3, 2, -2, 9), (obj.X, obj.Y, obj.Direction, obj.CurrentFrame, obj.State, obj.VanishTime));
+        Assert.Equal((2, 1, 11, 0), (obj.TriggerMode, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount));
+        Assert.Equal(2500, copy.Objects.Single(o => o.Id == 29).TriggerEntry);
+        Assert.Equal(2, copy.Objects.Single(o => o.Id == 30).State);
+        foreach (var original in source.Objects) Assert.NotSame(original, copy.Objects.Single(o => o.Id == original.Id));
+
+        fixture.EventFile["commands"]![3]!["x"] = 1400;
+        fixture.EventFile["commands"]![12]!["onEnter"] = 27;
+        fixture.EventFile["commands"]![14]!["value"] = 33;
+        new TriggerScriptSession(fixture.Load(), Language(), copy).Start("story", "owner28", 28);
+        Assert.Equal(1280, source.Objects.Single(o => o.Id == 28).X);
+        Assert.Equal(Tuple.Create(7, 8), source.SceneScripts[2]);
+        Assert.Equal(13, source.ObjectScripts[(777, 4)]);
+        Assert.Equal(1400, obj.X);
+        Assert.Equal(Tuple.Create(27, 8), copy.SceneScripts[2]);
+        Assert.Equal(33, copy.ObjectScripts[(777, 4)]);
+    }
+
+    [Fact]
+    public void CreateIsolatedCopy_preserves_legacy_initialized_and_uninitialized_vitals_without_an_owner()
+    {
+        var empty = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0).CreateIsolatedCopy();
+        Assert.Null(empty.RoleLiveState);
+        Assert.Empty(empty.PartyVitals);
+        var source = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0);
+        source.InitializePartyVitals(0, 71, 150, 13, 50);
+        source.InitializePartyVitals(5, 0, 240, 7, 80);
+        var copy = source.CreateIsolatedCopy();
+        Assert.Null(copy.RoleLiveState);
+        Assert.Equal(2, copy.PartyVitals.Count);
+        Assert.Equal((71, 150, 13, 50), (copy.PartyVitals[0].Hp, copy.PartyVitals[0].MaxHp, copy.PartyVitals[0].Mp, copy.PartyVitals[0].MaxMp));
+        Assert.Equal((0, 240, 7, 80), (copy.PartyVitals[5].Hp, copy.PartyVitals[5].MaxHp, copy.PartyVitals[5].Mp, copy.PartyVitals[5].MaxMp));
+        Assert.NotSame(source.PartyVitals[0], copy.PartyVitals[0]);
+        VitalScript(copy, 0, -10).Start("story", "owner28", 0);
+        VitalScript(copy, 0, 2, revive: true).Start("story", "owner28", 5);
+        Assert.Equal((61, 3, 48, 7), (copy.PartyVitals[0].Hp, copy.PartyVitals[0].Mp, copy.PartyVitals[5].Hp, copy.PartyVitals[5].Mp));
+        Assert.Equal((71, 13, 0, 7), (source.PartyVitals[0].Hp, source.PartyVitals[0].Mp, source.PartyVitals[5].Hp, source.PartyVitals[5].Mp));
+        source.InitializePartyVitals(0, 80, 150, 20, 50);
+        Assert.Equal((61, 3), (copy.PartyVitals[0].Hp, copy.PartyVitals[0].Mp));
+        Assert.Equal(80, source.CreateIsolatedCopy().PartyVitals[0].Hp);
+    }
+
+    [Fact]
+    public void CreateIsolatedCopy_preserves_nonzero_auto_counter_without_source_session_subscribers()
+    {
+        var fixture = Fixture(false);
+        CopyCommand(fixture, 12, 9, """{"op":"waitUpdate","frames":3,"runTriggers":0,"updateGestures":0}""");
+        CopyCommand(fixture, 13, 0, """{"op":"end","mode":"keep"}""");
+        var rules = Rules();
+        rules = rules.WithObjects(rules.Objects.Select(o => o.Id == 28 ? o with { AutoEntry = 12 } : o));
+        var events = fixture.Load();
+        var session = new DynamicEventSession(rules, Leader(), events, Language(), Entry(events), 2, 0, 0);
+        session.Update(0);
+        Assert.Equal(1, session.World.Objects[0].AutoIdleCount);
+        var before = session.Current;
+        var copy = session.World.CreateIsolatedCopy();
+        Assert.Equal((12, 1), (copy.Objects[0].AutoEntry, copy.Objects[0].AutoIdleCount));
+        var move = Fixture(false);
+        move.EventFile["entries"]![0]!["target"] = "L0003";
+        move.EventFile["entries"]![0]!["sourceAddress"] = 3;
+        CopyCommand(move, 4, 0, """{"op":"end","mode":"keep"}""");
+        new TriggerScriptSession(move.Load(), Language(), copy).Start("story", "owner28", 28);
+        Assert.Same(before, session.Current);
+        Assert.Same(before.Plan, session.Current.Plan);
+        Assert.Equal((304, 328), (session.World.Objects[0].X, session.World.Objects[0].Y));
+        Assert.Equal((1280, 256), (copy.Objects[0].X, copy.Objects[0].Y));
+        session.Update(100);
+        Assert.Equal(2, session.World.Objects[0].AutoIdleCount);
+        Assert.Equal(1, copy.Objects[0].AutoIdleCount);
+        session.Update(200);
+        Assert.Equal((13, 0), (session.World.Objects[0].AutoEntry, session.World.Objects[0].AutoIdleCount));
+        Assert.Equal((12, 1), (copy.Objects[0].AutoEntry, copy.Objects[0].AutoIdleCount));
+    }
+
+    private static void CopyCommand(VerbsFixture fixture, int address, int opcode, string body)
+    {
+        var command = JsonNode.Parse(body)!.AsObject();
+        command["label"] = $"L{address:X4}";
+        command["next"] = address < 23 ? $"L{address + 1:X4}" : null;
+        command["source"] = new JsonObject { ["index"] = address, ["opcode"] = opcode, ["operands"] = new JsonArray(0, 0, 0) };
+        fixture.EventFile["commands"]![address] = command;
+    }
+
+    [Fact]
     public void RoleLiveState_freezes_six_role_records_and_rejects_duplicate_or_invalid_seed()
     {
         var equipment = new int[6];
