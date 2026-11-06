@@ -156,6 +156,16 @@ U21 使用既有正常 direct-dotnet 路由执行 heavy-a（5 Passed）及 heavy
 
 父控独立核518原件、221源码/6工具、1463 tracked、四 TRX 精确集合/完整身份图/原诊断/实际产物与包/marker不变；首次父控 helper 错从 dotnet 成功摘要寻找 engine banner 而停止，原 exit1 保留，另一次 SDK-free reader 从各原 TRX Summary/Output/StdOut 核对4.7.2 banner成功，未复跑 native，case trace仍只取唯一 UnitTestResult。收据见 `coordinator-u23-verification.json`。U21 heavy-a5按未变所选方法/helpers/生产依赖责任复用，联合兼容范围46不是同轮新46，也不是 clean checkpoint 重跑。运行后仅 README 补本实测结果；仍欠最终新 source-bound shared 影响、整票 review/实际 integration，不是 #150/#130/M6、GPU/人工/private-real/CI 验收。
 
+## #150 最终 shared 原件与整票源码审查
+
+U24 在 **clean `4363ae1a5c677ccfe3458702f98cb1eed2bc40ea`** 仅运行一次原公共 Range：`cli-integration/prepare/game`，Game 选择 `process/scene-dialogue/native-map`，无公共 Filter/Skip。原11条 SDK roots 全 exit0、完整输出/清理，无 timeout/cancel；CLI 为360 Passed＋仅两条合法平台 NotExecuted，Prepare89 Passed，Game **595 Passed＝85＋74＋436**，实际发现650，非完整647/646执行。三个原 TRX 均 Completed，只有 CLI 的两条实际 skip Warning RunInfo，Prepare/Game RunInfo0。正常完整 unfiltered native-map 由原入口自行刷新 marker，head4363；没有人工写入、复制或回退 marker。
+
+原 Game Summary 的三条 `Profile.tres` Child ERROR 与四条 CaseMismatch WARNING 曾触发 STOP，不能凭595 Passed忽略。父控及 U25 纯 SDK-free 复核证明：前三条唯一绑定主动写坏资源的 `BrokenProfileFailsWithBothSelectedUrisAndNoReady:1 ("malformed", "PalExplorationProfile")`，实际自有子进程 exit1、指定拒绝原因/两URI且无READY；后四条唯一绑定主动将路径转大写的 Windows 规范化用例，requested/stored 仅case不同，四个直接原生 backtrace 均命名该测试。其 unique case stdout 本身无warning，warning来自 Summary；不伪造输出位置。历史 #153 原 TRX 存在相同七条诊断，五个直接文件与两轮实际编译输入hash一致。仅当前整TRX/语义Summary hash、精确case/owned GUID及四完整stderr块证明成立后分类，不是全局警告/ERROR白名单，也不证明跨平台export。
+
+U25 保留三次 reader helper 失败（混合archive schema、warm空数组成员投影追加null、PowerShell `$Error` 自动变量碰撞），均先STOP、父控核原件、另新名 SDK-free 精确恢复；最终完整audit exit0，未新增任何SDK/native/import/metadata执行。原 U24 `audit.ps1` 从未执行，不称其failed。父控再独立重核 **4509** 原封存文件、289编译输入/1463 tracked、71实际runtime/36包文件、11root双流/身份/时间、原Version7发现/三TRX完整图/1046唯一execution、实际DLL/PDB/CodeBase与marker前后。31冻结身份中仅5项有单独归档，其余26是identity-only；Prepare宿主27项只核到prepare.test的原before/after，不虚构pre-Game bytes归档或环境before/after。编译日志为7条distinct warning、MSBuild7 Warning(s)、含重复摘要14个entry匹配/baseline14，计数不混用。
+
+完整10路径 `67be98f…4363ae1` 已由两个独立fresh reviewer分别完成 Standards/Spec 源码审查，无可行动阻塞；source review不代替上述原生证明，也不要求为未变no-combat Dynamic路径凑跑库存。原件及父控收据见 `C:/evidence/m6/execution/tickets/150/{U24-final-shared-impact/,U25-shared-sdk-free-audit/,coordinator-u25-verification.json}`；独立review由 workflow `d750a3d1-ce3d-47ba-a846-aabe0863e43e` 保存。此段是运行后README结果补充，编译源码/工具与实际clean4363字节相同，不称随后文档checkpoint重跑。整票实际集成/Issue状态另以父控集成回执为准；#130聚合、#126/#148与完整M6、GPU/人工/private-real/远端CI/fullM0均不由本段自动验收。
+
 ## 维护边界
 
 保持 `Main.tscn` 的真实入口和现有测试装配，不新增第二 Godot 项目、替代业务实现或内部测试 seam。变更时先冻结独立预期与完整身份，再同步脚本/config/本页；需要时序变异、输出捕获或完整门诊断，进入 Game 分层与当前异常规则，不在本页重写历史证据。
