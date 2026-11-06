@@ -564,9 +564,10 @@ public sealed class TriggerScriptSession
                     _address = Next(command);
                     break;
                 case "changeHpMp" when _world is not null:
-                    // script.c 0x001D: HP and MP move by the same signed amount, clamped at the
-                    // words' bounds; scope 0 is the caller role, nonzero the whole party.
-                    _world.ChangeHpMp(command.Scope, Caller, command.Amount, command.Position);
+                    // script.c 0x001D: only single-target failure clears the flag; the party
+                    // branch ignores PAL_IncreaseHPMP's result, preserving any earlier failure.
+                    bool changed = _world.ChangeHpMp(command.Scope, Caller, command.Amount, command.Position);
+                    if (command.Scope == 0 && !changed) ScriptSuccess = false;
                     _address = Next(command);
                     break;
                 case "revivePlayer" when _world is not null:

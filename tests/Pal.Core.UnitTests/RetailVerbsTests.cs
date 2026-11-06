@@ -8,6 +8,176 @@ namespace Pal.Core.Tests;
 public sealed class RetailVerbsTests
 {
     [Fact]
+    public void RoleLiveState_freezes_six_role_records_and_rejects_duplicate_or_invalid_seed()
+    {
+        var equipment = new int[6];
+        var magics = new int[32];
+        var statuses = new int[9];
+        var hidden = new Dictionary<string, BattleExperienceSnapshot> { ["attack"] = new(17, 3, 4) };
+        var role = Role(5) with { Equipment = equipment, Magics = magics, Statuses = statuses, HiddenExperience = hidden };
+        var seeds = Enumerable.Range(0, 5).Select(id => Role(id)).Append(role).ToArray();
+        var owner = new RoleLiveState(seeds);
+        equipment[0] = 81; magics[0] = 82; statuses[0] = 83; hidden["attack"] = new(99, 9, 9);
+        seeds[5] = Role(5) with { Hp = 0 };
+
+        Assert.Equal(6, owner.Roles.Count);
+        Assert.Equal(100, owner.Roles[5].Hp);
+        Assert.Equal(0, owner.Roles[5].Equipment[0]);
+        Assert.Equal(0, owner.Roles[5].Magics[0]);
+        Assert.Equal(0, owner.Roles[5].Statuses[0]);
+        Assert.Equal(new BattleExperienceSnapshot(17, 3, 4), owner.Roles[5].HiddenExperience["attack"]);
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<int, BattleRoleSnapshot>)owner.Roles).Clear());
+        Assert.Throws<NotSupportedException>(() => ((IList<int>)owner.Roles[5].Equipment)[0] = 3);
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<string, BattleExperienceSnapshot>)owner.Roles[5].HiddenExperience).Clear());
+        Assert.Throws<InvalidDataException>(() => new RoleLiveState([Role(1), Role(1)]));
+        Assert.Throws<InvalidDataException>(() => new RoleLiveState([Role(-1)]));
+        Assert.Throws<InvalidDataException>(() => new RoleLiveState([Role(6)]));
+        Assert.Throws<InvalidDataException>(() => new RoleLiveState([Role(1) with { Hp = 65536 }]));
+        Assert.Throws<InvalidDataException>(() => new RoleLiveState([Role(1) with { Mp = -1 }]));
+        Assert.Throws<InvalidDataException>(() => new RoleLiveState([null!]));
+        Assert.Throws<ArgumentNullException>(() => new RoleLiveState(null!));
+    }
+
+    [Fact]
+    public void Shared_world_scripts_write_the_owner_and_retained_views_without_reseeding()
+    {
+        var owner = new RoleLiveState([Role(0), Role(1) with { Hp = 28, Mp = 10, MaxHp = 240, MaxMp = 240 }, Role(5)]);
+        var world = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner);
+        var view = world.PartyVitals;
+        var vitals = view[0];
+        var records = owner.Roles;
+        Assert.Same(owner, world.RoleLiveState);
+        Assert.Throws<InvalidOperationException>(() => world.InitializePartyVitals(0, 1, 150, 1, 50));
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<int, DynamicRoleVitals>)view).Clear());
+        var fixture = Fixture(false);
+        fixture.EventFile["entries"]![0]!["target"] = "L0006";
+        fixture.EventFile["entries"]![0]!["sourceAddress"] = 6;
+        var script = new TriggerScriptSession(fixture.Load(), Language(), world);
+        script.Start("story", "owner28", 0);
+        Assert.Equal((150, 50), (records[0].Hp, records[0].Mp));
+        Assert.Equal((150, 50), (vitals.Hp, vitals.Mp));
+        Assert.Equal((240, 240), (view[1].Hp, view[1].Mp));
+        Assert.Equal((100, 20), (records[5].Hp, records[5].Mp));
+        Assert.Equal(new BattleExperienceSnapshot(5, 2, 17), records[0].PrimaryExperience);
+        Assert.Throws<InvalidOperationException>(() => world.InitializePartyVitals(0, 1, 150, 1, 50));
+
+        var drain = VitalScript(world, scope: 0, amount: -9999);
+        drain.Start("story", "owner28", 0);
+        Assert.Equal((0, 0), (vitals.Hp, vitals.Mp));
+        var revive = VitalScript(world, scope: 0, amount: 2, revive: true);
+        revive.Start("story", "owner28", 0);
+        Assert.Equal((30, 0), (vitals.Hp, vitals.Mp));
+        Assert.Equal(30, records[0].Hp);
+    }
+
+    // Independent literals from global.c PAL_IncreaseHPMP: WORD write precedes signed SHORT
+    // testing (not mathematical clamp); success compares the resulting two words.
+    [Theory]
+    [InlineData(100, 150, 20, 50, 10, 110, 30, true)]
+    [InlineData(100, 150, 20, 50, 0, 100, 20, false)]
+    [InlineData(100, 150, 20, 50, -20, 80, 0, true)]
+    [InlineData(150, 150, 50, 50, 10, 150, 50, false)]
+    [InlineData(0, 150, 20, 50, 10, 0, 20, false)]
+    [InlineData(1, 150, 20, 50, -1, 0, 19, true)]
+    [InlineData(32767, 65535, 32767, 65535, 1, 0, 0, true)]
+    [InlineData(65535, 65535, 65535, 65535, 1, 0, 0, true)]
+    [InlineData(65530, 65535, 65530, 65535, 10, 4, 4, true)]
+    [InlineData(1, 65535, 0, 65535, -32768, 0, 0, true)]
+    [InlineData(32768, 65535, 65535, 65535, -32768, 0, 32767, true)]
+    [InlineData(40000, 65535, 50000, 65535, -32768, 7232, 17232, true)]
+    [InlineData(1, 65535, 0, 65535, 32767, 0, 32767, true)]
+    [InlineData(1, 150, 0, 50, -2, 0, 0, true)]
+    [InlineData(0, 0, 0, 0, -1, 0, 0, false)]
+    public void ChangeHpMp_matches_WORD_SHORT_alive_and_actual_change_rules_in_shared_and_legacy_worlds(
+        int hp, int maxHp, int mp, int maxMp, int amount, int expectedHp, int expectedMp, bool success)
+    {
+        foreach (bool shared in new[] { false, true })
+        {
+            var owner = new RoleLiveState([Role(5) with { Hp = hp, MaxHp = maxHp, Mp = mp, MaxMp = maxMp }, Role(0)]);
+            var world = shared ? DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner)
+                : DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0);
+            if (!shared) world.InitializePartyVitals(5, hp, maxHp, mp, maxMp);
+            var script = VitalScript(world, 0, amount);
+            script.Start("story", "owner28", 5); // caller is RoleId, not party index 0
+            Assert.Equal((expectedHp, expectedMp), (world.PartyVitals[5].Hp, world.PartyVitals[5].Mp));
+            Assert.Equal(success, script.ScriptSuccess);
+            if (shared)
+            {
+                Assert.Equal((expectedHp, expectedMp), (owner.Roles[5].Hp, owner.Roles[5].Mp));
+                Assert.Equal((100, 20), (owner.Roles[0].Hp, owner.Roles[0].Mp));
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(150, false)]
+    [InlineData(100, false)]
+    [InlineData(0, true)]
+    [InlineData(150, true)]
+    [InlineData(100, true)]
+    public void ChangeHpMp_party_scope_preserves_success_flag_even_without_actual_changes(int hp, bool failedBefore)
+    {
+        var owner = new RoleLiveState([Role(0) with { Hp = hp, Mp = 50 }, Role(1) with { Hp = hp, Mp = 50 }, Role(5)]);
+        var world = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner);
+        var fixture = Fixture(false);
+        fixture.EventFile["entries"]![0]!["target"] = "L0006";
+        fixture.EventFile["entries"]![0]!["sourceAddress"] = 6;
+        if (failedBefore)
+        {
+            fixture.EventFile["commands"]![8]!["op"] = "markFailed";
+            fixture.EventFile["commands"]![8]!["source"]!["opcode"] = 0x41;
+        }
+        fixture.EventFile["commands"]![9]!["scope"] = 65535;
+        var script = new TriggerScriptSession(fixture.Load(), Language(), world);
+        script.Start("story", "owner28", 5);
+        Assert.Equal(!failedBefore, script.ScriptSuccess); // party branch ignores helper result
+        Assert.Equal(hp == 0 ? 0 : 150, owner.Roles[0].Hp);
+        Assert.Equal(hp == 0 ? 0 : 150, owner.Roles[1].Hp);
+        Assert.Equal((100, 20), (owner.Roles[5].Hp, owner.Roles[5].Mp));
+    }
+
+    [Fact]
+    public void ChangeHpMp_success_does_not_reset_an_earlier_failure_or_roll_back_applied_words()
+    {
+        var owner = new RoleLiveState([Role(0)]);
+        var world = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner);
+        var fixture = Fixture(false);
+        fixture.EventFile["entries"]![0]!["target"] = "L0008";
+        fixture.EventFile["entries"]![0]!["sourceAddress"] = 8;
+        fixture.EventFile["commands"]![8]!["op"] = "markFailed";
+        fixture.EventFile["commands"]![8]!["source"]!["opcode"] = 0x41;
+        fixture.EventFile["commands"]![9]!["scope"] = 0;
+        fixture.EventFile["commands"]![9]!["amount"] = 10;
+        var script = new TriggerScriptSession(fixture.Load(), Language(), world);
+        script.Start("story", "owner28", 0);
+        Assert.False(script.ScriptSuccess);
+        Assert.Equal((110, 30), (owner.Roles[0].Hp, owner.Roles[0].Mp));
+    }
+
+    private static TriggerScriptSession VitalScript(DynamicEventWorld world, int scope, int amount, bool revive = false)
+    {
+        var fixture = Fixture(false);
+        fixture.EventFile["entries"]![0]!["target"] = "L0009";
+        fixture.EventFile["entries"]![0]!["sourceAddress"] = 9;
+        var command = fixture.EventFile["commands"]![9]!;
+        command["scope"] = scope;
+        if (revive)
+        {
+            command["op"] = "revivePlayer";
+            command.AsObject().Remove("amount");
+            command["healthTenths"] = amount;
+            command["source"]!["opcode"] = 0x22;
+        }
+        else command["amount"] = amount;
+        return new(fixture.Load(), Language(), world);
+    }
+
+    private static BattleRoleSnapshot Role(int id) => new(id, 2, 100, 150, 20, 50, new(5, 2, 17),
+        new Dictionary<string, BattleExperienceSnapshot> { ["attack"] = new(17, 3, 4) },
+        new int[6], new int[32], new int[9], 0);
+
+    [Fact]
     public void World_verbs_apply_entries_positions_states_party_battlefield_and_vitals()
     {
         DynamicEventSession session = Session();

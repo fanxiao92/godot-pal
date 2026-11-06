@@ -40,8 +40,10 @@ public sealed class DynamicEventWorld
     public int Battlefield { get; internal set; }
     /// <summary>Party role HP/MP words changed by script.c 0x001D/0x0022. Entries exist only
     /// for roles the host initialized from its own pre-battle profile.</summary>
-    public IReadOnlyDictionary<int, DynamicRoleVitals> PartyVitals => partyVitals;
+    public IReadOnlyDictionary<int, DynamicRoleVitals> PartyVitals => new System.Collections.ObjectModel.ReadOnlyDictionary<int, DynamicRoleVitals>(partyVitals);
     private readonly Dictionary<int, DynamicRoleVitals> partyVitals = new();
+    /// <summary>Explicit shared owner, or null for the legacy lightweight world-only path.</summary>
+    public RoleLiveState? RoleLiveState { get; }
     public IReadOnlyDictionary<int, System.Tuple<int, int>> SceneScripts => sceneScripts;
     public IReadOnlyDictionary<(int ObjectId, int SlotIndex), int> ObjectScripts => objectScripts;
 
@@ -82,6 +84,22 @@ public sealed class DynamicEventWorld
     /// exploration session uses; object words start from the static records.</summary>
     public static DynamicEventWorld ForHost(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport)
         => new(rules, leader, sceneId, onEnter, onTeleport);
+
+    /// <summary>Shared path: vitals are live views of the supplied owner, never seeded again.</summary>
+    public static DynamicEventWorld ForHost(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport,
+        RoleLiveState roleLiveState)
+    {
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        return new(rules, leader, sceneId, onEnter, onTeleport, roleLiveState);
+    }
+
+    private DynamicEventWorld(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport,
+        RoleLiveState roleLiveState) : this(rules, leader, sceneId, onEnter, onTeleport)
+    {
+        RoleLiveState = roleLiveState;
+        foreach (int roleId in roleLiveState.Roles.Keys)
+            partyVitals.Add(roleId, new DynamicRoleVitals(roleLiveState, roleId));
+    }
 
     /// <summary>Host hook over the internal initializer: publish one role's HP/MP words.</summary>
     public void InitializePartyVitals(int roleId, int hp, int maxHp, int mp, int maxMp) => InitializeVitals(roleId, hp, maxHp, mp, maxMp);
@@ -242,22 +260,35 @@ public sealed class DynamicEventWorld
     /// <summary>Host hook: publish one role's current words before 0x001D/0x0022 can run.</summary>
     internal void InitializeVitals(int roleId, int hp, int maxHp, int mp, int maxMp)
     {
+        if (RoleLiveState is not null)
+            throw new InvalidOperationException("Shared world vitals are already seeded by their RoleLiveState owner.");
         if (roleId is < 0 or > 5 || maxHp is < 0 or > 65535 || maxMp is < 0 or > 65535
             || hp is < 0 or > 65535 || mp is < 0 or > 65535 || hp > maxHp || mp > maxMp)
             throw new InvalidDataException($"party vitals for role {roleId} are outside the WORD domain.");
         partyVitals[roleId] = new DynamicRoleVitals(hp, maxHp, mp, maxMp);
     }
 
-    /// <summary>script.c 0x001D (PAL_IncreaseHPMP): the same signed amount moves HP and MP,
-    /// clamped to 0..max; scope 0 is the caller role, nonzero the whole party.</summary>
-    internal void ChangeHpMp(int scope, int callerRole, int amount, TriggerPosition position)
+    /// <summary>global.c PAL_IncreaseHPMP: only alive roles change; assignment narrows to
+    /// WORD before the signed SHORT test and maximum check. Return actual word change.</summary>
+    internal bool ChangeHpMp(int scope, int callerRole, int amount, TriggerPosition position)
     {
+        bool changed = false;
         foreach (int role in VitalTargets(scope, callerRole, position))
         {
             var vitals = partyVitals[role];
-            vitals.Hp = Math.Clamp(vitals.Hp + amount, 0, vitals.MaxHp);
-            vitals.Mp = Math.Clamp(vitals.Mp + amount, 0, vitals.MaxMp);
+            int hp = vitals.Hp, mp = vitals.Mp;
+            if (hp == 0) continue;
+            vitals.Hp = IncreaseWord(hp, amount, vitals.MaxHp);
+            vitals.Mp = IncreaseWord(mp, amount, vitals.MaxMp);
+            changed |= hp != vitals.Hp || mp != vitals.Mp;
         }
+        return changed;
+    }
+
+    private static int IncreaseWord(int value, int amount, int maximum)
+    {
+        int word = unchecked((ushort)(value + (short)amount));
+        return (short)word < 0 ? 0 : Math.Min(word, maximum);
     }
 
     /// <summary>script.c 0x0022: dead roles return with maxHP * tenths / 10; the reference also
@@ -604,8 +635,27 @@ public sealed class DynamicEventSession
 /// <summary>Mutable party HP/MP words for one role (script.c 0x001D/0x0022 writes).</summary>
 public sealed class DynamicRoleVitals(int hp, int maxHp, int mp, int maxMp)
 {
-    public int Hp { get; internal set; } = hp;
-    public int MaxHp { get; } = maxHp;
-    public int Mp { get; internal set; } = mp;
-    public int MaxMp { get; } = maxMp;
+    private readonly RoleLiveState? owner;
+    private readonly int roleId;
+    private int hp = hp;
+    private int mp = mp;
+
+    internal DynamicRoleVitals(RoleLiveState owner, int roleId) : this(0, 0, 0, 0)
+    {
+        this.owner = owner;
+        this.roleId = roleId;
+    }
+
+    public int Hp
+    {
+        get => owner is null ? hp : owner.Roles[roleId].Hp;
+        internal set { if (owner is null) hp = value; else owner.SetVitals(roleId, value, Mp); }
+    }
+    public int MaxHp => owner is null ? maxHp : owner.Roles[roleId].MaxHp;
+    public int Mp
+    {
+        get => owner is null ? mp : owner.Roles[roleId].Mp;
+        internal set { if (owner is null) mp = value; else owner.SetVitals(roleId, Hp, value); }
+    }
+    public int MaxMp => owner is null ? maxMp : owner.Roles[roleId].MaxMp;
 }
