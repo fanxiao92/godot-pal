@@ -954,12 +954,25 @@ public sealed class TriggerScriptBattleBindingTests
     [InlineData("maxHp")]
     [InlineData("equipment")]
     [InlineData("experience")]
+    [InlineData("status-count")]
+    [InlineData("timed-status")]
+    [InlineData("magics-count")]
+    [InlineData("magic-word")]
+    [InlineData("hidden-alias")]
+    [InlineData("growth-threshold")]
+    [InlineData("hook-closure")]
     public void Shared_Start_preflight_rejects_participants_without_owner_request_or_random_side_effects(string fault)
     {
         var role = Role();
         if (fault == "maxHp") role = role with { MaxHp = 32768 };
         if (fault == "equipment") role = role with { Equipment = new[] { 8, 0, 0, 0, 0, 0 } };
         if (fault == "experience") role = role with { PrimaryExperience = new(-1, 2, 17) };
+        if (fault == "status-count") role = role with { Statuses = new int[8] };
+        if (fault == "timed-status") role = role with { Statuses = new[] { 0, 0, 0, 0, 0, 1, 0, 0, 0 } };
+        if (fault == "magics-count") role = role with { Magics = new int[31] };
+        if (fault == "magic-word") role = role with { Magics = new[] { 65536 }.Concat(new int[31]).ToArray() };
+        if (fault == "hidden-alias") role = role with { HiddenExperience = role.HiddenExperience.ToDictionary(
+            x => x.Key == "attack" ? "ATTACK" : x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase) };
         var owner = new RoleLiveState(fault == "missing" ? [] : new[] { role });
         var before = owner.Roles.ToArray();
         var random = new BindingRandom();
@@ -967,8 +980,18 @@ public sealed class TriggerScriptBattleBindingTests
         fixture.Commands[1] = ChangeHpMp(1, -20); // must not execute before rejecting the reachable battle
         fixture.Commands[2] = Battle(2);
         fixture.Commands[3] = End(3);
-        var script = TriggerScriptSession.ForSharedRoles(fixture.Load(), TriggerScriptSessionTests.Language(), Content(), random, owner, SharedWorld(owner));
+        var content = fault == "growth-threshold" ? Content(growth: new(new int[100], [])) : Content();
+        if (fault == "hook-closure") content = new TriggerBattleContent(Role(), content.Player with { DyingScript = 6 },
+            Growth(), content.Teams);
+        var world = SharedWorld(owner);
+        var script = TriggerScriptSession.ForSharedRoles(fixture.Load(), TriggerScriptSessionTests.Language(), content, random, owner, world);
+        var context = script.Context;
         Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 1, Guid.NewGuid()));
+        Assert.Same(owner, world.RoleLiveState);
+        Assert.Equal(context, script.Context);
+        Assert.Null(script.PendingDisplay);
+        Assert.Equal(0, script.Caller);
+        Assert.Equal(0, script.ReturnEntry);
         Assert.Equal(before, owner.Roles.ToArray());
         Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
         Assert.Equal(Guid.Empty, script.CallId);
@@ -1020,6 +1043,136 @@ public sealed class TriggerScriptBattleBindingTests
         Assert.Equal((137, 42), (owner.Roles[1].Hp, owner.Roles[1].Mp));
         Assert.Equal(60000, owner.Roles[5].Hp);
         Reject(second.Id, second.Lifecycle.Completion); // duplicate after completion
+    }
+
+    [Fact]
+    public void Shared_equipped_participant_commits_after_post_battle_script_and_rebuilds_effects_without_stacking()
+    {
+        int[] worn = [0, 0, 0, 170, 0, 0];
+        int[] protect = [0, 0, 0, 0, 0, 0, 60000, 0, 0];
+        var role = Role() with { Equipment = worn, Attack = 40, MagicPower = 12, Defense = 20, Dexterity = 100, FleeRate = 6 };
+        var grid = Enumerable.Range(0, 6).Select(id => (IReadOnlyList<int>)(id == 1 ? worn : new int[6])).ToArray();
+        var effects = Enumerable.Range(0, 6).Select(id => id == 1
+            ? new BattleEquipmentEffect(10, 4, 20, 0, protect)
+            : new BattleEquipmentEffect(0, 0, 0, 0, new int[9])).ToArray();
+        var content = new TriggerBattleContent([role], [new(1, 100, 150, 40, 20, 100) { Equipment = worn }],
+            new Dictionary<int, ClassicBattleGrowthData> { [1] = Growth() },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = new[] { new ClassicBattleEnemy(7, 0, 43, 0, 0, 0, 1) { BattleEndScript = 5 } } },
+            grid, [new(170, effects)], panelDeclaredRoles: [1]);
+        var owner = new RoleLiveState([role, Role() with { RoleId = 5 }]);
+        var historical = owner.Roles[1];
+        var spectator = owner.Roles[5];
+        var world = SharedWorld(owner);
+        var vitals = world.PartyVitals[1];
+        var fixture = Fixture();
+        fixture.Index["source"]!["instructionCount"] = 7;
+        fixture.Index["source"]!["byteLength"] = 56;
+        Pad(fixture, 7);
+        fixture.Commands[2] = Battle(2);
+        fixture.Commands[3] = End(3);
+        fixture.Commands[5] = new JsonObject { ["label"] = "L0005", ["op"] = "showDialog", ["messageId"] = 61,
+            ["descriptionLineWord"] = 0, ["next"] = "L0006", ["source"] = new JsonObject { ["index"] = 5, ["opcode"] = 65535, ["operands"] = new JsonArray(61, 0, 0) } };
+        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("settlement")])]);
+        var script = TriggerScriptSession.ForSharedRoles(fixture.Load(), language, content, new BindingRandom(), owner, world);
+        var projection = script.BattleRoles!;
+        script.Start("shared", "npc", 1);
+        var first = script.PendingBattle!;
+        Assert.Equal((50, 24, 120), (first.Lifecycle.Current.Combat.Players[0].Attack, first.Lifecycle.Current.Combat.Players[0].Defense, first.Lifecycle.Current.Combat.Players[0].Dexterity));
+        first.Lifecycle.SelectAttack(7);
+        Assert.True(first.Lifecycle.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Won, first.Lifecycle.Current.Combat.Phase);
+        Assert.Null(first.Lifecycle.Completion);
+        Assert.NotNull(first.Lifecycle.PendingBattleEndScript);
+        Assert.Same(historical, owner.Roles[1]);
+        Assert.False(script.AcknowledgeBattle(first.Id, first.Lifecycle.Completion));
+        script.StartBattleEndScript();
+        Assert.Equal(TriggerScriptPhase.WaitingForDisplay, script.Phase);
+        Assert.Same(historical, owner.Roles[1]);
+        Assert.False(script.AcknowledgeBattle(first.Id, null));
+        FinishDisplay(script);
+        Assert.Equal(ClassicBattlePhase.Won, first.Lifecycle.Completion!.Outcome);
+        // Fixed classic recovery and cleanup: persistent protect survives, no panel bonus becomes a base.
+        Assert.Equal((125, 35), (first.Lifecycle.Current.Role.Hp, first.Lifecycle.Current.Role.Mp));
+        Assert.Equal(protect, first.Lifecycle.Current.Role.Statuses);
+        Assert.Same(historical, owner.Roles[1]);
+        Assert.Equal((100, 20), (vitals.Hp, vitals.Mp));
+        Assert.False(script.AcknowledgeBattle(Guid.NewGuid(), first.Lifecycle.Completion));
+        Assert.Same(historical, owner.Roles[1]);
+        Assert.True(script.AcknowledgeBattle(first.Id, first.Lifecycle.Completion));
+        var settled = owner.Roles[1];
+        Assert.Same(settled, projection[1]);
+        Assert.Equal((1, 2, 125, 150, 35, 50, 0), (settled.RoleId, settled.Level, settled.Hp, settled.MaxHp, settled.Mp, settled.MaxMp, settled.CoveredByRoleId));
+        Assert.Equal((40, 12, 20, 100, 6), (settled.Attack, settled.MagicPower, settled.Defense, settled.Dexterity, settled.FleeRate));
+        Assert.Equal(new BattleExperienceSnapshot(5, 2, 17), settled.PrimaryExperience);
+        Assert.Equal(new BattleExperienceSnapshot(7, 3, 1), settled.HiddenExperience["attack"]);
+        Assert.Equal(new BattleExperienceSnapshot(7, 3, 2), settled.HiddenExperience["health"]);
+        Assert.All(settled.HiddenExperience.Where(x => x.Key is not ("attack" or "health")), x => Assert.Equal(new BattleExperienceSnapshot(7, 3, 0), x.Value));
+        Assert.Equal(worn, settled.Equipment);
+        Assert.Equal(new[] { 9 }.Concat(new int[31]), settled.Magics);
+        Assert.Equal(protect, settled.Statuses);
+        Assert.Throws<NotSupportedException>(() => ((IList<int>)settled.Statuses)[6] = 0);
+        Assert.Equal((125, 35), (vitals.Hp, vitals.Mp));
+        Assert.Same(spectator, owner.Roles[5]);
+        Assert.Equal(new int[9], historical.Statuses);
+        var second = script.PendingBattle!;
+        Assert.Equal((125, 35), (second.Lifecycle.Current.Role.Hp, second.Lifecycle.Current.Role.Mp));
+        Assert.Equal(protect, second.Lifecycle.Current.Role.Statuses);
+        Assert.Equal(worn, second.Lifecycle.Current.Role.Equipment);
+        Assert.Equal((50, 24, 120), (second.Lifecycle.Current.Combat.Players[0].Attack, second.Lifecycle.Current.Combat.Players[0].Defense, second.Lifecycle.Current.Combat.Players[0].Dexterity));
+        Assert.False(script.AcknowledgeBattle(second.Id, first.Lifecycle.Completion));
+        Assert.Same(settled, owner.Roles[1]);
+    }
+
+    [Fact]
+    public void Shared_Lost_commits_only_on_owned_receipt_before_world_revival_suffix()
+    {
+        var owner = new RoleLiveState([Role() with { Hp = 20 }, Role() with { RoleId = 5 }]);
+        var initial = owner.Roles[1];
+        var spectator = owner.Roles[5];
+        var world = SharedWorld(owner);
+        var vitals = world.PartyVitals[1];
+        var fixture = Fixture();
+        fixture.Commands[1] = Battle(1, loss: "L0002");
+        fixture.Commands[2] = new JsonObject { ["label"] = "L0002", ["op"] = "revivePlayer", ["scope"] = 0,
+            ["healthTenths"] = 5, ["next"] = "L0003", ["source"] = new JsonObject { ["index"] = 2, ["opcode"] = 0x22, ["operands"] = new JsonArray(0, 5, 0) } };
+        fixture.Commands[3] = ChangeHpMp(3, -5);
+        var random = new BindingRandom();
+        var script = TriggerScriptSession.ForSharedRoles(fixture.Load(), TriggerScriptSessionTests.Language(),
+            Content(enemy: new(7, 0, 100, 0, 0, 0, 1)), random, owner, world);
+        script.Start("shared", "npc", 1);
+        var request = script.PendingBattle!;
+        request.Lifecycle.SelectAttack(7);
+        Assert.True(request.Lifecycle.ResolveNextAction());
+        Assert.Null(request.Lifecycle.Completion);
+        Assert.Same(initial, owner.Roles[1]);
+        Assert.False(script.AcknowledgeBattle(request.Id, null));
+        Assert.True(request.Lifecycle.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Lost, request.Lifecycle.Completion!.Outcome);
+        Assert.Equal((0, 20), (request.Lifecycle.Current.Role.Hp, request.Lifecycle.Current.Role.Mp));
+        Assert.Equal((20, 20), (vitals.Hp, vitals.Mp));
+        Assert.Same(initial, owner.Roles[1]);
+        Assert.False(script.AcknowledgeBattle(Guid.NewGuid(), request.Lifecycle.Completion));
+        Assert.Same(initial, owner.Roles[1]);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        Assert.True(script.AcknowledgeBattle(request.Id, request.Lifecycle.Completion));
+        // Lost must publish HP0 before the real suffix: revive 150*5/10=75, then -5 HP/MP.
+        // If Lost never merged, revive would skip the old alive20 and the result would be15, not70.
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Equal((70, 15), (owner.Roles[1].Hp, owner.Roles[1].Mp));
+        Assert.Equal((70, 15), (vitals.Hp, vitals.Mp));
+        Assert.Equal((70, 15), (script.BattleRole!.Hp, script.BattleRole.Mp));
+        Assert.Equal(new BattleExperienceSnapshot(5, 2, 17), owner.Roles[1].PrimaryExperience);
+        Assert.Equal(new BattleExperienceSnapshot(7, 3, 1), owner.Roles[1].HiddenExperience["attack"]);
+        Assert.Equal(new BattleExperienceSnapshot(7, 3, 2), owner.Roles[1].HiddenExperience["health"]);
+        Assert.Equal(0, request.Lifecycle.Completion.ExperienceGranted);
+        Assert.Equal(0, request.Lifecycle.Completion.CashGranted);
+        Assert.Same(spectator, owner.Roles[5]);
+        var settled = owner.Roles[1];
+        int draws = random.Draws;
+        Assert.False(script.AcknowledgeBattle(request.Id, request.Lifecycle.Completion));
+        Assert.Same(settled, owner.Roles[1]);
+        Assert.Equal(draws, random.Draws);
+        Assert.Equal(20, initial.Hp);
     }
 
     private static DynamicEventWorld SharedWorld(RoleLiveState owner) => DynamicEventWorld.ForHost(
