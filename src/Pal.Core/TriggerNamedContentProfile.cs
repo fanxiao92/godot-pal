@@ -12,6 +12,11 @@ internal static class TriggerNamedContentProfile
     private static readonly Shape[] Shapes =
     [
         new(0x0004, "call", [new("to", FieldKind.Reference), new("eventObjectId", FieldKind.Word)]),
+        new(0x0008, "advanceEntry", []),
+        new(0x000A, "confirmNoJump", [new("to", FieldKind.Reference)]),
+        new(0x0011, "walkToSlow", [new("x", FieldKind.Word), new("y", FieldKind.Word), new("h", FieldKind.Word)]),
+        new(0x0012, "setObjectPositionRelativeToParty", [new("eventObjectId", FieldKind.Word), new("xOffset", FieldKind.Word), new("yOffset", FieldKind.Word)]),
+        new(0x0016, "setObjectFacing", [new("eventObjectId", FieldKind.Word), new("direction", FieldKind.Word), new("frame", FieldKind.Word)]),
         new(0x0020, "removeItem", [new("itemId", FieldKind.Word), new("count", FieldKind.Word), new("shortageTarget", FieldKind.NullableReference)]),
     ];
 

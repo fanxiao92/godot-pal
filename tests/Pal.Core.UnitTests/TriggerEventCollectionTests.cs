@@ -6,6 +6,40 @@ namespace Pal.Core.Tests;
 
 public class TriggerEventCollectionTests
 {
+    // Literal modern fields from events-schema and fixed script.c, not DecodeCommand/profile output.
+    [Theory]
+    [InlineData(0x0008, "{\"op\":\"advanceEntry\"}")]
+    [InlineData(0x000A, "{\"op\":\"confirmNoJump\",\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0011, "{\"op\":\"walkToSlow\",\"x\":65535,\"y\":0,\"h\":65535}")]
+    [InlineData(0x0012, "{\"op\":\"setObjectPositionRelativeToParty\",\"eventObjectId\":65535,\"xOffset\":65408,\"yOffset\":56}")]
+    [InlineData(0x0016, "{\"op\":\"setObjectFacing\",\"eventObjectId\":0,\"direction\":4,\"frame\":27}")]
+    public void Early_named_content_retains_literal_fields_without_granting_execution(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    private static void AssertContentOnlyLiteral(int opcode, string semanticJson)
+    {
+        var fixture = new EventFixture();
+        var semantic = JsonNode.Parse(semanticJson)!.AsObject();
+        var command = semantic.DeepClone().AsObject();
+        command["label"] = "L0001";
+        command["next"] = "L0002";
+        command["source"] = new JsonObject { ["index"] = 1, ["opcode"] = opcode, ["operands"] = new JsonArray(123, 456, 789) };
+        fixture.Commands[1] = command;
+        var collection = fixture.Load();
+        var retained = collection.GetCommandContent(1);
+        foreach (var field in semantic)
+            Assert.Equal(field.Value?.ToJsonString() ?? "null", retained.GetProperty(field.Key).GetRawText());
+        Assert.Equal(new[] { 123, 456, 789 }, collection.GetSource(1).Operands);
+        var script = new TriggerScriptSession(collection, TriggerScriptSessionTests.Language());
+        var error = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 60));
+        Assert.Contains("content-only", error.Message);
+        Assert.Contains(semantic["op"]!.GetValue<string>(), error.Message);
+        Assert.Contains("@0001", error.Message);
+        Assert.Contains("trigger context", error.Message);
+        Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+        Assert.Null(script.CurrentPosition);
+    }
+
     [Fact]
     public void Unselected_named_call_and_removeItem_load_without_reinterpreting_source()
     {
