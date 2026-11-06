@@ -39,6 +39,14 @@ headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证�
 
 源码登记为 Game 647 = 644 positives + 3 controls，native-map 433（原 412 + 21）；Prepare 进程库存仍为 89，Core 为 936（原 928 + 8）。这是测试身份/计数登记，不是完整门、正式 Main 输入、GPU、人工桌面、真实资源或 CI 验收声明；本票执行证据由对应候选收据记录，恢复后的成功不覆盖先前失败原件。
 
+## #149 M6-A T04a：Core 共享角色活状态职责
+
+宿主从完整 `BattleRoleSnapshot` 集合一次 seed `RoleLiveState`，按 RoleId 0..5 持有深冻结的活记录，并以 `DynamicEventWorld.ForHost(rules, leader, sceneId, onEnter, onTeleport, owner)` 绑定 world。trigger 使用 `TriggerScriptSession.ForSharedRoles(events, language, battleContent, battleRandom, owner, world = null, inheritedColor = DialogueTextTokenizer.DefaultColor)`；旧 battle + world 构造若收到已 shared 的 world，也会自动绑定同一 owner。`PartyVitals` 读取该 owner 的 HP/MP，事件写入直接更新 owner；`BattleRoles` 仅为 `content.Players` 的 RoleId 与顺序所选的 live 只读投影，持有的投影也读取最新记录，不在每次入战重新 seed 初始模板。owner 可含六角色，不表示六人参战，也不扩大现有参战容量。
+
+combat 中间态及战后脚本等待期间不提前发布最终角色记录。仅当 `AcknowledgeBattle(requestId, receipt)` 的 phase、requestId 与 lifecycle `OwnsCompletion` 全部通过，才 merge 此次参战者的完整结算记录（含既有成长、装备、法术等字段），保留旁观记录，然后继续外层脚本后缀；拒绝的旧、重复或 foreign 回执不提交。legacy dialogue-only、world-only + `InitializePartyVitals`、battle-only 路径保留；shared world 拒绝重复 `InitializePartyVitals` seed，显式 shared trigger 拒绝未绑定同一 owner 的 world。
+
+未来外层 content loader 负责从已验证内容/恢复记录重新构造 owner，再将 world/trigger 重新绑定；本票不设计存档 schema。#148 的 D3/D4 已批准，其正式存读档规格不由这里重开或实现。当前 Main、preview、SceneRunner **尚未接入此 shared 路径**，#149 的公开 Core 能力及兼容回归不能替代 #130 的正式 Main 接线与验收，也不代表完整 revive 毒/状态、#139 或整个 M6 已交付。当前计数登记 Core 1191、CLI Unit 465；完整 Unit 证据复用 #149 U3 固定源码收据，Game 库存与批次未因本票改变。metadata 登记及 bounded shared-impact 不是完整门、GPU、人工或 CI 验收。
+
 ## 维护边界
 
 保持 `Main.tscn` 的真实入口和现有测试装配，不新增第二 Godot 项目、替代业务实现或内部测试 seam。变更时先冻结独立预期与完整身份，再同步脚本/config/本页；需要时序变异、输出捕获或完整门诊断，进入 Game 分层与当前异常规则，不在本页重写历史证据。
