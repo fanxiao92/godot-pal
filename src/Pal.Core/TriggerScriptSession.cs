@@ -17,6 +17,8 @@ public sealed class TriggerScriptSession
     private readonly TriggerBattleContent? _battleContent;
     private readonly IBattleRandom? _battleRandom;
     private readonly DynamicEventWorld? _world;
+    private RoleLiveState? _roleLiveState;
+    private IReadOnlyDictionary<int, BattleRoleSnapshot>? _battleRoles;
     private ClassicBattleRoleHook? _battleHook;
     private ClassicBattleEndScript? _battleEndScript;
     private int _parkedCaller;
@@ -63,7 +65,7 @@ public sealed class TriggerScriptSession
     public ClassicBattleRoleHook? RunningBattleHook => _battleHook;
     /// <summary>The enemy post-victory script this executor is currently running; null outside a battle-end run.</summary>
     public ClassicBattleEndScript? RunningBattleEndScript => _battleEndScript;
-    public IReadOnlyDictionary<int, BattleRoleSnapshot>? BattleRoles { get; private set; }
+    public IReadOnlyDictionary<int, BattleRoleSnapshot>? BattleRoles => _battleRoles;
     public BattleRoleSnapshot? BattleRole => BattleRoles is null ? null : BattleRoles.Count == 1 ? BattleRoles.Values.Single()
         : throw new InvalidOperationException("Use BattleRoles for a multiplayer trigger session.");
     public TriggerDialogueContext Context { get; private set; }
@@ -86,7 +88,7 @@ public sealed class TriggerScriptSession
         ArgumentNullException.ThrowIfNull(battleRandom);
         _battleContent = battleContent;
         _battleRandom = battleRandom;
-        BattleRoles = battleContent.InitialRoles;
+        _battleRoles = battleContent.InitialRoles;
     }
 
     /// <summary>#53 first-battle construction: the real @09C3 call both executes battles
@@ -99,6 +101,48 @@ public sealed class TriggerScriptSession
     {
         ArgumentNullException.ThrowIfNull(world);
         _world = world;
+        if (world.RoleLiveState is { } owner) BindRoleLiveState(owner);
+    }
+
+    /// <summary>Explicit shared-owner battle binding, with or without a world. A supplied world
+    /// must already use this owner; construction never seeds or rebinds either side.</summary>
+    public static TriggerScriptSession ForSharedRoles(TriggerEventCollection events, DialogueLanguagePackage language,
+        TriggerBattleContent battleContent, IBattleRandom battleRandom, RoleLiveState roleLiveState,
+        DynamicEventWorld? world = null, int inheritedColor = DialogueTextTokenizer.DefaultColor)
+    {
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        if (world is not null && !ReferenceEquals(world.RoleLiveState, roleLiveState))
+            throw new ArgumentException("The trigger and world must share the same live role owner.", nameof(world));
+        var session = world is null
+            ? new TriggerScriptSession(events, language, battleContent, battleRandom, inheritedColor)
+            : new TriggerScriptSession(events, language, battleContent, battleRandom, world, inheritedColor);
+        session.BindRoleLiveState(roleLiveState);
+        return session;
+    }
+
+    private void BindRoleLiveState(RoleLiveState owner)
+    {
+        _roleLiveState = owner;
+        _battleRoles = new LiveBattleRoles(owner, _battleContent!.Players.Select(player => player.RoleId).ToArray());
+    }
+
+    // A held projection reads replacement records from the owner; it never caches HP/MP snapshots.
+    private sealed class LiveBattleRoles(RoleLiveState owner, int[] roleIds) : IReadOnlyDictionary<int, BattleRoleSnapshot>
+    {
+        public BattleRoleSnapshot this[int roleId] => ContainsKey(roleId) && owner.Roles.TryGetValue(roleId, out var role)
+            ? role : throw new InvalidDataException($"Live roles are missing battle participant {roleId}.");
+        public IEnumerable<int> Keys => Array.AsReadOnly(roleIds);
+        public IEnumerable<BattleRoleSnapshot> Values => roleIds.Select(roleId => this[roleId]);
+        public int Count => roleIds.Length;
+        public bool ContainsKey(int roleId) => roleIds.Contains(roleId);
+        public bool TryGetValue(int roleId, out BattleRoleSnapshot value)
+        {
+            value = null!;
+            return ContainsKey(roleId) && owner.Roles.TryGetValue(roleId, out value!);
+        }
+        public IEnumerator<KeyValuePair<int, BattleRoleSnapshot>> GetEnumerator() =>
+            roleIds.Select(roleId => new KeyValuePair<int, BattleRoleSnapshot>(roleId, this[roleId])).GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     /// <summary>Dynamic-scene construction (no battle support): world mutations apply directly to
@@ -169,7 +213,9 @@ public sealed class TriggerScriptSession
     {
         if (Phase != TriggerScriptPhase.WaitingForBattle || PendingBattle is not { } request || request.Id != requestId
             || !request.Lifecycle.OwnsCompletion(completion)) return false;
-        BattleRoles = request.Lifecycle.Current.Roles;
+        if (_roleLiveState is not null)
+            _roleLiveState.MergeSettledRoles(request.Lifecycle.Current.Roles.Values.ToArray());
+        else _battleRoles = request.Lifecycle.Current.Roles;
         // The reload diagnostic carries the enemy team/context of the battle that actually lost.
         if (completion!.Outcome == ClassicBattlePhase.Lost) _lostBattleContext = (request.EnemyTeamId, request.IsBoss);
         _address = completion!.Outcome == ClassicBattlePhase.Lost ? request.LossAddress ?? request.NextAddress : request.NextAddress;
@@ -443,7 +489,8 @@ public sealed class TriggerScriptSession
                     _address = Next(command);
                     break;
                 case "startBattle" when _battleContent is not null:
-                    var lifecycle = new ClassicBattleLifecycleSession(BattleRoles!.Values.ToArray(), _battleContent.SettledPlayers(BattleRoles),
+                    var battleRoles = BattleRoles!;
+                    var lifecycle = new ClassicBattleLifecycleSession(battleRoles.Values.ToArray(), _battleContent.SettledPlayers(battleRoles),
                         _battleContent.Enemies(command.EnemyTeamId), _battleContent.GrowthByRole, _battleRandom!,
                         BattleEquipmentState.Initialize(_battleContent), runEnemyBattleEndScripts: true, isBossBattle: command.IsBoss);
                     PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.EnemyTeamId, command.IsBoss,

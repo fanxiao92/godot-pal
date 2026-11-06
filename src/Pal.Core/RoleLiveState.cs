@@ -26,5 +26,14 @@ public sealed class RoleLiveState
 
     internal void SetVitals(int roleId, int hp, int mp) => roles[roleId] = roles[roleId] with { Hp = hp, Mp = mp };
 
+    // Freeze and validate every participant before publishing any row; spectators remain untouched.
+    internal void MergeSettledRoles(IReadOnlyCollection<BattleRoleSnapshot> settledRoles)
+    {
+        var settled = new RoleLiveState(settledRoles);
+        if (settled.Roles.Keys.Any(roleId => !roles.ContainsKey(roleId)))
+            throw new InvalidDataException("Settled roles must already belong to the live owner.");
+        foreach (var (roleId, role) in settled.Roles) roles[roleId] = role;
+    }
+
     private static bool Word(int value) => value is >= 0 and <= 65535;
 }
