@@ -46,6 +46,35 @@ public class SyntheticFirstBattleClosureTests
             System.IO.File.Copy(ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/" + file),
                 ProjectSettings.GlobalizePath(statics.ResourceRoot + "/Palettes/" + file));
         using var fixture = new SyntheticFirstBattleFixture(statics, statics.ResourceRoot, staticProfile, lost: false);
+        var frozenProfile = ResourceLoader.Load<Pal.Game.Resources.PalFirstMandatoryBattleProfile>(fixture.ProfileUri)!;
+        var frozenContent = ResourceLoader.Load<Pal.Game.Resources.PalBattleContent>(frozenProfile.BattleContentUri)!;
+        var frozenVisual = ResourceLoader.Load<Pal.Game.Resources.PalBattleVisualProfile>(frozenProfile.VisualUri)!;
+        // String-URI manifests supplement the typed graph (notably modern event JSON).
+        // Never walk author temp directories or generated .godot caches.
+        var inputUris = Pal.Game.Profiles.NativeContentDependencies.ContentDependencies(new[] {
+            fixture.ProfileUri, frozenProfile.StaticProfile, statics.ResourceRoot + "/Scenes/Scene.tscn",
+            statics.ResourceRoot + "/Palettes/Palette.tres", frozenProfile.VisualUri });
+        inputUris.UnionWith(frozenProfile.ResourceSha256.Keys);
+        inputUris.UnionWith(frozenVisual.ResourceSha256.Keys);
+        var inputHashes = inputUris.ToDictionary(uri => uri, Godot.FileAccess.GetSha256);
+        foreach (string hash in inputHashes.Values) AssertThat(hash.Length).IsEqual(64);
+        foreach (var pair in frozenProfile.ResourceSha256)
+            AssertThat(inputHashes[pair.Key]).IsEqual(pair.Value);
+        foreach (var pair in frozenVisual.ResourceSha256)
+            AssertThat(inputHashes[pair.Key]).IsEqual(pair.Value);
+        var frozenRoles = Pal.Game.Profiles.NativeBattleContent.CreateCore(frozenContent).InitialRoles;
+        AssertRoleNumbers(frozenRoles[0], 100, 20, 0);
+        AssertRoleNumbers(frozenRoles[1], 100, 5, 0);
+        string frozenRoleValues = System.Text.Json.JsonSerializer.Serialize(frozenRoles);
+        void AssertPreparedInputsUnchanged()
+        {
+            foreach (var pair in inputHashes)
+                AssertThat(Godot.FileAccess.GetSha256(pair.Key)).IsEqual(pair.Value);
+            AssertThat(System.Text.Json.JsonSerializer.Serialize(
+                Pal.Game.Profiles.NativeBattleContent.CreateCore(frozenContent).InitialRoles)).IsEqual(frozenRoleValues);
+            AssertRoleNumbers(frozenRoles[0], 100, 20, 0);
+            AssertRoleNumbers(frozenRoles[1], 100, 5, 0);
+        }
         var main = new Main();
         main.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
         Pal.Game.Dialogue.GodotBattleRandom? productionRandom = null;
@@ -71,16 +100,121 @@ public class SyntheticFirstBattleClosureTests
         Guid firstOrigin = Guid.Empty, firstCall = Guid.Empty;
         int navigation = 0;
         bool observedNavigation = false, secondSearch = false, observedSecondBattle = false;
+        bool wrongOwnedRequestRejected = false, firstReplayRejected = false, secondReplayRejected = false;
+        bool staleReceiptsRejected = false;
+        Guid firstBattleRequest = Guid.Empty, secondBattleRequest = Guid.Empty;
+        Pal.Core.ClassicBattleLifecycleSession.CompletionReceipt? firstReceipt = null;
+        Action? echoInvariant = null;
+        bool echoObserved = false, observeTargetMenu = false, targetMenuObserved = false;
+        // Complete records are an invariance oracle, never the numeric expected-value bank.
+        Action CaptureStableBusinessState()
+        {
+            var dialogue = main.Dialogue!;
+            var session = dialogue.Session!;
+            var world = dialogue.FirstBattleWorld!;
+            var owner = world.RoleLiveState!;
+            var rolesView = owner.Roles;
+            var battleView = session.BattleRoles!;
+            var records = rolesView.ToDictionary(pair => pair.Key, pair => pair.Value);
+            string values = System.Text.Json.JsonSerializer.Serialize(records);
+            var vitals = world.PartyVitals.ToDictionary(pair => pair.Key, pair => (pair.Value.Hp, pair.Value.Mp));
+            var phase = session.Phase; var call = session.CallId; var origin = session.SourceRequestId;
+            var position = session.CurrentPosition; int returnEntry = session.ReturnEntry;
+            bool blocksScene = session.BlocksSceneUpdates;
+            var pending = session.PendingBattle; var display = session.PendingDisplay;
+            var lifecycle = main.StoryBattle;
+            var current = lifecycle?.Current; var receipt = lifecycle?.Completion;
+            var settlement = lifecycle?.VictorySettlement;
+            var mode = main.StoryBattleMode;
+            var outer = main.Battle!.PendingTrigger; var outerId = main.Battle.PendingRequestId;
+            var exploration = main.Exploration!; var explorationLeader = exploration.Leader;
+            var outerCurrent = main.Battle.Current; var leader = world.Leader;
+            int cash = main.StoryCashGranted, experience = main.StoryExperienceGranted;
+            return () =>
+            {
+                AssertThat(ReferenceEquals(main.Dialogue, dialogue)).IsTrue();
+                AssertThat(ReferenceEquals(dialogue.Session, session)).IsTrue();
+                AssertThat(ReferenceEquals(dialogue.FirstBattleWorld, world)).IsTrue();
+                AssertThat(ReferenceEquals(world.RoleLiveState, owner)).IsTrue();
+                AssertThat(ReferenceEquals(owner.Roles, rolesView)).IsTrue();
+                AssertThat(ReferenceEquals(session.BattleRoles, battleView)).IsTrue();
+                AssertThat(owner.Roles.Keys.OrderBy(id => id).SequenceEqual(records.Keys.OrderBy(id => id))).IsTrue();
+                AssertThat(battleView.Keys.OrderBy(id => id).SequenceEqual(records.Keys.OrderBy(id => id))).IsTrue();
+                foreach (var pair in records)
+                {
+                    AssertThat(ReferenceEquals(owner.Roles[pair.Key], pair.Value)).IsTrue();
+                    if (battleView.ContainsKey(pair.Key))
+                        AssertThat(ReferenceEquals(battleView[pair.Key], pair.Value)).IsTrue();
+                }
+                AssertThat(System.Text.Json.JsonSerializer.Serialize(owner.Roles)).IsEqual(values);
+                AssertThat(world.PartyVitals.Count).IsEqual(vitals.Count);
+                foreach (var pair in vitals)
+                    AssertThat((world.PartyVitals[pair.Key].Hp, world.PartyVitals[pair.Key].Mp)).IsEqual(pair.Value);
+                AssertThat(session.Phase).IsEqual(phase);
+                AssertThat(session.CallId).IsEqual(call);
+                AssertThat(session.SourceRequestId).IsEqual(origin);
+                AssertThat(session.CurrentPosition).IsEqual(position);
+                AssertThat(session.ReturnEntry).IsEqual(returnEntry);
+                AssertThat(session.BlocksSceneUpdates).IsEqual(blocksScene);
+                AssertThat(ReferenceEquals(session.PendingBattle, pending)).IsTrue();
+                AssertThat(ReferenceEquals(session.PendingDisplay, display)).IsTrue();
+                AssertThat(ReferenceEquals(main.StoryBattle, lifecycle)).IsTrue();
+                AssertThat(ReferenceEquals(lifecycle?.Current, current)).IsTrue();
+                AssertThat(ReferenceEquals(lifecycle?.Completion, receipt)).IsTrue();
+                AssertThat(ReferenceEquals(lifecycle?.VictorySettlement, settlement)).IsTrue();
+                if (main.StoryBattleMode != mode)
+                    throw new InvalidOperationException($"Story rejected receipt or Enter echo must preserve presentation mode: expected {mode}, actual {main.StoryBattleMode}.");
+                AssertThat(ReferenceEquals(main.Battle.PendingTrigger, outer)).IsTrue();
+                AssertThat(main.Battle.PendingRequestId).IsEqual(outerId);
+                AssertThat(ReferenceEquals(main.Exploration, exploration)).IsTrue();
+                AssertThat(main.Exploration!.Leader).IsEqual(explorationLeader);
+                AssertThat(ReferenceEquals(main.Battle.Current, outerCurrent)).IsTrue();
+                AssertThat(world.Leader).IsEqual(leader);
+                AssertThat(main.StoryCashGranted).IsEqual(cash);
+                AssertThat(main.StoryExperienceGranted).IsEqual(experience);
+            };
+        }
+        void RejectReceipt(Guid request, Pal.Core.ClassicBattleLifecycleSession.CompletionReceipt receipt)
+        {
+            var unchanged = CaptureStableBusinessState();
+            AssertThat(main.Dialogue!.AcknowledgeBattle(request, receipt)).IsFalse();
+            unchanged();
+        }
+        async Task ObserveEnterEcho(RealFirstBattleFlowTests.RealFlowScene scene)
+        {
+            echoObserved = false;
+            echoInvariant = CaptureStableBusinessState(); // arm before actual engine dispatch
+            try
+            {
+                using var input = new InputEventKey { Keycode = Key.Enter, PhysicalKeycode = Key.Enter, Pressed = true, Echo = true };
+                Input.ParseInputEvent(input);
+                Input.FlushBufferedEvents();
+                await scene.WaitFor(() => echoObserved, "first Main completion after Enter echo");
+                if (observationError is not null) throw observationError;
+            }
+            finally { ReleaseKey(Key.Enter); echoInvariant = null; }
+        }
         void ObserveSharedRoles()
         {
             if (observationError is not null) return;
             try
             {
+                if (echoInvariant is { } unchanged)
+                {
+                    echoInvariant = null;
+                    echoObserved = true; // FIRST completion, before any state assertions
+                    unchanged();
+                }
                 var world = main.Dialogue?.FirstBattleWorld;
                 var owner = world?.RoleLiveState;
                 var session = main.Dialogue?.Session;
                 if (owner is null || session is null)
                     throw new InvalidOperationException("Missing shared role owner or trigger session at Main.UpdateCompleted.");
+                if (observeTargetMenu && !targetMenuObserved)
+                {
+                    targetMenuObserved = true;
+                    AssertThat(main.StoryBattleMode).IsEqual(Pal.Game.Dialogue.StoryBattlePresentation.TargetMenu);
+                }
                 if (observedOwner is null)
                 {
                     observedWorld = world; observedOwner = owner; observedSession = session;
@@ -93,6 +227,7 @@ public class SyntheticFirstBattleClosureTests
                     productionRandom = main.FirstBattleRandom;
                     ownedDialogue = main.Dialogue;
                     AssertCurrentPreview(main);
+                    AssertPreparedInputsUnchanged();
                 }
                 AssertThat(ReferenceEquals(world, observedWorld)).IsTrue();
                 AssertThat(ReferenceEquals(owner, observedOwner)).IsTrue();
@@ -143,6 +278,14 @@ public class SyntheticFirstBattleClosureTests
                         AssertThat(action.Attacker).IsEqual(Pal.Core.ClassicBattleSide.Player);
                     foreach (var player in lifecycle.Current.Combat.Players)
                         AssertThat(player.Hp).IsEqual(secondSearch ? (player.RoleId == 0 ? 120 : 95) : 97);
+                    if (!secondSearch && !wrongOwnedRequestRejected && lifecycle.Completion is { } ownedReceipt)
+                    {
+                        wrongOwnedRequestRejected = true;
+                        AssertThat(lifecycle.OwnsCompletion(ownedReceipt)).IsTrue();
+                        AssertThat(session!.Phase).IsEqual(Pal.Core.TriggerScriptPhase.WaitingForBattle);
+                        AssertThat(session.PendingBattle!.Id != Guid.Empty).IsTrue();
+                        RejectReceipt(Guid.Empty, ownedReceipt); // owned receipt, wrong ID while waiting
+                    }
                     if (lifecycle.VictorySettlement is { } reward)
                     {
                         AssertThat(reward.ExperienceGranted).IsEqual(52);
@@ -155,6 +298,7 @@ public class SyntheticFirstBattleClosureTests
                     observedBattle = true;
                     AssertThat(firstPrefix).IsTrue();
                     firstLifecycle = main.StoryBattle;
+                    firstBattleRequest = session!.PendingBattle!.Id;
                     AssertRoleNumbers(firstLifecycle.Current.Roles[0], 97, 17, 0);
                     AssertRoleNumbers(firstLifecycle.Current.Roles[1], 97, 2, 0);
                     AssertThat(ReferenceEquals(firstPrefixZero, owner.Roles[0])).IsTrue();
@@ -172,6 +316,15 @@ public class SyntheticFirstBattleClosureTests
                     // coroutine's later read. The held initial record remains frozen.
                     observedReturn = true;
                     AssertThat(firstLifecycle!.Completion).IsNotNull();
+                    firstReceipt = firstLifecycle.Completion;
+                    AssertThat(firstLifecycle.OwnsCompletion(firstReceipt)).IsTrue();
+                    AssertThat(firstReceipt!.CashGranted).IsEqual(96);
+                    AssertThat(firstReceipt.ExperienceGranted).IsEqual(52);
+                    RejectReceipt(firstBattleRequest, firstReceipt);
+                    firstReplayRejected = true;
+                    AssertThat(main.StoryCashGranted).IsEqual(96);
+                    AssertThat(main.StoryExperienceGranted).IsEqual(52);
+                    AssertPreparedInputsUnchanged();
                     AssertThat(firstRewards).IsEqual(1);
                     AssertRoleNumbers(owner.Roles[0], 123, 33, 52);
                     AssertRoleNumbers(owner.Roles[1], 98, 3, 52);
@@ -217,6 +370,7 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(current.Plan.LeaderFrameIndex).IsEqual(expectedPhase % 2 == 0 ? 0 : (expectedPhase + 1) / 2);
                     AssertThat(ReferenceEquals(returnedRoleOne, owner.Roles[1])).IsTrue();
                     AssertCurrentPreview(main);
+                    AssertPreparedInputsUnchanged();
                 }
                 if (navigation != 0 && !observedNavigation)
                 {
@@ -239,7 +393,13 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(secondPrefix).IsTrue();
                     secondOrigin = main.Battle.PendingRequestId; secondCall = session.CallId;
                     secondLifecycle = main.StoryBattle;
+                    secondBattleRequest = session.PendingBattle!.Id;
                     AssertThat(ReferenceEquals(firstLifecycle, secondLifecycle)).IsFalse();
+                    AssertThat(secondLifecycle.OwnsCompletion(firstReceipt)).IsFalse();
+                    RejectReceipt(Guid.Empty, firstReceipt!);
+                    RejectReceipt(secondBattleRequest, firstReceipt!); // current ID, foreign lifecycle receipt
+                    RejectReceipt(firstBattleRequest, firstReceipt!); // stale ID + consumed receipt
+                    staleReceiptsRejected = true;
                     AssertRoleNumbers(secondLifecycle.Current.Roles[0], 120, 30, 52);
                     AssertRoleNumbers(secondLifecycle.Current.Roles[1], 95, 0, 52);
                     AssertThat(ReferenceEquals(secondPrefixZero, owner.Roles[0])).IsTrue();
@@ -251,6 +411,15 @@ public class SyntheticFirstBattleClosureTests
                 {
                     secondReturn = true;
                     AssertThat(secondLifecycle!.Completion).IsNotNull();
+                    AssertThat(ReferenceEquals(firstReceipt, secondLifecycle.Completion)).IsFalse();
+                    AssertThat(secondLifecycle.OwnsCompletion(secondLifecycle.Completion)).IsTrue();
+                    AssertThat(secondLifecycle.Completion!.CashGranted).IsEqual(96);
+                    AssertThat(secondLifecycle.Completion.ExperienceGranted).IsEqual(52);
+                    RejectReceipt(secondBattleRequest, secondLifecycle.Completion);
+                    secondReplayRejected = true;
+                    AssertThat(main.StoryCashGranted).IsEqual(192); // host grants, not a persistent wallet
+                    AssertThat(main.StoryExperienceGranted).IsEqual(104);
+                    AssertPreparedInputsUnchanged();
                     AssertThat(secondRewards).IsEqual(1);
                     AssertRoleNumbers(owner.Roles[0], 135, 40, 104);
                     AssertRoleNumbers(owner.Roles[1], 97, 2, 104);
@@ -287,6 +456,7 @@ public class SyntheticFirstBattleClosureTests
                     AssertRoleNumbers(owner.Roles[0], 135, 40, 104);
                     AssertRoleNumbers(owner.Roles[1], 97, 2, 104);
                     AssertCurrentPreview(main);
+                    AssertPreparedInputsUnchanged();
                 }
             }
             catch (Exception error) { observationError = error; }
@@ -313,7 +483,16 @@ public class SyntheticFirstBattleClosureTests
             if (observationError is not null) throw observationError;
             AssertThat(main.StoryBattle is not null).IsTrue();
             AssertThat(main.StoryBattle!.Current.Combat.Enemies.Count).IsEqual(2);
-            int rounds = 0;
+            AssertThat(main.StoryBattleMode).IsEqual(Pal.Game.Dialogue.StoryBattlePresentation.AttackMenu);
+            await ObserveEnterEcho(scene);
+            // Reuse the driver's first real confirm, then prove echo cannot select its target.
+            observeTargetMenu = true;
+            scene.Press(Key.Enter);
+            await scene.WaitFor(() => targetMenuObserved || observationError is not null, "first real menu confirm");
+            if (observationError is not null) throw observationError;
+            observeTargetMenu = false;
+            await ObserveEnterEcho(scene);
+            int rounds = 1;
             while (main.StoryBattle is not null && rounds++ < 3000)
             { scene.Press(Key.Enter); await scene.RunnerIdle(); }
             // The Won continuation parks on @09FF displays after the battle view releases;
@@ -389,10 +568,14 @@ public class SyntheticFirstBattleClosureTests
             await scene.WaitFor(() => secondMovement || observationError is not null, "second post-Won committed movement");
             if (observationError is not null) throw observationError;
             AssertThat(secondOuterReturn).IsTrue();
-            System.Console.WriteLine($"SYN_TWO_CLOSURES:first={firstOrigin}/{firstCall} second={secondOrigin}/{secondCall} rewards={firstRewards + secondRewards} XP=104 cash=192 prefixes={firstPrefix}/{secondPrefix} outer={firstOuterReturn}/{secondOuterReturn}");
+            AssertThat(wrongOwnedRequestRejected).IsTrue();
+            AssertThat(firstReplayRejected && staleReceiptsRejected && secondReplayRejected).IsTrue();
+            AssertPreparedInputsUnchanged(); // before owned Main/runner Dispose
+            System.Console.WriteLine($"SYN_TWO_CLOSURES:first={firstOrigin}/{firstCall} second={secondOrigin}/{secondCall} rewards={firstRewards + secondRewards} XP={main.StoryExperienceGranted} hostCashGranted={main.StoryCashGranted} prefixes={firstPrefix}/{secondPrefix} outer={firstOuterReturn}/{secondOuterReturn}");
             scene.AssertHealthy();
         }
-        finally { main.UpdateCompleted -= ObserveSharedRoles; }
+        finally { ReleaseKey(Key.Enter); main.UpdateCompleted -= ObserveSharedRoles; }
+        AssertPreparedInputsUnchanged(); // after runner Dispose, before fixture deletes its own files
         AssertThat(productionRandom!.IsDisposed).IsTrue();
         AssertThat(ownedDialogue!.PreviewSessionFactory).IsNull();
         AssertThat(ownedDialogue.FirstBattleWorld).IsNull();

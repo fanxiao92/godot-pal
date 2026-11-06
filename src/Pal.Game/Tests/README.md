@@ -92,6 +92,24 @@ U9 扩展原方法的 shared owner/world/trigger、两人顺序、结算连续�
 
 #155 随后已由父控独立整票验收并实际本地集成至 `67be98f9de1178239e2d1def41cb9f60f6886e45`（Issue155已关闭，非Main交付）。#150 普通合并该已验收前置及其154/156祖先，保留自身U10精确路由；合并后实际源码库存650、full647/committable646，分区85/74/2/5/6/3/4/28/436/4（committable最后3），process/scene-dialogue/native-map合计595。这是合并后的metadata，不冒称在#150重跑了#155完整436或shared/full gate；#150真实前缀消费和其余验收仍待完成。
 
+## #150 U16 Enter echo 反例与正常双循环（有界实测）
+
+父控随后审阅U15候选并补严当前world身份、live-view键集合及mode错误文本；实测身份为 `03334ae351a4e08d90eecec6088b7e26ecafb210 + dirty`、patch SHA `1b4198b6ca40141fa0b9075e85be65dc90b0542ad88f8c0e62bcf3dea11527a5`，不是以下U15源码阶段或U14运行的转签。只经原公开scene-realfull完整Synthetic Won FQN执行两次：Main.cs临时去掉confirm的Echo门，准确Failed1，指定 `Story rejected receipt or Enter echo must preserve presentation mode: expected AttackMenu, actual TargetMenu.`；完整Main bytes恢复后，唯一fresh GREEN **Completed/Passed1/RunInfo0**。两轮真实发现650、精确所选/实际1，4roots分别0/0/0/1与全0，完整双EOF/output/cleanup且无timeout/cancel；预算2/2，没有重跑或额外SDK探针。
+
+RED原生TRX `86e8d680-aea4-4fb3-8ec0-c2cf36fe5ee1`（Range `7ac62a4a-366a-49ef-9117-7051b4996a2c`），GREEN原生TRX `c401caff-d4d2-4893-91ad-c0c2a62b7cda`（Range `be47ee9a-1054-48ba-b152-d003a94bbd3f`）。RED真实栈仅ObserveEnterEcho:193显式重抛→Won:487；首Main完成observer来源由冻结实测源码控制流绑定，不声称原生栈有来源帧或adapter原因/Main.Failure为空。发现栈条件不符先停，获父控一次SDK-free新分类后才恢复/进入GREEN；原helper未改，原失败/唯一镜像ErrorRunInfo保留。GREEN报告的旧静态stack-limit说明不作为RED栈证据。
+
+GREEN唯一case原TRX stdout实际输出两次不同origin/call、`rewards=2 XP=104 hostCashGranted=192 prefixes=True/True outer=True/True`。公有adapter错/foreign/stale/replay拒绝、两处真实echo首Main完成快照、独立HP/MP/XP银行、原3次NOW preview/RNG隔离、prepared typed+两manifest声明闭包SHA及numeric完整初值、Dispose前后只读/正常原生释放，由冻结完整方法和完整case通过证明，不伪造逐字段独立日志。父控独立重核两轮各221源码/6工具、原TRX图/counters/真实root结果、680封存文件及恢复actualDLL/PDB，均通过；本树filtered marker和固定4包前后未变。证据 `C:/evidence/m6/execution/tickets/150/U16-enter-echo-red-green/`、`coordinator-u16-verification.json`。实测后只有本README结果文字；不冒称随后clean检查点重跑。异常preview lifetime、firstBattle active-exit、legacy新source-bound及最终shared影响仍待完成，不关闭或集成#150/#130/M6。
+
+## #150 U15 公有回执拒绝 / Enter echo / prepared 闭包（仅源码候选）
+
+仅扩展既有 `Synthetic_closure_full_flow_Won_continuation_and_changed_exploration`，不增加 case/FQN、metadata、UID 或生产接口。原两次真实 search / battle / owned ACK / 外层返回 / 首移动、独立 HP/MP/XP 数字、NOW preview 和真实 RNG 隔离断言保留。当前只读源码检查，**未运行 SDK、Godot、Prepare、build、discovery、test、import 或 probe**；U14 与旧 Synthetic 运行不转签本候选，仍待父控实读补丁后另批 scoped native 预算。
+
+- 经真实公有 `main.Dialogue.AcknowledgeBattle`：首战所属 completion 已生成但 Main 尚未正常消费时，以错误 request 拒绝；Main 已消费后重复拒绝；第二真实 lifecycle 等待时，以第一 receipt 配当前正确 request 证明 foreign ownership 拒绝，以第一旧 request + receipt 证明 stale replay 拒绝，第二提交后再拒绝重复。每次同时核完整 owner 记录及引用、live view/HPMP、CallId/SourceRequestId/phase/PendingBattle/返回入口与阻塞状态、Main lifecycle/current/settlement/completion、外层 pending、探索位置和奖励账本不变；不抢发正常 ACK。两个不同 owned receipt 各为52XP/96cash，角色最终XP104；实际 `StoryCashGranted` 是 Main 的 grant ledger（96→192），不是新建持久钱包，trace 不再写死 cash192。
+- 在首战 AttackMenu 与正常物理 Enter 后的 TargetMenu，注入 `InputEventKey { Pressed=true, Echo=true }`，通过 `Input.ParseInputEvent` / `FlushBufferedEvents` 进入原分发。入树前观察器在交付后的**首个 Main.UpdateCompleted** 先置完成标志，再无条件核完整业务快照；driver 只等标志，键在 finally 释放，合法下一次物理 Enter 仍驱动原流程。默认 WaitFor 实际为2s，原120s/60s driver、280000ms方法与300000ms批次均不放宽。不冻结允许自然推进的 idle 动画时钟，不冒称 GPU 像素核对。
+- 复用 `NativeContentDependencies.ContentDependencies`，union firstBattle `ResourceSha256` 与 visual `ResourceSha256`，保存实际文件SHA：profile、static profile / PackedScene及其typed map/tile/sprite资源、palette、visual、numeric/global objects、完整事件index+files、双语语言、font/glyph、prompts及声明image/player/effect/number依赖（外部图像含已有.import remap）。在初始preview后、两次owned返回、两次移动preview后、runner Dispose前后核文件SHA及持有的原生numeric资源完整初始角色值不变。仅边界内prepared声明闭包：不扫目录、不写资源/缓存，不包括fixture私有author临时输入、scripts/engine或生成的 `.godot` import输出；文件SHA不证明GPU或所有内存对象不可变。
+
+仍欠：本候选真实执行/负控、异常preview lease释放及firstBattle active-exit覆盖、legacy/Main/Story新source-bound兼容和最终shared影响。已有 `ActiveBattleExitReleasesOverlayAndBindingsBeforeOwnedNodesAreFreed` 属heavy-a、`NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle` 属heavy-b/c、Main失败用例属light；当前 Test-Range allowlist不接受这些heavy/light批次，不能假填公开窄route，须父控另批既有完整门或后续合法范围方案。dialogue-only旧adapter在scene-dialogue、legacy无binding loader在native-map可用既有公开范围。完整映射随U15外部源码收据保存；未扩路由或执行任何后续case。#150仍未整票验收/集成，不代表#130/#126/#148、GPU/人工/private-real/CI或M6完成。
+
 ## #150 U13 Story 前缀消费者（仅源码候选，未运行 SDK）
 
 原 `PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin` 现在显式消费 `new AuthoredStoryFixture("PartyWin", partyHpMpPrefixAmount: -3)`；仍由原 Prepare、native profile 和 Main 真实 search 装配，不修改启动 HP100/95、MP20 或 prepared 文件。入树前已安装的 `StoryHost` 观察器在本次 search 交付且新 `Session.CallId` 出现后的首个 `Main.UpdateCompleted` 内无条件取样，记录前 CallId/request/phase 与新身份；不等 HP/phase 成功形状才采样，也不把尚未 Start 的排队回调当作前缀效果。原5s driver等待同时要求观察器已采样，避免FramePostDraw先建立display、但新CallId尚未经过Main完成回调时提前检查；不增加超时或等待正确数值。预期全队 HP97/92、MP17；实际 battle 入场先核当前 HP 与完整角色初值，再核 pending/lifecycle 引用，避免 current-value 数字负控被引用检查抢先截获。
