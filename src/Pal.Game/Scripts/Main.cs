@@ -25,6 +25,7 @@ public partial class Main : Node2D
     private bool awaitingFirstBattleDraw;
     private bool firstBattleRendererSubscribed;
     private GodotBattleRandom? firstBattleRandom;
+    private ulong? initialFirstBattleSeed;
     internal GodotBattleRandom? FirstBattleRandom => firstBattleRandom;
     private DynamicEventWorld? firstBattleWorld;
     private RoleLiveState? roleLiveState;
@@ -49,6 +50,15 @@ public partial class Main : Node2D
         if (IsInsideTree() || configuration is not null || initializationAttempted || exited || Failure is not null)
             throw new InvalidOperationException("Configure the scene exactly once before entering the tree.");
         configuration = selection;
+    }
+
+    internal void Configure(GameSceneConfiguration selection, ulong initialFirstBattleSeed)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        if (selection.BattleProfile is null)
+            throw new ArgumentException("An initial first-battle seed requires a first-battle profile.", nameof(selection));
+        Configure(selection);
+        this.initialFirstBattleSeed = initialFirstBattleSeed;
     }
 
     public ExplorationState? Exploration => Battle?.Current ?? Interaction?.Current ?? dynamicSession?.Current ?? input?.Current;
@@ -179,7 +189,7 @@ public partial class Main : Node2D
                     roleLiveState, real.Resources.BattleContent.Players.Select(player => player.RoleId).ToArray());
                 Dialogue.FirstBattleWorld = world;
                 firstBattleWorld = world;
-                firstBattleRandom = new GodotBattleRandom(selected.BattleSeed);
+                firstBattleRandom = new GodotBattleRandom(initialFirstBattleSeed ?? selected.BattleSeed);
                 Dialogue.PreviewSessionFactory = () =>
                 {
                     var fork = firstBattleRandom.Fork();

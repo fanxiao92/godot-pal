@@ -151,6 +151,11 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         Put(0x09C4, "showDialog", 65535, 1, 0, 0, ("messageId", 1), ("descriptionLineWord", 0));
         for (int address = 0x09C5; address < 0x09FE; address++)
             Put(address, "face", 15, 0, 0, 0, ("direction", 0), ("frame", 0));
+        if (!lost)
+        {
+            // Party-wide signed WORD -3. Synthetic coverage, not a retail edit.
+            Put(0x09C5, "changeHpMp", 0x001D, 1, 65533, 0, ("scope", 1), ("amount", -3));
+        }
         Put(0x09FE, "startBattle", 7, 0x0012, 0xA073, 0, ("enemyTeamId", 18), ("lossTarget", $"L{0xA073:X4}"), ("isBoss", true), ("fleeTarget", null));
         Put(0x09FF, "showDialog", 65535, 2, 0, 0, ("messageId", 2), ("descriptionLineWord", 0));
         for (int address = 0x0A00; address < 0x0A32; address++)
@@ -246,6 +251,11 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         roleSnapshot["magics"] = new JsonArray(Enumerable.Range(0, 32).Select(_ => (JsonNode?)0).ToArray());
         roles.Add(roleSnapshot);
         var growth = data["growth"]!.AsArray();
+        // Won-only controlled threshold: two 52-XP victories cannot trigger random
+        // formal/hidden stat growth, keeping independent HP/MP closure literals exact.
+        // Lost retains the original table and hook/enemy conditions are unchanged.
+        if (!lost)
+            growth[0]!["levelUpExperience"] = new JsonArray(Enumerable.Range(0, 100).Select(_ => (JsonNode?)1000).ToArray());
         var growthOne = (JsonNode)growth[0]!.DeepClone();
         growthOne["roleId"] = 1;
         growth.Add(growthOne);
