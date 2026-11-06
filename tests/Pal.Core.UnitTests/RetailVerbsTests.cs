@@ -70,6 +70,74 @@ public sealed class RetailVerbsTests
         Assert.Equal(30, records[0].Hp);
     }
 
+    [Fact]
+    public void Shared_world_initial_party_order_targets_only_selected_owner_roles_and_is_read_only()
+    {
+        var owner = new RoleLiveState(Enumerable.Range(0, 6).Select(id => Role(id)).ToArray());
+        var before = owner.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var initialParty = new List<int> { 4, 1 };
+        var world = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner, initialParty);
+        Assert.Equal(new[] { 4, 1 }, world.PartyRoles);
+        foreach (int roleId in Enumerable.Range(0, 6)) Assert.Same(before[roleId], owner.Roles[roleId]);
+
+        var script = VitalScript(world, scope: 1, amount: 10);
+        script.Start("story", "owner28", 0); // caller is not in the initial party
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.True(script.ScriptSuccess);
+        Assert.Equal(before[4] with { Hp = 110, Mp = 30 }, owner.Roles[4]);
+        Assert.Equal(before[1] with { Hp = 110, Mp = 30 }, owner.Roles[1]);
+        foreach (int roleId in new[] { 0, 2, 3, 5 }) Assert.Same(before[roleId], owner.Roles[roleId]);
+        Assert.Equal((110, 30), (world.PartyVitals[4].Hp, world.PartyVitals[4].Mp));
+        Assert.Equal((110, 30), (world.PartyVitals[1].Hp, world.PartyVitals[1].Mp));
+
+        initialParty[0] = 5;
+        initialParty.Add(0);
+        Assert.Equal(new[] { 4, 1 }, world.PartyRoles);
+        Assert.Throws<NotSupportedException>(() => ((IList<int>)world.PartyRoles)[0] = 0);
+        Assert.Throws<NotSupportedException>(() => ((IList<int>)world.PartyRoles).Clear());
+        Assert.Equal(new[] { 4, 1 }, world.PartyRoles);
+    }
+
+    [Fact]
+    public void Shared_world_initial_party_rejects_null_empty_duplicate_illegal_missing_and_over_capacity_without_owner_changes()
+    {
+        var owner = new RoleLiveState(new[] { 0, 1, 2, 4, 5 }.Select(id => Role(id)).ToArray());
+        var before = owner.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
+        Assert.Throws<ArgumentNullException>(() => DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner, null!));
+        Assert.Throws<ArgumentNullException>(() => DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, null!, new[] { 4, 1 }));
+        IReadOnlyList<int>[] invalidParties = [[], [4, 4], [-1], [6], [3], [0, 1, 2, 4]];
+        foreach (var initialParty in invalidParties)
+        {
+            Assert.Throws<InvalidDataException>(() => DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner, initialParty));
+            Assert.Equal(5, owner.Roles.Count);
+            foreach (int roleId in new[] { 0, 1, 2, 4, 5 }) Assert.Same(before[roleId], owner.Roles[roleId]);
+        }
+    }
+
+    [Fact]
+    public void Shared_world_initial_party_accepts_three_world_slots_without_changing_owner_records()
+    {
+        var owner = new RoleLiveState(Enumerable.Range(0, 6).Select(id => Role(id)).ToArray());
+        var before = owner.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var world = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner, new[] { 5, 2, 0 });
+        Assert.Equal(new[] { 5, 2, 0 }, world.PartyRoles); // world capacity, not three-player battle support
+        foreach (int roleId in Enumerable.Range(0, 6)) Assert.Same(before[roleId], owner.Roles[roleId]);
+    }
+
+    [Fact]
+    public void ForHost_existing_overloads_keep_the_default_role_zero_party()
+    {
+        Assert.Equal(new[] { 0 }, DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0).PartyRoles);
+        var owner = new RoleLiveState([Role(0), Role(1)]);
+        var spectator = owner.Roles[1];
+        var world = DynamicEventWorld.ForHost(Rules(), Leader(), 2, 0, 0, owner);
+        Assert.Equal(new[] { 0 }, world.PartyRoles);
+        var script = VitalScript(world, scope: 1, amount: 10);
+        script.Start("story", "owner28", 1);
+        Assert.Equal((110, 30), (owner.Roles[0].Hp, owner.Roles[0].Mp));
+        Assert.Same(spectator, owner.Roles[1]);
+    }
+
     // Independent literals from global.c PAL_IncreaseHPMP: WORD write precedes signed SHORT
     // testing (not mathematical clamp); success compares the resulting two words.
     [Theory]

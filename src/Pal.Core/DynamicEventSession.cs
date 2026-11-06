@@ -93,6 +93,24 @@ public sealed class DynamicEventWorld
         return new(rules, leader, sceneId, onEnter, onTeleport, roleLiveState);
     }
 
+    /// <summary>Shared path with the host's ordered initial party, independent of owner record
+    /// count and battle capacity. The party is copied once, not rebound during the session.</summary>
+    public static DynamicEventWorld ForHost(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport,
+        RoleLiveState roleLiveState, IReadOnlyList<int> initialPartyRoleIds)
+    {
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        ArgumentNullException.ThrowIfNull(initialPartyRoleIds);
+        var partyRoles = initialPartyRoleIds.ToArray();
+        // script.c 0x0075 has three party slots; six owner records do not enlarge the party.
+        if (partyRoles.Length is < 1 or > 3 || partyRoles.Distinct().Count() != partyRoles.Length
+            || partyRoles.Any(roleId => roleId is < 0 or > 5 || !roleLiveState.Roles.ContainsKey(roleId)))
+            throw new InvalidDataException("Initial party requires one to three unique RoleId 0..5 records from the shared owner.");
+        return new(rules, leader, sceneId, onEnter, onTeleport, roleLiveState)
+        {
+            PartyRoles = Array.AsReadOnly(partyRoles)
+        };
+    }
+
     private DynamicEventWorld(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport,
         RoleLiveState roleLiveState) : this(rules, leader, sceneId, onEnter, onTeleport)
     {
