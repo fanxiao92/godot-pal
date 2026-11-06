@@ -10,13 +10,19 @@ public sealed class FirstMandatoryBattleSession
     private readonly ExplorationInput input;
     private readonly FirstMandatoryBattleClosureReceipt? closure;
     private bool searchPressed;
+    private TriggerScriptSession? boundTrigger;
+    private Guid boundCall;
+    private bool returning;
+    private uint returnDeadline;
 
     public FirstMandatoryBattleSessionState State { get; }
-    /// <summary>The static rules this session was bound to (host world wiring reuses them).</summary>
-    public StaticSceneRules Rules { get; }
+    /// <summary>The active exploration rules (host world wiring reuses them).</summary>
+    public StaticSceneRules Rules => exploration.Rules;
     /// <summary>The @09C3 entry opened by a verified real closure at the committed search update.
     /// While set, the opened trigger owns further advancement; the host consumes it.</summary>
     public FirstMandatoryBattleTriggerRequest? PendingTrigger { get; private set; }
+    /// <summary>Origin of the current committed search, separate from the two-field request value.</summary>
+    public Guid PendingRequestId { get; private set; }
     public ExplorationState Current => exploration.Current;
     public IReadOnlyList<SceneObject> Objects => exploration.Objects;
 
@@ -55,7 +61,6 @@ public sealed class FirstMandatoryBattleSession
         SceneSearchMatch? hit = rules.FindSearchTarget(leader);
         if (hit is null || hit.ObjectId != 28 || hit.SampleIndex != State.World.SearchProof.SampleIndex || rules.IsBlocked(leader.X, leader.Y))
             throw new InvalidDataException("First mandatory battle start/search identity does not match owner28 collision proof.");
-        Rules = rules;
         exploration = new ExplorationSession(rules, leader);
         input = new ExplorationInput(exploration);
     }
@@ -64,9 +69,54 @@ public sealed class FirstMandatoryBattleSession
     public void Release(ExplorationKey key) => input.Release(key);
     public void PressSearch() => searchPressed = true;
 
+    /// <summary>Binds the actual successful Start once, including synchronous endkeep calls.</summary>
+    public bool BindTrigger(Guid requestId, TriggerScriptSession trigger)
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        if (boundTrigger is not null || !OwnsRequest(requestId, trigger)) return false;
+        boundTrigger = trigger;
+        boundCall = trigger.CallId;
+        return true;
+    }
+
+    /// <summary>Releases only the bound completed outer call, not a battle/display acknowledgement.</summary>
+    public bool CompleteTrigger(Guid requestId, TriggerScriptSession trigger, uint ticksMilliseconds)
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        if (!OwnsRequest(requestId, trigger) || !ReferenceEquals(trigger, boundTrigger)
+            || trigger.CallId != boundCall || trigger.Phase != TriggerScriptPhase.Completed
+            || trigger.ReturnEntry != PendingTrigger!.EntryAddress) return false;
+
+        // The supported outer executor ends with keep. This saves the legacy/worldless word;
+        // bound dynamic-world projection is a separate synchronization boundary.
+        exploration.SaveTriggerEntry((ushort)PendingTrigger.OwnerId, (ushort)trigger.ReturnEntry);
+        State.World.EventObjects.Single(item => item.OwnerId == PendingTrigger.OwnerId).TriggerEntry = trigger.ReturnEntry;
+        PendingTrigger = null;
+        PendingRequestId = Guid.Empty;
+        boundTrigger = null;
+        boundCall = Guid.Empty;
+        returning = true;
+        returnDeadline = unchecked(ticksMilliseconds + 50);
+        return true;
+    }
+
+    private bool OwnsRequest(Guid requestId, TriggerScriptSession trigger) =>
+        PendingTrigger is { } request && requestId != Guid.Empty && requestId == PendingRequestId
+        && trigger.SourceRequestId == requestId && trigger.CallId != Guid.Empty
+        && trigger.Caller == request.OwnerId
+        && trigger.StartedEntry is { OwnerType: "eventObject", OwnerId: 28, Slot: "wTriggerScript",
+            Kind: "trigger", SourceAddress: 0x09c3 };
+
     public bool Update(uint ticksMilliseconds)
     {
         if (PendingTrigger is not null) return false;
+        if (returning)
+        {
+            // SDL_TICKS_PASSED: tick differences must be smaller than 2^31 ms.
+            if (unchecked((int)(returnDeadline - ticksMilliseconds)) > 0) return false;
+            searchPressed = false; // PAL_ClearKeyState retains held direction and alias order.
+            returning = false;
+        }
         if (!input.IsUpdateDue(ticksMilliseconds)) return false;
         if (searchPressed)
         {
@@ -77,6 +127,7 @@ public sealed class FirstMandatoryBattleSession
                 // The real entry is open: hand @09C3 to the host before any side effect. The
                 // unit 2 host executes it; exploration stays parked at this boundary.
                 PendingTrigger = new FirstMandatoryBattleTriggerRequest(0x09c3, 28);
+                PendingRequestId = Guid.NewGuid();
                 return true;
             }
         }

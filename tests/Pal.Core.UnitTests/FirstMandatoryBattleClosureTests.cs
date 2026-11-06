@@ -94,6 +94,275 @@ public sealed class FirstMandatoryBattleClosureTests
         Assert.Equal(string.Format(FirstMandatoryBattleClosure.ContractOnlyDiagnostic, profile.Closure.Entries[0].Id), error.Message);
     }
 
+    [Fact]
+    public void Owned_call_completes_returns_and_requires_a_fresh_origin_for_the_next_search()
+    {
+        var session = VerifiedSession();
+        var trigger = ReturnTrigger();
+        Assert.Equal(Guid.Empty, session.PendingRequestId);
+        session.PressSearch();
+        Assert.True(session.Update(0));
+        Guid first = session.PendingRequestId;
+        Assert.NotEqual(Guid.Empty, first);
+        trigger.Start("return", "owner28", 28, first);
+        Assert.True(session.BindTrigger(first, trigger));
+        Assert.False(session.CompleteTrigger(first, trigger, 100));
+        FinishReturnDisplay(trigger);
+        Assert.True(session.CompleteTrigger(first, trigger, 100));
+        Assert.Null(session.PendingTrigger);
+        Assert.Equal(Guid.Empty, session.PendingRequestId);
+        Assert.Equal(0x09c3, session.Rules.Objects.Single().TriggerEntry);
+        Assert.Equal(0x09c3, session.Objects.Single().TriggerEntry);
+        Assert.Equal(0x09c3, session.State.World.EventObjects.Single(o => o.OwnerId == 28).TriggerEntry);
+        Assert.False(session.Update(149));
+        Assert.True(session.Update(150));
+        session.PressSearch();
+        Assert.True(session.Update(250));
+        Guid second = session.PendingRequestId;
+        Assert.NotEqual(first, second);
+        Assert.Equal(new FirstMandatoryBattleTriggerRequest(0x09c3, 28), session.PendingTrigger);
+        Assert.False(session.BindTrigger(second, trigger));
+        Assert.False(session.CompleteTrigger(second, trigger, 250));
+        trigger.Start("return", "owner28", 28, second);
+        Assert.True(session.BindTrigger(second, trigger));
+        FinishReturnDisplay(trigger);
+        Assert.True(session.CompleteTrigger(second, trigger, 350));
+        Assert.True(session.Update(400));
+    }
+
+    [Fact]
+    public void Binding_rejects_unstarted_presearch_foreign_and_wrong_entry_calls_without_changing_exploration()
+    {
+        var session = VerifiedSession();
+        var trigger = ReturnTrigger(false);
+        Assert.False(session.BindTrigger(Guid.NewGuid(), trigger));
+        Assert.False(session.CompleteTrigger(Guid.NewGuid(), trigger, 0));
+        trigger.Start("return", "owner28", 28); // Real completed call, but before this search.
+        session.PressSearch();
+        Assert.True(session.Update(0));
+        Guid id = session.PendingRequestId;
+        var pending = session.PendingTrigger;
+        var current = session.Current;
+        var rules = session.Rules;
+        string world = System.Text.Json.JsonSerializer.Serialize(session.State.World);
+        Assert.False(session.BindTrigger(id, trigger));
+        Assert.False(session.BindTrigger(id, ReturnTrigger(false)));
+        Assert.Throws<ArgumentNullException>(() => session.BindTrigger(id, null!));
+        Assert.Throws<ArgumentNullException>(() => session.CompleteTrigger(id, null!, 100));
+        trigger.Start("return", "owner28", 28, Guid.NewGuid());
+        Assert.False(session.BindTrigger(id, trigger));
+        foreach (var wrong in new[]
+        {
+            ReturnTrigger(false, owner: 29),
+            ReturnTrigger(false, ownerType: "scene", slot: "wScriptOnEnter"),
+            ReturnTrigger(false, address: 0x09c4)
+        })
+        {
+            wrong.Start("return", "owner28", 28, id);
+            Assert.False(session.BindTrigger(id, wrong));
+            Assert.False(session.CompleteTrigger(id, wrong, 100));
+        }
+        trigger.Start("return", "owner28", 29, id);
+        Assert.False(session.BindTrigger(id, trigger));
+        trigger.Start("return", "owner28", 28, id);
+        Assert.False(session.BindTrigger(Guid.Empty, trigger));
+        Assert.False(session.BindTrigger(Guid.NewGuid(), trigger));
+        Assert.False(session.CompleteTrigger(id, trigger, 100)); // Completed but unbound.
+        Assert.Same(pending, session.PendingTrigger);
+        Assert.Equal(id, session.PendingRequestId);
+        Assert.Same(current, session.Current);
+        Assert.Same(rules, session.Rules);
+        Assert.Equal(world, System.Text.Json.JsonSerializer.Serialize(session.State.World));
+        Assert.True(session.BindTrigger(id, trigger));
+        Assert.True(session.CompleteTrigger(id, trigger, 100));
+        Assert.False(session.Update(149));
+        Assert.True(session.Update(150));
+    }
+
+    [Fact]
+    public void Bound_call_rejects_unfinished_foreign_duplicate_and_restarted_call_identity()
+    {
+        var session = VerifiedSession();
+        session.PressSearch(); session.Update(0);
+        Guid id = session.PendingRequestId;
+        var trigger = ReturnTrigger();
+        var foreign = ReturnTrigger(false);
+        trigger.Start("return", "owner28", 28, id);
+        foreign.Start("return", "owner28", 28, id);
+        Assert.True(session.BindTrigger(id, trigger));
+        Assert.False(session.BindTrigger(id, trigger));
+        Assert.False(session.BindTrigger(id, foreign));
+        var current = session.Current;
+        var rules = session.Rules;
+        Assert.False(session.CompleteTrigger(id, trigger, 100)); // WaitingForDisplay.
+        Assert.False(session.CompleteTrigger(id, foreign, 100));
+        Assert.False(session.Update(100));
+        FinishReturnDisplay(trigger);
+        Guid call = trigger.CallId;
+        Assert.Throws<InvalidDataException>(() => trigger.Start("return", "missing", 28, id));
+        Assert.Equal(call, trigger.CallId);
+        Assert.Equal(id, trigger.SourceRequestId);
+        trigger.Start("return", "owner28", 28, id);
+        FinishReturnDisplay(trigger);
+        Assert.NotEqual(call, trigger.CallId);
+        Assert.False(session.BindTrigger(id, trigger));
+        Assert.False(session.CompleteTrigger(id, trigger, 100));
+        Assert.Equal(id, session.PendingRequestId);
+        Assert.Same(current, session.Current);
+        Assert.Same(rules, session.Rules);
+        Assert.False(session.Update(1000));
+
+        var lost = VerifiedSession();
+        lost.PressSearch(); lost.Update(0);
+        var reload = ReturnTrigger(false, reload: true);
+        reload.Start("return", "owner28", 28, lost.PendingRequestId);
+        Assert.True(lost.BindTrigger(lost.PendingRequestId, reload));
+        Assert.Equal(TriggerScriptPhase.WaitingForLostReload, reload.Phase);
+        Assert.False(lost.CompleteTrigger(lost.PendingRequestId, reload, 100));
+        Assert.False(lost.Update(1000));
+    }
+
+    [Fact]
+    public void Synchronous_endkeep_and_failed_Start_preserve_owned_completion_and_session_isolation()
+    {
+        var (profile, fixture) = PreparedProfile();
+        var receipt = FirstMandatoryBattleClosure.Verify(profile,
+            fixture.Events(), fixture.Chinese(), fixture.English(), fixture.Content(), Images());
+        var template = Rules();
+        var session = new FirstMandatoryBattleSession(profile, 2, template, ReturnLeader(), receipt);
+        var second = new FirstMandatoryBattleSession(profile, 2, template, ReturnLeader(), receipt);
+        var untouched = second.Current;
+        string original = System.Text.Json.JsonSerializer.Serialize(profile.World);
+        session.PressSearch(); session.Update(0);
+        Guid id = session.PendingRequestId;
+        var trigger = ReturnTrigger(false);
+        trigger.Start("return", "owner28", 28, id);
+        Assert.Equal(TriggerScriptPhase.Completed, trigger.Phase);
+        Assert.True(session.BindTrigger(id, trigger));
+        Guid call = trigger.CallId;
+        var entry = trigger.StartedEntry;
+        Assert.Throws<InvalidDataException>(() => trigger.Start("return", "missing", 28, id));
+        Assert.Equal((call, id, entry), (trigger.CallId, trigger.SourceRequestId, trigger.StartedEntry));
+        Assert.False(session.CompleteTrigger(Guid.NewGuid(), trigger, 50));
+        Assert.True(session.CompleteTrigger(id, trigger, 100));
+        Assert.False(session.CompleteTrigger(id, trigger, 500)); // Must not move the return deadline.
+        session.Press(ExplorationKey.SouthPrimary);
+        Assert.False(session.Update(149));
+        Assert.True(session.Update(150));
+        Assert.Equal((1248, 256), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y));
+        Assert.Same(untouched, second.Current);
+        Assert.Equal(Guid.Empty, second.PendingRequestId);
+        Assert.Null(second.PendingTrigger);
+        Assert.Equal(1264, second.State.World.Leader.X);
+        Assert.Equal(template.Objects, second.Objects);
+        Assert.Equal(original, System.Text.Json.JsonSerializer.Serialize(profile.World));
+    }
+
+    [Theory]
+    [InlineData(100u, 149u, 150u, 249u, 250u)]
+    [InlineData(100u, 149u, 900u, 999u, 1000u)]
+    [InlineData(4294967275u, 28u, 29u, 128u, 129u)]
+    public void Return_uses_reference_50ms_then_one_100ms_step_clearing_search_but_retaining_held_alias_priority(
+        uint completed, uint early, uint due, uint beforeNext, uint next)
+    {
+        var session = VerifiedSession();
+        session.PressSearch(); Assert.True(session.Update(unchecked(completed - 100)));
+        Guid id = session.PendingRequestId;
+        var trigger = ReturnTrigger(false);
+        trigger.Start("return", "owner28", 28, id);
+        Assert.True(session.BindTrigger(id, trigger));
+        session.Press(ExplorationKey.WestPrimary);
+        session.Press(ExplorationKey.SouthPrimary);
+        session.Press(ExplorationKey.SouthAlternate);
+        session.Press(ExplorationKey.NorthPrimary, repeat: true);
+        session.PressSearch();
+        Assert.True(session.CompleteTrigger(id, trigger, completed));
+        session.Release(ExplorationKey.SouthPrimary);
+        var standing = session.Current;
+        Assert.False(session.Update(early));
+        Assert.Same(standing, session.Current);
+        session.PressSearch(); // Delivered during the return delay must also be cleared.
+        Assert.True(session.Update(due));
+        Assert.Null(session.PendingTrigger);
+        Assert.Equal((1248, 256, 0, 1), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y,
+            session.Current.Leader.Direction, session.Current.Leader.StepPhase));
+        Assert.Equal((1248, 256), (session.State.World.Leader.X, session.State.World.Leader.Y));
+        Assert.False(session.Update(unchecked(due + 1)));
+        Assert.False(session.Update(beforeNext));
+        session.Release(ExplorationKey.SouthAlternate); // Fall back to the older held west.
+        Assert.True(session.Update(next));
+        Assert.Equal((1232, 248, 1, 2), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y,
+            session.Current.Leader.Direction, session.Current.Leader.StepPhase));
+        session.Release(ExplorationKey.WestPrimary);
+        Assert.True(session.Update(unchecked(next + 100)));
+        Assert.False(session.Current.IsWalking);
+        Assert.Equal((1232, 248), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y));
+    }
+
+    private static FirstMandatoryBattleSession VerifiedSession()
+    {
+        var (profile, fixture) = PreparedProfile();
+        var receipt = FirstMandatoryBattleClosure.Verify(profile,
+            fixture.Events(), fixture.Chinese(), fixture.English(), fixture.Content(), Images());
+        return new(profile, 2, Rules(), ReturnLeader(), receipt);
+    }
+
+    private static StaticLeader ReturnLeader() => Leader() with
+    {
+        Sprite = new SceneSprite(17, Enumerable.Range(0, 12).Select(i => new SceneFrame(i, 1, 1)))
+    };
+
+    // Original selected modern stream isolates outer-call release, not the battle engine.
+    private static TriggerScriptSession ReturnTrigger(bool dialogue = true, int owner = 28,
+        string ownerType = "eventObject", string slot = "wTriggerScript", int address = 0x09c3,
+        bool reload = false)
+    {
+        const int count = 0x09c6;
+        var commands = new JsonArray();
+        for (int i = 0; i < count; i++)
+        {
+            bool show = dialogue && i == address;
+            var command = new JsonObject
+            {
+                ["label"] = $"L{i:X4}", ["op"] = show ? "showDialog" : reload && i == address ? "requestReload" : "end",
+                ["next"] = i + 1 < count ? $"L{i + 1:X4}" : null,
+                ["source"] = new JsonObject { ["index"] = i, ["opcode"] = show ? 65535 : reload && i == address ? 78 : 0,
+                    ["operands"] = new JsonArray(show ? 10 : 0, 0, 0) }
+            };
+            if (show) { command["messageId"] = 10; command["descriptionLineWord"] = 0; }
+            else if (!(reload && i == address)) command["mode"] = "keep";
+            commands.Add(command);
+        }
+        var index = new JsonObject
+        {
+            ["formatVersion"] = 1, ["profile"] = "faithful",
+            ["source"] = new JsonObject { ["archive"] = "SSS.MKF", ["chunk"] = 4, ["byteOrder"] = "little",
+                ["instructionCount"] = count, ["byteLength"] = count * 8, ["sha256"] = new string('c', 64) },
+            ["files"] = new JsonArray("return")
+        };
+        var file = new JsonObject
+        {
+            ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "return",
+            ["entries"] = new JsonArray(new JsonObject { ["id"] = "owner28",
+                ["owner"] = new JsonObject { ["type"] = ownerType, ["id"] = owner }, ["slot"] = slot,
+                ["kind"] = "trigger", ["target"] = $"L{address:X4}", ["sourceAddress"] = address }),
+            ["commands"] = commands
+        };
+        return new(TriggerEventCollection.Parse(index.ToJsonString(),
+            new Dictionary<string, string> { ["return"] = file.ToJsonString() }),
+            new DialogueLanguagePackage("en", [new DialogueMessageBlock(10, 10, [DialogueMessagePart.FromText("AB")])]));
+    }
+
+    private static void FinishReturnDisplay(TriggerScriptSession trigger)
+    {
+        var display = Assert.IsType<TriggerDialogueRequest>(trigger.PendingDisplay);
+        display.Display.Update(24, false, true);
+        display.Display.Update(100, true, false);
+        Assert.Equal(DialogueDisplayPhase.Completed, display.Display.Current.Phase);
+        Assert.True(trigger.AcknowledgeDisplay(display.Id));
+        Assert.Equal(TriggerScriptPhase.Completed, trigger.Phase);
+    }
+
     private static (FirstMandatoryBattleProfile Profile, RealClosureFixture Fixture) PreparedProfile(string fault = "none") =>
         (Load(BattleContextTestFixture.Valid(), prepared: true), new RealClosureFixture(fault));
 
