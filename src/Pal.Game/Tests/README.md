@@ -100,6 +100,26 @@ RED原生TRX `86e8d680-aea4-4fb3-8ec0-c2cf36fe5ee1`（Range `7ac62a4a-366a-49ef-
 
 GREEN唯一case原TRX stdout实际输出两次不同origin/call、`rewards=2 XP=104 hostCashGranted=192 prefixes=True/True outer=True/True`。公有adapter错/foreign/stale/replay拒绝、两处真实echo首Main完成快照、独立HP/MP/XP银行、原3次NOW preview/RNG隔离、prepared typed+两manifest声明闭包SHA及numeric完整初值、Dispose前后只读/正常原生释放，由冻结完整方法和完整case通过证明，不伪造逐字段独立日志。父控独立重核两轮各221源码/6工具、原TRX图/counters/真实root结果、680封存文件及恢复actualDLL/PDB，均通过；本树filtered marker和固定4包前后未变。证据 `C:/evidence/m6/execution/tickets/150/U16-enter-echo-red-green/`、`coordinator-u16-verification.json`。实测后只有本README结果文字；不冒称随后clean检查点重跑。异常preview lifetime、firstBattle active-exit、legacy新source-bound及最终shared影响仍待完成，不关闭或集成#150/#130/M6。
 
+## #150 U20 生命周期反例与恢复验证（有界实测）
+
+U17 的候选经父控修正并实际验证：U18 虽捕获指定 RNG 断言，但同时出现 runner 对已脱树 Main 重复 `RemoveChild` 的清理错误，不能计为有效指定 RED；原件保留。改为既有 StoryHost 的 container-owned runner 模式后，U19 又因父控错写 `GdUnit4.Api.ISceneRunner` 在编译阶段失败（仅 SDK/build 两命令，无 discovery/native/TRX），同样保留且不转签。核实际固定接口并仅更正两处为 `GdUnit4.ISceneRunner` 后，U20 在 `28552d25163c823d3bcddc8250387f96a912b825 + dirty`、patch SHA `a8c14c71ecb8de5971002c6f7fa370a5be9a1d413e28462e2b746286d2ea19b1` 上仅执行原公开 scene-realfull / Synthetic Won 完整 FQN 两次：Main active-only 漏释放自有 native RNG 产生唯一指定 `First-battle active exit must dispose its owned native RNG.`；精确完整 Main 新写恢复后，fresh 同例 **Completed/Passed1/RunInfo0**。没有 remove_child 或其它非指定诊断，RED 四命令 0/0/0/1、GREEN 全0，双 EOF/output/cleanup 完整且无 timeout/cancel，两轮各 discovery650、精确所选/实际1；时限、依赖、case库存和分区不变。
+
+RED native `a4a92e58-b4d6-491b-80bd-1c7e153e5e7e`（Range `ebf3bda3-6211-4490-be12-7aa672cf03e7`）原生栈只有 Won driver:799 重抛及 GdUnit 帧；TreeExited 首标志/唯一 RNG throw/订阅/真实 RemoveChild/catch/rethrow 是冻结源码绑定的来源，不伪造 callback/Main 原生帧。GREEN native `50342d0c-90af-4114-b099-bff6ecab8a16`（Range `feb7636a-030a-447f-b82b-b737ff5f4c8d`）实际运行目录 DLL/PDB 与 RED 不同、和恢复源码/原TRX CodeBase/归档/current 相符，非仅恢复 bytes/mtime。父控独立复核两轮221源码/6工具、682个运行原件及838项全证据索引、实际TRX图/精确集合/四命令原双流/包及marker不变；另一次只读独立 Standards/Spec 审查无阻塞。实测后仅本 README 补结果，不称后续 clean checkpoint 重新运行。
+
+唯一 case 的两循环 trace 直接记录 rewards2/XP104/hostCashGranted192/prefixes和outer均True，但位于新增退出段之前，不单凭该行签退出成功。同URI新 Main 首完成的独立初态、真实返回 preview lease 的 caller using 异常展开与 RNG 释放、实际 active TreeExited 的 RNG-first 清理/无假ACK/完整owner保持、末尾 fresh/container Free 及资源SHA不变，来自冻结无条件断言和完整方法 Completed；无独立末尾 trace，不虚构字段。这不是生产 StartCall 内部异常或 factory 构造 catch 的动态覆盖。父控收据见 `C:/evidence/m6/execution/tickets/150/coordinator-u20-verification.json`，原件在 `U20-active-exit-namespace-red-green/`。仍欠新 source-bound legacy/Main/Story 兼容、最终 shared 影响与整票独立审查/实际集成；#150/#130/M6、GPU/人工/private-real/CI 未整体验收。
+
+## #150 U17 同 URI / active-exit / 返回 lease 异常（仅源码候选）
+
+仅在原 Synthetic Won 方法内补生命周期观察，不新增 case/FQN、fixture、UID、metadata 或生产接口；原两次完整闭环、数字/回执/echo/三次普通 NOW preview/资源 SHA/正常 Dispose 断言保留。本单元**没有运行 SDK、Godot、Prepare、build、discovery、test、import 或 probe**，U16 GREEN 不转签这些新增断言，也不预告其编译或 runtime 通过。
+
+- 第一 Main 正常 Dispose 后，仍使用本例同一 prepared URI 创建并配置第二个正常 Main，入树前订阅。首个实际 `Main.UpdateCompleted` 先置标志，再无条件核独立 owner/world/session/原生 RNG、HP100/100、MP20/5、XP0 与奖励 ledger0，以及冻结资源初值/SHA。driver 仅等待完成标志。
+- 第二 Main 经真实 Enter/显示进入 active firstBattle，在真实 Main 完成回调捕获 pending/lifecycle/完整 owner 记录、world/source/call、adapter/display/overlay/实际 RNG；追加准备只给10s guard，不扩原120s/60s循环、2s WaitFor、280000ms方法或300000ms会话。真实 `RemoveChild` 触发 `TreeExited` 的首次观察先置标志，**先核 owned native RNG disposed**（命名错误文本），再核 Main/adapter/factory/world/overlay 引用清理、保留的 Core pending/完整记录和零奖励无假 ACK/Completion/外层返还；observer 异常捕获后在 driver 重抛，不变成 Main.Failure。RealFlowScene 仍负责自有输入、节点最终 free 与 globals 恢复。退出订阅释放责任另按生产源码核对，不声称直接枚举了 private/.NET delegates。
+- 首 Main 初次完成中直接调用既有真实 `PreviewSessionFactory()`，在返回 native lifetime 的 `using` 内对真实 session 公开 `Start` 传不存在的 entry；按实际 `GetEntry` 契约精确核 `InvalidDataException` 消息，异常退出后核该真实 RNG fork 已释放、生产 RNG Seed/State 及完整业务快照不变。不替换 factory/session，不造假异常执行器；**只覆盖已转交 lease 的 caller 异常展开**，不宣称动态进入生产 `PalTriggerDialogue.StartCall` 内异常或 factory 构造 catch，这两处只做源码责任核对。
+
+退出边界来自本地固定 GodotSharp 4.7.2 XML：`TreeExited` 在 `NotificationExitTree` 后，节点已不活跃，`_ExitTree` 在所有子节点离树后执行；不是 TreeExiting/idle 恢复或等 disposed 成功再采样。未应用的 active-only RNG 漏释放 mutation、完整恢复 SHA 和 source patch 随 `C:/evidence/m6/execution/tickets/150/U17-lifetime-source/` 封存，待父控实读后另授 native 预算。不能据源码设计声称反例已失败或恢复已通过。
+
+U15 后续 route 更正（保留其历史原文）：heavy/light 不在 Test-Range allowlist **不等于必须重跑三轮 M0**。当前入口已允许绕过 Range 的正常 dotnet/VSTest，仍须固定 bundle bootstrap、批准 GODOT_BIN/PAL_TEST_GODOT、所需 build/import 与全局串行；具体 legacy/Main/Story 定点 compatibility 集合、命令及预算由父控另行冻结，不扩 allowlist、不伪装 Range/fullgate。本候选与新 source-bound compatibility/最终 shared 影响仍待实测及审阅；#150 未整票验收/集成，不代表 #130/M6、GPU/人工/private-real/CI 完成。
+
 ## #150 U15 公有回执拒绝 / Enter echo / prepared 闭包（仅源码候选）
 
 仅扩展既有 `Synthetic_closure_full_flow_Won_continuation_and_changed_exploration`，不增加 case/FQN、metadata、UID 或生产接口。原两次真实 search / battle / owned ACK / 外层返回 / 首移动、独立 HP/MP/XP 数字、NOW preview 和真实 RNG 隔离断言保留。当前只读源码检查，**未运行 SDK、Godot、Prepare、build、discovery、test、import 或 probe**；U14 与旧 Synthetic 运行不转签本候选，仍待父控实读补丁后另批 scoped native 预算。

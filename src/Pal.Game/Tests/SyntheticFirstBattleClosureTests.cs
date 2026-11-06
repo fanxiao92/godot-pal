@@ -129,6 +129,9 @@ public class SyntheticFirstBattleClosureTests
             var outer = main.Battle!.PendingTrigger; var outerId = main.Battle.PendingRequestId;
             var exploration = main.Exploration!; var explorationLeader = exploration.Leader;
             var outerCurrent = main.Battle.Current; var leader = world.Leader;
+            var objects = world.Objects.Select(obj => (obj.Id, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
+                obj.State, obj.VanishTime, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount)).ToArray();
+            var party = world.PartyRoles.ToArray();
             int cash = main.StoryCashGranted, experience = main.StoryExperienceGranted;
             return () =>
             {
@@ -170,6 +173,9 @@ public class SyntheticFirstBattleClosureTests
                 AssertThat(main.Exploration!.Leader).IsEqual(explorationLeader);
                 AssertThat(ReferenceEquals(main.Battle.Current, outerCurrent)).IsTrue();
                 AssertThat(world.Leader).IsEqual(leader);
+                AssertThat(world.PartyRoles.SequenceEqual(party)).IsTrue();
+                AssertThat(world.Objects.Select(obj => (obj.Id, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
+                    obj.State, obj.VanishTime, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount)).SequenceEqual(objects)).IsTrue();
                 AssertThat(main.StoryCashGranted).IsEqual(cash);
                 AssertThat(main.StoryExperienceGranted).IsEqual(experience);
             };
@@ -227,6 +233,35 @@ public class SyntheticFirstBattleClosureTests
                     productionRandom = main.FirstBattleRandom;
                     ownedDialogue = main.Dialogue;
                     AssertCurrentPreview(main);
+                    // The real factory has already transferred this native lifetime. A caller's
+                    // exceptional unwind is not production StartCall/factory-construction coverage.
+                    var productionUnchanged = CaptureStableBusinessState();
+                    var randomState = productionRandom!.CurrentState;
+                    var entry = session.Entries.First();
+                    var lease = main.Dialogue!.PreviewSessionFactory!();
+                    var fork = (Pal.Game.Dialogue.GodotBattleRandom)lease.Lifetime;
+                    const string missingEntry = "U17-missing-preview-entry";
+                    bool rejected = false;
+                    try
+                    {
+                        using (lease.Lifetime)
+                        {
+                            AssertThat(fork.IsDisposed).IsFalse();
+                            AssertThat(fork.CurrentState).IsEqual(randomState);
+                            AssertThat(lease.Session.Entries.Any(e => e.FileId == entry.FileId && e.Id == missingEntry)).IsFalse();
+                            lease.Session.Start(entry.FileId, missingEntry, 28);
+                        }
+                    }
+                    catch (System.IO.InvalidDataException error)
+                    {
+                        AssertThat(error.Message).IsEqual($"{entry.FileId}.json: missing entry '{missingEntry}'.");
+                        rejected = true;
+                    }
+                    AssertThat(rejected).IsTrue();
+                    AssertThat(fork.IsDisposed).IsTrue();
+                    AssertThat(productionRandom.IsDisposed).IsFalse();
+                    AssertThat(productionRandom.CurrentState).IsEqual(randomState);
+                    productionUnchanged();
                     AssertPreparedInputsUnchanged();
                 }
                 AssertThat(ReferenceEquals(world, observedWorld)).IsTrue();
@@ -579,6 +614,218 @@ public class SyntheticFirstBattleClosureTests
         AssertThat(productionRandom!.IsDisposed).IsTrue();
         AssertThat(ownedDialogue!.PreviewSessionFactory).IsNull();
         AssertThat(ownedDialogue.FirstBattleWorld).IsNull();
+
+        // Reuse these still-alive prepared URIs, never a removed Main or a re-prepared bundle.
+        var fresh = new Main();
+        fresh.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
+        bool freshInitial = false, activeCaptured = false, exitObserved = false;
+        Exception? lifetimeError = null;
+        Pal.Game.Dialogue.GodotBattleRandom? freshRandom = null;
+        Pal.Game.Dialogue.PalTriggerDialogue? freshAdapter = null;
+        Pal.Game.Dialogue.PalDialogueDisplay? freshDisplay = null;
+        Pal.Game.Dialogue.PalStoryBattleView? overlay = null;
+        Action? assertUnsettled = null;
+        void ObserveFreshCompletion()
+        {
+            if (lifetimeError is not null) return;
+            try
+            {
+                if (!freshInitial)
+                {
+                    freshInitial = true; // FIRST actual completion, not a wait for correct values.
+                    var world = fresh.Dialogue!.FirstBattleWorld!;
+                    var owner = world.RoleLiveState!;
+                    var session = fresh.Dialogue.Session!;
+                    freshRandom = fresh.FirstBattleRandom!;
+                    AssertThat(ReferenceEquals(owner, observedOwner)).IsFalse();
+                    AssertThat(ReferenceEquals(world, observedWorld)).IsFalse();
+                    AssertThat(ReferenceEquals(session, observedSession)).IsFalse();
+                    AssertThat(ReferenceEquals(freshRandom, productionRandom)).IsFalse();
+                    AssertThat(freshRandom.IsDisposed).IsFalse();
+                    AssertThat(session.Phase).IsEqual(Pal.Core.TriggerScriptPhase.Ready);
+                    AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1 })).IsTrue();
+                    AssertRoleNumbers(owner.Roles[0], 100, 20, 0);
+                    AssertRoleNumbers(owner.Roles[1], 100, 5, 0);
+                    foreach (int id in new[] { 0, 1 })
+                    {
+                        AssertThat(ReferenceEquals(session.BattleRoles![id], owner.Roles[id])).IsTrue();
+                        AssertThat(world.PartyVitals[id].Hp).IsEqual(owner.Roles[id].Hp);
+                        AssertThat(world.PartyVitals[id].Mp).IsEqual(owner.Roles[id].Mp);
+                    }
+                    AssertThat(fresh.StoryCashGranted).IsEqual(0);
+                    AssertThat(fresh.StoryExperienceGranted).IsEqual(0);
+                    AssertPreparedInputsUnchanged();
+                }
+                if (!activeCaptured && fresh.StoryBattle is { } lifecycle)
+                {
+                    activeCaptured = true;
+                    freshAdapter = fresh.Dialogue!; freshDisplay = fresh.Display!;
+                    overlay = fresh.GetChildren().OfType<Pal.Game.Dialogue.PalStoryBattleView>().Single();
+                    var session = freshAdapter.Session!;
+                    var world = freshAdapter.FirstBattleWorld!;
+                    var owner = world.RoleLiveState!;
+                    var records = owner.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
+                    string values = System.Text.Json.JsonSerializer.Serialize(owner.Roles);
+                    var pending = session.PendingBattle!;
+                    var outer = fresh.Battle!;
+                    var outerPending = outer.PendingTrigger;
+                    var origin = outer.PendingRequestId; var call = session.CallId;
+                    var position = session.CurrentPosition; int returnEntry = session.ReturnEntry;
+                    var current = lifecycle.Current; var leader = world.Leader;
+                    AssertThat(pending).IsNotNull();
+                    AssertThat(ReferenceEquals(pending.Lifecycle, lifecycle)).IsTrue();
+                    AssertThat(lifecycle.Completion).IsNull();
+                    AssertThat(lifecycle.VictorySettlement).IsNull();
+                    AssertThat(origin != Guid.Empty && call != Guid.Empty).IsTrue();
+                    AssertThat(outerPending).IsNotNull();
+                    AssertThat(session.SourceRequestId).IsEqual(origin);
+                    AssertThat(ReferenceEquals(fresh.FirstBattleRandom, freshRandom)).IsTrue();
+                    AssertThat(freshRandom!.IsDisposed).IsFalse();
+                    AssertRoleNumbers(owner.Roles[0], 97, 17, 0);
+                    AssertRoleNumbers(owner.Roles[1], 97, 2, 0);
+                    assertUnsettled = () =>
+                    {
+                        AssertThat(ReferenceEquals(session.PendingBattle, pending)).IsTrue();
+                        AssertThat(ReferenceEquals(pending.Lifecycle, lifecycle)).IsTrue();
+                        AssertThat(ReferenceEquals(lifecycle.Current, current)).IsTrue();
+                        AssertThat(lifecycle.Completion).IsNull();
+                        AssertThat(lifecycle.VictorySettlement).IsNull();
+                        AssertThat(session.Phase).IsEqual(Pal.Core.TriggerScriptPhase.WaitingForBattle);
+                        AssertThat(session.PendingDisplay).IsNull();
+                        AssertThat(session.CallId).IsEqual(call);
+                        AssertThat(session.SourceRequestId).IsEqual(origin);
+                        AssertThat(session.CurrentPosition).IsEqual(position);
+                        AssertThat(session.ReturnEntry).IsEqual(returnEntry);
+                        AssertThat(session.BlocksSceneUpdates).IsTrue();
+                        AssertThat(ReferenceEquals(world.RoleLiveState, owner)).IsTrue();
+                        AssertThat(System.Text.Json.JsonSerializer.Serialize(owner.Roles)).IsEqual(values);
+                        AssertThat(owner.Roles.Count).IsEqual(records.Count);
+                        foreach (var pair in records)
+                        {
+                            AssertThat(ReferenceEquals(owner.Roles[pair.Key], pair.Value)).IsTrue();
+                            AssertThat(ReferenceEquals(session.BattleRoles![pair.Key], pair.Value)).IsTrue();
+                            AssertThat(world.PartyVitals[pair.Key].Hp).IsEqual(pair.Value.Hp);
+                            AssertThat(world.PartyVitals[pair.Key].Mp).IsEqual(pair.Value.Mp);
+                        }
+                        AssertThat(world.Leader).IsEqual(leader);
+                        AssertThat(ReferenceEquals(outer.PendingTrigger, outerPending)).IsTrue();
+                        AssertThat(outer.PendingRequestId).IsEqual(origin);
+                        AssertThat(fresh.StoryCashGranted).IsEqual(0);
+                        AssertThat(fresh.StoryExperienceGranted).IsEqual(0);
+                    };
+                    assertUnsettled();
+                }
+            }
+            catch (Exception error) { lifetimeError = error; }
+        }
+        void ObserveFreshExit()
+        {
+            exitObserved = true; // TreeExited is after NotificationExitTree; never poll cleanup.
+            try
+            {
+                if (!freshRandom!.IsDisposed)
+                    throw new InvalidOperationException("First-battle active exit must dispose its owned native RNG.");
+                AssertThat(fresh.FirstBattleRandom).IsNull();
+                AssertThat(freshAdapter!.PreviewSessionFactory).IsNull();
+                AssertThat(freshAdapter.FirstBattleWorld).IsNull();
+                AssertThat(freshAdapter.Session).IsNull();
+                AssertThat(GodotObject.IsInstanceValid(overlay)).IsFalse();
+                AssertThat(fresh.GetChildren().OfType<Pal.Game.Dialogue.PalStoryBattleView>().Count()).IsEqual(0);
+                AssertThat(GodotObject.IsInstanceValid(freshDisplay)).IsTrue();
+                AssertThat(fresh.IsInsideTree()).IsFalse();
+                AssertThat(fresh.StoryBattle).IsNull();
+                AssertThat(fresh.StoryBattleMode).IsNull();
+                AssertThat(fresh.StoryDrawSnapshot).IsNull();
+                AssertThat(fresh.StoryResultVisible).IsFalse();
+                AssertThat(fresh.Dialogue).IsNull();
+                AssertThat(fresh.Display).IsNull();
+                AssertThat(fresh.Battle).IsNull();
+                AssertThat(fresh.Exploration).IsNull();
+                AssertThat(fresh.SelectedLanguage).IsNull();
+                assertUnsettled!(); // The detached Core call must not acquire a fake ACK/reward/return.
+                AssertPreparedInputsUnchanged();
+                AssertThat(fresh.Failure).IsNull();
+            }
+            catch (Exception error) { lifetimeError ??= error; }
+        }
+        // Like StoryHost, let the runner own a container: removing Main must not detach
+        // the runner's own scene and make SceneRunner.Dispose remove it a second time.
+        var exitContainer = new Node();
+        GdUnit4.ISceneRunner? exitRunner = null;
+        var exitWindow = ((SceneTree)Engine.GetMainLoop()).Root;
+        var exitMinSize = exitWindow.MinSize; var exitSize = exitWindow.Size;
+        double exitTimeScale = Engine.TimeScale; int exitPhysicsTicks = Engine.PhysicsTicksPerSecond;
+        var exitFocus = exitWindow.GuiGetFocusOwner();
+        var freshFailures = new System.Collections.Generic.List<string>();
+        void RecordFreshFailure(string failure) => freshFailures.Add(failure);
+        void PressFreshEnter()
+        {
+            using var input = new InputEventKey { Keycode = Key.Enter, PhysicalKeycode = Key.Enter, Pressed = true };
+            Input.ParseInputEvent(input);
+            Input.FlushBufferedEvents();
+        }
+        fresh.UpdateCompleted += ObserveFreshCompletion;
+        fresh.TreeExited += ObserveFreshExit;
+        fresh.Failed += RecordFreshFailure;
+        try
+        {
+            exitContainer.AddChild(fresh);
+            exitRunner = GdUnit4.ISceneRunner.Load(exitContainer, autoFree: true);
+            ulong initialStart = Time.GetTicksMsec();
+            while (!freshInitial)
+            {
+                if (Time.GetTicksMsec() - initialStart > 2000)
+                    throw new TimeoutException("Required production boundary not observed: same-URI Main first completion; failure=" + fresh.Failure);
+                await exitRunner.AwaitIdleFrame();
+            }
+            if (lifetimeError is not null) throw lifetimeError;
+            PressFreshEnter();
+            int frames = 0;
+            ulong deadline = Time.GetTicksMsec() + 10000; // Only the additional preparation guard.
+            while (!activeCaptured && lifetimeError is null && Time.GetTicksMsec() < deadline)
+            {
+                if (fresh.Dialogue?.Session?.PendingDisplay is { } display
+                    && ((frames & 15) == 0 || display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
+                    PressFreshEnter();
+                frames++;
+                await exitRunner.AwaitIdleFrame();
+            }
+            if (lifetimeError is not null) throw lifetimeError;
+            AssertThat(activeCaptured).IsTrue();
+            ReleaseKey(Key.Enter);
+            AssertThat(ReferenceEquals(fresh.GetParent(), exitContainer)).IsTrue();
+            fresh.GetParent().RemoveChild(fresh); // Actual owned active tree exit, not _ExitTree().
+            AssertThat(exitObserved).IsTrue();
+            if (lifetimeError is not null) throw lifetimeError;
+            AssertThat(exitContainer.IsInsideTree()).IsTrue();
+            AssertThat(fresh.Failure).IsNull();
+            AssertThat(freshFailures.Count).IsEqual(0);
+        }
+        finally
+        {
+            try
+            {
+                ReleaseKey(Key.Enter);
+                fresh.UpdateCompleted -= ObserveFreshCompletion;
+                fresh.TreeExited -= ObserveFreshExit;
+                fresh.Failed -= RecordFreshFailure;
+                exitRunner?.Dispose(); // Its container is still attached, even when Main was removed.
+            }
+            finally
+            {
+                if (GodotObject.IsInstanceValid(fresh)) fresh.Free();
+                if (GodotObject.IsInstanceValid(exitContainer)) exitContainer.Free();
+                // The completed exit observer records a release failure before this test-only fallback.
+                // Release only this owned scene's captured RNG; never mask its recorded assertion.
+                if (freshRandom is { IsDisposed: false }) freshRandom.Dispose();
+                exitWindow.MinSize = exitMinSize; exitWindow.Size = exitSize;
+                Engine.TimeScale = exitTimeScale; Engine.PhysicsTicksPerSecond = exitPhysicsTicks;
+                if (GodotObject.IsInstanceValid(exitFocus)) exitFocus!.GrabFocus();
+            }
+        }
+        AssertThat(GodotObject.IsInstanceValid(fresh)).IsFalse();
+        AssertThat(GodotObject.IsInstanceValid(exitContainer)).IsFalse();
+        AssertPreparedInputsUnchanged();
     }
 
     [TestCase(Timeout = 280000)]
