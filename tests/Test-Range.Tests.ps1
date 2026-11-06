@@ -52,6 +52,7 @@ function Get-Process { param([string]$Name)
     [IO.File]::WriteAllText($wrapper, $code, $utf8)
     $null = [Management.Automation.Language.Parser]::ParseFile($wrapper, [ref]$tokens, [ref]$errors)
     Assert (-not $errors.Count) 'Generated invocation file must parse before execution.'
+    Assert ([IO.File]::ReadAllText($wrapper, $utf8) -ceq $code) 'Invocation wrapper readback differs.'
     $stdout = Join-Path $evidence "$number.stdout.log"; $stderr = Join-Path $evidence "$number.stderr.log"
     Push-Location ([IO.Path]::GetTempPath())
     try { & $hostPath -NoProfile -File $wrapper 1> $stdout 2> $stderr; $actual = $LASTEXITCODE } finally { Pop-Location }
@@ -153,11 +154,72 @@ public class Cases {
     $blocked = (Join-Path $blockedOutput 'cli-integration/results.trx').Replace('"', '""')
     Put 'tests/Pal.Extract.IntegrationTests/Fault.cs' ('using Xunit; namespace RangeFixture; public class Fault { [Fact] public void BlockTrx() { System.IO.Directory.CreateDirectory(@"' + $blocked + '"); Assert.True(true); } }')
     $null = Check 'missing current TRX cannot be success' 1 '[range:results-missing]' -Filter 'FullyQualifiedName=RangeFixture.Fault.BlockTrx' -ExistingOutput $blockedOutput
+    # Real SDK host/Prepare fixture: no Godot or production bootstrap is executed.
+    Put 'scripts/gdunit-packages.lock.json' '{"assets":[{"file":"fixture.input"}]}'
+    Put 'fake-bundle/fixture.input' 'literal owned bundle input'
+    Put 'scripts/Get-GdUnitPackages.ps1' 'param([string]$InputDirectory) Join-Path $InputDirectory "fixture.input"'
+    $gameProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles></PropertyGroup></Project>'
+    Put 'src/Pal.Game/Pal.Game.csproj' $gameProject
+    Put 'src/Pal.Game/Host.cs' 'public class PrepareHost { }'
+    $prepareProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable></PropertyGroup><ItemGroup><ProjectReference Include="../../src/Pal.Game/Pal.Game.csproj" ReferenceOutputAssembly="false" Private="false"/><PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1"/><PackageReference Include="xunit" Version="2.9.3"/><PackageReference Include="xunit.runner.visualstudio" Version="3.1.4"/></ItemGroup></Project>'
+    Put 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj' $prepareProject
+    $prepareSource = 'using Xunit; namespace PrepareFixture; public class Cases {' + ((1..89 | ForEach-Object { '[Fact] public void Case' + $_.ToString('D2') + '() { Assert.True(true); }' }) -join "`n") + '}'
+    Put 'tests/Pal.Prepare.Tests/Cases.cs' $prepareSource
+    [IO.File]::WriteAllText((Join-Path $evidence 'fixture-root.txt'), $root, $utf8)
+    $prepareOnly = Check 'Prepare explicitly journals its host before the 89-case scope' 0 'PASS range-regression' -Selection @('prepare') -EngineFixture
+    $r = Report $prepareOnly
+    Assert ((@($r.commands.name) -join ',') -ceq 'sdk,prepare.host.build,prepare.build,prepare.discover,prepare.test') 'Designated RED: missing explicit Prepare host prerequisite command before Prepare build.'
+    Assert ($r.projects.Count -eq 1 -and $r.projects[0].scope -ceq 'prepare' -and $r.projects[0].executed.Count -eq 89) 'Prepare-only must not select Game tests.'
+    Assert ($r.prepareHost.artifacts.Count -ge 3 -and $r.prepareHost.warningBaseline -eq 14) 'Dedicated host artifact identity/Game warning ownership missing.'
+    # Seven literal compiler warnings are printed twice by MSBuild: the unchanged
+    # Game baseline is 14, while Prepare remains zero on its incremental build.
+    Put 'src/Pal.Game/Host.cs' (((1..7 | ForEach-Object { '#warning HOST_BASELINE_' + $_ }) -join "`n") + "`npublic class PrepareHost { }")
+    $warned = Check 'host warnings belong to Game14 rather than Prepare0' 0 'PASS range-regression' -Selection @('prepare') -EngineFixture
+    $r = Report $warned
+    Assert ($r.prepareHost.warningCount -eq 14 -and $r.prepareHost.warningBaseline -eq 14) 'Literal host warning baseline not verified.'
+    foreach ($a in $r.prepareHost.artifacts) { Assert ($a.sha256 -ceq $a.afterSha256) 'Host identity interval not verified through Prepare.' }
+    Put 'src/Pal.Game/Host.cs' (((1..8 | ForEach-Object { '#warning HOST_EXCESS_' + $_ }) -join "`n") + "`npublic class PrepareHost { }")
+    $excess = Check 'excess host warnings stop before Prepare build' 1 '[range:warning-delta]' -Selection @('prepare') -EngineFixture
+    Assert ((@((Report $excess).commands.name) -join ',') -ceq 'sdk,prepare.host.build') 'Warning excess continued into Prepare.'
+    Put 'src/Pal.Game/Host.cs' "#error HOST_BUILD_FAILURE`npublic class PrepareHost { }"
+    $hostFailure = Check 'host native build exit is retained before Prepare' 1 '[range:command-exit]' -Selection @('prepare') -EngineFixture
+    $r = Report $hostFailure
+    Assert ($r.commands.Count -eq 2 -and $r.commands[1].exitKnown -and $r.commands[1].exitCode -eq 1 -and $r.commands[1].outputComplete -and $r.commands[1].cleanupComplete) 'Native host build failure/completion lost.'
+    Put 'src/Pal.Game/Host.cs' 'public class PrepareHost { }'
+    Put 'src/Pal.Game/Pal.Game.csproj' ($gameProject.Replace('</Project>', '<Target Name="RemoveRuntimeConfig" AfterTargets="Build"><Delete Files="$(TargetDir)$(TargetName).runtimeconfig.json"/></Target></Project>'))
+    $missing = Check 'missing required host runtimeconfig stops before Prepare' 1 '[range:artifact]' -Selection @('prepare') -EngineFixture
+    Assert ((Report $missing).commands.Count -eq 2) 'Missing host artifact continued into Prepare.'
+    Put 'src/Pal.Game/Pal.Game.csproj' ($gameProject.Replace('</Project>', '<Target Name="DuplicateAssembly" AfterTargets="Build"><Message Importance="high" Text="Pal.Game -&gt; $(TargetPath)"/></Target></Project>'))
+    $duplicate = Check 'duplicate host assembly output stops before Prepare' 1 '[range:artifact]' -Selection @('prepare') -EngineFixture
+    Assert ((Report $duplicate).commands.Count -eq 2) 'Duplicate host output continued into Prepare.'
+    Put 'src/Pal.Game/Pal.Game.csproj' ($gameProject.Replace('<TargetFramework>', '<AssemblyName>ForeignHost</AssemblyName><TargetFramework>'))
+    $mismatch = Check 'foreign host assembly output stops before Prepare' 1 '[range:artifact]' -Selection @('prepare') -EngineFixture
+    Assert ((Report $mismatch).commands.Count -eq 2) 'Mismatched host output continued into Prepare.'
+    Put 'src/Pal.Game/Pal.Game.csproj' $gameProject
+    $hostDll = (Join-Path $root 'src/Pal.Game/bin/Debug/net10.0/Pal.Game.dll').Replace('"','""')
+    Put 'tests/Pal.Prepare.Tests/Cases.cs' ($prepareSource.Replace('Case01() { Assert.True(true);', 'Case01() { System.IO.File.AppendAllText(@"' + $hostDll + '", "changed"); Assert.True(true);'))
+    $changed = Check 'host artifact changes during Prepare are rejected' 1 '[range:identity]' -Selection @('prepare') -EngineFixture
+    Assert ((@((Report $changed).commands.name) -join ',') -ceq 'sdk,prepare.host.build,prepare.build,prepare.discover,prepare.test') 'Changed host failed at the wrong boundary.'
+    # Observe the later ordinary Game build without ever discovering/launching
+    # an artificial Game adapter or the non-executable fake Godot file.
+    $marker = (Join-Path $root 'prepare-complete.marker').Replace('"','""')
+    Put 'tests/Pal.Prepare.Tests/Cases.cs' ($prepareSource.Replace('Case01() { Assert.True(true);', 'Case01() { System.IO.File.WriteAllText(@"' + $marker + '", "complete"); Assert.True(true);'))
+    $lateFailure = '<Target Name="StopAfterPrepare" BeforeTargets="Build" Condition="Exists(&apos;' + $marker + '&apos;)"><Error Text="LATER_GAME_BUILD_SENTINEL"/></Target>'
+    Put 'src/Pal.Game/Pal.Game.csproj' ($gameProject.Replace('</Project>', $lateFailure + '</Project>'))
+    $ordered = Check 'CLI then host then all Prepare then regular Game build' 1 '[range:command-exit]' -Selection @('game','prepare','cli-integration') -Batches @('process') -EngineFixture
+    $r = Report $ordered
+    Assert ((@($r.commands.name) -join ',') -ceq 'sdk,cli-integration.build,cli-integration.discover,cli-integration.test,prepare.host.build,prepare.build,prepare.discover,prepare.test,game.build') 'Canonical CLI/Prepare/Game order changed.'
+    Assert ($r.projects.Count -eq 2 -and $r.projects[1].scope -ceq 'prepare' -and $r.prepareHost.verifiedThrough -ceq 'prepare.test') 'Host evidence pretended Game was tested.'
+    Assert ([IO.File]::ReadAllText((Join-Path $ordered $r.commands[-1].stdout), $utf8).Contains('LATER_GAME_BUILD_SENTINEL')) 'Order control failed without its designated later Game build sentinel.'
+    $gameOnly = Check 'Game-only adds no Prepare host phase' 1 '[range:command-exit]' -Selection @('game') -Batches @('process') -EngineFixture
+    $r = Report $gameOnly
+    Assert ((@($r.commands.name) -join ',') -ceq 'sdk,game.build' -and $null -eq $r.prepareHost) 'Game-only added Prepare work.'
+    Assert ([IO.File]::ReadAllText((Join-Path $gameOnly $r.commands[-1].stdout), $utf8).Contains('LATER_GAME_BUILD_SENTINEL')) 'Game-only control failed without its designated Game build sentinel.'
     $completed = $true
     Write-Host "PASS range regression: $($records.Count) public invocations; real artificial SDK/xUnit only."
 } finally {
     $env:PATH = $oldPath; $env:DOTNET_ROOT = $oldDotnetRoot
-    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+    if ($completed -and -not $EvidenceDirectory -and (Test-Path -LiteralPath $root)) { Remove-Item -LiteralPath $root -Recurse -Force }
     if ($completed -and -not $EvidenceDirectory) { Remove-Item -LiteralPath $evidence -Recurse -Force }
     elseif (-not $completed) { Write-Host "Range regression failure retained: $evidence" }
 }

@@ -7,6 +7,8 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <!-- C# editor scenes need the Game host built, not its assembly or test dependencies. -->
+    <ProjectReference Include="../../src/Pal.Game/Pal.Game.csproj" ReferenceOutputAssembly="false" Private="false" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4"><PrivateAssets>all</PrivateAssets></PackageReference>
