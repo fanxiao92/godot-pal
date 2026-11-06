@@ -1566,8 +1566,8 @@ internal sealed class CompleteNamedEventFixture
         Index = JsonNode.Parse("""
             {"formatVersion":1,"profile":"faithful","source":{"archive":"SSS.MKF","chunk":4,"byteOrder":"little","instructionCount":170,"byteLength":1360,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"files":["archive","selected"]}
             """)!.AsObject();
-        Files["archive"] = File("archive");
-        Files["selected"] = File("selected");
+        Files["archive"] = CreateEventFile("archive");
+        Files["selected"] = CreateEventFile("selected");
         int address = 0;
         foreach (string row in ShellLiterals.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -1596,7 +1596,7 @@ internal sealed class CompleteNamedEventFixture
         return node;
     }
 
-    private static JsonObject File(string id) => new()
+    private static JsonObject CreateEventFile(string id) => new()
     {
         ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = id,
         ["entries"] = new JsonArray(), ["commands"] = new JsonArray()
