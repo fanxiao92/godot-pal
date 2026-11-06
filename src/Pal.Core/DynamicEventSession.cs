@@ -49,6 +49,38 @@ public sealed class DynamicEventWorld
 
     internal event Action? WorldChanged;
 
+    /// <summary>Copies the current world and all live roles into independently owned mutable
+    /// storage. Call under the world's normal single-update ownership; no events execute and
+    /// no WorldChanged subscribers are retained. Frozen static identity may remain shared.</summary>
+    public DynamicEventWorld CreateIsolatedCopy() => new(this);
+
+    private DynamicEventWorld(DynamicEventWorld source)
+    {
+        objects = Array.AsReadOnly(source.objects.Select(obj => new DynamicEventObject(obj.Initial)
+        {
+            X = obj.X, Y = obj.Y, Direction = obj.Direction, CurrentFrame = obj.CurrentFrame,
+            State = obj.State, VanishTime = obj.VanishTime, TriggerMode = obj.TriggerMode,
+            TriggerEntry = obj.TriggerEntry, AutoEntry = obj.AutoEntry, AutoIdleCount = obj.AutoIdleCount
+        }).ToArray());
+        SceneId = source.SceneId;
+        Leader = source.Leader;
+        PartyRoles = Array.AsReadOnly(source.PartyRoles.ToArray());
+        Battlefield = source.Battlefield;
+        foreach (var (sceneId, scripts) in source.sceneScripts) sceneScripts.Add(sceneId, scripts);
+        foreach (var (slot, entry) in source.objectScripts) objectScripts.Add(slot, entry);
+        if (source.RoleLiveState is { } owner)
+        {
+            RoleLiveState = new RoleLiveState(owner.Roles.Values.ToArray());
+            foreach (int roleId in RoleLiveState.Roles.Keys)
+                partyVitals.Add(roleId, new DynamicRoleVitals(RoleLiveState, roleId));
+        }
+        else
+        {
+            foreach (var (roleId, vitals) in source.partyVitals)
+                partyVitals.Add(roleId, new DynamicRoleVitals(vitals.Hp, vitals.MaxHp, vitals.Mp, vitals.MaxMp));
+        }
+    }
+
     /// <summary>Host update ownership for a world-wired trigger call: advances one parked
     /// scene-wait (0x0009) or walk movement (0x0010) step exactly like the dynamic host's
     /// per-tick block; other phases return false and stay frozen.</summary>
