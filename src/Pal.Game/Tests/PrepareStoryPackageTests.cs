@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -41,13 +43,24 @@ public class PrepareStoryPackageTests
     {
         // Committed #47 two-player authored inputs through the unchanged public prepare chain;
         // outputs are fresh GUID-owned directories, so the old AuthoredBattle* outputs stay untouched.
-        using var win = new AuthoredStoryFixture("PartyWin");
-        using var loss = new AuthoredStoryFixture("PartyLoss");
-        foreach (var fixture in new[] { win, loss })
+        string repository = Path.GetFullPath(Path.Combine(ProjectSettings.GlobalizePath("res://"), "../.."));
+        foreach (string scenario in new[] { "PartyWin", "PartyLoss" })
+        {
+            string source = Path.Combine(repository, "samples/authored-battle", scenario);
+            string[] before = SnapshotDirectory(source);
+            using (var fixture = new AuthoredStoryFixture(scenario))
             foreach (string language in new[] { "zh-Hans", "en" })
             {
                 var story = NativeStoryProfile.Load(fixture.StoryUri, language);
                 var visual = NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+                foreach (string path in Directory.GetFiles(Path.Combine(source, "Story/events")))
+                    AssertThat(File.ReadAllBytes(ProjectSettings.GlobalizePath(fixture.Root + "/Story/Events/" + Path.GetFileName(path))))
+                        .IsEqual(File.ReadAllBytes(path));
+                AssertThat(story.Events.InstructionCount).IsEqual(10);
+                int[] hp = scenario == "PartyWin" ? [100, 95] : [20, 20];
+                AssertThat(story.BattleContent.InitialRoles.OrderBy(p => p.Key).Select(p => p.Value.Hp).ToArray()).IsEqual(hp);
+                AssertThat(story.BattleContent.InitialRoles.OrderBy(p => p.Key).Select(p => p.Value.Mp).ToArray()).IsEqual(new[] { 20, 20 });
+                AssertThat(story.BattleContent.Players.Select(p => p.Hp).ToArray()).IsEqual(hp);
                 AssertThat(story.BattleContent.Players.Count).IsEqual(2);
                 AssertThat(story.BattleContent.EnemyTeams[18].Count).IsEqual(2);
                 AssertThat(story.BattleContent.EnemyTeams[18].Select(x => x.Id).SequenceEqual(new[] { 7, 7 })).IsTrue();
@@ -56,7 +69,314 @@ public class PrepareStoryPackageTests
                 AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemyPosition)
                     .SequenceEqual(new[] { new Vector2I(100, 120), new Vector2I(128, 104) })).IsTrue();
             }
+            AssertThat(SnapshotDirectory(source)).IsEqual(before);
+        }
+
+        string partySource = Path.Combine(repository, "samples/authored-battle/PartyWin");
+        string[] partyBefore = SnapshotDirectory(partySource);
+        string[] ownedBefore = SnapshotAuthoredOwnedDirectories();
+        string output;
+        // Combine the old valid PartyWin positional options with the explicit-zero sixth option.
+        // enemyHp and removeDualAttack retain their original, scenario-specific supported inputs.
+        using (var fixture = new AuthoredStoryFixture("PartyWin", "number", null, false, 88, 0))
+        {
+            output = ProjectSettings.GlobalizePath(fixture.Root);
+            foreach (string language in new[] { "zh-Hans", "en" })
+            {
+                var story = NativeStoryProfile.Load(fixture.StoryUri, language);
+                var visual = NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+                AssertThat(story.Events.InstructionCount).IsEqual(11);
+                var prefix = story.Events.GetCommandContent(1);
+                AssertThat(prefix.GetProperty("op").GetString()!).IsEqual("changeHpMp");
+                AssertThat(prefix.GetProperty("scope").GetInt32()).IsEqual(1);
+                AssertThat(prefix.GetProperty("amount").GetInt32()).IsEqual(0);
+                AssertThat(story.Events.GetSource(1).Opcode).IsEqual(29);
+                AssertThat(story.Events.GetSource(1).Operands.ToArray()).IsEqual(new[] { 1, 0, 0 });
+                AssertThat(story.BattleContent.EnemyTeams[18].Select(e => e.Id).ToArray()).IsEqual(new[] { 7, 7 });
+                AssertThat(story.BattleContent.EnemyTeams[18].Select(e => e.Hp).ToArray()).IsEqual(new[] { 43, 43 });
+                AssertThat(story.BattleContent.InitialRoles[0].Hp).IsEqual(88);
+                AssertThat(story.BattleContent.InitialRoles[1].Hp).IsEqual(95);
+                AssertThat(story.BattleContent.InitialRoles.OrderBy(p => p.Key).Select(p => p.Value.Mp).ToArray()).IsEqual(new[] { 20, 20 });
+                AssertThat(story.BattleContent.Players.Select(p => p.Hp).ToArray()).IsEqual(new[] { 88, 95 });
+                AssertThat(story.BattleContent.InitialRoles[1].Equipment[3]).IsEqual(0);
+                AssertThat(story.BattleContent.Players[1].Equipment[3]).IsEqual(0);
+                AssertThat(story.BattleContent.RoleEquipment.Count).IsEqual(0);
+                visual.RequireReferencePresentation();
+                AssertThat(visual.NumberSprite is null).IsTrue();
+                AssertThat(visual.BlueNumberFrames.Count).IsEqual(0);
+                Exception? failure = null;
+                try { visual.RequireNumberPresentation(); } catch (Exception error) { failure = error; }
+                AssertThat(failure?.GetType() == typeof(InvalidDataException)).IsTrue();
+                AssertThat(failure!.Message.Contains("NumberSpriteUri", StringComparison.Ordinal)).IsTrue();
+            }
+        }
+        AssertThat(Directory.Exists(output)).IsFalse();
+        AssertThat(SnapshotAuthoredOwnedDirectories()).IsEqual(ownedBefore);
+        AssertThat(SnapshotDirectory(partySource)).IsEqual(partyBefore);
+
+        foreach (string scenario in new[] { "Win", "PartyEquip" })
+        {
+            string source = Path.Combine(repository, "samples/authored-battle", scenario);
+            string[] before = SnapshotDirectory(source);
+            if (scenario == "PartyEquip")
+            {
+                var authored = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "Numbers/battle-data.json")))!;
+                foreach (string section in new[] { "roles", "players" })
+                    AssertThat(authored[section]![1]!["equipment"]!.AsArray().Select(n => n!.GetValue<int>()).ToArray())
+                        .IsEqual(new[] { 197, 0, 210, 170, 237, 248 });
+                AssertThat(authored["roleEquipment"]![1]!.AsArray().Select(n => n!.GetValue<int>()).ToArray())
+                    .IsEqual(new[] { 197, 0, 210, 170, 237, 248 });
+            }
+            using (var fixture = scenario == "Win"
+                ? new AuthoredStoryFixture("Win", "number", 77, false, 88)
+                : new AuthoredStoryFixture("PartyEquip", removeDualAttack: true))
+            {
+                output = ProjectSettings.GlobalizePath(fixture.Root);
+                foreach (string language in new[] { "zh-Hans", "en" })
+                {
+                    var story = NativeStoryProfile.Load(fixture.StoryUri, language);
+                    var visual = NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+                    foreach (string path in Directory.GetFiles(Path.Combine(source, "Story/events")))
+                        AssertThat(File.ReadAllBytes(ProjectSettings.GlobalizePath(fixture.Root + "/Story/Events/" + Path.GetFileName(path))))
+                            .IsEqual(File.ReadAllBytes(path));
+                    AssertThat(story.Events.InstructionCount).IsEqual(10);
+                    visual.RequireReferencePresentation();
+                    if (scenario == "Win")
+                    {
+                        AssertThat(story.BattleContent.EnemyTeams[18].Count).IsEqual(1);
+                        AssertThat(story.BattleContent.EnemyTeams[18][0].Id).IsEqual(7);
+                        AssertThat(story.BattleContent.EnemyTeams[18][0].Hp).IsEqual(77);
+                        AssertThat(story.BattleContent.InitialRoles[0].Hp).IsEqual(88);
+                        AssertThat(story.BattleContent.Players[0].Hp).IsEqual(88);
+                        AssertThat(story.BattleContent.InitialRoles[0].Mp).IsEqual(20);
+                        AssertThat(visual.NumberSprite is null).IsTrue();
+                        AssertThat(visual.BlueNumberFrames.Count).IsEqual(0);
+                        Exception? failure = null;
+                        try { visual.RequireNumberPresentation(); } catch (Exception error) { failure = error; }
+                        AssertThat(failure?.GetType() == typeof(InvalidDataException)).IsTrue();
+                        AssertThat(failure!.Message.Contains("NumberSpriteUri", StringComparison.Ordinal)).IsTrue();
+                    }
+                    else
+                    {
+                        AssertThat(story.BattleContent.InitialRoles[1].Equipment.ToArray()).IsEqual(new[] { 197, 0, 210, 0, 237, 248 });
+                        AssertThat(story.BattleContent.Players[1].Equipment.ToArray()).IsEqual(new[] { 197, 0, 210, 0, 237, 248 });
+                        AssertThat(story.BattleContent.RoleEquipment[1].ToArray()).IsEqual(new[] { 197, 0, 210, 0, 237, 248 });
+                        AssertThat(story.BattleContent.InitialRoles[0].Equipment.ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0, 0 });
+                        AssertThat(story.BattleContent.Players[0].Equipment.ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0, 0 });
+                        AssertThat(story.BattleContent.RoleEquipment[0].ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0, 0 });
+                        AssertThat(story.BattleContent.Players.Select(p => p.Hp).ToArray()).IsEqual(new[] { 100, 25 });
+                        visual.RequireNumberPresentation();
+                    }
+                }
+            }
+            AssertThat(Directory.Exists(output)).IsFalse();
+            AssertThat(SnapshotAuthoredOwnedDirectories()).IsEqual(ownedBefore);
+            AssertThat(SnapshotDirectory(source)).IsEqual(before);
+        }
     }
+
+    [TestCase]
+    public void AuthoredPartyHpMpPrefixPreparesAndLoadsThroughStrictNativeProfiles()
+    {
+        string repository = Path.GetFullPath(Path.Combine(ProjectSettings.GlobalizePath("res://"), "../.."));
+        string source = Path.Combine(repository, "samples/authored-battle/PartyWin");
+        string[] before = SnapshotDirectory(source);
+        using (var fixture = new AuthoredStoryFixture("PartyWin", partyHpMpPrefixAmount: -3))
+        foreach (string language in new[] { "zh-Hans", "en" })
+        {
+            var story = NativeStoryProfile.Load(fixture.StoryUri, language);
+            if (story.Events.InstructionCount != 11)
+                throw new InvalidOperationException($"M6-155 prefix instruction count: expected 11, actual {story.Events.InstructionCount}.");
+            var visual = NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+            visual.RequireReferencePresentation();
+            visual.RequireNumberPresentation();
+            // Independent complete literal stream reviewed in U12, not derived from the fixture conversion.
+            int[][] rows = [ [134, 0, 65535, 8], [29, 1, 65533, 0], [60, 0, 0, 0],
+                [65535, 1, 0, 0], [7, 18, 8, 0], [60, 0, 0, 0], [65535, 2, 0, 0],
+                [0, 0, 0, 0], [60, 0, 0, 0], [65535, 3, 0, 0], [0, 0, 0, 0] ];
+            string[] contents = [
+                """{"op":"raw"}""",
+                """{"op":"changeHpMp","scope":1,"amount":-3}""",
+                """{"op":"setDialog","box":"upper","portraitId":0,"color":0,"rngWord":0}""",
+                """{"op":"showDialog","messageId":1,"descriptionLineWord":0}""",
+                """{"op":"startBattle","enemyTeamId":18,"lossTarget":"L0008","isBoss":true,"fleeTarget":null}""",
+                """{"op":"setDialog","box":"upper","portraitId":0,"color":0,"rngWord":0}""",
+                """{"op":"showDialog","messageId":2,"descriptionLineWord":0}""",
+                """{"op":"end","mode":"keep"}""",
+                """{"op":"setDialog","box":"upper","portraitId":0,"color":0,"rngWord":0}""",
+                """{"op":"showDialog","messageId":3,"descriptionLineWord":0}""",
+                """{"op":"end","mode":"keep"}"""
+            ];
+            var bytes = new byte[88];
+            for (int address = 0; address < rows.Length; address++)
+            {
+                var actualSource = story.Events.GetSource(address);
+                AssertThat(actualSource.Position.FileId).IsEqual("arena");
+                AssertThat(actualSource.Position.SourceAddress).IsEqual(address);
+                AssertThat(actualSource.Position.Label).IsEqual($"L{address:D4}");
+                AssertThat(actualSource.Opcode).IsEqual(rows[address][0]);
+                AssertThat(actualSource.Operands.ToArray()).IsEqual(rows[address].Skip(1).ToArray());
+                for (int word = 0; word < 4; word++)
+                    BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8 + word * 2), checked((ushort)rows[address][word]));
+                var expected = JsonNode.Parse(contents[address])!;
+                expected["label"] = $"L{address:D4}";
+                expected["next"] = address == 10 ? null : $"L{address + 1:D4}";
+                expected["source"] = new JsonObject { ["index"] = address, ["opcode"] = rows[address][0],
+                    ["operands"] = new JsonArray(rows[address].Skip(1).Select(n => (JsonNode?)JsonValue.Create(n)).ToArray()) };
+                AssertThat(JsonNode.DeepEquals(JsonNode.Parse(story.Events.GetCommandContent(address).GetRawText()), expected)).IsTrue();
+            }
+            const string streamSha256 = "5fec1c76900dde7668d4810bf9312e4b1b462b2b1c66554101ec81758c343e82";
+            AssertThat(Convert.ToHexStringLower(SHA256.HashData(bytes))).IsEqual(streamSha256);
+            AssertThat(story.Entry.SourceAddress).IsEqual(1);
+            AssertThat(story.Events.GetSource(story.Entry.SourceAddress).Position.Label).IsEqual("L0001");
+            AssertThat(story.Entry.OwnerId).IsEqual(1);
+            AssertThat(story.SourceIdentity.Contains("Test-owned PartyWin changeHpMp prefix: scope=1, amount=-3; original authored stream derived, not retail SSS.MKF.", StringComparison.Ordinal)).IsTrue();
+            AssertThat(story.BundleSha256).IsEqual("a6e7c2b10e379bfc6cd34898302d49ab8a9a81e5b91fd035f5a5b9b241d638fc");
+            string eventsUri = fixture.Root + "/Story/Events/";
+            var index = JsonNode.Parse(File.ReadAllText(ProjectSettings.GlobalizePath(eventsUri + "index.json")))!;
+            AssertThat(index["source"]!["instructionCount"]!.GetValue<int>()).IsEqual(11);
+            AssertThat(index["source"]!["byteLength"]!.GetValue<int>()).IsEqual(88);
+            AssertThat(index["source"]!["sha256"]!.GetValue<string>()).IsEqual(streamSha256);
+            foreach (string name in new[] { "index.json", "arena.json" })
+                AssertThat(story.ResourceSha256[eventsUri + name]).IsEqual(Convert.ToHexStringLower(
+                    SHA256.HashData(File.ReadAllBytes(ProjectSettings.GlobalizePath(eventsUri + name)))));
+            AssertThat(story.BattleContent.InitialRoles[0].Hp).IsEqual(100);
+            AssertThat(story.BattleContent.InitialRoles[1].Hp).IsEqual(95);
+            AssertThat(story.BattleContent.InitialRoles[0].Mp).IsEqual(20);
+            AssertThat(story.BattleContent.InitialRoles[1].Mp).IsEqual(20);
+            AssertThat(story.BattleContent.Players.Select(p => p.Hp).ToArray()).IsEqual(new[] { 100, 95 });
+            AssertThat(visual.Teams[18].EnemySlots.Select(s => s.TargetId).ToArray()).IsEqual(new[] { 7, 7 });
+            AssertThat(story.Language.Resolve(1, 0).Parts[0].Text!).IsEqual(language == "en" ? "FIGHT" : "战");
+            AssertThat(story.Language.Resolve(2, 0).Parts[0].Text!).IsEqual(language == "en" ? "WIN" : "胜");
+            AssertThat(story.Language.Resolve(3, 0).Parts[0].Text!).IsEqual(language == "en" ? "LOSE" : "败");
+        }
+        AssertThat(SnapshotDirectory(source)).IsEqual(before);
+    }
+
+    [TestCase]
+    public void AuthoredPartyHpMpPrefixPreservesShortEdgesIncludingExplicitZero()
+    {
+        string repository = Path.GetFullPath(Path.Combine(ProjectSettings.GlobalizePath("res://"), "../.."));
+        string source = Path.Combine(repository, "samples/authored-battle/PartyWin");
+        string[] before = SnapshotDirectory(source);
+        string[] ownedBefore = SnapshotAuthoredOwnedDirectories();
+        // Explicit literal signed/WORD pairs: no cast or clamp can generate the expected operand.
+        foreach (var (amount, sourceWord) in new[] { (-32768, 32768), (0, 0), (32767, 32767) })
+        {
+            string output;
+            using (var fixture = new AuthoredStoryFixture("PartyWin", partyHpMpPrefixAmount: amount))
+            {
+                output = ProjectSettings.GlobalizePath(fixture.Root);
+                foreach (string language in new[] { "zh-Hans", "en" })
+                {
+                    var story = NativeStoryProfile.Load(fixture.StoryUri, language);
+                    if (story.Events.InstructionCount != 11)
+                        throw new InvalidOperationException($"M6-155 prefix instruction count: expected 11, actual {story.Events.InstructionCount}.");
+                    var visual = NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+                    visual.RequireReferencePresentation();
+                    visual.RequireNumberPresentation();
+                    // Independent complete literal stream reviewed in U12, not derived from the fixture conversion.
+                    int[][] rows = [ [134, 0, 65535, 8], [29, 1, sourceWord, 0], [60, 0, 0, 0],
+                        [65535, 1, 0, 0], [7, 18, 8, 0], [60, 0, 0, 0], [65535, 2, 0, 0],
+                        [0, 0, 0, 0], [60, 0, 0, 0], [65535, 3, 0, 0], [0, 0, 0, 0] ];
+                    string[] contents = [
+                        """{"op":"raw"}""",
+                        new JsonObject { ["op"] = "changeHpMp", ["scope"] = 1, ["amount"] = amount }.ToJsonString(),
+                        """{"op":"setDialog","box":"upper","portraitId":0,"color":0,"rngWord":0}""",
+                        """{"op":"showDialog","messageId":1,"descriptionLineWord":0}""",
+                        """{"op":"startBattle","enemyTeamId":18,"lossTarget":"L0008","isBoss":true,"fleeTarget":null}""",
+                        """{"op":"setDialog","box":"upper","portraitId":0,"color":0,"rngWord":0}""",
+                        """{"op":"showDialog","messageId":2,"descriptionLineWord":0}""",
+                        """{"op":"end","mode":"keep"}""",
+                        """{"op":"setDialog","box":"upper","portraitId":0,"color":0,"rngWord":0}""",
+                        """{"op":"showDialog","messageId":3,"descriptionLineWord":0}""",
+                        """{"op":"end","mode":"keep"}"""
+                    ];
+                    var bytes = new byte[88];
+                    for (int address = 0; address < rows.Length; address++)
+                    {
+                        var actualSource = story.Events.GetSource(address);
+                        AssertThat(actualSource.Position.FileId).IsEqual("arena");
+                        AssertThat(actualSource.Position.SourceAddress).IsEqual(address);
+                        AssertThat(actualSource.Position.Label).IsEqual($"L{address:D4}");
+                        AssertThat(actualSource.Opcode).IsEqual(rows[address][0]);
+                        AssertThat(actualSource.Operands.ToArray()).IsEqual(rows[address].Skip(1).ToArray());
+                        for (int word = 0; word < 4; word++)
+                            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8 + word * 2), checked((ushort)rows[address][word]));
+                        var expected = JsonNode.Parse(contents[address])!;
+                        expected["label"] = $"L{address:D4}";
+                        expected["next"] = address == 10 ? null : $"L{address + 1:D4}";
+                        expected["source"] = new JsonObject { ["index"] = address, ["opcode"] = rows[address][0],
+                            ["operands"] = new JsonArray(rows[address].Skip(1).Select(n => (JsonNode?)JsonValue.Create(n)).ToArray()) };
+                        AssertThat(JsonNode.DeepEquals(JsonNode.Parse(story.Events.GetCommandContent(address).GetRawText()), expected)).IsTrue();
+                    }
+                    string streamSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
+                    AssertThat(story.Entry.SourceAddress).IsEqual(1);
+                    AssertThat(story.Events.GetSource(story.Entry.SourceAddress).Position.Label).IsEqual("L0001");
+                    AssertThat(story.Entry.OwnerId).IsEqual(1);
+                    AssertThat(story.SourceIdentity.Contains($"Test-owned PartyWin changeHpMp prefix: scope=1, amount={amount}; original authored stream derived, not retail SSS.MKF.", StringComparison.Ordinal)).IsTrue();
+                    AssertThat(story.BundleSha256).IsEqual("a6e7c2b10e379bfc6cd34898302d49ab8a9a81e5b91fd035f5a5b9b241d638fc");
+                    string eventsUri = fixture.Root + "/Story/Events/";
+                    var index = JsonNode.Parse(File.ReadAllText(ProjectSettings.GlobalizePath(eventsUri + "index.json")))!;
+                    AssertThat(index["source"]!["instructionCount"]!.GetValue<int>()).IsEqual(11);
+                    AssertThat(index["source"]!["byteLength"]!.GetValue<int>()).IsEqual(88);
+                    AssertThat(index["source"]!["sha256"]!.GetValue<string>()).IsEqual(streamSha256);
+                    foreach (string name in new[] { "index.json", "arena.json" })
+                        AssertThat(story.ResourceSha256[eventsUri + name]).IsEqual(Convert.ToHexStringLower(
+                            SHA256.HashData(File.ReadAllBytes(ProjectSettings.GlobalizePath(eventsUri + name)))));
+                    AssertThat(story.BattleContent.InitialRoles[0].Hp).IsEqual(100);
+                    AssertThat(story.BattleContent.InitialRoles[1].Hp).IsEqual(95);
+                    AssertThat(story.BattleContent.InitialRoles[0].Mp).IsEqual(20);
+                    AssertThat(story.BattleContent.InitialRoles[1].Mp).IsEqual(20);
+                    AssertThat(story.BattleContent.Players.Select(p => p.Hp).ToArray()).IsEqual(new[] { 100, 95 });
+                    AssertThat(visual.Teams[18].EnemySlots.Select(s => s.TargetId).ToArray()).IsEqual(new[] { 7, 7 });
+                    AssertThat(story.Language.Resolve(1, 0).Parts[0].Text!).IsEqual(language == "en" ? "FIGHT" : "战");
+                    AssertThat(story.Language.Resolve(2, 0).Parts[0].Text!).IsEqual(language == "en" ? "WIN" : "胜");
+                    AssertThat(story.Language.Resolve(3, 0).Parts[0].Text!).IsEqual(language == "en" ? "LOSE" : "败");
+                }
+            }
+            AssertThat(Directory.Exists(output)).IsFalse();
+            AssertThat(SnapshotAuthoredOwnedDirectories()).IsEqual(ownedBefore);
+            AssertThat(SnapshotDirectory(source)).IsEqual(before);
+        }
+    }
+
+    [TestCase]
+    public void AuthoredPartyHpMpPrefixRejectsInvalidOptionsBeforeOwnedIo()
+    {
+        string repository = Path.GetFullPath(Path.Combine(ProjectSettings.GlobalizePath("res://"), "../.."));
+        string[] scenarios = ["PartyWin", "PartyLoss", "Win", "Loss"];
+        string[][] before = scenarios.Select(s => SnapshotDirectory(Path.Combine(repository, "samples/authored-battle", s))).ToArray();
+        string[] ownedBefore = SnapshotAuthoredOwnedDirectories();
+        foreach (var (scenario, amount) in new[] {
+            ("PartyWin", -32769), ("PartyWin", 32768), ("PartyWin", int.MinValue),
+            ("PartyWin", int.MaxValue), ("PartyWin", 65533),
+            ("PartyLoss", 0), ("Win", 0), ("Loss", 0) })
+        {
+            AuthoredStoryFixture? unexpected = null;
+            Exception? failure = null;
+            try { unexpected = new AuthoredStoryFixture(scenario, partyHpMpPrefixAmount: amount); }
+            catch (Exception error) { failure = error; }
+            finally { unexpected?.Dispose(); }
+            Type expectedType = scenario == "PartyWin" ? typeof(ArgumentOutOfRangeException) : typeof(ArgumentException);
+            AssertThat(failure?.GetType() == expectedType).IsTrue();
+            AssertThat(((ArgumentException)failure!).ParamName!).IsEqual(scenario == "PartyWin" ? "partyHpMpPrefixAmount" : "scenario");
+            // Before/after inventory proves no residual owned directories, not absence of transient I/O.
+            // The constructor validates these options before its first directory/Prepare operation.
+            AssertThat(SnapshotAuthoredOwnedDirectories()).IsEqual(ownedBefore);
+            for (int i = 0; i < scenarios.Length; i++)
+                AssertThat(SnapshotDirectory(Path.Combine(repository, "samples/authored-battle", scenarios[i]))).IsEqual(before[i]);
+        }
+    }
+
+    private static string[] SnapshotAuthoredOwnedDirectories() => Directory.GetDirectories(Path.GetTempPath(), "pal-story-c-*")
+        .Concat(Directory.GetDirectories(Path.GetTempPath(), "pal-story-numeric-*"))
+        .Concat(Directory.GetDirectories(ProjectSettings.GlobalizePath("res://Assets/RuntimeTests"), "story-c-*"))
+        .Order(StringComparer.Ordinal).ToArray();
+
+    private static string[] SnapshotDirectory(string directory) => Directory.GetFiles(directory, "*", SearchOption.AllDirectories)
+        .Order(StringComparer.Ordinal).Select(p => Path.GetRelativePath(directory, p) + ":" +
+            Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(p)))).ToArray();
 
     [TestCase]
     public void PublicPreparePublishesExplicitEnemySlotsForASingleSlotTeam()

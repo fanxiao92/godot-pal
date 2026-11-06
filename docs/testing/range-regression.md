@@ -36,6 +36,22 @@ Prepare 测试工程本身以 `ReferenceOutputAssembly="false" Private="false"` 
 
 只运行选中范围及必要构建／包准备，不隐式执行未选的 Prepare，也不运行原生 Main 启动或三轮 Game 重复；后两者属于完整门。Prepare-only 的命令图为 `sdk → prepare.host.build → prepare.build → prepare.discover → prepare.test`，`projects` 仍只记录 Prepare；Game-only 不新增 Prepare 宿主阶段，CLI-only 不引入任何 Game 构建。三个范围均成功时，保留后续常规 `game.build`，因此 SDK 命令根从原 10 个增至 **11 个**，不能沿用旧图冒充新入口证据。入口在包准备／SDK／引擎工作前只查询全局 Godot PID／Name：有进程或无法核实库存即失败，记录结果但不终止任何进程；CLI 范围不查全局进程。这是冲突前检而不是跨入口锁，调用者仍必须维持 Godot／Prepare／GdUnit 全局串行，不能据一次空快照并发启动任务。失败中止、崩溃或未知结果后保留证据停止，不能自动重试。
 
+## native-map 完整验证记录
+
+Game 的 affected-batch guard 以 Profiles／Resources／Editor／authored samples 的内容指纹核对 `TestResults/native-map-verified.json`（明确按 UTF-8 读取）：
+
+- **只有不带 Filter 的 native-map 选择**可 self-verifying；整次所选范围通过既有 discovery、TRX、命令／源码身份检查后，才写入或刷新完整批记录。
+- **任何非空显式 Filter 都不能签发完整记录**，即使其前缀碰巧覆盖所选批的全部案例。过滤 native-map 与其它部分批一样，需要已有匹配内容指纹的完整验证记录；缺失、损坏或陈旧时，在 `game.test` 前以 `affected-batches` 拒绝，不靠过滤成功自证完整。
+- 已有匹配记录允许过滤运行，但不改变其原始字节或 mtime，也不续期。失败、不完整或显式 `-SkipAffectedBatchGuard` 均不签发；Skip 仍只表示显式 bypass，不是完整验证证据。
+
+需要建立完整记录时，使用无 Filter 的完整批入口（仍需批准的引擎／固定包及全局串行条件）：
+
+```powershell
+& ./scripts/Test-Range.ps1 -Scope game -GameBatch native-map `
+  -GodotPath $ApprovedGodotConsole -FixedPackageDirectory $VerifiedFourFileBundle `
+  -OutputDirectory $NewFullNativeMapEvidence
+```
+
 ## 身份、证据与退出
 
 - 从任意 cwd 使用入口／RepositoryRoot 的明确路径。默认在 RepositoryRoot/TestResults 创建唯一目录；显式 OutputDirectory 必须不存在。成功、失败证据都保留，不覆盖旧轮。
@@ -50,11 +66,15 @@ Prepare 测试工程本身以 `ReferenceOutputAssembly="false" Private="false"` 
 ## 回归与证据边界
 
 ```powershell
+# metadata + native-map guard/公共接线离线回归，无 SDK／引擎／CIM／网络。
+pwsh -NoProfile -File ./tests/Pal.Game.Tests/GameBatches.Tests.ps1
 # 27 个独立字面 TRX fixture，无 SDK／引擎。
 pwsh -NoProfile -File ./tests/RangeIdentity.Tests.ps1
 # 实际人工 SDK/xUnit 仓库的公开入口回归，使用仓库既有批准版本及普通包缓存。
 pwsh -NoProfile -File ./tests/Test-Range.Tests.ps1 -EvidenceDirectory $NewFixtureEvidence
 ```
+
+GameBatches metadata 回归保留 full／committable 源库存与分区检查，并覆盖 Filter 的缺失／坏／旧／匹配记录、UTF-8 诊断、末尾可选 Filter 的旧调用兼容和字节／mtime 保持。其 17 个 AST 接线场景精准抽取实际 `Test-Range.ps1` 中的 guard／bypass／required 拒绝、测试命令至严格 TRX 验证以及末尾源码核对／签发语句，按真实顺序执行，不复制 guard 或签发条件；只在命令边界用合成 TRX 或指定失败代替 SDK 调用。覆盖完整成功／刷新、过滤不签发、命令失败／不完整／源码变化不签发与 Skip 保留。该定点 AST 切片不执行 build／discovery／引擎／产物全链，**不是**真实 native-map、公开 Game 运行或完整门通过证据。
 
 公开入口 **33 次**回归保留原 23 次：冲突／未知库存阻断工作、空库存进入下一实际前提、CLI 不查询库存、非法选择的准确诊断、完整发现与参数选择、同显示名不同 ID、字面前缀、未选命名空间不执行、缺当前 TRX、原生退出 7／中文原始字节、旧证据不覆盖及失败后恢复。新增 10 次使用真实 SDK 临时宿主／89 个人工 Prepare facts，覆盖显式宿主命令、Game14／Prepare0 警告归属、超额警告、宿主构建非零、缺 runtimeconfig／重复或异名程序集、Prepare 期间产物变动、CLI → 宿主 → Prepare → 常规 Game 的顺序，以及 Game-only 无 Prepare 阶段；顺序控制还核对指定的原始失败消息。显式 EvidenceDirectory 会保留自有临时 fixture 根，路径见 `fixture-root.txt`，以便核对各次有意变异的源码／产物。
 

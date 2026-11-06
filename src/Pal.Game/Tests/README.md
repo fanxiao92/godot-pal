@@ -23,6 +23,8 @@ Game 测试继续使用现有 Godot 程序集、固定 GdUnit 包和 `tests/Pal.
   -OutputDirectory $NewEvidenceDirectory
 ```
 
+game-only 在冷工作树上也须先显式完成现有 CI-style Godot editor import（`--headless --path <src/Pal.Game> --editor --import`）；范围入口不会代做该前提。#155 的原冷入口失败与显式 import 后恢复完整433成功各保留原收据，恢复不改写为首次成功。
+
 该入口设置并恢复 `GODOT_BIN` / `PAL_TEST_GODOT`，不隐式运行未选的 Prepare；需要 Prepare 时显式加入 Scope，按固定顺序先于 Game。绕过入口直接 `dotnet` 时，必须先 bootstrap、设置这两个批准引擎路径变量并完成当前所需构建/import。实际 SDK/Godot/GdUnit/Prepare/solution 运行遵守根 AGENTS 的全局串行规则，完整参数以脚本/config 为准。
 
 ## 失败与证据
@@ -67,7 +69,7 @@ shared world 的 copy 拥有独立 `RoleLiveState`，包含当前完整角色记
 
 #152 仍待父控最终 Standards/Spec 及实际本地集成；之后 #150 才能合入并消费当前 copy，继续验证真实 Main/preview/RNG/lifetime/Story 与原票其余验收。复制 Core 能力不代表 Main 已全部接线，不自动关闭 #152 或 #130/#126/#148，也不是 full gate、GPU、人工桌面、私有真实资源或 CI/M6 交付。
 
-## #150 当前有界候选：公开 Story party 精确分区
+## #150 U10/U11 有界候选：公开 Story party 精确分区
 
 唯一既有方法 `Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin` 从 `scene-battle-heavy-d` 迁入既有公开 `scene-realfull`，不是新增 batch、扩大 `Test-Range` allowlist 或选择整个 Story 类。以下仅为父控审查后的计划命令，本次 metadata 维护未执行 SDK / Game，也不授予运行权限；变量仍须指向批准的引擎、已验证 bundle 与全新输出目录：
 
@@ -78,9 +80,17 @@ shared world 的 copy 拥有独立 `RoleLiveState`，包含当前完整角色记
   -OutputDirectory $NewEvidenceDirectory
 ```
 
-当前分区权威仍为 `scripts/GameTestBatches.ps1` 与离线 `GameBatches.Tests.ps1`：heavy-d 5→4；realfull full 3→4 / committable 2→3。full 保留原私有 `RealFirstBattleFlowTests` 正例，committable 只排除该原正例，保留两例 Synthetic 与上述完整 Story 方法匹配；公开精确 filter 仅选该一个 Story 方法，不消费私有真实资产。库存仍为 647 = full 644 positives + 3 controls，committable 643 positives + 1 private exclusion + 3 controls；仅迁移执行归属，完整门执行集合/总数、10 batches、三轮/37 TRX 与 realfull 300000ms 预算均不变。native-map 433 及 process / scene-dialogue / native-map 合计 592 不变。这些是源码/离线 metadata 登记，不是本轮 runtime discovery 或 full gate 通过。
+当前分区权威仍为 `scripts/GameTestBatches.ps1` 与离线 `GameBatches.Tests.ps1`：heavy-d 5→4；realfull full 3→4 / committable 2→3。full 保留原私有 `RealFirstBattleFlowTests` 正例，committable 只排除该原正例，保留两例 Synthetic 与上述完整 Story 方法匹配；公开精确 filter 仅选该一个 Story 方法，不消费私有真实资产。U10 时库存为 647 = full 644 positives + 3 controls，committable 643 positives + 1 private exclusion + 3 controls；仅迁移执行归属，完整门执行集合/总数、10 batches、三轮/37 TRX 与 realfull 300000ms 预算均不变。native-map 433 及 process / scene-dialogue / native-map 合计 592 不变。这些是源码/离线 metadata 登记，不是本轮 runtime discovery 或 full gate 通过。
 
 U9 扩展原方法的 shared owner/world/trigger、两人顺序、结算连续与同 URI 新 Main 初值观察。U11 已通过正常公开入口验证：临时反转初始 party 顺序时，在真实 Main 完成回调中发生指定断言失败；精确恢复后，同一方法在一次新运行中通过（647 discovery，单例 Completed/Passed，14 次 warning，原预算不变）。父控独立复核通过；这是有界观察器与分区候选验收，不是整票验收，也不能把初始 HP/MP 当作脚本前缀效果。真实 Story 全队 `0x001D` HP/MP 前缀及当前值消费、其余整票兼容/回执/资源 hash/lifetime 和新 source-bound shared-impact 证据仍欠。#150 尚未整票验收或集成，既有有界历史证据不重写；headless 合成证据也不替代私有真实资产、GPU、人工桌面或 CI/M6 交付。
+
+## #155 PartyWin 全队 HP/MP 前缀准备
+
+`AuthoredStoryFixture` 末尾增加可选 `partyHpMpPrefixAmount`，默认 null 保持原 events/index 字节和旧五位置参数；显式值仅支持 PartyWin 的 SHORT（含0），在自有输入 entry1 插入命名 `changeHpMp`/0x001D、scope1，而非修改初始数值。正常-3用例经原 Prepare、双语 typed Story/Visual strict Load 核对完整11行/88字节、独立源流 SHA 与输出 manifest；准备后的 HP100/95、MP20 保持初值。这是准备能力，不证明 Main 执行前缀、全队效果或当前值入战。
+
+本票累计新增三个无参 case：正常-3、SHORT边缘（-32768/0/32767）和准确参数拒绝；显式0保留11条命令，65533不当作-3接受。原默认PartyWin/PartyLoss继续核原字节/初值；既有用例覆盖PartyWin旧合法numeric/presentation选项与第六位置prefix0组合，另以Win旧五位置调用核enemyHp、以PartyEquip核去dual装备，保持原选项的scenario域，不扩大fixture支持。当前登记650（647 positives +3 controls）、native-map436，committable646；这些是实际源码库存，不预填最终完整批通过数。正常-3指定RED/GREEN和SHORT边缘精确GREEN只读复用已验证的同内容完整433 marker，不签发或刷新新增case完整批证明；首次无Filter完整native-map因测试新增的非法PartyWin/重复enemy7 numeric组合失败，原件和R1 marker保留；父控批准按各旧选项的合法scenario修正测试后，fresh无Filter完整native-map实际Completed、436/436 Passed、RunInfo0、四条命令exit0且输出/清理完整，包含默认兼容增强；仅该完整成功通过Range正常更新marker。实测为be432ddd + dirty候选，不称后续clean checkpoint重跑；运行后仅README补本结果。该bounded准备影响仍待父控独立整票审核/实际集成，不等于 fullgate/GPU/人工/CI 或 #150/Main 交付。
+
+#155 随后已由父控独立整票验收并实际本地集成至 `67be98f9de1178239e2d1def41cb9f60f6886e45`（Issue155已关闭，非Main交付）。#150 普通合并该已验收前置及其154/156祖先，保留自身U10精确路由；合并后实际源码库存650、full647/committable646，分区85/74/2/5/6/3/4/28/436/4（committable最后3），process/scene-dialogue/native-map合计595。这是合并后的metadata，不冒称在#150重跑了#155完整436或shared/full gate；#150真实前缀消费和其余验收仍待完成。
 
 ## 维护边界
 

@@ -234,7 +234,7 @@ try {
             $null = Assert-GameDiscovery $listed $plan
             # Affected-batch guard: the guarded native content fingerprint must match the last
             # verified native-map run unless this selection verifies it itself (see GameTestBatches.ps1).
-            $guard = Test-NativeMapAffectedBatchGuard -RepositoryRoot $root -Head $report.head -GameBatches $batches
+            $guard = Test-NativeMapAffectedBatchGuard -RepositoryRoot $root -Head $report.head -GameBatches $batches -Filter $Filter
             if ($SkipAffectedBatchGuard) { $guard = @{ status = 'skipped'; bypass = $true; fingerprint = $guard.fingerprint } }
             $report.nativeMapGuard = $guard
             if ($guard.status -ceq 'required') { Fail 'affected-batches' $guard.message }
@@ -335,7 +335,7 @@ try {
     foreach ($tool in $report.toolIdentity) { if ((Hash-File $tool.path) -cne $tool.sha256) { Fail 'source-changed' "Entry/helper changed during the run: $($tool.path)" } }
     if ($recordingError) { Fail 'evidence' 'Cannot finalize an incomplete journal.' }
     $report.status = 'completed'; $exitCode = 0
-    if ($Scope -ccontains 'game' -and $batches -ccontains 'native-map' -and -not $SkipAffectedBatchGuard) {
+    if ($Scope -ccontains 'game' -and $batches -ccontains 'native-map' -and -not $Filter -and -not $SkipAffectedBatchGuard) {
         Write-NativeMapVerification -RepositoryRoot $root -Head $report.head
     }
 } catch {

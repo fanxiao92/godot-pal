@@ -102,7 +102,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
             'Pal.Game.Tests.StoryRoundtripSceneTests.NonterminalActions', 'Pal.Game.Tests.StoryRoundtripSceneTests.NormalStoryArguments',
             'Pal.Game.Tests.StoryRoundtripSceneTests.PlayerPhysical', 'Pal.Game.Tests.StoryRoundtripSceneTests.StoryBattlePoseClock',
             'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects') }
-        @{ name = 'native-map'; count = 433; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
+        @{ name = 'native-map'; count = 436; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
         @{ name = 'scene-realfull'; count = 4; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin') }
     )
     $localOnly = if ($Scope -ceq 'committable') {
@@ -142,15 +142,15 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.class -CNE 'FailureControlTests' -and $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 647) { throw "Game inventory differs: $($inventory.Count)/647." }
+    if ($inventory.Count -ne 650) { throw "Game inventory differs: $($inventory.Count)/650." }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
         [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 1218; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 465; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 360; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
-        # 644 full-scope positives; committable scope executes one fewer (#76 local-only split).
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (644 - $localOnly.Count); skipped = 0 }
+        # 647 full-scope positives; committable scope executes one fewer (#76 local-only split).
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (647 - $localOnly.Count); skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {
@@ -291,7 +291,7 @@ function Assert-GameDiscovery([string]$Text, $Plan) {
 # Twice during M4 (#49/#50 authored content, #53 aea456d binding Require) a change under the
 # guarded roots below shipped without rerunning the native-map batch and only the full gate
 # caught it. Writing the rule down did not prevent recurrence, so Test-Range now enforces it:
-# a Game run whose selection does not include native-map requires a recorded native-map
+# a Game run other than unfiltered native-map requires a recorded native-map
 # verification whose guarded-content fingerprint still matches.
 $script:NativeMapGuardedRoots = @('src/Pal.Game/Scripts/Profiles', 'src/Pal.Game/Scripts/Resources', 'src/Pal.Game/Editor', 'samples/authored-battle', 'src/Pal.Game/Samples')
 function Get-NativeMapGuardFingerprint([string]$RepositoryRoot) {
@@ -315,7 +315,7 @@ function Get-NativeMapVerificationPath([string]$RepositoryRoot) { Join-Path (Joi
 function Read-NativeMapVerification([string]$RepositoryRoot) {
     $path = Get-NativeMapVerificationPath $RepositoryRoot
     if (-not [IO.File]::Exists($path)) { return $null }
-    try { return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable) } catch { return @{ invalid = $true } }
+    try { return (Get-Content -LiteralPath $path -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable) } catch { return @{ invalid = $true } }
 }
 function Write-NativeMapVerification([string]$RepositoryRoot, [string]$Head) {
     $directory = Join-Path $RepositoryRoot 'TestResults'
@@ -323,10 +323,10 @@ function Write-NativeMapVerification([string]$RepositoryRoot, [string]$Head) {
     $record = @{ recordedUtc = [DateTime]::UtcNow.ToString('o'); head = $Head; fingerprint = (Get-NativeMapGuardFingerprint $RepositoryRoot) }
     [IO.File]::WriteAllText((Get-NativeMapVerificationPath $RepositoryRoot), ($record | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 }
-function Test-NativeMapAffectedBatchGuard([string]$RepositoryRoot, [string]$Head, [string[]]$GameBatches) {
+function Test-NativeMapAffectedBatchGuard([string]$RepositoryRoot, [string]$Head, [string[]]$GameBatches, [string]$Filter) {
     $fingerprint = Get-NativeMapGuardFingerprint $RepositoryRoot
     if ($null -eq $fingerprint) { return @{ status = 'none' } }
-    if ($GameBatches -ccontains 'native-map') { return @{ status = 'self-verifying'; fingerprint = $fingerprint } }
+    if ($GameBatches -ccontains 'native-map' -and -not $Filter) { return @{ status = 'self-verifying'; fingerprint = $fingerprint } }
     $record = Read-NativeMapVerification $RepositoryRoot
     if ($record -is [hashtable] -and -not $record.invalid -and $record.fingerprint -ceq $fingerprint) {
         return @{ status = 'satisfied'; fingerprint = $fingerprint; verifiedHead = $record.head }
