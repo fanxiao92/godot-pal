@@ -67,7 +67,7 @@ public class Fixture
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
             'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
         $expectedProjects = @{
-            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 1195, 0)
+            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 1212, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 465, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 360, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 89, 0)
@@ -92,7 +92,7 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1195 passed; CLI unit 465 passed; CLI integration 360 passed + 2 skipped (362 total); Prepare 89 passed; Godot source/discovery 647; positives 644 as serial 85/74/2/5/6/3/5/28/433/3 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1212 passed; CLI unit 465 passed; CLI integration 360 passed + 2 skipped (362 total); Prepare 89 passed; Godot source/discovery 647; positives 644 as serial 85/74/2/5/6/3/5/28/433/3 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }
@@ -118,7 +118,7 @@ public class Fixture
     }
     Case 'committable gate PASS summary declares scope and the private-asset boundary' {
         $summary = Get-GatePassSummary (Get-GameBatchPlan $repository -Scope committable)
-        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1195 passed; CLI unit 465 passed; CLI integration 360 passed + 2 skipped (362 total); Prepare 89 passed; Godot source/discovery 647; positives 643 as serial 85/74/2/5/6/3/5/28/433/2 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
+        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1212 passed; CLI unit 465 passed; CLI integration 360 passed + 2 skipped (362 total); Prepare 89 passed; Godot source/discovery 647; positives 643 as serial 85/74/2/5/6/3/5/28/433/2 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
         Assert ($summary -ceq $expected) "Wrong committable gate PASS summary: $summary"
         Assert ($summary -cmatch 'committable-scope full gate') 'Committable identity missing.'
         Assert ($summary -cmatch 'local-only real-asset positives excluded') 'Private-asset boundary missing.'
