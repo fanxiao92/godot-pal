@@ -176,6 +176,119 @@ public class TriggerEventCollectionTests
         Assert.Equal(new[] { 123, 456, 789 }, collection.GetSource(0).Operands);
     }
 
+    [Theory]
+    [InlineData(0x0069, "{\"op\":\"enemyEscape\"}")]
+    [InlineData(0x006A, "{\"op\":\"stealFromEnemy\",\"stealRate\":65535}")]
+    [InlineData(0x006B, "{\"op\":\"blowAwayEnemies\",\"strength\":-32768}")]
+    [InlineData(0x006C, "{\"op\":\"walkNpcStep\",\"eventObjectId\":65535,\"xOffset\":-32768,\"yOffset\":32767}")]
+    [InlineData(0x006E, "{\"op\":\"moveParty\",\"xOffset\":32767,\"yOffset\":-32768,\"layerUnits\":65535}")]
+    [InlineData(0x006F, "{\"op\":\"syncState\",\"eventObjectId\":0,\"state\":-32768}")]
+    [InlineData(0x0070, "{\"op\":\"partyWalkToSlow\",\"x\":65535,\"y\":0,\"h\":65535}")]
+    [InlineData(0x0071, "{\"op\":\"waveScreen\",\"level\":65535,\"progression\":32767}")]
+    [InlineData(0x0074, "{\"op\":\"partyHpNotFullJump\",\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0076, "{\"op\":\"showFbp\",\"fbpId\":65535,\"fade\":0}")]
+    public void U4_enemy_movement_and_screen_named_content_retains_literal_fields(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(0x0077, "{\"op\":\"stopMusic\",\"fadeUnits\":0}")]
+    [InlineData(0x0079, "{\"op\":\"roleInPartyJump\",\"roleNameWord\":65535,\"to\":\"L0004\"}")]
+    [InlineData(0x007A, "{\"op\":\"partyWalkTo\",\"x\":0,\"y\":65535,\"h\":65535}")]
+    [InlineData(0x007B, "{\"op\":\"partyWalkToFast\",\"x\":65535,\"y\":0,\"h\":65535}")]
+    [InlineData(0x007C, "{\"op\":\"walkToFast\",\"x\":65535,\"y\":65535,\"h\":65535}")]
+    [InlineData(0x007D, "{\"op\":\"moveObject\",\"eventObjectId\":0,\"xOffset\":-32768,\"yOffset\":32767}")]
+    [InlineData(0x007E, "{\"op\":\"setObjectLayer\",\"eventObjectId\":65535,\"layer\":-32768}")]
+    [InlineData(0x007F, "{\"op\":\"moveViewport\",\"xOffset\":32767,\"yOffset\":-32768,\"frames\":65535}")]
+    [InlineData(0x007F, "{\"op\":\"moveViewport\",\"xOffset\":0,\"yOffset\":0,\"frames\":0}")]
+    [InlineData(0x0080, "{\"op\":\"toggleDayNightPalette\",\"paletteOnly\":65535}")]
+    [InlineData(0x0081, "{\"op\":\"notFacingObjectJump\",\"eventObjectId\":65535,\"zoneUnits\":65535,\"to\":\"shared#L0000\"}")]
+    public void U4_party_object_and_viewport_named_content_retains_full_offline_domains(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(0x0082, "{\"op\":\"walkToFastest\",\"x\":65535,\"y\":0,\"h\":65535}")]
+    [InlineData(0x0083, "{\"op\":\"objectOutOfZoneJump\",\"eventObjectId\":0,\"zoneUnits\":65535,\"to\":\"L0004\"}")]
+    [InlineData(0x0084, "{\"op\":\"placeUsedItem\",\"eventObjectId\":65535,\"state\":-32768,\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0085, "{\"op\":\"delay\",\"delayUnits\":65535}")]
+    [InlineData(0x0086, "{\"op\":\"itemNotEquippedJump\",\"itemId\":65535,\"count\":0,\"to\":\"L0004\"}")]
+    [InlineData(0x0086, "{\"op\":\"itemNotEquippedJump\",\"itemId\":0,\"count\":65535,\"to\":\"shared#L0000\"}")]
+    [InlineData(0x0087, "{\"op\":\"animateObject\",\"eventObjectId\":0}")]
+    [InlineData(0x0088, "{\"op\":\"setMagicBaseDamageByCash\",\"magicId\":65535}")]
+    [InlineData(0x0089, "{\"op\":\"setBattleResult\",\"result\":65535}")]
+    [InlineData(0x008A, "{\"op\":\"enableAutoBattle\"}")]
+    public void U4_zone_item_and_battle_named_content_retains_literal_fields_without_execution(int opcode, string semanticJson)
+        => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    [Theory]
+    [InlineData(0x006B, "{\"op\":\"blowAwayEnemies\",\"strength\":0}", "strength")]
+    [InlineData(0x006C, "{\"op\":\"walkNpcStep\",\"eventObjectId\":65535,\"xOffset\":0,\"yOffset\":0}", "xOffset,yOffset")]
+    [InlineData(0x006E, "{\"op\":\"moveParty\",\"xOffset\":0,\"yOffset\":0,\"layerUnits\":65535}", "xOffset,yOffset")]
+    [InlineData(0x006F, "{\"op\":\"syncState\",\"eventObjectId\":0,\"state\":0}", "state")]
+    [InlineData(0x0071, "{\"op\":\"waveScreen\",\"level\":65535,\"progression\":0}", "progression")]
+    [InlineData(0x007D, "{\"op\":\"moveObject\",\"eventObjectId\":0,\"xOffset\":0,\"yOffset\":0}", "xOffset,yOffset")]
+    [InlineData(0x007E, "{\"op\":\"setObjectLayer\",\"eventObjectId\":65535,\"layer\":0}", "layer")]
+    [InlineData(0x007F, "{\"op\":\"moveViewport\",\"xOffset\":0,\"yOffset\":0,\"frames\":65535}", "xOffset,yOffset")]
+    [InlineData(0x0084, "{\"op\":\"placeUsedItem\",\"eventObjectId\":65535,\"state\":0,\"to\":\"L0000\"}", "state")]
+    public void U4_signed_fields_retain_SHORT_boundaries_and_reject_unsigned_or_non_integer_values(int opcode, string semantics, string signedFields)
+    {
+        var fixture = new EventFixture();
+        var command = JsonNode.Parse(semantics)!.AsObject();
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(123, 456, 789) };
+        fixture.Commands[0] = command;
+        foreach (string field in signedFields.Split(','))
+        {
+            foreach (int valid in new[] { -32768, 0, 32767 })
+            {
+                command[field] = valid;
+                Assert.Equal(valid, fixture.Load().GetCommandContent(0).GetProperty(field).GetInt32());
+            }
+            foreach (string invalid in new[] { "-32769", "32768", "65535", "true", "null", "\"1\"", "1.5" })
+            {
+                command[field] = JsonNode.Parse(invalid);
+                var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+                Assert.Contains(field, error.Message);
+                Assert.Contains("@0000", error.Message);
+            }
+            command[field] = 0;
+        }
+    }
+
+    [Theory]
+    [InlineData(0x0074, "{\"op\":\"partyHpNotFullJump\",\"to\":\"targets#L0004\"}")]
+    [InlineData(0x0079, "{\"op\":\"roleInPartyJump\",\"roleNameWord\":65535,\"to\":\"targets#L0004\"}")]
+    [InlineData(0x0081, "{\"op\":\"notFacingObjectJump\",\"eventObjectId\":65535,\"zoneUnits\":65535,\"to\":\"targets#L0004\"}")]
+    [InlineData(0x0083, "{\"op\":\"objectOutOfZoneJump\",\"eventObjectId\":0,\"zoneUnits\":0,\"to\":\"targets#L0004\"}")]
+    [InlineData(0x0084, "{\"op\":\"placeUsedItem\",\"eventObjectId\":65535,\"state\":-32768,\"to\":\"targets#L0004\"}")]
+    [InlineData(0x0086, "{\"op\":\"itemNotEquippedJump\",\"itemId\":65535,\"count\":0,\"to\":\"targets#L0004\"}")]
+    public void U4_all_supplied_references_resolve_even_when_unselected_and_retain_immutable_content(int opcode, string semantics)
+    {
+        var fixture = new EventFixture();
+        fixture.Index["files"] = new JsonArray("shared", "targets");
+        var last = fixture.Commands[4]!.DeepClone();
+        fixture.Commands.RemoveAt(4);
+        fixture.Commands[3]!["next"] = "targets#L0004";
+        fixture.Files["targets"] = new JsonObject { ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "targets",
+            ["entries"] = new JsonArray(), ["commands"] = new JsonArray(last) };
+        var command = JsonNode.Parse(semantics)!.AsObject();
+        command["label"] = "L0000";
+        command["next"] = "L0001";
+        command["source"] = new JsonObject { ["index"] = 0, ["opcode"] = opcode, ["operands"] = new JsonArray(123, 456, 789) };
+        fixture.Commands[0] = command;
+        var collection = fixture.Load();
+        foreach (string invalid in new[] { "\"targets#missing\"", "\"missing#L0004\"", "\"targets##L0004\"", "null", "0" })
+        {
+            command["to"] = JsonNode.Parse(invalid);
+            var error = Assert.Throws<InvalidDataException>(() => fixture.Load());
+            Assert.Contains("@0000", error.Message);
+        }
+        command["to"] = "shared#L0000";
+        Assert.Equal("shared#L0000", fixture.Load().GetCommandContent(0).GetProperty("to").GetString());
+        Assert.Equal("targets#L0004", collection.GetCommandContent(0).GetProperty("to").GetString());
+        Assert.Equal(new[] { 123, 456, 789 }, collection.GetSource(0).Operands);
+    }
+
     private static void AssertContentOnlyLiteral(int opcode, string semanticJson)
     {
         var fixture = new EventFixture();
