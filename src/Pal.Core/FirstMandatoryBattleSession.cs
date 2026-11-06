@@ -138,7 +138,8 @@ public sealed class FirstMandatoryBattleSession
                 row.Direction = unchecked((ushort)actual.Direction); row.CurrentFrame = unchecked((ushort)actual.CurrentFrame);
                 row.State = unchecked((short)actual.State); row.VanishTime = unchecked((short)actual.VanishTime);
                 row.TriggerMode = unchecked((ushort)actual.TriggerMode); row.TriggerEntry = unchecked((ushort)actual.TriggerEntry);
-                row.AutoEntry = unchecked((ushort)actual.AutoEntry); row.AutoIdleFrameCount = actual.AutoIdleCount;
+                row.AutoEntry = unchecked((ushort)actual.AutoEntry);
+                // This facade never materializes or executes auto counters; retain the opaque source WORD.
             }
             SaveLegacyLeader(leader);
         }
