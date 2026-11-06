@@ -68,10 +68,9 @@ public partial class PalTriggerDialogue : Node
     /// initialization (the #53 host owns the scene, not a story profile).</summary>
     public Color[]? PaletteFromScene { private get; set; }
 
-    /// <summary>#53 first-battle host: the same production dialogue/battle executor over the
-    /// strict-loaded resources the verified closure bound.</summary>
-    /// <summary>The dynamic world the first-battle host bound (script verbs mutate it); null
-    /// keeps the plain session whose dynamic verbs reject precisely at execution.</summary>
+    /// <summary>World supplied before initialization by the first-battle or checked Story host.
+    /// A shared world also binds its live role owner to the trigger; null preserves the legacy
+    /// battle-only session whose dynamic verbs reject precisely at execution.</summary>
     public Pal.Core.DynamicEventWorld? FirstBattleWorld { internal get; set; }
 
     public void Initialize(PalDialogueDisplay display, FirstBattleRealResources resources, string language, IBattleRandom random,
@@ -103,7 +102,9 @@ public partial class PalTriggerDialogue : Node
         _story = story; _events = story.Events; _language = story.Language; _font = story.Font;
         _prompts = story.Prompts.ToArray(); _palette = story.Palette.ToArray();
         foreach (var pair in story.Portraits) _portraits.Add(pair.Key, pair.Value);
-        Session = new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random);
+        Session = FirstBattleWorld is { } world
+            ? new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random, world)
+            : new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random);
         _display = display; display.UpdateCompleted += OnDisplayUpdated;
     }
 
@@ -256,5 +257,6 @@ public partial class PalTriggerDialogue : Node
         if (_display is not null) _display.UpdateCompleted -= OnDisplayUpdated;
         _display = null; Session = null; _story = null; _events = null; _language = null;
         _font = null; _scene = null; _prompts = []; _portraits.Clear(); _palette = [];
+        FirstBattleWorld = null;
     }
 }

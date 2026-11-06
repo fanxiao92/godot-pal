@@ -26,6 +26,7 @@ public partial class Main : Node2D
     private bool firstBattleRendererSubscribed;
     private GodotBattleRandom? firstBattleRandom;
     private DynamicEventWorld? firstBattleWorld;
+    private RoleLiveState? roleLiveState;
     private bool awaitingSceneDraw;
     private bool rendererSubscribed;
     private GameSceneConfiguration? configuration;
@@ -169,13 +170,12 @@ public partial class Main : Node2D
                 var staticIds = new System.Collections.Generic.HashSet<int>(Battle!.Rules.Objects.Select(o => (int)o.Id));
                 var extendedRules = Battle.Rules.WithObjects(Battle.Rules.Objects
                     .Concat(real.Resources.GlobalObjects.Where(o => !staticIds.Contains(o.Id))));
+                // Seed the validated battle declarations once; party order is explicit and
+                // independent of how many role records the content declares.
+                roleLiveState = new RoleLiveState(real.Resources.BattleContent.InitialRoles.Values.ToArray());
                 var world = DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
-                    map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport);
-                for (int role = 0; role < real.Profile.Roles.Count; role++)
-                {
-                    var snapshot = real.Profile.Roles[role];
-                    world.InitializePartyVitals(role, snapshot.Hp, snapshot.MaxHp, snapshot.Mp, snapshot.MaxMp);
-                }
+                    map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
+                    roleLiveState, real.Resources.BattleContent.Players.Select(player => player.RoleId).ToArray());
                 Dialogue.FirstBattleWorld = world;
                 firstBattleWorld = world;
                 var firstBattleSeedRandom = new GodotBattleRandom(selected.BattleSeed);
@@ -525,5 +525,6 @@ public partial class Main : Node2D
             firstBattleRendererSubscribed = false;
         }
         Display = null; Dialogue = null; SelectedLanguage = null;
+        firstBattleWorld = null; roleLiveState = null;
     }
 }

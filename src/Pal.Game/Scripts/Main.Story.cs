@@ -90,6 +90,10 @@ public partial class Main
             storyRandom = new GodotBattleRandom(selected.BattleSeed);
             display = new PalDialogueDisplay();
             dialogue = new PalTriggerDialogue();
+            roleLiveState = new RoleLiveState(checkedStory.BattleContent.InitialRoles.Values.ToArray());
+            dialogue.FirstBattleWorld = DynamicEventWorld.ForHost(checkedStory.Exploration.Rules,
+                checkedStory.Exploration.Leader, map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
+                roleLiveState, checkedStory.BattleContent.Players.Select(player => player.RoleId).ToArray());
             dialogue.Initialize(display, checkedStory, storyRandom);
             story = checkedStory; storyVisual = checkedVisual; mapScene = map;
             Interaction = interaction; Display = display; Dialogue = dialogue; SelectedLanguage = selected.Language;
