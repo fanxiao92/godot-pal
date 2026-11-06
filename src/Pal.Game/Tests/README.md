@@ -23,6 +23,8 @@ Game 测试继续使用现有 Godot 程序集、固定 GdUnit 包和 `tests/Pal.
   -OutputDirectory $NewEvidenceDirectory
 ```
 
+game-only 在冷工作树上也须先显式完成现有 CI-style Godot editor import（`--headless --path <src/Pal.Game> --editor --import`）；范围入口不会代做该前提。#155 的原冷入口失败与显式 import 后恢复完整433成功各保留原收据，恢复不改写为首次成功。
+
 该入口设置并恢复 `GODOT_BIN` / `PAL_TEST_GODOT`，不隐式运行未选的 Prepare；需要 Prepare 时显式加入 Scope，按固定顺序先于 Game。绕过入口直接 `dotnet` 时，必须先 bootstrap、设置这两个批准引擎路径变量并完成当前所需构建/import。实际 SDK/Godot/GdUnit/Prepare/solution 运行遵守根 AGENTS 的全局串行规则，完整参数以脚本/config 为准。
 
 ## 失败与证据
@@ -66,6 +68,12 @@ shared world 的 copy 拥有独立 `RoleLiveState`，包含当前完整角色记
 当前 metadata 登记 Core 1218、CLI Unit 465。完整 Unit 复用 #152 U2 实际 focused 6/6、RetailVerbs 37/37、Core 1218/1218、CLI Unit 465/465 原件：真实运行源码为 `dc031ac + dirty.patch`，四次运行的完整 patch SHA256 均为 `5f0b369eec50f4a9c85852012f1642fbf82390128b714f56b952adad7f7b7d00`，patch 与 `3eaf4e359d4de377a4a9bc53a839e3fdafe6d8ba` 的对应提交差异逐字节相同，两份实际 raw source 亦相同。最终 metadata/docs 候选在全部相关编译源码/配置不变的证明下复用这些 Unit，不声称在后续 clean HEAD 重跑。新增六例均为公开 Core Facts，不是 Game cases；Game 647 discovery、full 644 / committable 643 positives 及批次不变。最终冻结候选的新鲜 bounded shared-impact 结果只以该候选实际收据为准，不预告通过或拼成完整门。
 
 #152 仍待父控最终 Standards/Spec 及实际本地集成；之后 #150 才能合入并消费当前 copy，继续验证真实 Main/preview/RNG/lifetime/Story 与原票其余验收。复制 Core 能力不代表 Main 已全部接线，不自动关闭 #152 或 #130/#126/#148，也不是 full gate、GPU、人工桌面、私有真实资源或 CI/M6 交付。
+
+## #155 PartyWin 全队 HP/MP 前缀准备
+
+`AuthoredStoryFixture` 末尾增加可选 `partyHpMpPrefixAmount`，默认 null 保持原 events/index 字节和旧五位置参数；显式值仅支持 PartyWin 的 SHORT（含0），在自有输入 entry1 插入命名 `changeHpMp`/0x001D、scope1，而非修改初始数值。正常-3用例经原 Prepare、双语 typed Story/Visual strict Load 核对完整11行/88字节、独立源流 SHA 与输出 manifest；准备后的 HP100/95、MP20 保持初值。这是准备能力，不证明 Main 执行前缀、全队效果或当前值入战。
+
+本切片只新增一个无参 case：当前登记648（645 positives +3 controls）、native-map434，committable644；SHORT边缘/拒绝另外两例及最终完整436影响另行验证，不预填通过数。过滤RED/GREEN只读复用已验证的同内容完整433 marker，不签发新增case完整批证明；不等于 fullgate/GPU/人工/CI 或 #150/Main 交付。
 
 ## 维护边界
 
