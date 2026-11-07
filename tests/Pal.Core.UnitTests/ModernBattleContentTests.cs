@@ -6,6 +6,112 @@ namespace Pal.Core.Tests;
 public sealed class ModernBattleContentTests
 {
     [Theory]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void Typed_name_object_rejects_outside_WORD(int nameObjectId)
+    {
+        var content = NamedParty(nameObjectId, nameObjectId, 0, 0);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(content));
+        Assert.Contains("players[0].nameObjectId", error.Message);
+        Assert.Contains("expected integer in 0..65535", error.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void Typed_name_object_rejects_partial_mapping(int mappedIndex)
+    {
+        var content = NamedParty(mappedIndex == 0 ? 37 : null, mappedIndex == 1 ? 37 : null, 0, 0);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(content));
+        Assert.Contains("nameObjectId", error.Message);
+        Assert.Contains("declared together", error.Message);
+    }
+
+    [Theory]
+    [InlineData("dyingScript", false)]
+    [InlineData("dyingScript", true)]
+    [InlineData("friendDeathScript", false)]
+    [InlineData("friendDeathScript", true)]
+    public void Typed_same_name_rejects_conflicting_hook_seeds(string slot, bool reverse)
+    {
+        var source = NamedParty(37, 37, 0, 0);
+        var players = source.Players.ToArray();
+        players[1] = slot == "dyingScript" ? players[1] with { DyingScript = 1 } : players[1] with { FriendDeathScript = 1 };
+        if (reverse) Array.Reverse(players);
+        var content = new TriggerBattleContent(source.InitialRoles.Values.ToArray(), players, source.GrowthByRole, source.EnemyTeams);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(content));
+        Assert.Contains("players[1]." + slot, error.Message);
+        Assert.Contains("same nameObjectId", error.Message);
+    }
+
+    [Theory]
+    [InlineData(null, null, 0, 0)]
+    [InlineData(0, 0, 0, 0)]
+    [InlineData(65535, 65535, 65535, 65535)]
+    [InlineData(37, 37, 123, 456)]
+    [InlineData(0, 65535, 123, 456)]
+    [InlineData(36, 37, 123, 456)]
+    public void Typed_name_object_accepts_legacy_matching_and_distinct_identities(int? firstName, int? secondName, int dying, int friend)
+    {
+        var content = NamedParty(firstName, secondName, dying, friend);
+        ModernBattleContent.Validate(content);
+        Assert.Equal(new[] { 4, 1 }, content.Players.Select(x => x.RoleId));
+        Assert.Equal(new int?[] { firstName, secondName }, content.Players.Select(x => x.NameObjectId));
+        Assert.All(content.Players, player =>
+        {
+            Assert.Equal(dying, player.DyingScript);
+            Assert.Equal(friend, player.FriendDeathScript);
+        });
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0)]
+    [InlineData(65535)]
+    public void Typed_name_object_survives_defensive_projection_and_record_with(int? nameObjectId)
+    {
+        var legacy = ModernBattleContent.Parse(Data().ToJsonString());
+        Assert.Null(legacy.Player.NameObjectId);
+        int[] equipment = new int[6];
+        var player = legacy.Player with { NameObjectId = nameObjectId, DyingScript = 123, FriendDeathScript = 456, Equipment = equipment };
+        var content = new TriggerBattleContent(legacy.InitialRole, player, legacy.Growth, legacy.Teams);
+        equipment[0] = 99;
+        ModernBattleContent.Validate(content);
+        Assert.Equal(nameObjectId, content.Player.NameObjectId);
+        Assert.Equal(0, content.Player.Equipment[0]);
+        var copy = content.Player with { Attack = 999 };
+        Assert.Equal(nameObjectId, copy.NameObjectId);
+        Assert.Equal(123, copy.DyingScript);
+        Assert.Equal(456, copy.FriendDeathScript);
+        Assert.Equal(999, copy.Attack);
+        Assert.Equal(40, content.Player.Attack);
+        var renamed = copy with { NameObjectId = 37 };
+        Assert.Equal(37, renamed.NameObjectId);
+        Assert.Equal(nameObjectId, content.Player.NameObjectId);
+    }
+
+    [Fact]
+    public void JSON_name_object_mapping_remains_unknown()
+    {
+        var data = Data();
+        data["players"]![0]!["nameObjectId"] = 0;
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("unknown field 'nameObjectId'", error.Message);
+    }
+
+    private static TriggerBattleContent NamedParty(int? firstName, int? secondName, int dying, int friend)
+    {
+        var source = ModernBattleContent.Parse(PartyData().ToJsonString());
+        var players = source.Players.Select((player, index) => player with
+        {
+            NameObjectId = index == 0 ? firstName : secondName,
+            DyingScript = dying,
+            FriendDeathScript = friend
+        }).ToArray();
+        return new TriggerBattleContent(source.InitialRoles.Values.ToArray(), players, source.GrowthByRole, source.EnemyTeams);
+    }
+
+    [Theory]
     [InlineData("magicPower", -1)]
     [InlineData("magicPower", 65536)]
     [InlineData("fleeRate", -1)]

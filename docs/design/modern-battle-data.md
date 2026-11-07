@@ -2,6 +2,16 @@
 
 状态：纯 Core `ModernBattleContent.Parse(string)` → 既有 `TriggerBattleContent`，及独立 typed native Resource 编解码 `NativeBattleContent.Write/CreateCore/Load` 已实现。Core 不读文件、不抽 RNG、不创建战斗或模拟获胜；native runtime 不重读 JSON。显式离线 `PrepareBattleData.Prepare`、Editor scene 和正常 PowerShell wrapper 也已交付（见下方准备契约）；**数值准备不是完整人工 package 或 Main 资源链**。Core 测试字符串与可提交 `tests/Fixtures/ModernBattleData/battle-data.json` 均为独立人工数值，不是完整 storypackage 或原版认证。冻结的真实 `first-mandatory-battle-pre-trigger-v1`、envelope/provenance 和 owner28 `@09C3` gate 均未改动。
 
+## 显式角色名字对象 typed 声明（#158 A1）
+
+`ClassicBattlePlayer.NameObjectId` 是非位置构造参数的可选 `int?` 声明，默认 null 表示旧内容未声明映射；0 与 65535 都是合法对象编号，不把0当作缺省哨兵。参考 `fight.c` 的濒死/友亡检查，角色以名字编号选择全局对象，不能用 RoleId、队伍位置或相等的脚本入口反推对象身份。
+
+公开纯格式验证 `ModernBattleContent.Validate` 要求一份内容的全部 player 同时声明映射或全部省略；已声明值必须为 WORD。相同名字对象必须声明完全相同的两个初始脚本入口（包括0），任一槽冲突即带对应 player/字段路径拒绝；不同名字对象即使两个入口相同也保持不同身份。现有防御复制、单角色兼容投影与 record-with 保留该可空值。原有未声明映射的构造和验证不变。
+
+**此处只交付 typed metadata，不开放运输或运行时 owner。** 本切片不修改 JSON reader，`nameObjectId` 仍是被拒绝的未知 JSON 字段；也不新增 native 导出字段。原生写入端明确拒绝带声明的 typed 内容及其真实 native 回归属于本票 A2，未完成 A2 前此 A1 不能作为完整前置验收或集成，带声明内容不是可提交的生产原生输入。下一票才同时接通严格 JSON 与 native 运输，避免 Parse 接受后被旧 writer 静默丢值。旧 JSON/native 资源保持原兼容路径，不自动推断或迁移真实名字编号。
+
+本声明验证不读写 world，不建立活脚本表，不改变钩子检测/完成或保存返回入口；live owner、0090、跨战斗/新执行器共享和真正 root-return 写回仍需后续前置与 #129 单独交付。人工声明不等于原版真实数据绑定，Core Unit 也不等于 native、Prepare、Main 或完整 M6 验收。
+
 ## 根与严格读取
 
 根对象全部必填：`formatVersion: 1`、`roles`、`players`、`growth`、`teams`。不接受 profile/sourceKind/人工 ID 来跳过规则；未来 package/native 外壳另行诚实记录来源和图像/事件绑定。

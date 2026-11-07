@@ -19,6 +19,9 @@ public static partial class ModernBattleContent
             if (x is null) throw Error(p, "experience is null");
             Range(x.Value, p + ".value"); Range(x.Level, p + ".level"); Range(x.Count, p + ".count");
         }
+        if (content.Players.Any(p => p.NameObjectId.HasValue) && content.Players.Any(p => !p.NameObjectId.HasValue))
+            throw Error(Root + ".players", "nameObjectId must be declared together for all players");
+        var nameSeeds = new Dictionary<int, (int Dying, int FriendDeath)>();
         foreach (var (p, index) in content.Players.Select((x, i) => (x, i)))
         {
             var r = content.InitialRoles[p.RoleId];
@@ -41,6 +44,18 @@ public static partial class ModernBattleContent
             Range(p.MagicPower, pp + ".magicPower"); Range(p.FleeRate, pp + ".fleeRate");
             Words(p.Equipment, pp + ".equipment", 6); Words(p.Statuses, pp + ".statuses", 9); Words(p.Poisons, pp + ".poisons");
             Range(p.DyingScript, pp + ".dyingScript"); Range(p.FriendDeathScript, pp + ".friendDeathScript");
+            if (p.NameObjectId is int nameObjectId)
+            {
+                Range(nameObjectId, pp + ".nameObjectId");
+                if (nameSeeds.TryGetValue(nameObjectId, out var seeds))
+                {
+                    if (p.DyingScript != seeds.Dying)
+                        throw Error(pp + ".dyingScript", "players with the same nameObjectId must declare identical dyingScript seeds");
+                    if (p.FriendDeathScript != seeds.FriendDeath)
+                        throw Error(pp + ".friendDeathScript", "players with the same nameObjectId must declare identical friendDeathScript seeds");
+                }
+                else nameSeeds.Add(nameObjectId, (p.DyingScript, p.FriendDeathScript));
+            }
             if (p.CoveredByRoleId is int cover) Range(cover, pp + ".coveredByRoleId", 0, 5);
             Words(growth.LevelUpExperience, gp + ".levelUpExperience", 100);
             if (growth.LevelUpMagics is null) throw Error(gp + ".levelUpMagics", "array is null");

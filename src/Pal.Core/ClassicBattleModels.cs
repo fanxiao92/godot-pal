@@ -12,6 +12,7 @@ public sealed record ClassicBattlePlayer(int RoleId, int Hp, int MaxHp, int Atta
     public IReadOnlyList<int> Equipment { get; init; } = [];
     public IReadOnlyList<int> Statuses { get; init; } = [];
     public IReadOnlyList<int> Poisons { get; init; } = [];
+    public int? NameObjectId { get; init; }
     public int DyingScript { get; init; }
     public int FriendDeathScript { get; init; }
     public int? CoveredByRoleId { get; init; }
