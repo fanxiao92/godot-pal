@@ -298,8 +298,19 @@ public sealed class ClassicBattleLifecycleSession
     internal void ApplyRoleHookHp(int partyIndex, int delta)
     {
         if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        var player = activeCombat.Current.Players[partyIndex];
+        var role = roles[player.RoleId];
+        bool wasAlive = role.Hp > 0;
         activeCombat.HealRoleHookHp(partyIndex, delta);
         SyncPartyFromCombat();
+        // PAL_IncreaseHPMP checks life once, before either word changes. MP still normalizes
+        // with delta zero when this HP operation has just reduced the alive caller to zero.
+        if (wasAlive)
+        {
+            int mp = unchecked((ushort)role.Mp);
+            if ((short)mp < 0) mp = 0;
+            role.Mp = Math.Min(mp, role.MaxMp);
+        }
         Current = View(activeCombat.Current);
     }
 

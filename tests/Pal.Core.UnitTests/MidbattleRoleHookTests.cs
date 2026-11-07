@@ -226,6 +226,59 @@ public sealed class MidbattleRoleHookTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Friend_death_changeHp_normalizes_high_word_MP_even_when_HP_falls_to_zero()
+    {
+        // PAL_IncreaseHPMP checks the original HP once: MP delta 0 still normalizes
+        // WORD 40000 through SHORT to 0, even after this command reduces HP 100 to 0.
+        var fixture = Fixture();
+        fixture.Commands[38] = ChangeHp(38, -100);
+        Assert.Equal("L0027", fixture.Commands[38]!["next"]!.GetValue<string>());
+        Assert.Equal(-100, fixture.Commands[38]!["amount"]!.GetValue<int>());
+        Assert.Equal(65436, fixture.Commands[38]!["source"]!["operands"]![1]!.GetValue<int>());
+        var original = Content(40);
+        var content = new TriggerBattleContent(
+            [Role(0, 100, 200, 40000, 40000, 2), original.InitialRoles[1]],
+            original.Players, original.GrowthByRole, original.EnemyTeams);
+        var random = new ScriptedRandom(
+            [.. Queue3, .. EnemyHit1, I(1, 100, 74), I(1, 100, 65), I(1, 100, 49)]);
+        var script = new TriggerScriptSession(fixture.Load(), Language(), content, random);
+        script.Start("hooks", "npc", 28);
+        var battle = script.PendingBattle!;
+        battle.Lifecycle.SelectAttack(0, 0);
+        battle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(battle.Lifecycle.ResolveNextAction());
+        var hook = new ClassicBattleRoleHook(ClassicBattleHookKind.FriendDeath, 0, 0, 31);
+        Assert.Equal(hook, script.PendingBattleHook);
+        Assert.Equal(ClassicBattlePhase.RoleHook, battle.Lifecycle.Current.Combat.Phase);
+        Assert.Equal((100, 200, 40000, 40000),
+            (battle.Lifecycle.Current.Roles[0].Hp, battle.Lifecycle.Current.Roles[0].MaxHp,
+                battle.Lifecycle.Current.Roles[0].Mp, battle.Lifecycle.Current.Roles[0].MaxMp));
+        Assert.Equal(100, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.Equal(0, battle.Lifecycle.Current.Combat.Players[1].Hp);
+        script.StartBattleHook();
+        Assert.Equal(hook, script.RunningBattleHook);
+        Assert.Equal(0, script.Caller);
+        Assert.Equal(23, script.PendingDisplay!.Content.StartMessageId);
+        FinishDisplay(script);
+        Assert.Equal(24, script.PendingDisplay!.Content.StartMessageId);
+        Assert.Equal(100, battle.Lifecycle.Current.Roles[0].Hp);
+        FinishDisplay(script);
+        Assert.Same(battle, script.PendingBattle);
+        Assert.Null(script.RunningBattleHook);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        // Both party members are now dead; hook completion settles Lost, not another action.
+        Assert.Equal(ClassicBattlePhase.Lost, battle.Lifecycle.Current.Combat.Phase);
+        Assert.NotNull(battle.Lifecycle.Completion);
+        Assert.Equal(ClassicBattlePhase.Lost, battle.Lifecycle.Completion.Outcome);
+        Assert.Equal(0, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.Equal(0, battle.Lifecycle.Current.Roles[0].Hp);
+        random.AssertExhausted();
+        int mp = battle.Lifecycle.Current.Roles[0].Mp;
+        Assert.True(mp == 0,
+            $"RoleHook HP must normalize MP with the original alive gate: expected 0, actual {mp}.");
+    }
+
     [Theory]
     [InlineData("74,65,49", 200, 20, 2, 0, 0, 0)] // fall-through path1: +9999 HP clamps at 200, attack +5%
     [InlineData("100", 100, 50, 0, 6, 0, 0)]     // path2: +9999 MP clamps at 50, magicPower +10% of 64
@@ -521,7 +574,7 @@ public sealed class MidbattleRoleHookTests
     {
         ["label"] = $"L{address:X4}", ["op"] = "changeHp", ["scope"] = scope, ["amount"] = amount,
         ["next"] = next ?? $"L{address + 1:X4}",
-        ["source"] = new JsonObject { ["index"] = address, ["opcode"] = 27, ["operands"] = new JsonArray(scope, amount, 0) }
+        ["source"] = new JsonObject { ["index"] = address, ["opcode"] = 27, ["operands"] = new JsonArray(scope, unchecked((int)(ushort)amount), 0) }
     };
 
     private static JsonObject StartBattle(int address) => new()
