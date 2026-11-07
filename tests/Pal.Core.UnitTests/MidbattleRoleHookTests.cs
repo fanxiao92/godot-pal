@@ -342,6 +342,197 @@ public sealed class MidbattleRoleHookTests
     }
 
     [Theory]
+    // global.c 1254-1333: independent WORD-add/SHORT-sign/clamp expectations, not runtime-derived.
+    // The final input column checks the raw WORD separately from the typed signed amount.
+    [InlineData("changeHp", 100, 20, 50, -1, 99, 20, true, 65535)]
+    [InlineData("changeHp", 100, 20, 50, 32767, 0, 20, true, 32767)]
+    [InlineData("changeHp", 100, 20, 50, -32768, 0, 20, true, 32768)]
+    [InlineData("changeHp", 100, 20, 50, 101, 200, 20, true, 101)]
+    [InlineData("changeHp", 200, 20, 50, 1, 200, 20, false, 1)]
+    [InlineData("changeHp", 100, 32767, 65535, 0, 100, 32767, false, 0)]
+    [InlineData("changeHp", 100, 32768, 65535, 0, 100, 0, true, 0)]
+    [InlineData("changeHp", 100, 65535, 65535, 0, 100, 0, true, 0)]
+    [InlineData("changeMp", 100, 20, 50, 10, 100, 30, true, 10)]
+    [InlineData("changeMp", 100, 50, 50, 1, 100, 50, false, 1)]
+    [InlineData("changeMp", 100, 32767, 65535, 1, 100, 0, true, 1)]
+    [InlineData("changeMp", 100, 32768, 65535, -1, 100, 32767, true, 65535)]
+    [InlineData("changeMp", 100, 65535, 65535, 1, 100, 0, true, 1)]
+    [InlineData("changeMp", 100, 65535, 65535, 2, 100, 1, true, 2)]
+    [InlineData("changeMp", 100, 20, 50, -21, 100, 0, true, 65515)]
+    [InlineData("changeMp", 100, 20, 50, -32768, 100, 0, true, 32768)]
+    public void Friend_death_HP_MP_obey_WORD_boundaries_and_report_actual_changes(string operation,
+        int hp, int mp, int maxMp, int delta, int expectedHp, int expectedMp, bool expectedSuccess, int rawAmount)
+    {
+        var fixture = Fixture();
+        fixture.Commands[38] = ChangeHp(38, delta);
+        fixture.Commands[38]!["op"] = operation;
+        int opcode = operation == "changeHp" ? 27 : 28;
+        fixture.Commands[38]!["source"]!["opcode"] = opcode;
+        var events = fixture.Load();
+        AssertHpMpCommand(events, 38, operation, opcode, delta, rawAmount, "L0027");
+        var (script, battle, random) = StartFriendDeathBoundaryHook(events, hp, mp, maxMp);
+        FinishFirstFriendDeathBoundaryDisplay(script, battle, hp, mp);
+        FinishDisplay(script);
+        AssertFriendDeathBoundaryResult(script, battle, expectedHp, expectedMp, expectedSuccess);
+        Assert.Equal(2, battle.Lifecycle.Current.Combat.Players[0].BoostAttack);
+        random.AssertExhausted();
+    }
+
+    [Theory]
+    [InlineData("changeHp", 27)]
+    [InlineData("changeMp", 28)]
+    public void Friend_death_second_HP_or_MP_operation_leaves_an_already_dead_caller_unchanged(string operation, int opcode)
+    {
+        // The caller is alive when the real hook starts; the first operation kills it.
+        // The second PAL_IncreaseHPMP entry must reject both words (global.c 1287-1327).
+        var fixture = Fixture();
+        fixture.Commands[38] = ChangeHp(38, -100);
+        fixture.Commands[39] = ChangeHp(39, 1);
+        fixture.Commands[39]!["op"] = operation;
+        fixture.Commands[39]!["source"]!["opcode"] = opcode;
+        var events = fixture.Load();
+        AssertHpMpCommand(events, 38, "changeHp", 27, -100, 65436, "L0027");
+        AssertHpMpCommand(events, 39, operation, opcode, 1, 1, "L0028");
+        var (script, battle, random) = StartFriendDeathBoundaryHook(events, 100, 20, 50);
+        FinishFirstFriendDeathBoundaryDisplay(script, battle, 100, 20);
+        FinishDisplay(script);
+        AssertFriendDeathBoundaryResult(script, battle, 0, 20, false);
+        Assert.Equal(0, battle.Lifecycle.Current.Combat.Players[0].BoostAttack);
+        random.AssertExhausted();
+    }
+
+    [Theory]
+    [InlineData("changeHp", 27, 101, 20)]
+    [InlineData("changeMp", 28, 100, 21)]
+    public void Friend_death_successful_HP_or_MP_change_preserves_an_earlier_markFailed(string operation,
+        int opcode, int expectedHp, int expectedMp)
+    {
+        // script.c 0041 clears success; single-role 001B/001C only clear, never restore it.
+        var fixture = Fixture();
+        fixture.Commands[37] = new JsonObject
+        {
+            ["label"] = "L0025", ["op"] = "markFailed", ["next"] = "L0026",
+            ["source"] = new JsonObject { ["index"] = 37, ["opcode"] = 65, ["operands"] = new JsonArray(0, 0, 0) }
+        };
+        fixture.Commands[38] = ChangeHp(38, 1);
+        fixture.Commands[38]!["op"] = operation;
+        fixture.Commands[38]!["source"]!["opcode"] = opcode;
+        var events = fixture.Load();
+        var markFailed = events.GetCommandContent(37);
+        Assert.Equal("L0025", markFailed.GetProperty("label").GetString());
+        Assert.Equal("markFailed", markFailed.GetProperty("op").GetString());
+        Assert.Equal("L0026", markFailed.GetProperty("next").GetString());
+        Assert.Equal(new TriggerPosition("hooks", "L0025", 37), events.GetSource(37).Position);
+        Assert.Equal(65, events.GetSource(37).Opcode);
+        Assert.Equal(new[] { 0, 0, 0 }, events.GetSource(37).Operands);
+        AssertHpMpCommand(events, 38, operation, opcode, 1, 1, "L0027");
+        var (script, battle, random) = StartFriendDeathBoundaryHook(events, 100, 20, 50);
+        // Replacing Show24 leaves only display23; its receipt runs markFailed and the real +1.
+        FinishDisplay(script);
+        AssertFriendDeathBoundaryResult(script, battle, expectedHp, expectedMp, false);
+        Assert.Equal(2, battle.Lifecycle.Current.Combat.Players[0].BoostAttack);
+        random.AssertExhausted();
+    }
+
+    private static void AssertHpMpCommand(TriggerEventCollection events, int address, string operation,
+        int opcode, int amount, int rawAmount, string next)
+    {
+        Assert.Equal(60, events.InstructionCount);
+        var command = events.GetCommandContent(address);
+        Assert.Equal($"L{address:X4}", command.GetProperty("label").GetString());
+        Assert.Equal(operation, command.GetProperty("op").GetString());
+        Assert.Equal(0, command.GetProperty("scope").GetInt32());
+        Assert.Equal(amount, command.GetProperty("amount").GetInt32());
+        Assert.Equal(next, command.GetProperty("next").GetString());
+        var source = events.GetSource(address);
+        Assert.Equal(new TriggerPosition("hooks", $"L{address:X4}", address), source.Position);
+        Assert.Equal(opcode, source.Opcode);
+        Assert.Equal(new[] { 0, rawAmount, 0 }, source.Operands);
+    }
+
+    private static (TriggerScriptSession Script, TriggerBattleRequest Battle, ScriptedRandom Random)
+        StartFriendDeathBoundaryHook(TriggerEventCollection events, int hp, int mp, int maxMp)
+    {
+        var original = Content(40);
+        var content = new TriggerBattleContent(
+            [Role(0, hp, 200, mp, maxMp, 2), original.InitialRoles[1]],
+            [original.Players[0] with { Hp = hp, MaxHp = 200 }, original.Players[1]],
+            original.GrowthByRole, original.EnemyTeams);
+        var random = new ScriptedRandom(
+            [.. Queue3, .. EnemyHit1, I(1, 100, 74), I(1, 100, 65), I(1, 100, 49)]);
+        var script = new TriggerScriptSession(events, Language(), content, random);
+        script.Start("hooks", "npc", 28);
+        Assert.True(script.ScriptSuccess);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        Assert.Equal(28, script.Caller);
+        var battle = script.PendingBattle!;
+        battle.Lifecycle.SelectAttack(0, 0);
+        battle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(battle.Lifecycle.ResolveNextAction());
+        var hook = new ClassicBattleRoleHook(ClassicBattleHookKind.FriendDeath, 0, 0, 31);
+        Assert.Equal(hook, script.PendingBattleHook);
+        Assert.Equal(ClassicBattlePhase.RoleHook, battle.Lifecycle.Current.Combat.Phase);
+        Assert.Null(battle.Lifecycle.Completion);
+        Assert.Equal((hp, 200, mp, maxMp),
+            (battle.Lifecycle.Current.Roles[0].Hp, battle.Lifecycle.Current.Roles[0].MaxHp,
+                battle.Lifecycle.Current.Roles[0].Mp, battle.Lifecycle.Current.Roles[0].MaxMp));
+        Assert.Equal(hp, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.Equal(0, battle.Lifecycle.Current.Combat.Players[1].Hp);
+        script.StartBattleHook();
+        Assert.Same(battle, script.PendingBattle);
+        Assert.Equal(hook, script.RunningBattleHook);
+        Assert.Equal(0, script.Caller);
+        Assert.True(script.ScriptSuccess);
+        Assert.Equal(23, script.PendingDisplay!.Content.StartMessageId);
+        random.AssertExhausted();
+        return (script, battle, random);
+    }
+
+    private static void FinishFirstFriendDeathBoundaryDisplay(TriggerScriptSession script,
+        TriggerBattleRequest battle, int hp, int mp)
+    {
+        FinishDisplay(script);
+        Assert.Same(battle, script.PendingBattle);
+        Assert.Equal(new ClassicBattleRoleHook(ClassicBattleHookKind.FriendDeath, 0, 0, 31), script.RunningBattleHook);
+        Assert.Equal(0, script.Caller);
+        Assert.Equal(24, script.PendingDisplay!.Content.StartMessageId);
+        Assert.Equal((hp, mp), (battle.Lifecycle.Current.Roles[0].Hp, battle.Lifecycle.Current.Roles[0].Mp));
+        Assert.Equal(hp, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.True(script.ScriptSuccess);
+    }
+
+    private static void AssertFriendDeathBoundaryResult(TriggerScriptSession script, TriggerBattleRequest battle,
+        int expectedHp, int expectedMp, bool expectedSuccess)
+    {
+        Assert.Same(battle, script.PendingBattle);
+        Assert.Null(script.PendingDisplay);
+        Assert.Null(script.RunningBattleHook);
+        Assert.Null(script.PendingBattleHook);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        Assert.Equal(28, script.Caller);
+        Assert.Equal((expectedHp, expectedMp), (battle.Lifecycle.Current.Roles[0].Hp, battle.Lifecycle.Current.Roles[0].Mp));
+        Assert.Equal(expectedHp, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.Equal(0, battle.Lifecycle.Current.Combat.Players[1].Hp);
+        Assert.Equal(expectedSuccess, script.ScriptSuccess);
+        // fight.c 1127-1152: both members dead means exactly Lost, with no victory recovery.
+        if (expectedHp == 0)
+        {
+            Assert.Equal(ClassicBattlePhase.Lost, battle.Lifecycle.Current.Combat.Phase);
+            var receipt = battle.Lifecycle.Completion;
+            Assert.NotNull(receipt);
+            Assert.Equal(ClassicBattlePhase.Lost, receipt.Outcome);
+            Assert.Equal(0, receipt.ExperienceGranted);
+            Assert.Equal(0, receipt.CashGranted);
+            Assert.True(battle.Lifecycle.OwnsCompletion(receipt));
+        }
+        else
+        {
+            Assert.Equal(ClassicBattlePhase.Resolving, battle.Lifecycle.Current.Combat.Phase);
+            Assert.Null(battle.Lifecycle.Completion);
+        }
+    }
+
+    [Theory]
     [InlineData("74,65,49", 200, 20, 2, 0, 0, 0)] // fall-through path1: +9999 HP clamps at 200, attack +5%
     [InlineData("100", 100, 50, 0, 6, 0, 0)]     // path2: +9999 MP clamps at 50, magicPower +10% of 64
     [InlineData("74,66", 100, 20, 10, 16, 0, 0)] // path3: attack +25%, magicPower +25%
