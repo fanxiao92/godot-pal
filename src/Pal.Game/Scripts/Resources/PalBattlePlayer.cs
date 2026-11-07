@@ -15,6 +15,8 @@ public partial class PalBattlePlayer : Resource
     [Export] public int FleeRate { get; set; } = 0;
     [Export] public int DyingScript { get; set; } = 0;
     [Export] public int FriendDeathScript { get; set; } = 0;
+    [Export] public bool HasNameObjectId { get; set; } = false;
+    [Export] public int NameObjectId { get; set; } = 0;
     [Export] public int CoveredByRoleId { get; set; } = 0;
     [Export] public bool HasCoveredByRoleId { get; set; } = false;
     [Export] public bool AttackAll { get; set; } = false;

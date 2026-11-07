@@ -90,13 +90,120 @@ public sealed class ModernBattleContentTests
         Assert.Equal(nameObjectId, content.Player.NameObjectId);
     }
 
-    [Fact]
-    public void JSON_name_object_mapping_remains_unknown()
+    [Theory]
+    [InlineData(null, null, 0, 0)]
+    [InlineData(0, 0, 0, 0)]
+    [InlineData(65535, 65535, 65535, 65535)]
+    [InlineData(37, 37, 123, 456)]
+    [InlineData(0, 65535, 123, 456)]
+    [InlineData(36, 37, 123, 456)]
+    public void JSON_name_object_preserves_legacy_aliases_and_distinct_names(int? firstName, int? secondName, int dying, int friend)
+    {
+        var data = PartyData();
+        if (firstName.HasValue) data["players"]![0]!["nameObjectId"] = firstName.Value;
+        if (secondName.HasValue) data["players"]![1]!["nameObjectId"] = secondName.Value;
+        foreach (var player in data["players"]!.AsArray())
+        {
+            player!["dyingScript"] = dying;
+            player["friendDeathScript"] = friend;
+        }
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        Assert.Equal(new[] { 4, 1 }, content.Players.Select(x => x.RoleId));
+        Assert.Equal(new[] { 1, 4 }, content.InitialRoles.Keys.OrderBy(x => x));
+        Assert.Equal(4, content.InitialRoles[4].RoleId);
+        Assert.Equal(1, content.InitialRoles[1].RoleId);
+        Assert.Equal(new[] { 1, 4 }, content.GrowthByRole.Keys.OrderBy(x => x));
+        Assert.Equal(firstName, content.Players[0].NameObjectId);
+        Assert.Equal(secondName, content.Players[1].NameObjectId);
+        Assert.Equal(dying, content.Players[0].DyingScript);
+        Assert.Equal(friend, content.Players[0].FriendDeathScript);
+        Assert.Equal(dying, content.Players[1].DyingScript);
+        Assert.Equal(friend, content.Players[1].FriendDeathScript);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("\"0\"")]
+    [InlineData("1.5")]
+    [InlineData("1.0")]
+    [InlineData("-1")]
+    [InlineData("65536")]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    public void JSON_name_object_rejects_non_WORD(string token)
     {
         var data = Data();
         data["players"]![0]!["nameObjectId"] = 0;
+        string property = "\"nameObjectId\":" + token;
+        string json = data.ToJsonString().Replace("\"nameObjectId\":0", property, StringComparison.Ordinal);
+        Assert.Contains(property, json, StringComparison.Ordinal);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(json));
+        Assert.Contains("battle-data.json.$.players[0].nameObjectId", error.Message);
+        Assert.Contains("expected integer in 0..65535", error.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void JSON_name_object_requires_complete_mapping(int mappedIndex)
+    {
+        var data = PartyData();
+        data["players"]![mappedIndex]!["nameObjectId"] = 37;
         var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
-        Assert.Contains("unknown field 'nameObjectId'", error.Message);
+        Assert.Contains("nameObjectId", error.Message);
+        Assert.Contains("declared together", error.Message);
+    }
+
+    [Theory]
+    [InlineData("dyingScript", false)]
+    [InlineData("dyingScript", true)]
+    [InlineData("friendDeathScript", false)]
+    [InlineData("friendDeathScript", true)]
+    public void JSON_same_name_rejects_conflicting_seeds(string slot, bool reverse)
+    {
+        var data = PartyData();
+        foreach (var player in data["players"]!.AsArray())
+        {
+            player!["nameObjectId"] = 37;
+            player["dyingScript"] = 0;
+            player["friendDeathScript"] = 0;
+        }
+        data["players"]![1]![slot] = 1;
+        if (reverse)
+        {
+            var first = data["players"]![0]!.DeepClone();
+            var second = data["players"]![1]!.DeepClone();
+            data["players"] = new JsonArray(second, first);
+        }
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("players[1]." + slot, error.Message);
+        Assert.Contains("same nameObjectId", error.Message);
+    }
+
+    [Fact]
+    public void JSON_duplicate_name_object_key_is_rejected()
+    {
+        var data = Data();
+        data["players"]![0]!["nameObjectId"] = 0;
+        string property = "\"nameObjectId\":0";
+        string duplicate = property + "," + property;
+        string json = data.ToJsonString().Replace(property, duplicate, StringComparison.Ordinal);
+        Assert.Contains(duplicate, json, StringComparison.Ordinal);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(json));
+        Assert.Contains("duplicate JSON key 'nameObjectId'", error.Message);
+    }
+
+    [Fact]
+    public void JSON_name_object_key_is_case_sensitive()
+    {
+        var data = Data();
+        data["players"]![0]!["nameObjectId"] = 0;
+        string json = data.ToJsonString().Replace("\"nameObjectId\":0", "\"NameObjectId\":0", StringComparison.Ordinal);
+        Assert.Contains("\"NameObjectId\":0", json, StringComparison.Ordinal);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(json));
+        Assert.Contains("unknown field 'NameObjectId'", error.Message);
     }
 
     private static TriggerBattleContent NamedParty(int? firstName, int? secondName, int dying, int friend)

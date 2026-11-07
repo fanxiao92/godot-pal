@@ -41,6 +41,124 @@ public class PrepareBattleDataTests
         AssertThat(Directory.GetFileSystemEntries(fixture.Output).Length).IsEqual(1);
     }
 
+    [TestCase("legacy")]
+    [TestCase("zero")]
+    [TestCase("word-max")]
+    [TestCase("alias")]
+    [TestCase("distinct-extremes")]
+    [TestCase("distinct")]
+    public void PublicPreparePreservesNameIdentityAndHookSeeds(string kind)
+    {
+        (int? first, int? second, int dying, int friend) = kind switch
+        {
+            "legacy" => ((int?)null, (int?)null, 0, 0),
+            "zero" => (0, 0, 0, 0),
+            "word-max" => (65535, 65535, 65535, 65535),
+            "alias" => (37, 37, 123, 456),
+            "distinct-extremes" => (0, 65535, 123, 456),
+            "distinct" => (36, 37, 123, 456),
+            _ => throw new ArgumentException(nameof(kind))
+        };
+        using var fixture = new Preparation();
+        var json = JsonNode.Parse(File.ReadAllText(fixture.Source))!;
+        foreach (string field in new[] { "roles", "players", "growth" })
+        {
+            var copy = json[field]![0]!.DeepClone(); copy["roleId"] = 4;
+            json[field]!.AsArray().Add(copy);
+        }
+        json["players"]![0]!["roleId"] = 4;
+        json["players"]![1]!["roleId"] = 1;
+        if (first.HasValue) json["players"]![0]!["nameObjectId"] = first.Value;
+        if (second.HasValue) json["players"]![1]!["nameObjectId"] = second.Value;
+        foreach (var player in json["players"]!.AsArray())
+        {
+            player!["dyingScript"] = dying;
+            player!["friendDeathScript"] = friend;
+        }
+        File.WriteAllText(fixture.Source, json.ToJsonString(), new System.Text.UTF8Encoding(false));
+        byte[] before = File.ReadAllBytes(fixture.Source);
+        string uri = PrepareBattleData.Prepare(fixture.Input, fixture.Output);
+        AssertThat(uri).IsEqual(ProjectSettings.LocalizePath(fixture.Output).TrimEnd('/') + "/BattleContent.tres");
+        var content = NativeBattleContent.Load(uri);
+        AssertThat(content.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 1 });
+        AssertThat(content.InitialRoles.Keys.ToArray()).IsEqual(new[] { 1, 4 });
+        AssertThat(content.GrowthByRole.Keys.ToArray()).IsEqual(new[] { 1, 4 });
+        AssertThat(content.Players[0].NameObjectId == first).IsTrue();
+        AssertThat(content.Players[1].NameObjectId == second).IsTrue();
+        AssertThat(content.Players.Select(player => player.DyingScript).ToArray()).IsEqual(new[] { dying, dying });
+        AssertThat(content.Players.Select(player => player.FriendDeathScript).ToArray()).IsEqual(new[] { friend, friend });
+        AssertThat(File.ReadAllBytes(fixture.Source)).IsEqual(before);
+        AssertThat(Directory.GetFileSystemEntries(fixture.Output).Length).IsEqual(1);
+        AssertThat(File.Exists(Path.Combine(fixture.Output, "BattleContent.tres"))).IsTrue();
+    }
+
+    [TestCase("null")]
+    [TestCase("true")]
+    [TestCase("false")]
+    [TestCase("string")]
+    [TestCase("fraction")]
+    [TestCase("decimal")]
+    [TestCase("negative")]
+    [TestCase("overflow")]
+    [TestCase("object")]
+    [TestCase("array")]
+    [TestCase("partial-first")]
+    [TestCase("partial-second")]
+    [TestCase("dying-forward")]
+    [TestCase("dying-reverse")]
+    [TestCase("friend-forward")]
+    [TestCase("friend-reverse")]
+    public void PublicPrepareRejectsInvalidNameMappingWithoutPublishing(string kind)
+    {
+        using var fixture = new Preparation();
+        var json = JsonNode.Parse(File.ReadAllText(fixture.Source))!;
+        foreach (string field in new[] { "roles", "players", "growth" })
+        {
+            var copy = json[field]![0]!.DeepClone(); copy["roleId"] = 4;
+            json[field]!.AsArray().Add(copy);
+        }
+        json["players"]![0]!["roleId"] = 4;
+        json["players"]![1]!["roleId"] = 1;
+        string? token = kind switch
+        {
+            "null" => "null", "true" => "true", "false" => "false", "string" => "\"0\"",
+            "fraction" => "1.5", "decimal" => "1.0", "negative" => "-1", "overflow" => "65536",
+            "object" => "{}", "array" => "[]", _ => null
+        };
+        string diagnostic;
+        if (token is not null)
+        {
+            json["players"]![0]!["nameObjectId"] = JsonNode.Parse(token);
+            diagnostic = "players[0].nameObjectId: expected integer in 0..65535";
+        }
+        else if (kind.StartsWith("partial-", StringComparison.Ordinal))
+        {
+            json["players"]![kind == "partial-first" ? 0 : 1]!["nameObjectId"] = 37;
+            diagnostic = "nameObjectId must be declared together for all players";
+        }
+        else
+        {
+            foreach (var player in json["players"]!.AsArray()) player!["nameObjectId"] = 37;
+            string slot = kind.StartsWith("dying-", StringComparison.Ordinal) ? "dyingScript" : "friendDeathScript";
+            json["players"]![1]![slot] = 1;
+            if (kind.EndsWith("-reverse", StringComparison.Ordinal))
+                json["players"] = new JsonArray(json["players"]!.AsArray().Reverse().Select(player => player!.DeepClone()).ToArray());
+            diagnostic = "players[1]." + slot + ": players with the same nameObjectId must declare identical " + slot + " seeds";
+        }
+        string text = json.ToJsonString();
+        if (token is not null)
+        {
+            // Validate the fixture before invoking Prepare: notably JSON null is present and 1.0 stays raw 1.0.
+            using var parsed = System.Text.Json.JsonDocument.Parse(text);
+            AssertThat(parsed.RootElement.GetProperty("players")[0].GetProperty("nameObjectId").GetRawText()).IsEqual(token);
+        }
+        File.WriteAllText(fixture.Source, text, new System.Text.UTF8Encoding(false));
+        byte[] before = File.ReadAllBytes(fixture.Source);
+        Reject(fixture.Input, fixture.Output, diagnostic);
+        AssertThat(File.ReadAllBytes(fixture.Source)).IsEqual(before);
+        AssertThat(Directory.Exists(fixture.Output)).IsFalse();
+    }
+
     [TestCase("magicPower", -1)]
     [TestCase("magicPower", 65536)]
     [TestCase("fleeRate", -1)]

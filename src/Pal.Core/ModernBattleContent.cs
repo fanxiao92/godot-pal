@@ -164,7 +164,7 @@ public static partial class ModernBattleContent
     private static ClassicBattlePlayer Player(JsonElement value, string path)
     {
         EventJson.Keys(value, path, ["roleId", "hp", "maxHp", "attack", "defense", "dexterity", "equipment",
-            "statuses", "poisons", "dyingScript", "friendDeathScript", "coveredByRoleId", "attackAll"], ["magicPower", "fleeRate"]);
+            "statuses", "poisons", "dyingScript", "friendDeathScript", "coveredByRoleId", "attackAll"], ["magicPower", "fleeRate", "nameObjectId"]);
         int hp = Number(value, "hp", path), maxHp = Number(value, "maxHp", path, 1);
         if (hp > maxHp) throw Error(path + ".hp", "must not exceed maxHp");
         var cover = Property(value, "coveredByRoleId", path);
@@ -174,6 +174,7 @@ public static partial class ModernBattleContent
             Equipment = Words(value, "equipment", path, 6), Statuses = Words(value, "statuses", path, 9),
             Poisons = Words(value, "poisons", path), DyingScript = Number(value, "dyingScript", path),
             FriendDeathScript = Number(value, "friendDeathScript", path),
+            NameObjectId = value.TryGetProperty("nameObjectId", out var name) ? Integer(name, path + ".nameObjectId", 0, 65535) : null,
             CoveredByRoleId = cover.ValueKind == JsonValueKind.Null ? null : Integer(cover, path + ".coveredByRoleId", 0, 5),
             AttackAll = Boolean(value, "attackAll", path),
             MagicPower = OptionalWord(value, "magicPower", path), FleeRate = OptionalWord(value, "fleeRate", path)

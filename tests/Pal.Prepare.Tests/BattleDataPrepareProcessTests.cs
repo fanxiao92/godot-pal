@@ -27,6 +27,11 @@ public sealed class BattleDataPrepareProcessTests : IDisposable
     [Fact]
     public async Task Normal_wrapper_runs_editor_and_publishes_native_only_without_changing_source_or_overwriting()
     {
+        var payload = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Source))!;
+        payload["players"]![0]!["nameObjectId"] = 0;
+        payload["players"]![0]!["dyingScript"] = 123;
+        payload["players"]![0]!["friendDeathScript"] = 456;
+        File.WriteAllText(Source, payload.ToJsonString());
         byte[] before = File.ReadAllBytes(Source);
         var prepared = await Wrapper("-InputPath", Input, "-OutputPath", output, "-GodotPath", Godot);
         Assert.True(prepared.ExitCode == 0, prepared.Text);

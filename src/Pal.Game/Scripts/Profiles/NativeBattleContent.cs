@@ -34,6 +34,8 @@ public static class NativeBattleContent
             {
                 if (!player.HasCoveredByRoleId && player.CoveredByRoleId != 0)
                     throw new InvalidDataException("Player.CoveredByRoleId must be 0 when HasCoveredByRoleId is false");
+                if (!player.HasNameObjectId && player.NameObjectId != 0)
+                    throw new InvalidDataException("Player.NameObjectId must be 0 when HasNameObjectId is false");
                 return ReadPlayer(player);
             }).ToArray();
             var growth = new Dictionary<int, ClassicBattleGrowthData>();
@@ -57,8 +59,6 @@ public static class NativeBattleContent
     public static PalBattleContent Write(TriggerBattleContent content)
     {
         ModernBattleContent.Validate(content);
-        if (content.Players.Any(player => player.NameObjectId.HasValue))
-            throw new InvalidDataException("nameObjectId native transport is not supported");
         return new()
         {
             FormatVersion = 1,
@@ -110,6 +110,7 @@ public static class NativeBattleContent
     {
         Equipment = Copy(x.Equipment, "Player.Equipment"), Statuses = Copy(x.Statuses, "Player.Statuses"), Poisons = Copy(x.Poisons, "Player.Poisons"),
         DyingScript = x.DyingScript, FriendDeathScript = x.FriendDeathScript,
+        NameObjectId = x.HasNameObjectId ? x.NameObjectId : null,
         MagicPower = x.MagicPower, FleeRate = x.FleeRate,
         CoveredByRoleId = x.HasCoveredByRoleId ? x.CoveredByRoleId : null, AttackAll = x.AttackAll
     };
@@ -119,6 +120,7 @@ public static class NativeBattleContent
         RoleId = x.RoleId, Hp = x.Hp, MaxHp = x.MaxHp, Attack = x.Attack, Defense = x.Defense, Dexterity = x.Dexterity,
         Equipment = x.Equipment.ToArray(), Statuses = x.Statuses.ToArray(), Poisons = x.Poisons.ToArray(),
         DyingScript = x.DyingScript, FriendDeathScript = x.FriendDeathScript,
+        HasNameObjectId = x.NameObjectId.HasValue, NameObjectId = x.NameObjectId ?? 0,
         MagicPower = x.MagicPower, FleeRate = x.FleeRate,
         HasCoveredByRoleId = x.CoveredByRoleId.HasValue, CoveredByRoleId = x.CoveredByRoleId ?? 0, AttackAll = x.AttackAll
     };

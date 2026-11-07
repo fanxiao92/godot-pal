@@ -2,13 +2,17 @@
 
 状态：纯 Core `ModernBattleContent.Parse(string)` → 既有 `TriggerBattleContent`，及独立 typed native Resource 编解码 `NativeBattleContent.Write/CreateCore/Load` 已实现。Core 不读文件、不抽 RNG、不创建战斗或模拟获胜；native runtime 不重读 JSON。显式离线 `PrepareBattleData.Prepare`、Editor scene 和正常 PowerShell wrapper 也已交付（见下方准备契约）；**数值准备不是完整人工 package 或 Main 资源链**。Core 测试字符串与可提交 `tests/Fixtures/ModernBattleData/battle-data.json` 均为独立人工数值，不是完整 storypackage 或原版认证。冻结的真实 `first-mandatory-battle-pre-trigger-v1`、envelope/provenance 和 owner28 `@09C3` gate 均未改动。
 
-## 显式角色名字对象 typed 声明与原生写入边界（#158 A1/A2）
+## 显式角色名字对象声明与 JSON/native 运输（#158 / #159）
 
 `ClassicBattlePlayer.NameObjectId` 是非位置构造参数的可选 `int?` 声明，默认 null 表示旧内容未声明映射；0 与 65535 都是合法对象编号，不把0当作缺省哨兵。参考 `fight.c` 的濒死/友亡检查，角色以名字编号选择全局对象，不能用 RoleId、队伍位置或相等的脚本入口反推对象身份。
 
 公开纯格式验证 `ModernBattleContent.Validate` 要求一份内容的全部 player 同时声明映射或全部省略；已声明值必须为 WORD。相同名字对象必须声明完全相同的两个初始脚本入口（包括0），任一槽冲突即带对应 player/字段路径拒绝；不同名字对象即使两个入口相同也保持不同身份。现有防御复制、单角色兼容投影与 record-with 保留该可空值。原有未声明映射的构造和验证不变。
 
-**此处只提供 typed 声明与原生写入 fail-closed 边界，不开放运输或运行时 owner。** 本切片不修改 JSON reader，`nameObjectId` 仍是被拒绝的未知 JSON 字段；也不新增 native 导出字段。`NativeBattleContent.Write` 先执行纯格式验证，再在创建任何 native Resource 之前，明确拒绝任一 player 已声明 `NameObjectId` 的内容（包括合法0与65535），错误包含 `nameObjectId`、`transport` 与 `not supported`，不静默丢值。全部未声明的 legacy 内容继续沿既有 Write/CreateCore/Load 路径；带声明内容仍不是可提交的生产原生输入。下一票才同时接通严格 JSON 与 native 运输，避免 Parse 接受后被旧 writer 丢失身份。旧 JSON/native 资源不自动推断或迁移真实名字编号。代码与回归用例不替代整票实际 native 验证、独立复核及集成收据。
+JSON player 可选精确字段 `nameObjectId`：缺席才表示 legacy null，字段出现时必须为非 null 的 WORD 整数，拒绝布尔、字符串、小数、`1.0`、负数、越界、对象及数组。既有 Ordinal 未知键与递归重复键规则不变，`NameObjectId` 不是此字段的别名。JSON 与 native 运输在同一 #159 交付中接通；不能把内部 Parse 已接受、native 仍 fail-closed 的检查点当成交付。旧 v1 JSON 省略字段仍兼容，但不保证旧严格 JSON reader 接受新字段。
+
+原生 `PalBattlePlayer` 以导出 `HasNameObjectId=false` 和 `NameObjectId=0` 表达可空值。`Write` 先执行完整纯格式验证，再写出 has/value 和两个 hook WORD；原 #158 的 unsupported-transport guard 仅在读写两端同时接通后移除。`CreateCore` 在忽略未声明值之前显式拒绝 false+nonzero；true 时的 WORD 范围、全员映射及同名字两槽种子冲突复用原 Core 验证，错误仍带选中 identity 和字段信息。`CreateCore/Load` 返回独立防御复制，不保留可变 Resource alias。原生格式仍为1；两项新导出均缺席的旧 player 资源依默认 false/0 读为 null，保留既有 hook WORD，不推断或迁移真实名字编号。
+
+**这里仅运输被动元数据，不开放运行时 owner。** 实现与用例本身不替代 #159 实际 native/Prepare 执行、整票独立复核及本地集成收据。
 
 本声明验证不读写 world，不建立活脚本表，不改变钩子检测/完成或保存返回入口；live owner、0090、跨战斗/新执行器共享和真正 root-return 写回仍需后续前置与 #129 单独交付。人工声明不等于原版真实数据绑定，Core Unit 也不等于 native、Prepare、Main 或完整 M6 验收。
 
@@ -18,7 +22,7 @@
 
 - JSON 不允许注释、尾逗号、重复键（即使值相同）、非有限数字。每层仅接受下表字段；下划线开头的注释字段可忽略，但其中的重复键仍拒绝。键与七项 hidden 名称按 Ordinal 大小写精确匹配。
 - `WORD` 是整数 `0..65535`，不接受字符串、布尔、null、小数或 `1.0` 记法；signed WORD 为 `-32768..32767`。bool 只接受 JSON true/false。
-- 下述所有字段都必填，只有 player cover **值**允许 null；字段本身不能缺失。零、空列表也须显式声明，不能因缺数据就推断没有装备、钩子或成长。
+- 除明确标注可选的字段/section（包括 player `nameObjectId`）外，下述字段都必填；player cover **值**允许 null，但 cover 字段本身不能缺失。`nameObjectId` 出现时不允许 null。零、空列表也须显式声明，不能因缺数据就推断没有装备、钩子或成长。
 - 结构/范围错误为 `InvalidDataException`，带 `battle-data.json.$` 及对象/字段路径（例如 `teams[1].teamId`）；复用的递归重复键诊断带父字段路径及重复键名，数组内该诊断不带索引。语法错误保留原 `JsonException` 为 inner exception。
 
 `roles`、`players`、`growth` 和每队的 `enemies` 都保留数组 shape；当前到单角色 typed content 的 binding **明确仅接受恰好一项**，空项、多项（包括重复角色/战内 target ID）都拒绝，不挑第一项、不默默丢弃。`teams` 可多项且非空，teamId 必须唯一。未来 #47 可沿数组扩展 typed binding 与能力，不需要改成另一套格式；**当前未实现多角色/多敌引擎**。
@@ -48,6 +52,7 @@
 | `equipment`, `statuses` | 分别恰好6、9项WORD，显式能力输入，不从role悄悄推断 |
 | `poisons` | 显式WORD数组；既有typed模型未定义固定毒槽宽，本格式不臆造宽度 |
 | `dyingScript`, `friendDeathScript` | WORD |
+| `nameObjectId` | 可选非 null WORD；省略表示未声明，所有 player 必须同时声明或同时省略；同名字对象的两个 hook 种子分别相等 |
 | `coveredByRoleId` | null或整数0..5；combat模型以null表示没有实际cover，不能将snapshot存储的角色编号0直接当作该null。当前能力预检只接受此字段为null |
 | `attackAll` | bool |
 
@@ -90,12 +95,12 @@
 Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
 
 - `Write(TriggerBattleContent)` 先格式验证，再创建独立 `PalBattleContent` 资源；不写文件、不准备完整包。
-- `CreateCore(PalBattleContent, string identity = "native battle content")` 严格检查根版本、数组 shape、nested null、growth role identity、重复 team ID、canonical cover，再复制字段并做 Core 格式验证。输出的所有 nested 集合独立且只读，不保留可变 Godot Resource alias。
+- `CreateCore(PalBattleContent, string identity = "native battle content")` 严格检查根版本、数组 shape、nested null、growth role identity、重复 team ID、canonical cover 及 canonical Name has/value，再复制字段并做 Core 格式验证。输出的所有 nested 集合独立且只读，不保留可变 Godot Resource alias。
 - `Load(string uri)` 仅接受规范 `res://` URI，要求存在且类型为 `PalBattleContent`，用 `ResourceLoader.CacheMode.IgnoreDeep` 后走同一个 CreateCore。错误带选中 URI。它不读 `battle-data.json`、M1、原档或 MKF，也不解释 JSON blob。
 
 根 `[GlobalClass] PalBattleContent` 的导出字段是显式存储的 `FormatVersion=1`（资源默认值为 invalid `-1`，正式 Write 赋1；ResourceSaver 必须写出版本，缺失版本不得继承为 v1）、`Roles: PalBattleRole[]`、`Players: PalBattlePlayer[]`、`Growth: PalBattleGrowth[]`、`Teams: PalBattleTeam[]`。前三组及每队 `Enemies: PalBattleEnemy[]` 当前必须恰好一项，team 非空且 ID 唯一；保留数组形式不代表 #47 多人能力已实现。Role/primary/hidden XP 复用 #45 的原生类型与最小共享 `NativeBattleRoleAdapter`；共享 adapter 只转换/检查必要 null，不把本格式/单角色/能力限制施加到旧 frozen envelope。
 
-新增 player/enemy 资源逐项导出 Core 的全部字段（名字对应 PascalCase；enemy 的 attack/defense/dexterity 仍为 signed offset）。`PalBattleGrowth` 显式导出 `RoleId`、100 项 `LevelUpExperience`、完整有序 `PalBattleLearnableMagic[] LevelUpMagics`（`Level/MagicId`）；不排序去重。player 的 nullable cover 用 `HasCoveredByRoleId` 加整数 `CoveredByRoleId`：false 时值必须为0，true 时0..5；true+0 是实际 role0，不等同 null。role snapshot 的 CoveredByRoleId 继续保留原编号，不当作无 cover sentinel。
+新增 player/enemy 资源逐项导出 Core 的全部字段（名字对应 PascalCase；enemy 的 attack/defense/dexterity 仍为 signed offset）。`PalBattleGrowth` 显式导出 `RoleId`、100 项 `LevelUpExperience`、完整有序 `PalBattleLearnableMagic[] LevelUpMagics`（`Level/MagicId`）；不排序去重。player 的 nullable cover 用 `HasCoveredByRoleId` 加整数 `CoveredByRoleId`：false 时值必须为0，true 时0..5；true+0 是实际 role0，不等同 null。role snapshot 的 CoveredByRoleId 继续保留原编号，不当作无 cover sentinel。player 的 nullable Name 同样用 `HasNameObjectId/NameObjectId` 表示：false+0 是未声明，true+0 是真实名字对象0；false+nonzero 必须拒绝，true 的 WORD/共享种子规则见上节。
 
 数值资源没有 profile/source/人工开关、来源认证或 storyprofile hash。本 codec 不能证明源数据完整性、图像/语言/事件闭包或资源来源。显式离线数值生产准备入口现已追加，契约见下节；Main 从不自动 prepare，也没有新增 CLI 作者命令。
 

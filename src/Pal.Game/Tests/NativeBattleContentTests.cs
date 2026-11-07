@@ -111,7 +111,7 @@ public class NativeBattleContentTests
     }
 
     [TestCase]
-    public void WriteRejectsDeclaredNameObjectIdZeroBeforeNativeTransport()
+    public void NameObjectIdZeroSurvivesNativeRoundtrip()
     {
         var initial = Data();
         var content = new TriggerBattleContent([initial.InitialRole with { RoleId = 4 }, initial.InitialRole],
@@ -119,27 +119,11 @@ public class NativeBattleContentTests
                 initial.Player with { NameObjectId = 0, DyingScript = 123, FriendDeathScript = 456 }],
             new Dictionary<int, ClassicBattleGrowthData> { [4] = initial.Growth, [1] = initial.Growth },
             initial.EnemyTeams);
-        ModernBattleContent.Validate(content);
-        AssertThat(content.Players.Count).IsEqual(2);
-        AssertThat(content.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 1 });
-        AssertThat(content.InitialRoles.Keys.ToArray()).IsEqual(new[] { 4, 1 });
-        AssertThat(content.GrowthByRole.Keys.ToArray()).IsEqual(new[] { 4, 1 });
-        AssertThat(content.Players[0].NameObjectId == 0).IsTrue();
-        AssertThat(content.Players[1].NameObjectId == 0).IsTrue();
-        AssertThat(content.Players.Select(player => player.DyingScript).ToArray()).IsEqual(new[] { 123, 123 });
-        AssertThat(content.Players.Select(player => player.FriendDeathScript).ToArray()).IsEqual(new[] { 456, 456 });
-        InvalidDataException? rejection = null;
-        try { using var native = NativeBattleContent.Write(content); }
-        catch (InvalidDataException caught) { rejection = caught; }
-        AssertThat(rejection is not null).OverrideFailureMessage("Native Write must reject declared nameObjectId 0 before allocating native Resources; transport is not supported.").IsTrue();
-        if (rejection is null) return;
-        AssertThat(rejection.Message.Contains("nameObjectId", StringComparison.Ordinal)).IsTrue();
-        AssertThat(rejection.Message.Contains("transport", StringComparison.Ordinal)).IsTrue();
-        AssertThat(rejection.Message.Contains("not supported", StringComparison.Ordinal)).IsTrue();
+        AssertNameNativeRoundtrip(content, 0, 0);
     }
 
     [TestCase]
-    public void WriteRejectsDeclaredNameObjectId65535BeforeNativeTransport()
+    public void NameObjectId65535SurvivesNativeRoundtrip()
     {
         var initial = Data();
         var content = new TriggerBattleContent([initial.InitialRole with { RoleId = 4 }, initial.InitialRole],
@@ -147,23 +131,124 @@ public class NativeBattleContentTests
                 initial.Player with { NameObjectId = 65535, DyingScript = 123, FriendDeathScript = 456 }],
             new Dictionary<int, ClassicBattleGrowthData> { [4] = initial.Growth, [1] = initial.Growth },
             initial.EnemyTeams);
-        ModernBattleContent.Validate(content);
-        AssertThat(content.Players.Count).IsEqual(2);
-        AssertThat(content.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 1 });
-        AssertThat(content.InitialRoles.Keys.ToArray()).IsEqual(new[] { 4, 1 });
-        AssertThat(content.GrowthByRole.Keys.ToArray()).IsEqual(new[] { 4, 1 });
-        AssertThat(content.Players[0].NameObjectId == 65535).IsTrue();
-        AssertThat(content.Players[1].NameObjectId == 65535).IsTrue();
-        AssertThat(content.Players.Select(player => player.DyingScript).ToArray()).IsEqual(new[] { 123, 123 });
-        AssertThat(content.Players.Select(player => player.FriendDeathScript).ToArray()).IsEqual(new[] { 456, 456 });
-        InvalidDataException? rejection = null;
-        try { using var native = NativeBattleContent.Write(content); }
-        catch (InvalidDataException caught) { rejection = caught; }
-        AssertThat(rejection is not null).OverrideFailureMessage("Native Write must reject declared nameObjectId 65535 before allocating native Resources; transport is not supported.").IsTrue();
-        if (rejection is null) return;
-        AssertThat(rejection.Message.Contains("nameObjectId", StringComparison.Ordinal)).IsTrue();
-        AssertThat(rejection.Message.Contains("transport", StringComparison.Ordinal)).IsTrue();
-        AssertThat(rejection.Message.Contains("not supported", StringComparison.Ordinal)).IsTrue();
+        AssertNameNativeRoundtrip(content, 65535, 65535);
+    }
+
+    [TestCase("alias")]
+    [TestCase("distinct-extremes")]
+    [TestCase("distinct")]
+    public void NameObjectAliasesAndDistinctNamesSurviveNativeRoundtrip(string kind)
+    {
+        var (first, second) = kind switch
+        {
+            "alias" => (37, 37),
+            "distinct-extremes" => (0, 65535),
+            "distinct" => (36, 37),
+            _ => throw new ArgumentException(nameof(kind))
+        };
+        var initial = Data();
+        var content = new TriggerBattleContent([initial.InitialRole with { RoleId = 4 }, initial.InitialRole],
+            [initial.Player with { RoleId = 4, NameObjectId = first, DyingScript = 123, FriendDeathScript = 456 },
+                initial.Player with { NameObjectId = second, DyingScript = 123, FriendDeathScript = 456 }],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = initial.Growth, [1] = initial.Growth },
+            initial.EnemyTeams);
+        AssertNameNativeRoundtrip(content, first, second);
+    }
+
+    [TestCase]
+    public void NameObjectNativeCanonicalValueRejects()
+    {
+        using var native = NativeBattleContent.Write(Data());
+        AssertThat(native.Players[0].HasNameObjectId).IsFalse();
+        AssertThat(native.Players[0].NameObjectId).IsEqual(0);
+        native.Players[0].NameObjectId = 7;
+        AssertNameNativeRejection(native, "Player.NameObjectId", "HasNameObjectId");
+    }
+
+    [TestCase(-1)]
+    [TestCase(65536)]
+    public void NameObjectNativeWordValueRejects(int value)
+    {
+        using var native = NativeBattleContent.Write(Data());
+        native.Players[0].HasNameObjectId = true;
+        native.Players[0].NameObjectId = value;
+        AssertNameNativeRejection(native, "players[0].nameObjectId", "0..65535");
+    }
+
+    [TestCase(0)]
+    [TestCase(1)]
+    public void NameObjectNativePartialMappingRejects(int mappedIndex)
+    {
+        var initial = Data();
+        var content = new TriggerBattleContent([initial.InitialRole with { RoleId = 4 }, initial.InitialRole],
+            [initial.Player with { RoleId = 4 }, initial.Player],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = initial.Growth, [1] = initial.Growth },
+            initial.EnemyTeams);
+        using var native = NativeBattleContent.Write(content);
+        native.Players[mappedIndex].HasNameObjectId = true;
+        native.Players[mappedIndex].NameObjectId = 37;
+        AssertNameNativeRejection(native, "players", "nameObjectId", "declared together");
+    }
+
+    [TestCase("dying-forward")]
+    [TestCase("dying-reverse")]
+    [TestCase("friend-forward")]
+    [TestCase("friend-reverse")]
+    public void NameObjectNativeConflictingSeedsRejects(string kind)
+    {
+        var initial = Data();
+        var content = new TriggerBattleContent([initial.InitialRole with { RoleId = 4 }, initial.InitialRole],
+            [initial.Player with { RoleId = 4 }, initial.Player],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = initial.Growth, [1] = initial.Growth },
+            initial.EnemyTeams);
+        using var native = NativeBattleContent.Write(content);
+        foreach (var player in native.Players)
+        {
+            player.HasNameObjectId = true;
+            player.NameObjectId = 37;
+        }
+        bool dying = kind.StartsWith("dying-", StringComparison.Ordinal);
+        if (dying) native.Players[1].DyingScript = 1;
+        else native.Players[1].FriendDeathScript = 1;
+        if (kind.EndsWith("-reverse", StringComparison.Ordinal)) native.Players = native.Players.Reverse().ToArray();
+        AssertNameNativeRejection(native, dying ? "players[1].dyingScript" : "players[1].friendDeathScript", "same nameObjectId");
+    }
+
+    [TestCase]
+    public void LegacyNativePlayerWithoutNameExportsRemainsUnmapped()
+    {
+        // Write a legacy valid source first: the A guard must not prevent constructing this fixture.
+        using var native = NativeBattleContent.Write(Data());
+        native.Players[0].HasNameObjectId = true;
+        native.Players[0].NameObjectId = 37;
+        native.Players[0].DyingScript = 123;
+        native.Players[0].FriendDeathScript = 456;
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/LegacyName.tres";
+            AssertThat(ResourceSaver.Save(native, uri)).IsEqual(Error.Ok);
+            string path = ProjectSettings.GlobalizePath(uri);
+            string[] lines = File.ReadAllLines(path);
+            string declaration = lines.Single(line => line.StartsWith("[ext_resource ", StringComparison.Ordinal)
+                && line.Contains("path=\"res://Scripts/Resources/PalBattlePlayer.cs\"", StringComparison.Ordinal));
+            string scriptId = declaration.Split(" id=\"", StringSplitOptions.None)[1].Split('"')[0];
+            int scriptLine = Array.IndexOf(lines, "script = ExtResource(\"" + scriptId + "\")");
+            AssertThat(scriptLine >= 0).IsTrue();
+            int start = Array.FindLastIndex(lines, scriptLine, line => line.StartsWith("[sub_resource ", StringComparison.Ordinal));
+            int end = Array.FindIndex(lines, scriptLine + 1, line => line.StartsWith("[", StringComparison.Ordinal));
+            AssertThat(start >= 0 && end > scriptLine).IsTrue();
+            string[] legacy = lines.Where((line, index) => index < start || index >= end
+                || (!line.StartsWith("HasNameObjectId =", StringComparison.Ordinal) && !line.StartsWith("NameObjectId =", StringComparison.Ordinal))).ToArray();
+            AssertThat(lines.Length - legacy.Length).IsEqual(2);
+            File.WriteAllLines(path, legacy);
+            var loaded = NativeBattleContent.Load(uri);
+            AssertThat(loaded.Player.NameObjectId is null).IsTrue();
+            AssertThat(loaded.Player.DyingScript).IsEqual(123);
+            AssertThat(loaded.Player.FriendDeathScript).IsEqual(456);
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
     }
 
     [TestCase(100)]
@@ -516,6 +601,56 @@ public class NativeBattleContentTests
         AssertThat(script.PendingBattle is null).IsTrue();
         AssertThat(script.Caller).IsEqual(0);
         AssertThat(random.Draws).IsEqual(0);
+    }
+
+    private static void AssertNameNativeRoundtrip(TriggerBattleContent content, int first, int second)
+    {
+        ModernBattleContent.Validate(content);
+        using var native = NativeBattleContent.Write(content);
+        AssertThat(native.Players.All(player => player.HasNameObjectId)).IsTrue();
+        AssertThat(native.Players.Select(player => player.NameObjectId).ToArray()).IsEqual(new[] { first, second });
+        AssertThat(native.Players.Select(player => player.DyingScript).ToArray()).IsEqual(new[] { 123, 123 });
+        AssertThat(native.Players.Select(player => player.FriendDeathScript).ToArray()).IsEqual(new[] { 456, 456 });
+        var decoded = NativeBattleContent.CreateCore(native);
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/Name.tres";
+            AssertThat(ResourceSaver.Save(native, uri)).IsEqual(Error.Ok);
+            var loaded = NativeBattleContent.Load(uri);
+            native.Players[0].HasNameObjectId = false;
+            native.Players[0].NameObjectId = 39;
+            native.Players[0].DyingScript = 9;
+            native.Players[0].FriendDeathScript = 9;
+            native.Players[0].Equipment[0] = 99;
+            native.Roles[0].Equipment[0] = 99;
+            foreach (var copy in new[] { content, decoded, loaded, NativeBattleContent.Load(uri) })
+            {
+                AssertThat(copy.Players.Count).IsEqual(2);
+                AssertThat(copy.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 1 });
+                AssertThat(copy.InitialRoles.Keys.ToArray()).IsEqual(new[] { 4, 1 });
+                AssertThat(copy.GrowthByRole.Keys.ToArray()).IsEqual(new[] { 4, 1 });
+                AssertThat(copy.Players[0].NameObjectId == first).IsTrue();
+                AssertThat(copy.Players[1].NameObjectId == second).IsTrue();
+                AssertThat(copy.Players.Select(player => player.DyingScript).ToArray()).IsEqual(new[] { 123, 123 });
+                AssertThat(copy.Players.Select(player => player.FriendDeathScript).ToArray()).IsEqual(new[] { 456, 456 });
+                AssertThat(copy.Players[0].Equipment[0]).IsEqual(0);
+                AssertThat(copy.InitialRoles[4].Equipment[0]).IsEqual(0);
+            }
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
+    private static void AssertNameNativeRejection(PalBattleContent native, params string[] causes)
+    {
+        InvalidDataException? error = null;
+        try { NativeBattleContent.CreateCore(native, "selected-name.tres"); }
+        catch (InvalidDataException caught) { error = caught; }
+        AssertThat(error is not null).OverrideFailureMessage("CreateCore must reject the declared native Name mapping, not silently ignore exported fields.").IsTrue();
+        if (error is null) return;
+        AssertThat(error.Message.Contains("selected-name.tres", StringComparison.Ordinal)).IsTrue();
+        foreach (string cause in causes) AssertThat(error.Message.Contains(cause, StringComparison.Ordinal)).IsTrue();
     }
 
     private static TriggerScriptSession Script(TriggerBattleContent content, BattleRandom random)
