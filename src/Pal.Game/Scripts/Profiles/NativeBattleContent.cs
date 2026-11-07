@@ -57,6 +57,8 @@ public static class NativeBattleContent
     public static PalBattleContent Write(TriggerBattleContent content)
     {
         ModernBattleContent.Validate(content);
+        if (content.Players.Any(player => player.NameObjectId.HasValue))
+            throw new InvalidDataException("nameObjectId native transport is not supported");
         return new()
         {
             FormatVersion = 1,

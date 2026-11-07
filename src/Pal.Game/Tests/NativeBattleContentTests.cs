@@ -110,6 +110,62 @@ public class NativeBattleContentTests
         finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
     }
 
+    [TestCase]
+    public void WriteRejectsDeclaredNameObjectIdZeroBeforeNativeTransport()
+    {
+        var initial = Data();
+        var content = new TriggerBattleContent([initial.InitialRole with { RoleId = 4 }, initial.InitialRole],
+            [initial.Player with { RoleId = 4, NameObjectId = 0, DyingScript = 123, FriendDeathScript = 456 },
+                initial.Player with { NameObjectId = 0, DyingScript = 123, FriendDeathScript = 456 }],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = initial.Growth, [1] = initial.Growth },
+            initial.EnemyTeams);
+        ModernBattleContent.Validate(content);
+        AssertThat(content.Players.Count).IsEqual(2);
+        AssertThat(content.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 1 });
+        AssertThat(content.InitialRoles.Keys.ToArray()).IsEqual(new[] { 4, 1 });
+        AssertThat(content.GrowthByRole.Keys.ToArray()).IsEqual(new[] { 4, 1 });
+        AssertThat(content.Players[0].NameObjectId == 0).IsTrue();
+        AssertThat(content.Players[1].NameObjectId == 0).IsTrue();
+        AssertThat(content.Players.Select(player => player.DyingScript).ToArray()).IsEqual(new[] { 123, 123 });
+        AssertThat(content.Players.Select(player => player.FriendDeathScript).ToArray()).IsEqual(new[] { 456, 456 });
+        InvalidDataException? rejection = null;
+        try { using var native = NativeBattleContent.Write(content); }
+        catch (InvalidDataException caught) { rejection = caught; }
+        AssertThat(rejection is not null).OverrideFailureMessage("Native Write must reject declared nameObjectId 0 before allocating native Resources; transport is not supported.").IsTrue();
+        if (rejection is null) return;
+        AssertThat(rejection.Message.Contains("nameObjectId", StringComparison.Ordinal)).IsTrue();
+        AssertThat(rejection.Message.Contains("transport", StringComparison.Ordinal)).IsTrue();
+        AssertThat(rejection.Message.Contains("not supported", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [TestCase]
+    public void WriteRejectsDeclaredNameObjectId65535BeforeNativeTransport()
+    {
+        var initial = Data();
+        var content = new TriggerBattleContent([initial.InitialRole with { RoleId = 4 }, initial.InitialRole],
+            [initial.Player with { RoleId = 4, NameObjectId = 65535, DyingScript = 123, FriendDeathScript = 456 },
+                initial.Player with { NameObjectId = 65535, DyingScript = 123, FriendDeathScript = 456 }],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = initial.Growth, [1] = initial.Growth },
+            initial.EnemyTeams);
+        ModernBattleContent.Validate(content);
+        AssertThat(content.Players.Count).IsEqual(2);
+        AssertThat(content.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 1 });
+        AssertThat(content.InitialRoles.Keys.ToArray()).IsEqual(new[] { 4, 1 });
+        AssertThat(content.GrowthByRole.Keys.ToArray()).IsEqual(new[] { 4, 1 });
+        AssertThat(content.Players[0].NameObjectId == 65535).IsTrue();
+        AssertThat(content.Players[1].NameObjectId == 65535).IsTrue();
+        AssertThat(content.Players.Select(player => player.DyingScript).ToArray()).IsEqual(new[] { 123, 123 });
+        AssertThat(content.Players.Select(player => player.FriendDeathScript).ToArray()).IsEqual(new[] { 456, 456 });
+        InvalidDataException? rejection = null;
+        try { using var native = NativeBattleContent.Write(content); }
+        catch (InvalidDataException caught) { rejection = caught; }
+        AssertThat(rejection is not null).OverrideFailureMessage("Native Write must reject declared nameObjectId 65535 before allocating native Resources; transport is not supported.").IsTrue();
+        if (rejection is null) return;
+        AssertThat(rejection.Message.Contains("nameObjectId", StringComparison.Ordinal)).IsTrue();
+        AssertThat(rejection.Message.Contains("transport", StringComparison.Ordinal)).IsTrue();
+        AssertThat(rejection.Message.Contains("not supported", StringComparison.Ordinal)).IsTrue();
+    }
+
     [TestCase(100)]
     [TestCase(20)]
     public void NumericContentSavesLoadsAndCompletesRealLifecycle(int hp)
