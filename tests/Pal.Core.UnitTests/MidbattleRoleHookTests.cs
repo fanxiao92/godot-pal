@@ -280,6 +280,68 @@ public sealed class MidbattleRoleHookTests
     }
 
     [Theory]
+    [InlineData("changeHp", 27)]
+    [InlineData("changeMp", 28)]
+    public void Friend_death_single_role_no_op_HP_or_MP_clears_script_success(string operation, int opcode)
+    {
+        // script.c 0x001B/0x001C: single-role failure clears success when neither word changes.
+        var fixture = Fixture();
+        fixture.Commands[38] = ChangeHp(38, 0);
+        fixture.Commands[38]!["op"] = operation;
+        fixture.Commands[38]!["source"]!["opcode"] = opcode;
+        var events = fixture.Load();
+        var command = events.GetCommandContent(38);
+        Assert.Equal(operation, command.GetProperty("op").GetString());
+        Assert.Equal(0, command.GetProperty("scope").GetInt32());
+        Assert.Equal(0, command.GetProperty("amount").GetInt32());
+        Assert.Equal("L0027", command.GetProperty("next").GetString());
+        Assert.Equal(opcode, events.GetSource(38).Opcode);
+        Assert.Equal(new[] { 0, 0, 0 }, events.GetSource(38).Operands);
+        var random = new ScriptedRandom(
+            [.. Queue3, .. EnemyHit1, I(1, 100, 74), I(1, 100, 65), I(1, 100, 49)]);
+        var script = new TriggerScriptSession(events, Language(), Content(40), random);
+        script.Start("hooks", "npc", 28);
+        Assert.True(script.ScriptSuccess);
+        var battle = script.PendingBattle!;
+        battle.Lifecycle.SelectAttack(0, 0);
+        battle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(battle.Lifecycle.ResolveNextAction());
+        var hook = new ClassicBattleRoleHook(ClassicBattleHookKind.FriendDeath, 0, 0, 31);
+        Assert.Equal(hook, script.PendingBattleHook);
+        Assert.Equal(ClassicBattlePhase.RoleHook, battle.Lifecycle.Current.Combat.Phase);
+        Assert.Equal(0, battle.Lifecycle.Current.Combat.Players[1].Hp);
+        Assert.Equal((100, 200, 20, 50),
+            (battle.Lifecycle.Current.Roles[0].Hp, battle.Lifecycle.Current.Roles[0].MaxHp,
+                battle.Lifecycle.Current.Roles[0].Mp, battle.Lifecycle.Current.Roles[0].MaxMp));
+        script.StartBattleHook();
+        Assert.Equal(hook, script.RunningBattleHook);
+        Assert.Equal(0, script.Caller);
+        Assert.True(script.ScriptSuccess);
+        Assert.Equal(23, script.PendingDisplay!.Content.StartMessageId);
+        FinishDisplay(script);
+        Assert.Same(battle, script.PendingBattle);
+        Assert.Equal(hook, script.RunningBattleHook);
+        Assert.Equal(24, script.PendingDisplay!.Content.StartMessageId);
+        Assert.Equal((100, 20), (battle.Lifecycle.Current.Roles[0].Hp, battle.Lifecycle.Current.Roles[0].Mp));
+        Assert.Equal(100, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.True(script.ScriptSuccess);
+        FinishDisplay(script);
+        Assert.Same(battle, script.PendingBattle);
+        Assert.Null(script.PendingDisplay);
+        Assert.Null(script.RunningBattleHook);
+        Assert.Null(script.PendingBattleHook);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        Assert.Equal(28, script.Caller);
+        Assert.Equal(ClassicBattlePhase.Resolving, battle.Lifecycle.Current.Combat.Phase);
+        Assert.Null(battle.Lifecycle.Completion);
+        Assert.Equal((100, 20), (battle.Lifecycle.Current.Roles[0].Hp, battle.Lifecycle.Current.Roles[0].Mp));
+        Assert.Equal(100, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.Equal(2, battle.Lifecycle.Current.Combat.Players[0].BoostAttack);
+        random.AssertExhausted();
+        Assert.False(script.ScriptSuccess, $"RoleHook no-op {operation} must clear script success.");
+    }
+
+    [Theory]
     [InlineData("74,65,49", 200, 20, 2, 0, 0, 0)] // fall-through path1: +9999 HP clamps at 200, attack +5%
     [InlineData("100", 100, 50, 0, 6, 0, 0)]     // path2: +9999 MP clamps at 50, magicPower +10% of 64
     [InlineData("74,66", 100, 20, 10, 16, 0, 0)] // path3: attack +25%, magicPower +25%

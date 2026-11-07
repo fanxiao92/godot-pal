@@ -479,8 +479,10 @@ public sealed class TriggerScriptSession
                 case "changeMp" when _battleHook is not null:
                     if (command.Scope != 0)
                         throw new InvalidDataException($"{command.Position}: party-wide {command.Op} is unsupported; the role hook applies to its caller.");
-                    if (command.Op == "changeHp") PendingBattle!.Lifecycle.ApplyRoleHookHp(_battleHook.PartyIndex, command.Amount);
-                    else PendingBattle!.Lifecycle.ApplyRoleHookMp(_battleHook.PartyIndex, command.Amount);
+                    bool roleHookChanged = command.Op == "changeHp"
+                        ? PendingBattle!.Lifecycle.ApplyRoleHookHp(_battleHook.PartyIndex, command.Amount)
+                        : PendingBattle!.Lifecycle.ApplyRoleHookMp(_battleHook.PartyIndex, command.Amount);
+                    if (!roleHookChanged) ScriptSuccess = false;
                     _address = Next(command);
                     break;
                 case "boostStat" when _battleHook is not null:

@@ -295,38 +295,29 @@ public sealed class ClassicBattleLifecycleSession
 
     /// <summary>Role-hook side effects (script.c 0x001B/0x001C/0x0030) land on the live battle state;
     /// only a running hook's caller context may route them, never a host input.</summary>
-    internal void ApplyRoleHookHp(int partyIndex, int delta)
+    internal bool ApplyRoleHookHp(int partyIndex, int delta) => ApplyRoleHookHpMp(partyIndex, delta, 0);
+
+    internal bool ApplyRoleHookMp(int partyIndex, int delta) => ApplyRoleHookHpMp(partyIndex, 0, delta);
+
+    private bool ApplyRoleHookHpMp(int partyIndex, int hpDelta, int mpDelta)
     {
         if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
         var player = activeCombat.Current.Players[partyIndex];
         var role = roles[player.RoleId];
-        bool wasAlive = role.Hp > 0;
-        activeCombat.HealRoleHookHp(partyIndex, delta);
+        int beforeHp = role.Hp, beforeMp = role.Mp;
+        bool wasAlive = beforeHp > 0;
+        activeCombat.HealRoleHookHp(partyIndex, hpDelta);
         SyncPartyFromCombat();
         // PAL_IncreaseHPMP checks life once, before either word changes. MP still normalizes
         // with delta zero when this HP operation has just reduced the alive caller to zero.
         if (wasAlive)
         {
-            int mp = unchecked((ushort)role.Mp);
+            int mp = unchecked((ushort)(role.Mp + mpDelta));
             if ((short)mp < 0) mp = 0;
             role.Mp = Math.Min(mp, role.MaxMp);
         }
         Current = View(activeCombat.Current);
-    }
-
-    internal void ApplyRoleHookMp(int partyIndex, int delta)
-    {
-        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
-        var player = activeCombat.Current.Players[partyIndex];
-        var role = roles[player.RoleId];
-        // PAL_IncreaseHPMP only changes alive players (global.c:1272).
-        if (role.Hp > 0)
-        {
-            int mp = unchecked((ushort)(role.Mp + delta));
-            if ((short)mp < 0) mp = 0;
-            role.Mp = Math.Min(mp, role.MaxMp);
-        }
-        Current = View(activeCombat.Current);
+        return role.Hp != beforeHp || role.Mp != beforeMp;
     }
 
     internal void ApplyRoleHookStatBoost(int partyIndex, int statField, int percent)
