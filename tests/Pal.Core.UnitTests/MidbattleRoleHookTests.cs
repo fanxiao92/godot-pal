@@ -982,6 +982,227 @@ public sealed class MidbattleRoleHookTests
         }
     }
 
+    [Fact]
+    public void Current_entry_requirements_are_pure_and_do_not_seed_or_advance_last_caller()
+    {
+        var fixture = Fixture();
+        fixture.Files["hooks"]["entries"]!.AsArray().Add(new JsonObject
+        {
+            ["id"] = "warmup", ["owner"] = new JsonObject { ["type"] = "eventObject", ["id"] = 29 },
+            ["slot"] = "wTriggerScript", ["kind"] = "trigger", ["target"] = "L0004", ["sourceAddress"] = 4
+        });
+        var events = fixture.Load();
+        var content = CurrentQueryContent();
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var bankBefore = world.ObjectScripts.OrderBy(pair => pair.Key).ToArray();
+        var leaderBefore = world.Leader;
+        var initialRolesBefore = content.InitialRoles.OrderBy(pair => pair.Key).ToArray();
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(events, Language(), content, random, world);
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(leaderBefore, world.Leader);
+        Assert.Equal(initialRolesBefore, script.BattleRoles!.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(0, random.CallCount);
+        script.Start("hooks", "warmup", 28);
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Equal(28, script.Caller);
+
+        AssertCurrentQueryInert(script, content, world, random, () =>
+        {
+            AssertCurrentQueryTeam18(script.GetCurrentEntryRequirements("hooks", "npc", 37));
+            AssertCurrentQueryTeam18(script.GetCurrentEntryRequirements("hooks", "npc", 65535));
+        });
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        script.Start("hooks", "warmup", 65535);
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Equal(28, script.Caller); // Neither query may replace the saved caller with 37.
+        Assert.Equal(0, random.CallCount);
+
+        var unbound = new TriggerScriptSession(events, Language(), content, random);
+        AssertCurrentQueryInert(unbound, content, world, random, () =>
+        {
+            var error = Assert.Throws<InvalidDataException>(() => unbound.GetCurrentEntryRequirements("hooks", "npc", 37));
+            Assert.Contains("hooks.json#L0003 @0003", error.Message);
+            Assert.Contains("a Name-mapped battle requires a bound world", error.Message);
+        });
+        foreach (var noBattle in new[] { new TriggerScriptSession(events, Language()),
+            new TriggerScriptSession(events, Language(), world) })
+        {
+            AssertCurrentQueryInert(noBattle, content, world, random, () =>
+            {
+                var requirements = noBattle.GetCurrentEntryRequirements("hooks", "warmup", 65535);
+                Assert.Empty(requirements.BattleTeamIds);
+                Assert.Empty(requirements.DisplayBlocks);
+                Assert.Empty(requirements.PortraitIds);
+            });
+        }
+    }
+
+    [Fact]
+    public void Current_entry_requirements_use_existing_zero_instead_of_static_seed()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        WriteCurrentQueryDyingEntry(world, 0);
+        Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+        var events = Fixture().Load(); // FFFF is outside this independently authored 60-instruction file.
+        var content = CurrentQueryContent(dyingScript: 65535);
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(events, Language(), content, random, world);
+
+        AssertCurrentQueryInert(script, content, world, random, () =>
+        {
+            Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(events, Language(), content, "hooks", "npc"));
+            AssertCurrentQueryTeam18(script.GetCurrentEntryRequirements("hooks", "npc", 28));
+        });
+        script.Start("hooks", "npc", 28);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        Assert.NotNull(script.PendingBattle);
+        Assert.Equal(28, script.PendingBattle!.Caller);
+        Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+        Assert.Equal(0, random.CallCount);
+    }
+
+    [Fact]
+    public void Start_rechecks_world_changed_after_current_requirements_query()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var content = CurrentQueryContent();
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(Fixture().Load(), Language(), content, random, world);
+        AssertCurrentQueryInert(script, content, world, random, () =>
+            AssertCurrentQueryTeam18(script.GetCurrentEntryRequirements("hooks", "npc", 37)));
+        Assert.False(world.ObjectScripts.ContainsKey((0, 1)));
+
+        WriteCurrentQueryDyingEntry(world, 65535); // Another real executor changes this reader's relevant key.
+        Assert.Equal(65535, world.ObjectScripts[(0, 1)]);
+        AssertCurrentQueryInert(script, content, world, random, () =>
+        {
+            var queryError = Assert.Throws<InvalidDataException>(() => script.GetCurrentEntryRequirements("hooks", "npc", 37));
+            var startError = Assert.Throws<InvalidDataException>(() => script.Start("hooks", "npc", 28));
+            foreach (var error in new[] { queryError, startError })
+            {
+                Assert.Contains("hooks.json#L0003 @0003", error.Message);
+                Assert.Contains("role hook address FFFF is outside the event collection", error.Message);
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void Current_entry_requirements_reject_non_WORD_callers_without_effects(int caller)
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var content = CurrentQueryContent();
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(Fixture().Load(), Language(), content, random, world);
+        Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+        AssertCurrentQueryInert(script, content, world, random, () =>
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => script.GetCurrentEntryRequirements("hooks", "npc", caller));
+            Assert.Throws<ArgumentOutOfRangeException>(() => script.Start("hooks", "npc", caller));
+        });
+    }
+
+    [Fact]
+    public void Current_entry_requirements_reject_while_actual_call_is_waiting()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var content = CurrentQueryContent();
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(Fixture().Load(), Language(), content, random, world);
+        script.Start("hooks", "npc", 28);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        var battle = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
+        Assert.Equal(28, battle.Caller);
+        AssertCurrentQueryInert(script, content, world, random, () =>
+            Assert.Throws<InvalidOperationException>(() => script.GetCurrentEntryRequirements("hooks", "npc", 37)));
+        Assert.Same(battle, script.PendingBattle);
+    }
+
+    private static TriggerBattleContent CurrentQueryContent(int dyingScript = 0)
+    {
+        var original = Content(60);
+        return new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = dyingScript },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = 0 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+    }
+
+    private static void WriteCurrentQueryDyingEntry(DynamicEventWorld world, int entry)
+    {
+        var fixture = new DynamicEventSessionTests.DynamicFixture();
+        fixture.Commands[1] = new JsonObject
+        {
+            ["label"] = "L0001", ["op"] = "setObjectScript", ["objectId"] = 0,
+            ["value"] = entry, ["slotIndex"] = 1, ["next"] = "L0002",
+            ["source"] = new JsonObject { ["index"] = 1, ["opcode"] = 144,
+                ["operands"] = new JsonArray(0, entry, 1) }
+        };
+        fixture.Commands[2] = JsonNode.Parse("""
+            {"label":"L0002","op":"end","mode":"keep","next":"L0003",
+             "source":{"index":2,"opcode":0,"operands":[0,0,0]}}
+            """)!.AsObject();
+        var setter = new TriggerScriptSession(fixture.Load(), Language(), world);
+        setter.Start("scene", "npc", 5);
+        Assert.Equal(TriggerScriptPhase.Completed, setter.Phase);
+    }
+
+    private static void AssertCurrentQueryTeam18(TriggerEntryRequirements requirements)
+    {
+        Assert.Equal(new[] { 18 }, requirements.BattleTeamIds);
+        Assert.Empty(requirements.DisplayBlocks);
+        Assert.Empty(requirements.PortraitIds);
+    }
+
+    private static void AssertCurrentQueryInert(TriggerScriptSession script, TriggerBattleContent content,
+        DynamicEventWorld world, CountingBattleRandom random, Action operation)
+    {
+        var callBefore = (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry);
+        var executionBefore = (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed);
+        var pendingBefore = (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript);
+        var rolesBefore = script.BattleRoles?.OrderBy(pair => pair.Key).ToArray();
+        var initialRolesBefore = content.InitialRoles.OrderBy(pair => pair.Key).ToArray();
+        var bankBefore = world.ObjectScripts.OrderBy(pair => pair.Key).ToArray();
+        var worldBefore = (world.SceneId, world.Leader, world.Battlefield, world.RoleLiveState);
+        var partyBefore = world.PartyRoles.ToArray();
+        var scenesBefore = world.SceneScripts.OrderBy(pair => pair.Key).ToArray();
+        var vitalsBefore = world.PartyVitals.OrderBy(pair => pair.Key)
+            .Select(pair => (pair.Key, pair.Value.Hp, pair.Value.MaxHp, pair.Value.Mp, pair.Value.MaxMp)).ToArray();
+        var objectsBefore = world.Objects.Select(obj => (obj.Id, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
+            obj.State, obj.VanishTime, obj.TriggerMode, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount)).ToArray();
+        Assert.Equal(0, random.CallCount);
+
+        operation();
+
+        Assert.Equal(callBefore, (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry));
+        Assert.Equal(executionBefore, (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed));
+        Assert.Equal(pendingBefore, (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript));
+        Assert.Equal(rolesBefore, script.BattleRoles?.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(initialRolesBefore, content.InitialRoles.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(worldBefore, (world.SceneId, world.Leader, world.Battlefield, world.RoleLiveState));
+        Assert.Equal(partyBefore, world.PartyRoles.ToArray());
+        Assert.Equal(scenesBefore, world.SceneScripts.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(vitalsBefore, world.PartyVitals.OrderBy(pair => pair.Key)
+            .Select(pair => (pair.Key, pair.Value.Hp, pair.Value.MaxHp, pair.Value.Mp, pair.Value.MaxMp)).ToArray());
+        Assert.Equal(objectsBefore, world.Objects.Select(obj => (obj.Id, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
+            obj.State, obj.VanishTime, obj.TriggerMode, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount)).ToArray());
+        Assert.Equal(0, random.CallCount);
+    }
+
     private static HookFixture ClosureMatrixFixture(string caseName)
     {
         var fixture = Fixture();

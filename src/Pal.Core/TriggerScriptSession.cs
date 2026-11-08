@@ -172,6 +172,15 @@ public sealed class TriggerScriptSession
         return new(requirements.Displays, requirements.Portraits, requirements.Teams);
     }
 
+    /// <summary>Pure requirements for the current binding and world, without starting or seeding a call.
+    /// A later Start still rechecks its current state; caller FFFF never changes the saved caller.</summary>
+    public TriggerEntryRequirements GetCurrentEntryRequirements(string fileId, string entryId, int caller)
+    {
+        var requirements = new EntryRequirementsCollector();
+        ValidateSelectedStart(fileId, entryId, caller, requirements);
+        return new(requirements.Displays, requirements.Portraits, requirements.Teams);
+    }
+
     public void Start(string fileId, string entryId, int caller) => StartCall(fileId, entryId, caller, null);
 
     public void Start(string fileId, string entryId, int caller, Guid sourceRequestId)
@@ -180,13 +189,20 @@ public sealed class TriggerScriptSession
         StartCall(fileId, entryId, caller, sourceRequestId);
     }
 
-    private void StartCall(string fileId, string entryId, int caller, Guid? sourceRequestId)
+    private TriggerEventEntry ValidateSelectedStart(string fileId, string entryId, int caller,
+        EntryRequirementsCollector? requirements = null)
     {
         if (BlocksSceneUpdates) throw new InvalidOperationException("A trigger call is already active.");
         if (caller is < 0 or > 65535) throw new ArgumentOutOfRangeException(nameof(caller));
         var entry = _events.GetEntry(fileId, entryId);
         if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
-        ValidateCapabilityClosure(entry.SourceAddress, TriggerScriptContext.Event);
+        ValidateCapabilityClosure(entry.SourceAddress, TriggerScriptContext.Event, requirements);
+        return entry;
+    }
+
+    private void StartCall(string fileId, string entryId, int caller, Guid? sourceRequestId)
+    {
+        var entry = ValidateSelectedStart(fileId, entryId, caller);
         CallId = Guid.NewGuid();
         StartedEntry = entry;
         SourceRequestId = sourceRequestId;
@@ -299,8 +315,8 @@ public sealed class TriggerScriptSession
         Continue();
     }
 
-    private void ValidateCapabilityClosure(int address, TriggerScriptContext context) =>
-        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, context: context,
+    private void ValidateCapabilityClosure(int address, TriggerScriptContext context, EntryRequirementsCollector? requirements = null) =>
+        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, requirements, context,
             rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true,
             currentObjectScripts: _world?.ObjectScripts);
 
