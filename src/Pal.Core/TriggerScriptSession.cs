@@ -21,6 +21,8 @@ public sealed class TriggerScriptSession
     private RoleLiveState? _roleLiveState;
     private IReadOnlyDictionary<int, BattleRoleSnapshot>? _battleRoles;
     private ClassicBattleRoleHook? _battleHook;
+    private readonly record struct CapturedBattleHookOwner(int NameObjectId, int SlotIndex, int ScriptAddress);
+    private CapturedBattleHookOwner? _battleHookOwner;
     private ClassicBattleEndScript? _battleEndScript;
     private int _parkedCaller;
     private (int EnemyTeamId, bool IsBoss)? _lostBattleContext;
@@ -303,6 +305,9 @@ public sealed class TriggerScriptSession
         if (_battleHook is not null) throw new InvalidOperationException("A battle role hook is already running.");
         var hook = PendingBattleHook ?? throw new InvalidOperationException("The waiting battle has no pending role hook.");
         ValidateCapabilityClosure(hook.ScriptAddress, TriggerScriptContext.RoleHook);
+        _battleHookOwner = _world is not null && _battleContent!.Players[hook.PartyIndex].NameObjectId is int nameObjectId
+            ? new CapturedBattleHookOwner(nameObjectId, hook.Kind == ClassicBattleHookKind.FriendDeath ? 0 : 1, hook.ScriptAddress)
+            : null;
         _battleHook = hook;
         _parkedCaller = Caller;
         _lastCaller = Caller = hook.RoleId;
@@ -786,6 +791,9 @@ public sealed class TriggerScriptSession
         // command and keeps the script's final dialog context (the reference dialog state is global).
         if (_battleHook is not null)
         {
+            if (_battleHookOwner is { } owner)
+                _world!.SetObjectScript(owner.NameObjectId, owner.ScriptAddress, owner.SlotIndex);
+            _battleHookOwner = null;
             _battleHook = null;
             PendingBattle!.Lifecycle.AcknowledgeRoleHook();
             Caller = _parkedCaller; // the parked outer call keeps its own caller (PAL_RunTriggerScript state)
