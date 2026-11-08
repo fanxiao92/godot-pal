@@ -300,7 +300,8 @@ public sealed class TriggerScriptSession
     }
 
     private void ValidateCapabilityClosure(int address, TriggerScriptContext context) =>
-        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, context: context);
+        ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, context: context,
+            rejectMappedBattlesWithoutWorld: _world is null);
 
     private sealed class EntryRequirementsCollector
     {
@@ -311,7 +312,8 @@ public sealed class TriggerScriptSession
 
     private static void ValidateCapabilityClosure(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent? battleContent, IReadOnlyDictionary<int, BattleRoleSnapshot>? battleRoles, int color, int address,
-        EntryRequirementsCollector? requirements = null, TriggerScriptContext context = TriggerScriptContext.Event)
+        EntryRequirementsCollector? requirements = null, TriggerScriptContext context = TriggerScriptContext.Event,
+        bool rejectMappedBattlesWithoutWorld = false)
     {
         var pending = new Stack<(int Address, TriggerScriptContext Context)>();
         var visited = new HashSet<(int Address, TriggerScriptContext Context)>();
@@ -326,6 +328,8 @@ public sealed class TriggerScriptSession
             if (command.Op == "end" && command.Mode == "keep") continue;
             if (command.Op == "startBattle" && battleContent is not null && item.Context == TriggerScriptContext.Event)
             {
+                if (rejectMappedBattlesWithoutWorld && battleContent.Players.Any(player => player.NameObjectId.HasValue))
+                    throw new InvalidDataException($"{command.Position}: a Name-mapped battle requires a bound world.");
                 try { battleContent.Validate(command.EnemyTeamId, battleRoles!); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 requirements?.Teams.Add(command.EnemyTeamId);

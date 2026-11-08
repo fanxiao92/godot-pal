@@ -590,6 +590,37 @@ public sealed class MidbattleRoleHookTests
     }
 
     [Fact]
+    public void Start_rejects_a_Name_mapped_battle_without_world_before_effects()
+    {
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0 }, original.Players[1] with { NameObjectId = 65535 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(Fixture().Load(), Language(), content, random);
+        var callBefore = (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry);
+        var executionBefore = (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed);
+        var pendingBefore = (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript);
+        var rolesBefore = script.BattleRoles!.OrderBy(pair => pair.Key).ToArray();
+        Assert.Equal(0, random.CallCount);
+
+        Assert.Throws<InvalidDataException>(() => script.Start("hooks", "npc", 28));
+
+        Assert.Equal(callBefore, (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry));
+        Assert.Equal(executionBefore, (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed));
+        Assert.Equal(pendingBefore, (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript));
+        Assert.Equal(rolesBefore, script.BattleRoles!.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(0, random.CallCount);
+    }
+
+    [Fact]
     public void Hook_preflight_rejects_a_missing_random_branch_language_before_any_side_effect_or_draw()
     {
         var fixture = Fixture();
@@ -819,6 +850,21 @@ public sealed class MidbattleRoleHookTests
             return next.Value;
         }
         public void AssertExhausted() => Assert.Empty(remaining);
+    }
+
+    private sealed class CountingBattleRandom : IBattleRandom
+    {
+        public int CallCount { get; private set; }
+        public int NextInclusive(int from, int to)
+        {
+            CallCount++;
+            return from;
+        }
+        public float NextInclusive(float from, float to)
+        {
+            CallCount++;
+            return from;
+        }
     }
 
     internal static HookFixture Fixture() => new();
