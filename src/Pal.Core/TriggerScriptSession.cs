@@ -550,10 +550,13 @@ public sealed class TriggerScriptSession
         return (new DialogueMessageBlock(first.StartMessageId, first.StartMessageId + first.Span, parts), references.AsReadOnly());
     }
 
-    private int ReadDyingScript(ClassicBattlePlayer player) =>
-        player.NameObjectId is int nameObjectId && _world is not null
-            && _world.ObjectScripts.TryGetValue((nameObjectId, 1), out int entry)
-                ? entry : player.DyingScript;
+    private int ReadRoleHookScript(ClassicBattlePlayer player, ClassicBattleHookKind kind)
+    {
+        int slotIndex = kind == ClassicBattleHookKind.FriendDeath ? 0 : 1;
+        return player.NameObjectId is int nameObjectId && _world is not null
+            && _world.ObjectScripts.TryGetValue((nameObjectId, slotIndex), out int entry)
+                ? entry : kind == ClassicBattleHookKind.FriendDeath ? player.FriendDeathScript : player.DyingScript;
+    }
 
     private void Continue()
     {
@@ -600,7 +603,7 @@ public sealed class TriggerScriptSession
                     var lifecycle = new ClassicBattleLifecycleSession(battleRoles.Values.ToArray(), _battleContent.SettledPlayers(battleRoles),
                         _battleContent.Enemies(command.EnemyTeamId), _battleContent.GrowthByRole, _battleRandom!,
                         BattleEquipmentState.Initialize(_battleContent), runEnemyBattleEndScripts: true, isBossBattle: command.IsBoss,
-                        readDyingScript: _world is null ? null : ReadDyingScript);
+                        readRoleHookScript: _world is null ? null : ReadRoleHookScript);
                     PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.EnemyTeamId, command.IsBoss,
                         Next(command), command.LossAddress, command.FleeAddress, lifecycle);
                     Phase = TriggerScriptPhase.WaitingForBattle;

@@ -14,7 +14,7 @@ public sealed class ClassicBattleSession
     private readonly int?[] targets;
     private ClassicBattleQueueEntry[] queue = [];
     private readonly IBattleRandom random;
-    private readonly Func<ClassicBattlePlayer, int>? readDyingScript;
+    private readonly Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript;
     private int actionIndex;
     private bool pendingSecondStrike;
     // fight.c 595: per-action HP backup read by the post-action role-hook checks.
@@ -40,14 +40,14 @@ public sealed class ClassicBattleSession
         : this(definition, random, equipment, isBossBattle, null) { }
 
     internal ClassicBattleSession(ClassicBattleDefinition definition, IBattleRandom random, BattleEquipmentState? equipment,
-        bool isBossBattle, Func<ClassicBattlePlayer, int>? readDyingScript)
+        bool isBossBattle, Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(random);
         Validate(definition, equipment);
         this.random = random;
         this.isBossBattle = isBossBattle;
-        this.readDyingScript = readDyingScript;
+        this.readRoleHookScript = readRoleHookScript;
         players = definition.Players.ToArray();
         basePlayers = definition.Players.ToArray();
         enemies = definition.Enemies.ToArray();
@@ -250,8 +250,10 @@ public sealed class ClassicBattleSession
             if (playerHp[i] >= previousPlayerHp[i] || playerHp[i] != 0) continue;
             int coverer = PartyIndexOfRole(players[i].CoveredByRoleId);
             if (coverer < 0 || playerHp[coverer] == 0 || Unresponsive(coverer)) continue;
-            if (players[coverer].FriendDeathScript != 0)
-                return Hook(new(ClassicBattleHookKind.FriendDeath, coverer, players[coverer].RoleId, players[coverer].FriendDeathScript));
+            int friendDeathScript = readRoleHookScript is null ? players[coverer].FriendDeathScript
+                : readRoleHookScript(players[coverer], ClassicBattleHookKind.FriendDeath);
+            if (friendDeathScript != 0)
+                return Hook(new(ClassicBattleHookKind.FriendDeath, coverer, players[coverer].RoleId, friendDeathScript));
         }
         for (int i = 0; i < players.Length; i++)
         {
@@ -261,7 +263,8 @@ public sealed class ClassicBattleSession
                 || previousPlayerHp[i] < players[i].MaxHp / 5) continue;
             int coverer = PartyIndexOfRole(players[i].CoveredByRoleId);
             if (coverer < 0 || playerHp[coverer] == 0 || Unresponsive(coverer)) continue;
-            int dyingScript = readDyingScript is null ? players[i].DyingScript : readDyingScript(players[i]);
+            int dyingScript = readRoleHookScript is null ? players[i].DyingScript
+                : readRoleHookScript(players[i], ClassicBattleHookKind.Dying);
             if (dyingScript != 0)
                 return Hook(new(ClassicBattleHookKind.Dying, i, players[i].RoleId, dyingScript));
             return true; // fight.c 880: the crossing itself ends the check even without a script.

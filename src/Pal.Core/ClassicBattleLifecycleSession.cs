@@ -36,7 +36,7 @@ public sealed class ClassicBattleLifecycleSession
     internal ClassicBattleLifecycleSession(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
         IReadOnlyList<ClassicBattleEnemy> enemies, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth, IBattleRandom random,
         BattleEquipmentState? equipment, bool runEnemyBattleEndScripts, bool isBossBattle,
-        Func<ClassicBattlePlayer, int>? readDyingScript)
+        Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript)
     {
         ArgumentNullException.ThrowIfNull(random);
         Validate(roles, players, enemies, growth, equipment);
@@ -48,7 +48,7 @@ public sealed class ClassicBattleLifecycleSession
             throw new InvalidDataException("Classic combat requires the capable script executor to run a declared enemy battle-end script.");
         var byId = roles.ToDictionary(x => x.RoleId);
         var combat = new ClassicBattleSession(new(players.Select(x => x with { Hp = Math.Max(1, byId[x.RoleId].Hp) }).ToArray(), enemies),
-            random, equipment, isBossBattle, readDyingScript);
+            random, equipment, isBossBattle, readRoleHookScript);
         this.roles = byId.ToDictionary(x => x.Key, x => new BattleRoleState(x.Value));
         this.growth = growth.ToDictionary(x => x.Key, x => new ClassicBattleGrowthData(
             Array.AsReadOnly(x.Value.LevelUpExperience.ToArray()), Array.AsReadOnly(x.Value.LevelUpMagics.ToArray())));
