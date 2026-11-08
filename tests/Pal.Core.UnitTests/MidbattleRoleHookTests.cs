@@ -718,6 +718,181 @@ public sealed class MidbattleRoleHookTests
     }
 
     [Fact]
+    public void Start_rejects_a_current_Name_hook_before_prefix_or_battle_effects()
+    {
+        var setterFixture = new DynamicEventSessionTests.DynamicFixture();
+        setterFixture.Commands[1] = JsonNode.Parse("""
+            {"label":"L0001","op":"setObjectScript","objectId":0,"value":65535,"slotIndex":1,"next":"L0002",
+             "source":{"index":1,"opcode":144,"operands":[0,65535,1]}}
+            """)!.AsObject();
+        setterFixture.Commands[2] = JsonNode.Parse("""
+            {"label":"L0002","op":"end","mode":"keep","next":"L0003",
+             "source":{"index":2,"opcode":0,"operands":[0,0,0]}}
+            """)!.AsObject();
+        var world = DynamicEventWorld.ForHost(setterFixture.Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        // A genuine world-only executor stores a legal WORD without executing it as a hook.
+        var setter = new TriggerScriptSession(setterFixture.Load(), Language(), world);
+        setter.Start("scene", "npc", 5);
+        Assert.Equal(TriggerScriptPhase.Completed, setter.Phase);
+        Assert.Equal(65535, world.ObjectScripts[(0, 1)]);
+
+        var original = Content(60);
+        Assert.Equal(0, original.Players[0].DyingScript);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0 }, original.Players[1] with { NameObjectId = 65535 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var events = Fixture().Load(); // 60 instructions: WORD FFFF is outside this file.
+        var bankBefore = world.ObjectScripts.OrderBy(pair => pair.Key).ToArray();
+        var leaderBefore = world.Leader;
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(events, Language(), content, random, world);
+        // Static validation intentionally checks the initial disabled seed, not the live bank.
+        TriggerScriptSession.ValidateEntry(events, Language(), content, "hooks", "npc");
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(leaderBefore, world.Leader);
+        var callBefore = (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry);
+        var executionBefore = (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed);
+        var pendingBefore = (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript);
+        var rolesBefore = script.BattleRoles!.OrderBy(pair => pair.Key).ToArray();
+        Assert.Equal(0, random.CallCount);
+
+        Assert.Throws<InvalidDataException>(() => script.Start("hooks", "npc", 28));
+
+        Assert.Equal(callBefore, (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry));
+        Assert.Equal(executionBefore, (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed));
+        Assert.Equal(pendingBefore, (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript));
+        Assert.Equal(rolesBefore, script.BattleRoles!.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(leaderBefore, world.Leader);
+        Assert.Equal(0, random.CallCount);
+    }
+
+    [Fact]
+    public void ValidateEntry_rejects_a_reachable_Name_hook_write_from_a_disabled_seed()
+    {
+        var fixture = Fixture();
+        fixture.Commands[1] = JsonNode.Parse("""
+            {"label":"L0001","op":"setObjectScript","objectId":0,"value":65535,"slotIndex":1,"next":"L0002",
+             "source":{"index":1,"opcode":144,"operands":[0,65535,1]}}
+            """)!.AsObject();
+        var original = Content(60);
+        Assert.Equal(0, original.Players[0].DyingScript);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0 }, original.Players[1] with { NameObjectId = 65535 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var events = fixture.Load();
+        var rolesBefore = content.InitialRoles.OrderBy(pair => pair.Key).ToArray();
+
+        // Initial-content validation is pure, but includes future reachable literal writes to its Names.
+        Assert.Throws<InvalidDataException>(() =>
+            TriggerScriptSession.ValidateEntry(events, Language(), content, "hooks", "npc"));
+
+        Assert.Equal(rolesBefore, content.InitialRoles.OrderBy(pair => pair.Key).ToArray());
+    }
+
+    [Theory]
+    [InlineData("reachable-hook-write", true)]
+    [InlineData("existing-zero", false)]
+    [InlineData("unrelated-name", false)]
+    [InlineData("unrelated-slot", false)]
+    public void Start_preflights_reachable_Name_hook_writes_before_effects(string caseName, bool rejects)
+    {
+        bool existingZero = caseName == "existing-zero";
+        int objectId = caseName == "unrelated-name" ? 37 : 0;
+        int slotIndex = caseName == "unrelated-slot" ? 2 : 1;
+        var setterFixture = new DynamicEventSessionTests.DynamicFixture();
+        var world = DynamicEventWorld.ForHost(setterFixture.Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        if (existingZero)
+        {
+            setterFixture.Commands[1] = JsonNode.Parse("""
+                {"label":"L0001","op":"setObjectScript","objectId":0,"value":0,"slotIndex":1,"next":"L0002",
+                 "source":{"index":1,"opcode":144,"operands":[0,0,1]}}
+                """)!.AsObject();
+            setterFixture.Commands[2] = JsonNode.Parse("""
+                {"label":"L0002","op":"end","mode":"keep","next":"L0003",
+                 "source":{"index":2,"opcode":0,"operands":[0,0,0]}}
+                """)!.AsObject();
+            var setter = new TriggerScriptSession(setterFixture.Load(), Language(), world);
+            setter.Start("scene", "npc", 5);
+            Assert.Equal(TriggerScriptPhase.Completed, setter.Phase);
+            Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+        }
+        var fixture = Fixture();
+        if (!existingZero)
+        {
+            fixture.Commands[1] = new JsonObject
+            {
+                ["label"] = "L0001", ["op"] = "setObjectScript", ["objectId"] = objectId,
+                ["value"] = 65535, ["slotIndex"] = slotIndex, ["next"] = "L0002",
+                ["source"] = new JsonObject { ["index"] = 1, ["opcode"] = 144,
+                    ["operands"] = new JsonArray(objectId, 65535, slotIndex) }
+            };
+        }
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, DyingScript = existingZero ? 65535 : 0 },
+                original.Players[1] with { NameObjectId = 65535 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var events = fixture.Load(); // Every stored value is a WORD; FFFF is outside this 60-instruction file.
+        var bankBefore = world.ObjectScripts.OrderBy(pair => pair.Key).ToArray();
+        var leaderBefore = world.Leader;
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(events, Language(), content, random, world);
+        // Static validation uses declarations, not the current bank. Its future-write rejection is tested separately.
+        if (existingZero)
+            Assert.Throws<InvalidDataException>(() =>
+                TriggerScriptSession.ValidateEntry(events, Language(), content, "hooks", "npc"));
+        else if (!rejects)
+            TriggerScriptSession.ValidateEntry(events, Language(), content, "hooks", "npc");
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(leaderBefore, world.Leader);
+        var callBefore = (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry);
+        var executionBefore = (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed);
+        var pendingBefore = (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript);
+        var rolesBefore = script.BattleRoles!.OrderBy(pair => pair.Key).ToArray();
+        Assert.Equal(0, random.CallCount);
+
+        if (rejects)
+        {
+            // The reachable 0090 activates an initially disabled relevant hook. Reject before its write.
+            Assert.Throws<InvalidDataException>(() => script.Start("hooks", "npc", 28));
+            Assert.Equal(callBefore, (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry));
+            Assert.Equal(executionBefore, (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+                script.ScriptSuccess, script.Music, script.FadedToRed));
+            Assert.Equal(pendingBefore, (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+                script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+                script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript));
+            Assert.Equal(rolesBefore, script.BattleRoles!.OrderBy(pair => pair.Key).ToArray());
+            Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+            Assert.Equal(leaderBefore, world.Leader);
+        }
+        else
+        {
+            script.Start("hooks", "npc", 28);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+            Assert.NotNull(script.PendingBattle);
+            Assert.Equal(28, script.Caller);
+            // Missing keys may later be seeded; only the relevant stored zero or unrelated write is fixed.
+            Assert.Equal(existingZero ? 0 : 65535, world.ObjectScripts[(objectId, slotIndex)]);
+        }
+        Assert.Equal(0, random.CallCount);
+    }
+
+    [Fact]
     public void Hook_preflight_rejects_a_missing_random_branch_language_before_any_side_effect_or_draw()
     {
         var fixture = Fixture();

@@ -301,7 +301,8 @@ public sealed class TriggerScriptSession
 
     private void ValidateCapabilityClosure(int address, TriggerScriptContext context) =>
         ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, context: context,
-            rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true);
+            rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true,
+            currentObjectScripts: _world?.ObjectScripts);
 
     private sealed class EntryRequirementsCollector
     {
@@ -313,10 +314,15 @@ public sealed class TriggerScriptSession
     private static void ValidateCapabilityClosure(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent? battleContent, IReadOnlyDictionary<int, BattleRoleSnapshot>? battleRoles, int color, int address,
         EntryRequirementsCollector? requirements = null, TriggerScriptContext context = TriggerScriptContext.Event,
-        bool rejectMappedBattlesWithoutWorld = false, bool validateNameMappings = false)
+        bool rejectMappedBattlesWithoutWorld = false, bool validateNameMappings = false,
+        IReadOnlyDictionary<(int ObjectId, int SlotIndex), int>? currentObjectScripts = null)
     {
         var pending = new Stack<(int Address, TriggerScriptContext Context)>();
         var visited = new HashSet<(int Address, TriggerScriptContext Context)>();
+        // Per-walk candidates, not a live bank: a write can precede discovery of its battle/Name.
+        var hookWrites = new Dictionary<(int ObjectId, int SlotIndex), List<TriggerCommand>>();
+        var relevantHookKeys = new HashSet<(int ObjectId, int SlotIndex)>();
+        var hookRoots = new HashSet<(int ObjectId, int SlotIndex, int Entry)>();
         pending.Push((address, context));
         while (pending.TryPop(out var item))
         {
@@ -353,12 +359,28 @@ public sealed class TriggerScriptSession
                 pending.Push((Next(command), TriggerScriptContext.Event));
                 if (command.LossAddress is { } loss) pending.Push((loss, TriggerScriptContext.Event));
                 if (command.FleeAddress is { } flee) pending.Push((flee, TriggerScriptContext.Event));
-                // fight.c 768-880: the party's dying and friend-death scripts may run mid-battle; their
-                // whole random closure is preflighted with the battle's declared party players.
+                // fight.c 768-880: preflight the party's current Name-owned hook entries. A stored
+                // entry (including disabled WORD 0) wins; only a missing key uses the declared seed.
                 foreach (var player in battleContent.SettledPlayers(battleRoles!))
                 {
-                    if (player.FriendDeathScript != 0) PushHook(events, pending, command.Position, player.FriendDeathScript);
-                    if (player.DyingScript != 0) PushHook(events, pending, command.Position, player.DyingScript);
+                    int friendDeath = player.FriendDeathScript, dying = player.DyingScript;
+                    if (currentObjectScripts is not null && player.NameObjectId is int nameObjectId)
+                    {
+                        if (currentObjectScripts.TryGetValue((nameObjectId, 0), out var friendEntry)) friendDeath = friendEntry;
+                        if (currentObjectScripts.TryGetValue((nameObjectId, 1), out var dyingEntry)) dying = dyingEntry;
+                    }
+                    if (player.NameObjectId is int hookName)
+                    {
+                        PushHookCandidate((hookName, 0), command.Position, friendDeath);
+                        PushHookCandidate((hookName, 1), command.Position, dying);
+                        ActivateHookKey((hookName, 0));
+                        ActivateHookKey((hookName, 1));
+                    }
+                    else
+                    {
+                        if (friendDeath != 0) PushHook(events, pending, command.Position, friendDeath);
+                        if (dying != 0) PushHook(events, pending, command.Position, dying);
+                    }
                 }
                 // battle.c 1334-1337: every enemy slot's post-victory script runs after the growth
                 // settlement; the whole closure (both random branches included) is preflighted here.
@@ -376,8 +398,20 @@ public sealed class TriggerScriptSession
             {
                 pending.Push((Next(command), item.Context));
             }
+            else if (command.Op == "setObjectScript")
+            {
+                if (command.SlotIndex is 0 or 1)
+                {
+                    var key = (command.ObjectId, command.SlotIndex);
+                    if (!hookWrites.TryGetValue(key, out var writes)) hookWrites.Add(key, writes = new());
+                    writes.Add(command);
+                    if (relevantHookKeys.Contains(key))
+                        PushHookCandidate(key, command.Position, command.Value);
+                }
+                pending.Push((Next(command), item.Context));
+            }
             else if (command.Op is "walkStep" or "face" or "setState" or "hide" or "setTriggerMode"
-                or "setSceneScripts" or "setObjectScript" or "setPartyPos" or "setPartyFacing"
+                or "setSceneScripts" or "setPartyPos" or "setPartyFacing"
                 or "waitUpdate" or "redraw" or "fadeScene" or "markFailed" or "walkTo"
                 or "setObjectPosition" or "setObjectGesture" or "changeHpMp" or "revivePlayer"
                 or "setAutoEntry" or "setTriggerEntry" or "setBattlefield" or "fadeOut" or "setParty"
@@ -424,6 +458,20 @@ public sealed class TriggerScriptSession
                 pending.Push((Next(command), item.Context));
             }
             else throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
+        }
+
+        void PushHookCandidate((int ObjectId, int SlotIndex) key, TriggerPosition position, int entry)
+        {
+            if (entry != 0 && hookRoots.Add((key.ObjectId, key.SlotIndex, entry)))
+                PushHook(events, pending, position, entry);
+        }
+
+        void ActivateHookKey((int ObjectId, int SlotIndex) key)
+        {
+            // Each of at most four related keys consumes its prior writes once; later writes
+            // join the same worklist directly, including those discovered inside new hooks.
+            if (!relevantHookKeys.Add(key) || !hookWrites.TryGetValue(key, out var writes)) return;
+            foreach (var write in writes) PushHookCandidate(key, write.Position, write.Value);
         }
     }
 
