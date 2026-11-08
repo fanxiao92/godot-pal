@@ -202,7 +202,21 @@ public sealed class TriggerScriptSession
 
     private void StartCall(string fileId, string entryId, int caller, Guid? sourceRequestId)
     {
-        var entry = ValidateSelectedStart(fileId, entryId, caller);
+        var requirements = new EntryRequirementsCollector();
+        var entry = ValidateSelectedStart(fileId, entryId, caller, requirements);
+        // Only a fully validated, structurally reached battle may initialize its Name-owned slots.
+        // Query/construction/no-battle calls never enter this write path; a stored zero stays zero.
+        if (_world is not null && _battleContent is not null && requirements.Teams.Count != 0)
+        {
+            foreach (var player in _battleContent.Players)
+            {
+                if (player.NameObjectId is not int nameObjectId) continue;
+                if (!_world.ObjectScripts.TryGetValue((nameObjectId, 0), out _))
+                    _world.SetObjectScript(nameObjectId, player.FriendDeathScript, 0);
+                if (!_world.ObjectScripts.TryGetValue((nameObjectId, 1), out _))
+                    _world.SetObjectScript(nameObjectId, player.DyingScript, 1);
+            }
+        }
         CallId = Guid.NewGuid();
         StartedEntry = entry;
         SourceRequestId = sourceRequestId;

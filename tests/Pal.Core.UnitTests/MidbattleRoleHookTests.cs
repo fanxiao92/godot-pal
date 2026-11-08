@@ -1125,6 +1125,99 @@ public sealed class MidbattleRoleHookTests
         Assert.Same(battle, script.PendingBattle);
     }
 
+    [Fact]
+    public void Start_seeds_only_missing_relevant_Name_hook_keys_after_pure_validation()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var setterFixture = new DynamicEventSessionTests.DynamicFixture();
+        setterFixture.Commands[1] = JsonNode.Parse("""
+            {"label":"L0001","op":"setObjectScript","objectId":0,"value":0,"slotIndex":1,"next":"L0002",
+             "source":{"index":1,"opcode":144,"operands":[0,0,1]}}
+            """)!.AsObject();
+        setterFixture.Commands[2] = JsonNode.Parse("""
+            {"label":"L0002","op":"setObjectScript","objectId":37,"value":65535,"slotIndex":5,"next":"L0003",
+             "source":{"index":2,"opcode":144,"operands":[37,65535,5]}}
+            """)!.AsObject();
+        setterFixture.Commands[3] = JsonNode.Parse("""
+            {"label":"L0003","op":"end","mode":"keep","next":"L0004",
+             "source":{"index":3,"opcode":0,"operands":[0,0,0]}}
+            """)!.AsObject();
+        var setter = new TriggerScriptSession(setterFixture.Load(), Language(), world);
+        setter.Start("scene", "npc", 5);
+        Assert.Equal(TriggerScriptPhase.Completed, setter.Phase);
+        Assert.Equal(2, world.ObjectScripts.Count);
+        Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+        Assert.Equal(65535, world.ObjectScripts[(37, 5)]);
+        var bankBefore = world.ObjectScripts.OrderBy(pair => pair.Key).ToArray();
+
+        var fixture = Fixture();
+        fixture.Files["hooks"]["entries"]!.AsArray().Add(new JsonObject
+        {
+            ["id"] = "warmup", ["owner"] = new JsonObject { ["type"] = "eventObject", ["id"] = 29 },
+            ["slot"] = "wTriggerScript", ["kind"] = "trigger", ["target"] = "L0004", ["sourceAddress"] = 4
+        });
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 31, DyingScript = 5 },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = 0 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(fixture.Load(), Language(), content, random, world);
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        script.Start("hooks", "warmup", 28);
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        AssertCurrentQueryInert(script, content, world, random, () =>
+        {
+            Assert.Equal(new[] { 18 }, script.GetCurrentEntryRequirements("hooks", "npc", 28).BattleTeamIds);
+            Assert.Equal(new[] { 18 }, script.GetCurrentEntryRequirements("hooks", "npc", 65535).BattleTeamIds);
+        });
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+
+        script.Start("hooks", "npc", 28);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        var battle = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
+        Assert.Equal(28, battle.Caller);
+        Assert.Equal(0, random.CallCount);
+        // Name/slot ownership is independent of seed equality; existing zero is never a fallback.
+        Assert.Equal(5, world.ObjectScripts.Count);
+        Assert.Equal(31, world.ObjectScripts[(0, 0)]);
+        Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+        Assert.Equal(0, world.ObjectScripts[(65535, 0)]);
+        Assert.Equal(0, world.ObjectScripts[(65535, 1)]);
+        Assert.Equal(65535, world.ObjectScripts[(37, 5)]);
+    }
+
+    [Fact]
+    public void Start_does_not_seed_Name_hooks_when_a_later_reachable_command_is_unsupported()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var bankBefore = world.ObjectScripts.OrderBy(pair => pair.Key).ToArray();
+        var fixture = Fixture();
+        fixture.Commands[4] = JsonNode.Parse("""
+            {"label":"L0004","op":"raw","next":"L0005",
+             "source":{"index":4,"opcode":134,"operands":[0,65535,8]}}
+            """)!.AsObject();
+        var content = CurrentQueryContent(); // Both Names are explicit; all four declaration seeds are zero.
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(fixture.Load(), Language(), content, random, world);
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        AssertCurrentQueryInert(script, content, world, random, () =>
+        {
+            var queryError = Assert.Throws<InvalidDataException>(() => script.GetCurrentEntryRequirements("hooks", "npc", 28));
+            var startError = Assert.Throws<InvalidDataException>(() => script.Start("hooks", "npc", 28));
+            foreach (var error in new[] { queryError, startError })
+            {
+                Assert.Contains("hooks.json#L0004 @0004", error.Message);
+                Assert.Contains("unsupported trigger command/context 'raw'", error.Message);
+            }
+        });
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+    }
+
     private static TriggerBattleContent CurrentQueryContent(int dyingScript = 0)
     {
         var original = Content(60);
