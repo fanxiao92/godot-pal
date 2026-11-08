@@ -1523,6 +1523,186 @@ public sealed class MidbattleRoleHookTests
         }
     }
 
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(5, 0)]
+    public void A_new_executor_in_the_same_world_consumes_the_current_Dying_entry_after_a_real_keep(int currentEntry, int secondDeclaredEntry)
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        Assert.Null(world.RoleLiveState);
+        var original = Content(60);
+        var firstContent = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = 0 },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = 0 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        WriteLiveDyingEntryForName65535(world, 5);
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        var firstRandom = new ScriptedRandom([.. Queue3, .. EnemyHit1]);
+        var first = new TriggerScriptSession(CapturedKeepFixture(65535, 1).Load(), Language(), firstContent, firstRandom, world);
+        first.Start("hooks", "npc", 28);
+        var firstCallId = first.CallId;
+        Assert.NotEqual(Guid.Empty, firstCallId);
+        Assert.Equal(TriggerScriptPhase.WaitingForDisplay, first.Phase);
+        var prefixDisplay = Assert.IsType<TriggerDialogueRequest>(first.PendingDisplay);
+        Assert.Equal(10, prefixDisplay.Content.StartMessageId);
+        FinishDisplay(first);
+        Assert.Equal(DialogueDisplayPhase.Completed, prefixDisplay.Display.Current.Phase);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, first.Phase);
+        var firstBattle = Assert.IsType<TriggerBattleRequest>(first.PendingBattle);
+        Assert.Equal(28, firstBattle.Caller);
+        Assert.Equal(28, first.Caller);
+        Assert.Equal(firstCallId, first.CallId);
+        Assert.Equal(1, first.ReturnEntry);
+        Assert.Equal(0, world.ObjectScripts[(0, 0)]);
+        Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+        Assert.Equal(0, world.ObjectScripts[(65535, 0)]);
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        var otherBank = world.ObjectScripts.Where(pair => pair.Key != (65535, 1)).OrderBy(pair => pair.Key).ToArray();
+
+        firstBattle.Lifecycle.SelectAttack(0, 0);
+        firstBattle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(firstBattle.Lifecycle.ResolveNextAction());
+        Assert.Equal((16, 240), (firstBattle.Lifecycle.Current.Roles[1].Hp, firstBattle.Lifecycle.Current.Roles[1].MaxHp));
+        Assert.Equal(16, firstBattle.Lifecycle.Current.Combat.Players[1].Hp);
+        Assert.Equal(100, firstBattle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.Equal(ClassicBattleSide.Enemy, firstBattle.Lifecycle.Current.Combat.LastAction!.Attacker);
+        var expectedHook = new ClassicBattleRoleHook(ClassicBattleHookKind.Dying, 1, 1, 5);
+        Assert.Equal(expectedHook, firstBattle.Lifecycle.Current.Combat.PendingRoleHook);
+        Assert.Equal(expectedHook, first.PendingBattleHook);
+        Assert.Equal(ClassicBattlePhase.RoleHook, firstBattle.Lifecycle.Current.Combat.Phase);
+        firstRandom.AssertExhausted();
+
+        first.StartBattleHook();
+        var display = Assert.IsType<TriggerDialogueRequest>(first.PendingDisplay);
+        Assert.NotEqual(Guid.Empty, display.Id);
+        Assert.NotEqual(prefixDisplay.Id, display.Id);
+        Assert.Equal((11, 11), (display.Content.StartMessageId, display.Content.EndMessageId));
+        Assert.NotEqual(DialogueDisplayPhase.Completed, display.Display.Current.Phase);
+        AssertFirstHookWaiting();
+        CompleteCapturedKeepDisplay(display);
+        AssertFirstHookWaiting();
+        Assert.True(first.AcknowledgeDisplay(display.Id));
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        AssertFirstParked();
+        AssertOtherBank();
+
+        if (currentEntry == 0)
+            WriteLiveDyingEntryForName65535(world, 0);
+        Assert.Equal(currentEntry, world.ObjectScripts[(65535, 1)]);
+        AssertOtherBank();
+        AssertFirstParked();
+        var secondContent = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = 0 },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = secondDeclaredEntry }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var secondRandom = new ScriptedRandom([.. Queue3, .. EnemyHit1]);
+        var second = new TriggerScriptSession(Fixture().Load(), Language(), secondContent, secondRandom, world);
+        Assert.NotSame(first, second);
+        Assert.Equal(currentEntry, world.ObjectScripts[(65535, 1)]);
+        AssertOtherBank();
+        AssertFirstParked();
+
+        second.Start("hooks", "npc", 28);
+        var secondCallId = second.CallId;
+        Assert.NotEqual(Guid.Empty, secondCallId);
+        Assert.NotEqual(firstCallId, secondCallId);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, second.Phase);
+        var secondBattle = Assert.IsType<TriggerBattleRequest>(second.PendingBattle);
+        Assert.NotSame(firstBattle, secondBattle);
+        Assert.NotSame(firstBattle.Lifecycle, secondBattle.Lifecycle);
+        Assert.NotEqual(firstBattle.Id, secondBattle.Id);
+        Assert.Equal(28, secondBattle.Caller);
+        Assert.Equal(28, second.Caller);
+        Assert.Equal(1, second.ReturnEntry);
+        // The world shares the name bank, not role HP: this executor starts from its own content.
+        Assert.Null(world.RoleLiveState);
+        Assert.Equal((60, 240), (secondBattle.Lifecycle.Current.Roles[1].Hp, secondBattle.Lifecycle.Current.Roles[1].MaxHp));
+        Assert.Equal(60, secondBattle.Lifecycle.Current.Combat.Players[1].Hp);
+        Assert.Equal(currentEntry, world.ObjectScripts[(65535, 1)]);
+        AssertOtherBank();
+        AssertFirstParked();
+
+        secondBattle.Lifecycle.SelectAttack(0, 0);
+        secondBattle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(secondBattle.Lifecycle.ResolveNextAction());
+        Assert.Equal((16, 240), (secondBattle.Lifecycle.Current.Roles[1].Hp, secondBattle.Lifecycle.Current.Roles[1].MaxHp));
+        Assert.Equal(16, secondBattle.Lifecycle.Current.Combat.Players[1].Hp);
+        Assert.Equal(100, secondBattle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.Equal(ClassicBattleSide.Enemy, secondBattle.Lifecycle.Current.Combat.LastAction!.Attacker);
+        secondRandom.AssertExhausted();
+        if (currentEntry == 0)
+        {
+            Assert.Equal(ClassicBattlePhase.Resolving, secondBattle.Lifecycle.Current.Combat.Phase);
+            Assert.Null(secondBattle.Lifecycle.Current.Combat.PendingRoleHook);
+            Assert.Null(second.PendingBattleHook);
+        }
+        else
+        {
+            Assert.Equal(ClassicBattlePhase.RoleHook, secondBattle.Lifecycle.Current.Combat.Phase);
+            Assert.Equal(expectedHook, secondBattle.Lifecycle.Current.Combat.PendingRoleHook);
+            Assert.Equal(expectedHook, second.PendingBattleHook);
+        }
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, second.Phase);
+        Assert.Null(second.RunningBattleHook);
+        Assert.Null(second.PendingDisplay);
+        Assert.Equal(28, second.Caller);
+        Assert.Equal(28, secondBattle.Caller);
+        Assert.Equal(1, second.ReturnEntry);
+        Assert.Equal(secondCallId, second.CallId);
+        Assert.Same(secondBattle, second.PendingBattle);
+        Assert.Null(secondBattle.Lifecycle.Completion);
+        Assert.Equal(currentEntry, world.ObjectScripts[(65535, 1)]);
+        AssertOtherBank();
+        AssertFirstParked();
+
+        void AssertOtherBank()
+        {
+            Assert.Equal(otherBank, world.ObjectScripts.Where(pair => pair.Key != (65535, 1)).OrderBy(pair => pair.Key).ToArray());
+        }
+
+        void AssertFirstHookWaiting()
+        {
+            Assert.Equal(0, world.ObjectScripts[(65535, 1)]);
+            AssertOtherBank();
+            Assert.Same(display, first.PendingDisplay);
+            Assert.Same(firstBattle, first.PendingBattle);
+            Assert.Equal(expectedHook, first.RunningBattleHook);
+            Assert.Equal(expectedHook, first.PendingBattleHook);
+            Assert.Equal(TriggerScriptPhase.WaitingForDisplay, first.Phase);
+            Assert.Equal(ClassicBattlePhase.RoleHook, firstBattle.Lifecycle.Current.Combat.Phase);
+            Assert.Equal(1, first.Caller);
+            Assert.Equal(28, firstBattle.Caller);
+            Assert.Equal(firstCallId, first.CallId);
+            Assert.Equal(1, first.ReturnEntry);
+            Assert.Null(firstBattle.Lifecycle.Completion);
+            firstRandom.AssertExhausted();
+        }
+
+        void AssertFirstParked()
+        {
+            Assert.Same(firstBattle, first.PendingBattle);
+            Assert.Equal(firstCallId, first.CallId);
+            Assert.Equal(1, first.ReturnEntry);
+            Assert.Equal(new TriggerPosition("hooks", "L0007", 7), first.CurrentPosition);
+            Assert.Equal(28, first.Caller);
+            Assert.Equal(28, firstBattle.Caller);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, first.Phase);
+            Assert.Null(first.PendingDisplay);
+            Assert.Null(first.RunningBattleHook);
+            Assert.Null(first.PendingBattleHook);
+            Assert.Null(firstBattle.Lifecycle.Current.Combat.PendingRoleHook);
+            Assert.Equal((16, 240), (firstBattle.Lifecycle.Current.Roles[1].Hp, firstBattle.Lifecycle.Current.Roles[1].MaxHp));
+            Assert.Equal(16, firstBattle.Lifecycle.Current.Combat.Players[1].Hp);
+            Assert.Equal(100, firstBattle.Lifecycle.Current.Combat.Players[0].Hp);
+            Assert.Equal(ClassicBattlePhase.Resolving, firstBattle.Lifecycle.Current.Combat.Phase);
+            Assert.Null(firstBattle.Lifecycle.Completion);
+            firstRandom.AssertExhausted();
+        }
+    }
+
     [Fact]
     public void Friend_death_root_keep_restores_the_actual_coverer_Name_entry_after_its_own_write()
     {
