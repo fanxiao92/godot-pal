@@ -892,6 +892,159 @@ public sealed class MidbattleRoleHookTests
         Assert.Equal(0, random.CallCount);
     }
 
+    [Theory]
+    [InlineData("unselected-raw", true)]
+    [InlineData("second-order-language", true)]
+    [InlineData("alias-backedge", false)]
+    [InlineData("zero-write", false)]
+    public void Entry_preflight_closes_reachable_Name_hook_writes_to_a_fixpoint(string caseName, bool rejects)
+    {
+        var fixture = ClosureMatrixFixture(caseName);
+        var events = fixture.Load(); // Parsing succeeds before either capability-preflight assertion.
+        var language = Language();
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = 0 },
+                original.Players[1] with { NameObjectId = caseName == "alias-backedge" ? 0 : 65535,
+                    FriendDeathScript = 0, DyingScript = 0 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        // Neither the old FriendDeath @31 nor Dying @5 may make the bad root reachable.
+        Assert.All(content.Players, player =>
+        {
+            Assert.Equal(0, player.FriendDeathScript);
+            Assert.Equal(0, player.DyingScript);
+        });
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var bankBefore = world.ObjectScripts.OrderBy(pair => pair.Key).ToArray();
+        var leaderBefore = world.Leader;
+        var initialRolesBefore = content.InitialRoles.OrderBy(pair => pair.Key).ToArray();
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(events, language, content, random, world);
+        var callBefore = (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry);
+        var executionBefore = (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed);
+        var pendingBefore = (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript);
+        var rolesBefore = script.BattleRoles!.OrderBy(pair => pair.Key).ToArray();
+
+        InvalidDataException? staticError = null;
+        if (rejects)
+            staticError = Assert.Throws<InvalidDataException>(() =>
+                TriggerScriptSession.ValidateEntry(events, language, content, "hooks", "npc"));
+        else
+        {
+            var requirements = TriggerScriptSession.ValidateEntry(events, language, content, "hooks", "npc");
+            Assert.Equal(new[] { 18 }, requirements.BattleTeamIds);
+            Assert.Empty(requirements.DisplayBlocks);
+        }
+        AssertUnchanged();
+
+        if (rejects)
+        {
+            var runtimeError = Assert.Throws<InvalidDataException>(() => script.Start("hooks", "npc", 28));
+            foreach (var error in new[] { staticError!, runtimeError })
+            {
+                Assert.Contains("hooks.json#L003A @003A", error.Message); // literal bad root @58
+                Assert.Contains(caseName == "unselected-raw"
+                    ? "unsupported trigger command/context 'raw'"
+                    : "Language 'zh-Hans' is missing message range 65534+0", error.Message);
+            }
+            AssertUnchanged();
+        }
+        else
+        {
+            script.Start("hooks", "npc", 28);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+            Assert.NotNull(script.PendingBattle);
+            Assert.Equal(28, script.PendingBattle!.Caller);
+            Assert.Equal(28, script.Caller);
+            Assert.Equal(caseName == "zero-write" ? 0 : 40, world.ObjectScripts[(0, 1)]);
+            Assert.Equal(0, random.CallCount);
+            // Do not start/complete a hook: the backedge proves analysis termination only.
+        }
+
+        void AssertUnchanged()
+        {
+            Assert.Equal(callBefore, (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry));
+            Assert.Equal(executionBefore, (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+                script.ScriptSuccess, script.Music, script.FadedToRed));
+            Assert.Equal(pendingBefore, (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+                script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+                script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript));
+            Assert.Equal(rolesBefore, script.BattleRoles!.OrderBy(pair => pair.Key).ToArray());
+            Assert.Equal(initialRolesBefore, content.InitialRoles.OrderBy(pair => pair.Key).ToArray());
+            Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+            Assert.Equal(leaderBefore, world.Leader);
+            Assert.Equal(0, random.CallCount);
+        }
+    }
+
+    private static HookFixture ClosureMatrixFixture(string caseName)
+    {
+        var fixture = Fixture();
+        int rootValue = caseName == "zero-write" ? 0 : 40;
+        fixture.Commands[1] = new JsonObject
+        {
+            ["label"] = "L0001", ["op"] = "setObjectScript", ["objectId"] = 0,
+            ["value"] = rootValue, ["slotIndex"] = 1, ["next"] = "L0002",
+            ["source"] = new JsonObject { ["index"] = 1, ["opcode"] = 144,
+                ["operands"] = new JsonArray(0, rootValue, 1) }
+        };
+        fixture.Commands[41] = JsonNode.Parse("""
+            {"label":"L0029","op":"end","mode":"keep","next":"L002A",
+             "source":{"index":41,"opcode":0,"operands":[0,0,0]}}
+            """)!.AsObject();
+        fixture.Commands[58] = JsonNode.Parse("""
+            {"label":"L003A","op":"raw","next":"L003B",
+             "source":{"index":58,"opcode":134,"operands":[0,65535,8]}}
+            """)!.AsObject();
+        switch (caseName)
+        {
+            case "unselected-raw":
+                // CountingBattleRandom returns 1 for NextInclusive(1,100): 1 < 50 falls to keep @41.
+                // The unselected target @58 must nevertheless reject before any production draw.
+                fixture.Commands[40] = JsonNode.Parse("""
+                    {"label":"L0028","op":"randomJump","rate":50,"to":"L003A","next":"L0029",
+                     "source":{"index":40,"opcode":6,"operands":[50,58,0]}}
+                    """)!.AsObject();
+                break;
+            case "second-order-language":
+                // @58 is not a successor of @40; only this second Name's future write enables it.
+                fixture.Commands[40] = JsonNode.Parse("""
+                    {"label":"L0028","op":"setObjectScript","objectId":65535,"value":58,"slotIndex":1,"next":"L0029",
+                     "source":{"index":40,"opcode":144,"operands":[65535,58,1]}}
+                    """)!.AsObject();
+                fixture.Commands[58] = JsonNode.Parse("""
+                    {"label":"L003A","op":"showDialog","messageId":65534,"descriptionLineWord":0,"next":"L003B",
+                     "source":{"index":58,"opcode":65535,"operands":[65534,0,0]}}
+                    """)!.AsObject();
+                break;
+            case "alias-backedge":
+                fixture.Commands[40] = JsonNode.Parse("""
+                    {"label":"L0028","op":"setObjectScript","objectId":0,"value":40,"slotIndex":1,"next":"L0029",
+                     "source":{"index":40,"opcode":144,"operands":[0,40,1]}}
+                    """)!.AsObject();
+                fixture.Commands[41] = JsonNode.Parse("""
+                    {"label":"L0029","op":"randomJump","rate":50,"to":"L0028","next":"L002A",
+                     "source":{"index":41,"opcode":6,"operands":[50,40,0]}}
+                    """)!.AsObject();
+                fixture.Commands[42] = JsonNode.Parse("""
+                    {"label":"L002A","op":"end","mode":"keep","next":"L002B",
+                     "source":{"index":42,"opcode":0,"operands":[0,0,0]}}
+                    """)!.AsObject();
+                break;
+            case "zero-write":
+                // @40 remains keep; raw @58 is disconnected from every selected root.
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(caseName));
+        }
+        return fixture;
+    }
+
     [Fact]
     public void Hook_preflight_rejects_a_missing_random_branch_language_before_any_side_effect_or_draw()
     {
