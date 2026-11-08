@@ -1982,6 +1982,286 @@ public sealed class MidbattleRoleHookTests
         }
     }
 
+    [Fact]
+    public void Ended_battle_owned_ACK_starts_the_next_battle_with_settled_roles_and_the_current_mapped_Dying_entry()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        Assert.Null(world.RoleLiveState);
+        Assert.Empty(world.ObjectScripts);
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = 0 },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = 0 }],
+            original.GrowthByRole,
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>>
+            {
+                [18] = [original.EnemyTeams[18][0] with { Attack = 80 }]
+            },
+            original.RoleEquipment, original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        Assert.Equal(new int?[] { 0, 65535 }, content.Players.Select(player => player.NameObjectId));
+        Assert.All(content.Players, player =>
+        {
+            Assert.Equal((0, 0), (player.FriendDeathScript, player.DyingScript));
+            Assert.Equal((64, 18), (player.MagicPower, player.FleeRate));
+            Assert.Empty(player.Equipment);
+            Assert.Empty(player.Statuses);
+            Assert.Empty(player.Poisons);
+            Assert.False(player.AttackAll);
+        });
+        Assert.Empty(content.PanelDeclaredRoles);
+        Assert.Empty(content.RoleEquipment);
+        Assert.Empty(content.EquipmentObjects);
+        var enemy = Assert.Single(content.EnemyTeams[18]);
+        Assert.Equal((7, 0, 43, 80, 0, 500, 1),
+            (enemy.Id, enemy.Level, enemy.Hp, enemy.Attack, enemy.Defense, enemy.Dexterity, enemy.PhysicalResistance));
+        Assert.Equal((0, 0, 0), (enemy.TurnStartScript, enemy.ReadyScript, enemy.BattleEndScript));
+        Assert.Equal((0, 0, 0, 0, 0, 0),
+            (enemy.MagicId, enemy.DualMove, enemy.AttackEquivItem, enemy.AttackEquivItemRate, enemy.Experience, enemy.Cash));
+        Assert.Empty(enemy.Statuses);
+        Assert.Empty(enemy.Poisons);
+        Assert.All(content.GrowthByRole.Values, growth =>
+        {
+            Assert.Equal(Enumerable.Repeat(100, 100), growth.LevelUpExperience);
+            Assert.Empty(growth.LevelUpMagics);
+        });
+        var fixture = Fixture();
+        fixture.Commands[2] = StartBattle(2);
+        var random = new ScriptedRandom([.. Queue3, .. EnemyHit1, .. Strike, .. Queue3, .. EnemyHit1]);
+        var script = new TriggerScriptSession(fixture.Load(), Language(), content, random, world);
+        script.Start("hooks", "npc", 28);
+        var outerCallId = script.CallId;
+        var first = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
+        Assert.NotEqual(outerCallId, first.Id);
+        AssertFrame(first, 2, 3);
+        AssertBank(0);
+        AssertRoles(script.BattleRoles!, 100, 20, 60, 10, 55, 55, 55);
+        AssertRoles(first.Lifecycle.Current.Roles, 100, 20, 60, 10, 0, 0, 0);
+        AssertCombat(first, 100, 60, 43, ClassicBattlePhase.Selecting, false);
+        Assert.True(first.Lifecycle.Current.IsInBattle);
+        Assert.Null(first.Lifecycle.Completion);
+        Assert.Null(first.Lifecycle.VictorySettlement);
+        Assert.Null(first.Lifecycle.PendingBattleEndScript);
+        Assert.Null(first.Lifecycle.Current.Combat.LastAction);
+        Assert.Null(script.PendingBattleHook);
+
+        first.Lifecycle.SelectAttack(0, 0);
+        first.Lifecycle.SelectAttack(1, 0);
+        Assert.True(first.Lifecycle.ResolveNextAction());
+        // SDLPal: effective strength116 hits for116, clamped to the actual remaining60.
+        // Coverer role0's Name0 FriendDeath entry is0; dead role1 cannot run Dying.
+        AssertFrame(first, 2, 3);
+        AssertBank(0);
+        AssertRoles(script.BattleRoles!, 100, 20, 60, 10, 55, 55, 55);
+        AssertRoles(first.Lifecycle.Current.Roles, 100, 20, 0, 10, 0, 0, 0);
+        AssertCombat(first, 100, 0, 43, ClassicBattlePhase.Resolving, true);
+        AssertEnemyAction(first.Lifecycle.Current.Combat, 60);
+        Assert.True(first.Lifecycle.Current.IsInBattle);
+        Assert.Null(first.Lifecycle.Current.Combat.PendingRoleHook);
+        Assert.Null(script.PendingBattleHook);
+        Assert.Null(first.Lifecycle.Completion);
+        Assert.Null(first.Lifecycle.VictorySettlement);
+        Assert.Null(first.Lifecycle.PendingBattleEndScript);
+
+        Assert.True(first.Lifecycle.ResolveNextAction());
+        var firstOwnedCompletion = Assert.IsType<ClassicBattleLifecycleSession.CompletionReceipt>(first.Lifecycle.Completion);
+        AssertFirstEnded(0);
+        // Real zero-reward victory revives role1 to120; the terminal combat still records0.
+        // Only after this real settlement do we change the live NameFFFF Dying slot.
+        WriteLiveDyingEntryForName65535(world, 5);
+        AssertFirstEnded(5);
+        Assert.False(script.AcknowledgeBattle(first.Id, null));
+        AssertFirstEnded(5);
+        Assert.False(script.AcknowledgeBattle(outerCallId, firstOwnedCompletion));
+        AssertFirstEnded(5);
+
+        Assert.True(script.AcknowledgeBattle(first.Id, firstOwnedCompletion));
+        var second = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
+        Assert.NotSame(first, second);
+        Assert.NotSame(first.Lifecycle, second.Lifecycle);
+        Assert.NotEqual(first.Id, second.Id);
+        AssertSecondReady();
+        Assert.False(script.AcknowledgeBattle(first.Id, firstOwnedCompletion));
+        AssertSecondReady();
+        Assert.False(script.AcknowledgeBattle(second.Id, firstOwnedCompletion));
+        AssertSecondReady();
+        Assert.False(script.AcknowledgeBattle(second.Id, null));
+        AssertSecondReady();
+
+        second.Lifecycle.SelectAttack(0, 0);
+        second.Lifecycle.SelectAttack(1, 0);
+        Assert.True(second.Lifecycle.ResolveNextAction());
+        // Settled120, not template60: actual116 leaves4, crossing the raw maxHP/5 band48.
+        // Declaration0 would miss this pending5; NameFFFF is an ordinary Name identity.
+        AssertFrame(second, 3, 4);
+        AssertBank(5);
+        AssertRoles(script.BattleRoles!, 150, 35, 120, 125, 0, 1, 2);
+        AssertRoles(second.Lifecycle.Current.Roles, 150, 35, 4, 125, 0, 0, 0);
+        AssertCombat(second, 150, 4, 43, ClassicBattlePhase.RoleHook, true);
+        AssertEnemyAction(second.Lifecycle.Current.Combat, 116);
+        var expectedHook = new ClassicBattleRoleHook(ClassicBattleHookKind.Dying, 1, 1, 5);
+        Assert.Equal(expectedHook, second.Lifecycle.Current.Combat.PendingRoleHook);
+        Assert.Equal(expectedHook, script.PendingBattleHook);
+        Assert.True(second.Lifecycle.Current.IsInBattle);
+        Assert.Null(second.Lifecycle.Completion);
+        Assert.Null(second.Lifecycle.VictorySettlement);
+        Assert.Null(second.Lifecycle.PendingBattleEndScript);
+        Assert.False(second.Lifecycle.OwnsCompletion(firstOwnedCompletion));
+        AssertFirstSettlement();
+        random.AssertExhausted();
+
+        void AssertBank(int dyingEntry)
+        {
+            Assert.Equal(4, world.ObjectScripts.Count);
+            Assert.Equal(0, world.ObjectScripts[(0, 0)]);
+            Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+            Assert.Equal(0, world.ObjectScripts[(65535, 0)]);
+            Assert.Equal(dyingEntry, world.ObjectScripts[(65535, 1)]);
+            Assert.Null(world.RoleLiveState);
+        }
+
+        void AssertFrame(TriggerBattleRequest battle, int address, int nextAddress)
+        {
+            Assert.Same(battle, script.PendingBattle);
+            Assert.Equal(outerCallId, script.CallId);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+            Assert.Equal(28, script.Caller);
+            Assert.Equal(28, battle.Caller);
+            Assert.Equal(1, script.ReturnEntry);
+            Assert.Equal(new TriggerPosition("hooks", $"L{address:X4}", address), script.CurrentPosition);
+            Assert.Equal(new TriggerPosition("hooks", $"L{address:X4}", address), battle.Position);
+            Assert.Equal(18, battle.EnemyTeamId);
+            Assert.True(battle.IsBoss);
+            Assert.Equal(nextAddress, battle.NextAddress);
+            Assert.Null(battle.LossAddress);
+            Assert.Null(battle.FleeAddress);
+            Assert.Null(script.PendingDisplay);
+            Assert.Null(script.RunningBattleHook);
+            Assert.Null(script.RunningBattleEndScript);
+        }
+
+        void AssertFirstSettlement()
+        {
+            Assert.False(first.Lifecycle.Current.IsInBattle);
+            AssertRoles(first.Lifecycle.Current.Roles, 150, 35, 120, 125, 0, 1, 2);
+            AssertCombat(first, 100, 0, 0, ClassicBattlePhase.Won, true, 1, 2);
+            Assert.Equal(new ClassicBattleAction(1, ClassicBattleSide.Player, 7, 43, false, false)
+                { ActorIndex = 0, TargetIndex = 0 }, first.Lifecycle.Current.Combat.LastAction);
+            Assert.Null(first.Lifecycle.Current.Combat.PendingRoleHook);
+            Assert.Null(first.Lifecycle.PendingBattleEndScript);
+            Assert.Same(firstOwnedCompletion, first.Lifecycle.Completion);
+            Assert.True(first.Lifecycle.OwnsCompletion(firstOwnedCompletion));
+            Assert.Equal((ClassicBattlePhase.Won, 0, 0),
+                (firstOwnedCompletion.Outcome, firstOwnedCompletion.ExperienceGranted, firstOwnedCompletion.CashGranted));
+            var settlement = Assert.IsType<ClassicBattleVictorySettlement>(first.Lifecycle.VictorySettlement);
+            Assert.Equal((0, 0), (settlement.ExperienceGranted, settlement.CashGranted));
+            Assert.Equal(new[] { 0, 1 }, settlement.Growth.Select(growth => growth.RoleId));
+            Assert.All(settlement.Growth, growth =>
+            {
+                Assert.Equal((2, 2), (growth.LevelBefore, growth.LevelAfter));
+                Assert.Empty(growth.LearnedMagics);
+            });
+        }
+
+        void AssertFirstEnded(int dyingEntry)
+        {
+            AssertFirstSettlement();
+            AssertFrame(first, 2, 3);
+            AssertBank(dyingEntry);
+            Assert.Null(script.PendingBattleHook);
+            AssertRoles(script.BattleRoles!, 100, 20, 60, 10, 55, 55, 55);
+        }
+
+        void AssertSecondReady()
+        {
+            AssertFirstSettlement();
+            AssertFrame(second, 3, 4);
+            AssertBank(5);
+            AssertRoles(script.BattleRoles!, 150, 35, 120, 125, 0, 1, 2);
+            // Publication retains first counts1/2; only the new lifecycle clears its own counts.
+            AssertRoles(second.Lifecycle.Current.Roles, 150, 35, 120, 125, 0, 0, 0);
+            AssertCombat(second, 150, 120, 43, ClassicBattlePhase.Selecting, false);
+            Assert.True(second.Lifecycle.Current.IsInBattle);
+            Assert.Null(second.Lifecycle.Completion);
+            Assert.Null(second.Lifecycle.VictorySettlement);
+            Assert.Null(second.Lifecycle.PendingBattleEndScript);
+            Assert.Null(second.Lifecycle.Current.Combat.LastAction);
+            Assert.Null(second.Lifecycle.Current.Combat.PendingRoleHook);
+            Assert.Null(script.PendingBattleHook);
+            Assert.False(second.Lifecycle.OwnsCompletion(firstOwnedCompletion));
+            Assert.All(content.Players, player => Assert.Equal((0, 0), (player.FriendDeathScript, player.DyingScript)));
+        }
+
+        static void AssertRoles(IReadOnlyDictionary<int, BattleRoleSnapshot> roles,
+            int hp0, int mp0, int hp1, int mp1, int hiddenCount, int attackCount, int healthCount)
+        {
+            Assert.Equal(new[] { 0, 1 }, roles.Keys.OrderBy(id => id));
+            Assert.Equal((hp0, 200, mp0, 50), (roles[0].Hp, roles[0].MaxHp, roles[0].Mp, roles[0].MaxMp));
+            Assert.Equal((hp1, 240, mp1, 240), (roles[1].Hp, roles[1].MaxHp, roles[1].Mp, roles[1].MaxMp));
+            Assert.Equal((2, 0), (roles[0].CoveredByRoleId, roles[1].CoveredByRoleId));
+            foreach (int roleId in new[] { 0, 1 })
+            {
+                var role = roles[roleId];
+                Assert.Equal(roleId, role.RoleId);
+                Assert.Equal(2, role.Level);
+                Assert.Equal(new BattleExperienceSnapshot(5, 2, 17), role.PrimaryExperience);
+                Assert.Equal((0, 0, 0, 0, 0), (role.Attack, role.MagicPower, role.Defense, role.Dexterity, role.FleeRate));
+                Assert.Equal(new int[6], role.Equipment);
+                Assert.Equal(new int[32], role.Magics);
+                Assert.Equal(new int[9], role.Statuses);
+                Assert.Equal(7, role.HiddenExperience.Count);
+                foreach (string name in new[] { "health", "magic", "attack", "magicPower", "defense", "dexterity", "flee" })
+                {
+                    int count = roleId == 0 && name == "attack" ? attackCount
+                        : roleId == 0 && name == "health" ? healthCount : hiddenCount;
+                    Assert.Equal(new BattleExperienceSnapshot(7, 3, count), role.HiddenExperience[name]);
+                }
+            }
+        }
+
+        static void AssertCombat(TriggerBattleRequest battle, int hp0, int hp1, int enemyHp,
+            ClassicBattlePhase phase, bool selected, int attackCount = 0, int healthCount = 0)
+        {
+            var combat = battle.Lifecycle.Current.Combat;
+            Assert.Equal(phase, combat.Phase);
+            Assert.Equal(selected ? 1 : 0, combat.Round);
+            Assert.Equal(hp0, combat.PlayerHp);
+            Assert.Equal(enemyHp, combat.EnemyHp);
+            Assert.Equal(2, combat.Players.Count);
+            Assert.Equal((0, 0, hp0), (combat.Players[0].PartyIndex, combat.Players[0].RoleId, combat.Players[0].Hp));
+            Assert.Equal((1, 1, hp1), (combat.Players[1].PartyIndex, combat.Players[1].RoleId, combat.Players[1].Hp));
+            Assert.Equal((40, 20, 100), (combat.Players[0].Attack, combat.Players[0].Defense, combat.Players[0].Dexterity));
+            Assert.Equal((20, 0, 100), (combat.Players[1].Attack, combat.Players[1].Defense, combat.Players[1].Dexterity));
+            Assert.Equal(new ClassicBattleCounts(attackCount, healthCount), combat.Counts);
+            Assert.Equal(new ClassicBattleCounts(attackCount, healthCount), combat.Players[0].Counts);
+            Assert.Equal(new ClassicBattleCounts(0, 0), combat.Players[1].Counts);
+            Assert.All(combat.Players, player =>
+            {
+                Assert.Equal((0, 0, 0, 0, 0),
+                    (player.BoostAttack, player.BoostMagicPower, player.BoostDefense, player.BoostDexterity, player.BoostFlee));
+                Assert.Equal(selected ? (int?)0 : null, player.SelectedEnemySlot);
+            });
+            Assert.Equal(new ClassicBattleEnemyView(0, 7, enemyHp), Assert.Single(combat.Enemies));
+            Assert.Equal(selected ? null : (int?)0, combat.SelectingPlayerIndex);
+            Assert.Null(combat.LastFleeAttempt);
+            if (selected)
+                Assert.Equal(new[]
+                {
+                    new ClassicBattleQueueEntry(ClassicBattleSide.Enemy, 0, 518),
+                    new ClassicBattleQueueEntry(ClassicBattleSide.Player, 0, 100),
+                    new ClassicBattleQueueEntry(ClassicBattleSide.Player, 1, 100)
+                }, combat.ActionQueue);
+            else
+                Assert.Empty(combat.ActionQueue);
+        }
+
+        static void AssertEnemyAction(ClassicBattleView combat, int damage)
+        {
+            Assert.Equal(new ClassicBattleAction(1, ClassicBattleSide.Enemy, 1, damage, false, false)
+                { ActorIndex = 0, TargetIndex = 1, SecondStrike = false, CovererPartyIndex = null }, combat.LastAction);
+        }
+    }
+
     [Theory]
     [InlineData(0, 5)]
     [InlineData(5, 0)]
