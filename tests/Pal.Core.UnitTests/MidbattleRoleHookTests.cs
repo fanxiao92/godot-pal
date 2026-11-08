@@ -1523,6 +1523,251 @@ public sealed class MidbattleRoleHookTests
         }
     }
 
+    [Fact]
+    public void An_isolated_copy_consumes_the_current_mapped_Dying_entry_and_keeps_its_return_local()
+    {
+        var source = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        Assert.Null(source.RoleLiveState);
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = 0 },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = 0 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        WriteLiveDyingEntryForName65535(source, 5);
+        Assert.Equal(5, source.ObjectScripts[(65535, 1)]);
+        var sourceRandom = new ScriptedRandom([.. Queue3, .. EnemyHit1]);
+        var sourceScript = new TriggerScriptSession(CapturedKeepFixture(65535, 1).Load(), Language(), content, sourceRandom, source);
+        sourceScript.Start("hooks", "npc", 28);
+        var sourceCallId = sourceScript.CallId;
+        Assert.NotEqual(Guid.Empty, sourceCallId);
+        Assert.Equal(TriggerScriptPhase.WaitingForDisplay, sourceScript.Phase);
+        var sourcePrefix = Assert.IsType<TriggerDialogueRequest>(sourceScript.PendingDisplay);
+        Assert.Equal(10, sourcePrefix.Content.StartMessageId);
+        FinishDisplay(sourceScript);
+        Assert.Equal(DialogueDisplayPhase.Completed, sourcePrefix.Display.Current.Phase);
+        var sourceBattle = Assert.IsType<TriggerBattleRequest>(sourceScript.PendingBattle);
+        var sourceLifecycle = sourceBattle.Lifecycle;
+        var sourceInitialPhase = sourceLifecycle.Current.Combat.Phase;
+        Assert.Equal(0, source.ObjectScripts[(0, 0)]);
+        Assert.Equal(0, source.ObjectScripts[(0, 1)]);
+        Assert.Equal(0, source.ObjectScripts[(65535, 0)]);
+        Assert.Equal(5, source.ObjectScripts[(65535, 1)]);
+        var otherBank = source.ObjectScripts.Where(pair => pair.Key != (65535, 1)).OrderBy(pair => pair.Key).ToArray();
+        AssertSourceParked(60, 5);
+
+        var copy = source.CreateIsolatedCopy();
+        Assert.NotSame(source, copy);
+        Assert.Null(copy.RoleLiveState);
+        Assert.Equal(source.ObjectScripts.OrderBy(pair => pair.Key).ToArray(), copy.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(5, copy.ObjectScripts[(65535, 1)]);
+        AssertOtherBank(copy);
+        AssertSourceParked(60, 5);
+
+        WriteLiveDyingEntryForName65535(source, 0);
+        AssertBanks(5);
+        AssertSourceParked(60, 0);
+        WriteLiveDyingEntryForName65535(copy, 0);
+        AssertBanks(0);
+        AssertSourceParked(60, 0);
+        WriteLiveDyingEntryForName65535(copy, 5);
+        AssertBanks(5);
+        AssertSourceParked(60, 0);
+
+        var copyRandom = new ScriptedRandom([.. Queue3, .. EnemyHit1]);
+        Assert.NotSame(sourceRandom, copyRandom);
+        var copyScript = new TriggerScriptSession(CapturedKeepFixture(65535, 1).Load(), Language(), content, copyRandom, copy);
+        Assert.NotSame(sourceScript, copyScript);
+        AssertBanks(5);
+        AssertSourceParked(60, 0);
+        copyScript.Start("hooks", "npc", 28);
+        var copyCallId = copyScript.CallId;
+        Assert.NotEqual(Guid.Empty, copyCallId);
+        Assert.NotEqual(sourceCallId, copyCallId);
+        Assert.Equal(TriggerScriptPhase.WaitingForDisplay, copyScript.Phase);
+        var copyPrefix = Assert.IsType<TriggerDialogueRequest>(copyScript.PendingDisplay);
+        Assert.Equal(10, copyPrefix.Content.StartMessageId);
+        AssertBanks(5);
+        AssertSourceParked(60, 0);
+        FinishDisplay(copyScript);
+        Assert.Equal(DialogueDisplayPhase.Completed, copyPrefix.Display.Current.Phase);
+        var copyBattle = Assert.IsType<TriggerBattleRequest>(copyScript.PendingBattle);
+        Assert.NotSame(sourceBattle, copyBattle);
+        Assert.NotSame(sourceLifecycle, copyBattle.Lifecycle);
+        Assert.NotEqual(sourceBattle.Id, copyBattle.Id);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, copyScript.Phase);
+        Assert.Equal(28, copyScript.Caller);
+        Assert.Equal(28, copyBattle.Caller);
+        Assert.Equal(1, copyScript.ReturnEntry);
+        Assert.Equal(new TriggerPosition("hooks", "L0003", 3), copyScript.CurrentPosition);
+        Assert.Null(copyBattle.Lifecycle.Completion);
+        AssertVitals(copyBattle, 60);
+        AssertBanks(5);
+        AssertSourceParked(60, 0);
+
+        sourceLifecycle.SelectAttack(0, 0);
+        sourceLifecycle.SelectAttack(1, 0);
+        Assert.True(sourceLifecycle.ResolveNextAction());
+        Assert.Equal(ClassicBattleSide.Enemy, sourceLifecycle.Current.Combat.LastAction!.Attacker);
+        sourceRandom.AssertExhausted();
+        AssertSourceParked(16, 0);
+        AssertBanks(5);
+
+        copyBattle.Lifecycle.SelectAttack(0, 0);
+        copyBattle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(copyBattle.Lifecycle.ResolveNextAction());
+        AssertVitals(copyBattle, 16);
+        Assert.Equal(ClassicBattleSide.Enemy, copyBattle.Lifecycle.Current.Combat.LastAction!.Attacker);
+        copyRandom.AssertExhausted();
+        var expectedHook = new ClassicBattleRoleHook(ClassicBattleHookKind.Dying, 1, 1, 5);
+        Assert.Equal(ClassicBattlePhase.RoleHook, copyBattle.Lifecycle.Current.Combat.Phase);
+        Assert.Equal(expectedHook, copyBattle.Lifecycle.Current.Combat.PendingRoleHook);
+        Assert.Equal(expectedHook, copyScript.PendingBattleHook);
+        Assert.Null(copyScript.RunningBattleHook);
+        Assert.Null(copyScript.PendingDisplay);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, copyScript.Phase);
+        Assert.Equal(28, copyScript.Caller);
+        Assert.Equal(28, copyBattle.Caller);
+        Assert.Equal(1, copyScript.ReturnEntry);
+        Assert.Equal(copyCallId, copyScript.CallId);
+        Assert.Same(copyBattle, copyScript.PendingBattle);
+        Assert.Null(copyBattle.Lifecycle.Completion);
+        AssertBanks(5);
+        AssertSourceParked(16, 0);
+
+        copyScript.StartBattleHook();
+        var copyDisplay = Assert.IsType<TriggerDialogueRequest>(copyScript.PendingDisplay);
+        Assert.NotEqual(Guid.Empty, copyDisplay.Id);
+        Assert.NotEqual(copyPrefix.Id, copyDisplay.Id);
+        Assert.Equal((11, 11), (copyDisplay.Content.StartMessageId, copyDisplay.Content.EndMessageId));
+        Assert.NotEqual(DialogueDisplayPhase.Completed, copyDisplay.Display.Current.Phase);
+        AssertCopyHookWaiting();
+        var waitingDisplay = copyDisplay.Display.Current;
+        Assert.False(copyScript.AcknowledgeDisplay(copyDisplay.Id));
+        Assert.Equal(waitingDisplay, copyDisplay.Display.Current);
+        AssertCopyHookWaiting();
+
+        var laterCopy = copy.CreateIsolatedCopy();
+        Assert.NotSame(source, laterCopy);
+        Assert.NotSame(copy, laterCopy);
+        Assert.Null(laterCopy.RoleLiveState);
+        AssertLaterBank(laterCopy);
+        AssertCopyHookWaiting();
+        CompleteCapturedKeepDisplay(copyDisplay);
+        AssertCopyHookWaiting();
+        AssertLaterBank(laterCopy);
+
+        Assert.True(copyScript.AcknowledgeDisplay(copyDisplay.Id));
+        Assert.Equal(5, copy.ObjectScripts[(65535, 1)]);
+        Assert.Equal(0, source.ObjectScripts[(65535, 1)]);
+        Assert.Equal(0, laterCopy.ObjectScripts[(65535, 1)]);
+        AssertCopyResumed();
+        AssertLaterBank(laterCopy);
+        Assert.False(copyScript.AcknowledgeDisplay(copyDisplay.Id));
+        AssertCopyResumed();
+        AssertLaterBank(laterCopy);
+
+        void AssertOtherBank(DynamicEventWorld world)
+        {
+            Assert.Equal(0, world.ObjectScripts[(0, 0)]);
+            Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+            Assert.Equal(0, world.ObjectScripts[(65535, 0)]);
+            Assert.Equal(otherBank, world.ObjectScripts.Where(pair => pair.Key != (65535, 1)).OrderBy(pair => pair.Key).ToArray());
+        }
+
+        void AssertBanks(int copyEntry)
+        {
+            Assert.Equal(0, source.ObjectScripts[(65535, 1)]);
+            Assert.Equal(copyEntry, copy.ObjectScripts[(65535, 1)]);
+            AssertOtherBank(source);
+            AssertOtherBank(copy);
+        }
+
+        void AssertLaterBank(DynamicEventWorld world)
+        {
+            Assert.Equal(0, world.ObjectScripts[(65535, 1)]);
+            AssertOtherBank(world);
+        }
+
+        void AssertVitals(TriggerBattleRequest battle, int hp)
+        {
+            Assert.Equal((hp, 240), (battle.Lifecycle.Current.Roles[1].Hp, battle.Lifecycle.Current.Roles[1].MaxHp));
+            Assert.Equal(100, battle.Lifecycle.Current.Roles[0].Hp);
+            Assert.Equal(hp, battle.Lifecycle.Current.Combat.Players[1].Hp);
+            Assert.Equal(100, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        }
+
+        void AssertSourceParked(int hp, int entry)
+        {
+            Assert.Equal(entry, source.ObjectScripts[(65535, 1)]);
+            AssertOtherBank(source);
+            Assert.Null(source.RoleLiveState);
+            Assert.Same(sourceBattle, sourceScript.PendingBattle);
+            Assert.Same(sourceLifecycle, sourceBattle.Lifecycle);
+            Assert.Equal(sourceCallId, sourceScript.CallId);
+            Assert.Equal(28, sourceScript.Caller);
+            Assert.Equal(28, sourceBattle.Caller);
+            Assert.Equal(1, sourceScript.ReturnEntry);
+            Assert.Equal(new TriggerPosition("hooks", "L0003", 3), sourceScript.CurrentPosition);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, sourceScript.Phase);
+            Assert.Null(sourceScript.PendingDisplay);
+            Assert.Null(sourceScript.PendingBattleHook);
+            Assert.Null(sourceScript.RunningBattleHook);
+            Assert.Null(sourceLifecycle.Current.Combat.PendingRoleHook);
+            Assert.Null(sourceLifecycle.Completion);
+            AssertVitals(sourceBattle, hp);
+            Assert.Equal(hp == 60 ? sourceInitialPhase : ClassicBattlePhase.Resolving, sourceLifecycle.Current.Combat.Phase);
+            if (hp == 16)
+            {
+                Assert.Equal(ClassicBattleSide.Enemy, sourceLifecycle.Current.Combat.LastAction!.Attacker);
+                sourceRandom.AssertExhausted();
+            }
+        }
+
+        void AssertCopyHookWaiting()
+        {
+            AssertBanks(0);
+            AssertSourceParked(16, 0);
+            Assert.Same(copyDisplay, copyScript.PendingDisplay);
+            Assert.Same(copyBattle, copyScript.PendingBattle);
+            Assert.Equal(copyCallId, copyScript.CallId);
+            Assert.Equal(1, copyScript.Caller);
+            Assert.Equal(28, copyBattle.Caller);
+            Assert.Equal(1, copyScript.ReturnEntry);
+            Assert.Equal(TriggerScriptPhase.WaitingForDisplay, copyScript.Phase);
+            Assert.Equal(expectedHook, copyScript.RunningBattleHook);
+            Assert.Equal(expectedHook, copyScript.PendingBattleHook);
+            Assert.Equal(expectedHook, copyBattle.Lifecycle.Current.Combat.PendingRoleHook);
+            Assert.Equal(ClassicBattlePhase.RoleHook, copyBattle.Lifecycle.Current.Combat.Phase);
+            Assert.Null(copyBattle.Lifecycle.Completion);
+            AssertVitals(copyBattle, 16);
+            copyRandom.AssertExhausted();
+        }
+
+        void AssertCopyResumed()
+        {
+            AssertBanks(5);
+            AssertSourceParked(16, 0);
+            Assert.Same(copyBattle, copyScript.PendingBattle);
+            Assert.Equal(copyCallId, copyScript.CallId);
+            Assert.Equal(28, copyScript.Caller);
+            Assert.Equal(28, copyBattle.Caller);
+            Assert.Equal(1, copyScript.ReturnEntry);
+            Assert.Equal(new TriggerPosition("hooks", "L0007", 7), copyScript.CurrentPosition);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, copyScript.Phase);
+            Assert.Null(copyScript.PendingDisplay);
+            Assert.Null(copyScript.RunningBattleHook);
+            Assert.Null(copyScript.PendingBattleHook);
+            Assert.Null(copyBattle.Lifecycle.Current.Combat.PendingRoleHook);
+            Assert.Equal(ClassicBattlePhase.Resolving, copyBattle.Lifecycle.Current.Combat.Phase);
+            Assert.Null(copyBattle.Lifecycle.Completion);
+            AssertVitals(copyBattle, 16);
+            Assert.Equal(ClassicBattleSide.Enemy, copyBattle.Lifecycle.Current.Combat.LastAction!.Attacker);
+            copyRandom.AssertExhausted();
+        }
+    }
+
     [Theory]
     [InlineData(0, 5)]
     [InlineData(5, 0)]
