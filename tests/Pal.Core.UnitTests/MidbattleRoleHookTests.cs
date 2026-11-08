@@ -1218,6 +1218,109 @@ public sealed class MidbattleRoleHookTests
         Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
     }
 
+    [Fact]
+    public void Dying_hook_detection_uses_live_zero_written_after_the_battle_started()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = 0 },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = 5 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var random = new ScriptedRandom([.. Queue3, .. EnemyHit1]);
+        var script = new TriggerScriptSession(Fixture().Load(), Language(), content, random, world);
+
+        script.Start("hooks", "npc", 28);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        var battle = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        Assert.Equal((60, 240), (battle.Lifecycle.Current.Roles[1].Hp, battle.Lifecycle.Current.Roles[1].MaxHp));
+
+        WriteLiveDyingEntryForName65535(world, 0);
+        Assert.Equal(0, world.ObjectScripts[(65535, 1)]);
+        battle.Lifecycle.SelectAttack(0, 0);
+        battle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(battle.Lifecycle.ResolveNextAction());
+
+        // The real enemy strike crosses the dying threshold while role1 remains alive.
+        Assert.Equal(16, battle.Lifecycle.Current.Combat.Players[1].Hp);
+        Assert.Equal(44, battle.Lifecycle.Current.Combat.LastAction!.Damage);
+        Assert.Equal(ClassicBattleSide.Enemy, battle.Lifecycle.Current.Combat.LastAction.Attacker);
+        random.AssertExhausted();
+        Assert.Equal(0, world.ObjectScripts[(65535, 1)]);
+        Assert.Same(battle, script.PendingBattle);
+        Assert.Equal(28, battle.Caller);
+        Assert.Equal(28, script.Caller);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        Assert.Null(script.RunningBattleHook);
+        Assert.Equal(ClassicBattlePhase.Resolving, battle.Lifecycle.Current.Combat.Phase);
+        Assert.Null(battle.Lifecycle.Current.Combat.PendingRoleHook);
+        Assert.Null(script.PendingBattleHook);
+    }
+
+    [Fact]
+    public void Dying_hook_detection_uses_live_entry_enabled_after_the_battle_started()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = 0 },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = 0 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var random = new ScriptedRandom([.. Queue3, .. EnemyHit1]);
+        var script = new TriggerScriptSession(Fixture().Load(), Language(), content, random, world);
+
+        script.Start("hooks", "npc", 28);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        var battle = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
+        Assert.Equal(0, world.ObjectScripts[(65535, 1)]);
+        Assert.Equal((60, 240), (battle.Lifecycle.Current.Roles[1].Hp, battle.Lifecycle.Current.Roles[1].MaxHp));
+
+        WriteLiveDyingEntryForName65535(world, 5);
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        battle.Lifecycle.SelectAttack(0, 0);
+        battle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(battle.Lifecycle.ResolveNextAction());
+
+        Assert.Equal(16, battle.Lifecycle.Current.Combat.Players[1].Hp);
+        Assert.Equal(44, battle.Lifecycle.Current.Combat.LastAction!.Damage);
+        Assert.Equal(ClassicBattleSide.Enemy, battle.Lifecycle.Current.Combat.LastAction.Attacker);
+        random.AssertExhausted();
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        Assert.Same(battle, script.PendingBattle);
+        Assert.Equal(28, battle.Caller);
+        Assert.Equal(28, script.Caller);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        Assert.Null(script.RunningBattleHook);
+        Assert.Equal(ClassicBattlePhase.RoleHook, battle.Lifecycle.Current.Combat.Phase);
+        var expectedHook = new ClassicBattleRoleHook(ClassicBattleHookKind.Dying, 1, 1, 5);
+        Assert.Equal(expectedHook, battle.Lifecycle.Current.Combat.PendingRoleHook);
+        Assert.Equal(expectedHook, script.PendingBattleHook);
+    }
+
+    private static void WriteLiveDyingEntryForName65535(DynamicEventWorld world, int entry)
+    {
+        var fixture = new DynamicEventSessionTests.DynamicFixture();
+        fixture.Commands[1] = new JsonObject
+        {
+            ["label"] = "L0001", ["op"] = "setObjectScript", ["objectId"] = 65535,
+            ["value"] = entry, ["slotIndex"] = 1, ["next"] = "L0002",
+            ["source"] = new JsonObject { ["index"] = 1, ["opcode"] = 144,
+                ["operands"] = new JsonArray(65535, entry, 1) }
+        };
+        fixture.Commands[2] = JsonNode.Parse("""
+            {"label":"L0002","op":"end","mode":"keep","next":"L0003",
+             "source":{"index":2,"opcode":0,"operands":[0,0,0]}}
+            """)!.AsObject();
+        var setter = new TriggerScriptSession(fixture.Load(), Language(), world);
+        setter.Start("scene", "npc", 5);
+        Assert.Equal(TriggerScriptPhase.Completed, setter.Phase);
+    }
+
     private static TriggerBattleContent CurrentQueryContent(int dyingScript = 0)
     {
         var original = Content(60);

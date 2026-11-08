@@ -14,6 +14,7 @@ public sealed class ClassicBattleSession
     private readonly int?[] targets;
     private ClassicBattleQueueEntry[] queue = [];
     private readonly IBattleRandom random;
+    private readonly Func<ClassicBattlePlayer, int>? readDyingScript;
     private int actionIndex;
     private bool pendingSecondStrike;
     // fight.c 595: per-action HP backup read by the post-action role-hook checks.
@@ -36,12 +37,17 @@ public sealed class ClassicBattleSession
 
     public ClassicBattleSession(ClassicBattleDefinition definition, IBattleRandom random, BattleEquipmentState? equipment = null,
         bool isBossBattle = false)
+        : this(definition, random, equipment, isBossBattle, null) { }
+
+    internal ClassicBattleSession(ClassicBattleDefinition definition, IBattleRandom random, BattleEquipmentState? equipment,
+        bool isBossBattle, Func<ClassicBattlePlayer, int>? readDyingScript)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(random);
         Validate(definition, equipment);
         this.random = random;
         this.isBossBattle = isBossBattle;
+        this.readDyingScript = readDyingScript;
         players = definition.Players.ToArray();
         basePlayers = definition.Players.ToArray();
         enemies = definition.Enemies.ToArray();
@@ -255,8 +261,9 @@ public sealed class ClassicBattleSession
                 || previousPlayerHp[i] < players[i].MaxHp / 5) continue;
             int coverer = PartyIndexOfRole(players[i].CoveredByRoleId);
             if (coverer < 0 || playerHp[coverer] == 0 || Unresponsive(coverer)) continue;
-            if (players[i].DyingScript != 0)
-                return Hook(new(ClassicBattleHookKind.Dying, i, players[i].RoleId, players[i].DyingScript));
+            int dyingScript = readDyingScript is null ? players[i].DyingScript : readDyingScript(players[i]);
+            if (dyingScript != 0)
+                return Hook(new(ClassicBattleHookKind.Dying, i, players[i].RoleId, dyingScript));
             return true; // fight.c 880: the crossing itself ends the check even without a script.
         }
         return false;
