@@ -1039,6 +1039,110 @@ public sealed class MidbattleRoleHookTests
         }
     }
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public void Current_entry_query_and_Start_reject_unbound_world_setter_before_any_prefix_effect(bool withBattleContent, bool query)
+    {
+        var fixture = new DynamicEventSessionTests.DynamicFixture();
+        fixture.Commands[1] = JsonNode.Parse("""
+            {"label":"L0001","op":"setMusic","musicId":12,"mode":0,"next":"L0002",
+             "source":{"index":1,"opcode":67,"operands":[12,0,0]}}
+            """)!.AsObject();
+        fixture.Commands[2] = JsonNode.Parse("""
+            {"label":"L0002","op":"setObjectScript","objectId":37,"value":5,"slotIndex":2,"next":"L0003",
+             "source":{"index":2,"opcode":144,"operands":[37,5,2]}}
+            """)!.AsObject();
+        fixture.Commands[3] = JsonNode.Parse("""
+            {"label":"L0003","op":"end","mode":"keep","next":"L0004",
+             "source":{"index":3,"opcode":0,"operands":[0,0,0]}}
+            """)!.AsObject();
+        fixture.Commands[4] = JsonNode.Parse("""
+            {"label":"L0004","op":"markFailed","next":"L0005",
+             "source":{"index":4,"opcode":65,"operands":[0,0,0]}}
+            """)!.AsObject();
+        fixture.Commands[5] = JsonNode.Parse("""
+            {"label":"L0005","op":"end","mode":"keep","next":"L0006",
+             "source":{"index":5,"opcode":0,"operands":[0,0,0]}}
+            """)!.AsObject();
+        fixture.Files["scene"]["entries"]!.AsArray().Add(new JsonObject
+        {
+            ["id"] = "warmup", ["owner"] = new JsonObject { ["type"] = "eventObject", ["id"] = 29 },
+            ["slot"] = "wTriggerScript", ["kind"] = "trigger", ["target"] = "L0004", ["sourceAddress"] = 4
+        });
+        var events = fixture.Load();
+        var language = Language();
+        var content = Content(60);
+        var random = new CountingBattleRandom();
+        var world = DynamicEventWorld.ForHost(fixture.Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+
+        AssertEmptyRequirements(TriggerScriptSession.ValidateEntry(events, language, content, "scene", "npc"));
+        Assert.Empty(world.ObjectScripts);
+        var control = withBattleContent
+            ? new TriggerScriptSession(events, language, content, random, world)
+            : new TriggerScriptSession(events, language, world);
+        AssertCurrentQueryInert(control, content, world, random, () =>
+            AssertEmptyRequirements(control.GetCurrentEntryRequirements("scene", "npc", 5)));
+        control.Start("scene", "npc", 5);
+        AssertCompleted(control);
+        Assert.Equal(new TriggerMusicState(12, 0), control.Music);
+        Assert.Single(world.ObjectScripts);
+        Assert.Equal(5, world.ObjectScripts[(37, 2)]);
+        Assert.Equal(0, random.CallCount);
+
+        var script = withBattleContent
+            ? new TriggerScriptSession(events, language, content, random)
+            : new TriggerScriptSession(events, language);
+        script.Start("scene", "warmup", 17);
+        AssertWarmup();
+        AssertCurrentQueryInert(script, content, world, random, () =>
+        {
+            var error = Assert.Throws<InvalidDataException>(() =>
+            {
+                if (query) script.GetCurrentEntryRequirements("scene", "npc", 37);
+                else script.Start("scene", "npc", 37);
+            });
+            Assert.Contains("scene.json#L0002 @0002", error.Message);
+            Assert.Contains("setObjectScript", error.Message);
+        });
+        script.Start("scene", "warmup", 65535);
+        AssertWarmup();
+
+        void AssertWarmup()
+        {
+            AssertCompleted(script);
+            Assert.Equal(17, script.Caller);
+            Assert.False(script.ScriptSuccess);
+            Assert.Null(script.Music);
+            Assert.Equal(0, random.CallCount);
+        }
+
+        void AssertCompleted(TriggerScriptSession session)
+        {
+            Assert.Equal(TriggerScriptPhase.Completed, session.Phase);
+            Assert.False(session.BlocksSceneUpdates);
+            Assert.Null(session.PendingDisplay);
+            Assert.Null(session.PendingBattle);
+            Assert.Null(session.PendingLostReload);
+            Assert.Null(session.PendingSceneWait);
+            Assert.Null(session.PendingMovement);
+            Assert.Null(session.PendingTransition);
+            Assert.Null(session.PendingBattleHook);
+            Assert.Null(session.RunningBattleHook);
+            Assert.Null(session.RunningBattleEndScript);
+        }
+
+        void AssertEmptyRequirements(TriggerEntryRequirements requirements)
+        {
+            Assert.Empty(requirements.DisplayBlocks);
+            Assert.Empty(requirements.PortraitIds);
+            Assert.Empty(requirements.BattleTeamIds);
+        }
+    }
+
     [Fact]
     public void Current_entry_requirements_use_existing_zero_instead_of_static_seed()
     {

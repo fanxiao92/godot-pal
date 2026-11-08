@@ -337,7 +337,7 @@ public sealed class TriggerScriptSession
     private void ValidateCapabilityClosure(int address, TriggerScriptContext context, EntryRequirementsCollector? requirements = null) =>
         ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, requirements, context,
             rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true,
-            currentObjectScripts: _world?.ObjectScripts);
+            currentObjectScripts: _world?.ObjectScripts, rejectObjectScriptWithoutWorld: _world is null);
 
     private sealed class EntryRequirementsCollector
     {
@@ -350,7 +350,8 @@ public sealed class TriggerScriptSession
         TriggerBattleContent? battleContent, IReadOnlyDictionary<int, BattleRoleSnapshot>? battleRoles, int color, int address,
         EntryRequirementsCollector? requirements = null, TriggerScriptContext context = TriggerScriptContext.Event,
         bool rejectMappedBattlesWithoutWorld = false, bool validateNameMappings = false,
-        IReadOnlyDictionary<(int ObjectId, int SlotIndex), int>? currentObjectScripts = null)
+        IReadOnlyDictionary<(int ObjectId, int SlotIndex), int>? currentObjectScripts = null,
+        bool rejectObjectScriptWithoutWorld = false)
     {
         var pending = new Stack<(int Address, TriggerScriptContext Context)>();
         var visited = new HashSet<(int Address, TriggerScriptContext Context)>();
@@ -435,6 +436,8 @@ public sealed class TriggerScriptSession
             }
             else if (command.Op == "setObjectScript")
             {
+                if (rejectObjectScriptWithoutWorld)
+                    throw new InvalidDataException($"{command.Position}: setObjectScript requires a bound world.");
                 if (command.SlotIndex is 0 or 1)
                 {
                     var key = (command.ObjectId, command.SlotIndex);
