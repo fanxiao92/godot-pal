@@ -301,7 +301,7 @@ public sealed class TriggerScriptSession
 
     private void ValidateCapabilityClosure(int address, TriggerScriptContext context) =>
         ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, context: context,
-            rejectMappedBattlesWithoutWorld: _world is null);
+            rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true);
 
     private sealed class EntryRequirementsCollector
     {
@@ -313,7 +313,7 @@ public sealed class TriggerScriptSession
     private static void ValidateCapabilityClosure(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent? battleContent, IReadOnlyDictionary<int, BattleRoleSnapshot>? battleRoles, int color, int address,
         EntryRequirementsCollector? requirements = null, TriggerScriptContext context = TriggerScriptContext.Event,
-        bool rejectMappedBattlesWithoutWorld = false)
+        bool rejectMappedBattlesWithoutWorld = false, bool validateNameMappings = false)
     {
         var pending = new Stack<(int Address, TriggerScriptContext Context)>();
         var visited = new HashSet<(int Address, TriggerScriptContext Context)>();
@@ -330,6 +330,23 @@ public sealed class TriggerScriptSession
             {
                 if (rejectMappedBattlesWithoutWorld && battleContent.Players.Any(player => player.NameObjectId.HasValue))
                     throw new InvalidDataException($"{command.Position}: a Name-mapped battle requires a bound world.");
+                if (validateNameMappings && battleContent.Players.Any(player => player.NameObjectId.HasValue))
+                {
+                    var players = battleContent.Players;
+                    if (players.Any(player => !player.NameObjectId.HasValue))
+                        throw new InvalidDataException($"{command.Position}: nameObjectId must be declared together for all players.");
+                    foreach (var player in players)
+                        if (player.NameObjectId is < 0 or > 65535)
+                            throw new InvalidDataException($"{command.Position}: nameObjectId must be a WORD (0..65535).");
+                    // TriggerBattleContent admits one or two players; equal Names own both slots.
+                    if (players.Count == 2 && players[0].NameObjectId == players[1].NameObjectId)
+                    {
+                        if (players[0].DyingScript != players[1].DyingScript)
+                            throw new InvalidDataException($"{command.Position}: players with the same nameObjectId must declare identical dyingScript seeds.");
+                        if (players[0].FriendDeathScript != players[1].FriendDeathScript)
+                            throw new InvalidDataException($"{command.Position}: players with the same nameObjectId must declare identical friendDeathScript seeds.");
+                    }
+                }
                 try { battleContent.Validate(command.EnemyTeamId, battleRoles!); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 requirements?.Teams.Add(command.EnemyTeamId);

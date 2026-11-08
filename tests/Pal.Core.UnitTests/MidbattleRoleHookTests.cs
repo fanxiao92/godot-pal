@@ -620,6 +620,103 @@ public sealed class MidbattleRoleHookTests
         Assert.Equal(0, random.CallCount);
     }
 
+    [Theory]
+    [InlineData("partial-first", true)]
+    [InlineData("partial-second", true)]
+    [InlineData("name-negative", true)]
+    [InlineData("name-overflow", true)]
+    [InlineData("alias-dying-conflict", true)]
+    [InlineData("alias-friend-conflict", true)]
+    [InlineData("legacy", false)]
+    [InlineData("alias-zero", false)]
+    [InlineData("distinct-word-extremes", false)]
+    public void Start_validates_selected_typed_Name_declarations_before_effects(string caseName, bool rejects)
+    {
+        var original = Content(60);
+        var players = original.Players.ToArray();
+        switch (caseName)
+        {
+            case "partial-first":
+                players[1] = players[1] with { NameObjectId = 37 };
+                break;
+            case "partial-second":
+                players[0] = players[0] with { NameObjectId = 37 };
+                break;
+            case "name-negative":
+                players[0] = players[0] with { NameObjectId = -1 };
+                players[1] = players[1] with { NameObjectId = 38 };
+                break;
+            case "name-overflow":
+                players[0] = players[0] with { NameObjectId = 65536 };
+                players[1] = players[1] with { NameObjectId = 38 };
+                break;
+            case "alias-dying-conflict":
+            case "alias-friend-conflict":
+            case "alias-zero":
+                // Aliases require each seed independently equal, including a disabled entry 0.
+                players = players.Select(player => player with
+                {
+                    NameObjectId = caseName == "alias-zero" ? 0 : 37,
+                    FriendDeathScript = 31,
+                    DyingScript = 5
+                }).ToArray();
+                if (caseName == "alias-dying-conflict") players[1] = players[1] with { DyingScript = 0 };
+                if (caseName == "alias-friend-conflict") players[1] = players[1] with { FriendDeathScript = 0 };
+                break;
+            case "legacy":
+                break;
+            case "distinct-word-extremes":
+                players[0] = players[0] with { NameObjectId = 0 };
+                players[1] = players[1] with { NameObjectId = 65535 };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(caseName));
+        }
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(), players,
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var bankBefore = world.ObjectScripts.OrderBy(pair => pair.Key).ToArray();
+        var leaderBefore = world.Leader;
+        var random = new CountingBattleRandom();
+        var script = new TriggerScriptSession(Fixture().Load(), Language(), content, random, world);
+        Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+        Assert.Equal(leaderBefore, world.Leader);
+        var callBefore = (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry);
+        var executionBefore = (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+            script.ScriptSuccess, script.Music, script.FadedToRed);
+        var pendingBefore = (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+            script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+            script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript);
+        var rolesBefore = script.BattleRoles!.OrderBy(pair => pair.Key).ToArray();
+        Assert.Equal(0, random.CallCount);
+
+        if (rejects)
+        {
+            Assert.Throws<InvalidDataException>(() => script.Start("hooks", "npc", 28));
+
+            Assert.Equal(callBefore, (script.CallId, script.SourceRequestId, script.StartedEntry, script.Caller, script.ReturnEntry));
+            Assert.Equal(executionBefore, (script.Phase, script.BlocksSceneUpdates, script.CurrentPosition, script.Context,
+                script.ScriptSuccess, script.Music, script.FadedToRed));
+            Assert.Equal(pendingBefore, (script.PendingDisplay, script.PendingBattle, script.PendingLostReload,
+                script.PendingSceneWait, script.PendingMovement, script.PendingTransition,
+                script.PendingBattleHook, script.RunningBattleHook, script.RunningBattleEndScript));
+            Assert.Equal(rolesBefore, script.BattleRoles!.OrderBy(pair => pair.Key).ToArray());
+            Assert.Equal(bankBefore, world.ObjectScripts.OrderBy(pair => pair.Key).ToArray());
+            Assert.Equal(leaderBefore, world.Leader);
+        }
+        else
+        {
+            script.Start("hooks", "npc", 28);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+            Assert.NotNull(script.PendingBattle);
+            Assert.Equal(28, script.Caller);
+            // Successful Start may seed missing live entries; no empty-bank compatibility claim.
+        }
+        Assert.Equal(0, random.CallCount);
+    }
+
     [Fact]
     public void Hook_preflight_rejects_a_missing_random_branch_language_before_any_side_effect_or_draw()
     {
