@@ -1782,6 +1782,168 @@ public sealed class MidbattleRoleHookTests
         }
     }
 
+    [Fact]
+    public void Dying_hook_return_ignores_a_real_foreign_completed_display_receipt()
+    {
+        var world = DynamicEventWorld.ForHost(new DynamicEventSessionTests.DynamicFixture().Rules(),
+            DynamicEventSessionTests.DynamicFixture.Leader(), 1, 11, 12);
+        var original = Content(60);
+        var content = new TriggerBattleContent(original.InitialRoles.Values.ToArray(),
+            [original.Players[0] with { NameObjectId = 0, FriendDeathScript = 0, DyingScript = 0 },
+                original.Players[1] with { NameObjectId = 65535, FriendDeathScript = 0, DyingScript = 0 }],
+            original.GrowthByRole, original.EnemyTeams, original.RoleEquipment,
+            original.EquipmentObjects.Values.ToArray(), original.PanelDeclaredRoles.ToArray());
+        var language = Language();
+        WriteLiveDyingEntryForName65535(world, 5);
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        var random = new ScriptedRandom([.. Queue3, .. EnemyHit1]);
+        var script = new TriggerScriptSession(CapturedKeepFixture(65535, 1).Load(), language, content, random, world);
+        script.Start("hooks", "npc", 28);
+        var callId = script.CallId;
+        Assert.NotEqual(Guid.Empty, callId);
+        Assert.Equal(TriggerScriptPhase.WaitingForDisplay, script.Phase);
+        var prefixDisplay = Assert.IsType<TriggerDialogueRequest>(script.PendingDisplay);
+        Assert.Equal(10, prefixDisplay.Content.StartMessageId);
+        FinishDisplay(script);
+        Assert.Equal(DialogueDisplayPhase.Completed, prefixDisplay.Display.Current.Phase);
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+        var battle = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
+        Assert.Equal(28, battle.Caller);
+        Assert.Equal(28, script.Caller);
+        Assert.Equal(callId, script.CallId);
+        Assert.Equal(1, script.ReturnEntry);
+        Assert.Equal(0, world.ObjectScripts[(0, 0)]);
+        Assert.Equal(0, world.ObjectScripts[(0, 1)]);
+        Assert.Equal(0, world.ObjectScripts[(65535, 0)]);
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        var otherBank = world.ObjectScripts.Where(pair => pair.Key != (65535, 1)).OrderBy(pair => pair.Key).ToArray();
+
+        battle.Lifecycle.SelectAttack(0, 0);
+        battle.Lifecycle.SelectAttack(1, 0);
+        Assert.True(battle.Lifecycle.ResolveNextAction());
+        Assert.Equal(16, battle.Lifecycle.Current.Roles[1].Hp);
+        Assert.Equal(16, battle.Lifecycle.Current.Combat.Players[1].Hp);
+        Assert.Equal(100, battle.Lifecycle.Current.Combat.Players[0].Hp);
+        Assert.Equal(ClassicBattleSide.Enemy, battle.Lifecycle.Current.Combat.LastAction!.Attacker);
+        var hook = Assert.IsType<ClassicBattleRoleHook>(script.PendingBattleHook);
+        Assert.Equal((ClassicBattleHookKind.Dying, 1, 1, 5),
+            (hook.Kind, hook.PartyIndex, hook.RoleId, hook.ScriptAddress));
+        Assert.Equal(ClassicBattlePhase.RoleHook, battle.Lifecycle.Current.Combat.Phase);
+        random.AssertExhausted();
+
+        WriteLiveDyingEntryForName65535(world, 31);
+        Assert.Equal(31, world.ObjectScripts[(65535, 1)]);
+        Assert.Equal(hook, script.PendingBattleHook);
+        script.StartBattleHook();
+        var display = Assert.IsType<TriggerDialogueRequest>(script.PendingDisplay);
+        Assert.NotEqual(Guid.Empty, display.Id);
+        Assert.NotEqual(prefixDisplay.Id, display.Id);
+        Assert.Equal((11, 11), (display.Content.StartMessageId, display.Content.EndMessageId));
+        Assert.NotEqual(DialogueDisplayPhase.Completed, display.Display.Current.Phase);
+        Assert.Equal(0, world.ObjectScripts[(65535, 1)]);
+
+        // A second executor owns a genuinely completed display, but never acknowledges it.
+        var foreignRandom = new ScriptedRandom([]);
+        var foreign = new TriggerScriptSession(CapturedKeepFixture(65535, 1).Load(), language, content, foreignRandom, world);
+        foreign.Start("hooks", "npc", 43);
+        var foreignCallId = foreign.CallId;
+        Assert.NotEqual(Guid.Empty, foreignCallId);
+        Assert.NotEqual(callId, foreignCallId);
+        var foreignDisplay = Assert.IsType<TriggerDialogueRequest>(foreign.PendingDisplay);
+        Assert.NotEqual(Guid.Empty, foreignDisplay.Id);
+        Assert.NotEqual(display.Id, foreignDisplay.Id);
+        Assert.NotEqual(prefixDisplay.Id, foreignDisplay.Id);
+        Assert.Equal((10, 10), (foreignDisplay.Content.StartMessageId, foreignDisplay.Content.EndMessageId));
+        CompleteCapturedKeepDisplay(foreignDisplay);
+        var foreignSnapshot = foreignDisplay.Display.Current;
+        AssertForeign();
+        AssertWaiting();
+
+        var waitingSnapshot = display.Display.Current;
+        Assert.NotEqual(DialogueDisplayPhase.Completed, waitingSnapshot.Phase);
+        Assert.False(script.AcknowledgeDisplay(foreignDisplay.Id));
+        Assert.Equal(waitingSnapshot, display.Display.Current);
+        AssertWaiting();
+        AssertForeign();
+
+        CompleteCapturedKeepDisplay(display);
+        var completedSnapshot = display.Display.Current;
+        Assert.Equal(DialogueDisplayPhase.Completed, completedSnapshot.Phase);
+        AssertWaiting();
+        Assert.False(script.AcknowledgeDisplay(foreignDisplay.Id));
+        Assert.Equal(completedSnapshot, display.Display.Current);
+        AssertWaiting();
+        AssertForeign();
+
+        Assert.True(script.AcknowledgeDisplay(display.Id));
+        Assert.Equal(5, world.ObjectScripts[(65535, 1)]);
+        AssertResumed(5);
+        AssertForeign();
+
+        // Later real writes cannot be replayed away by either foreign or duplicate owned receipts.
+        WriteLiveDyingEntryForName65535(world, 0);
+        AssertResumed(0);
+        AssertForeign();
+        Assert.False(script.AcknowledgeDisplay(foreignDisplay.Id));
+        AssertResumed(0);
+        AssertForeign();
+        Assert.False(script.AcknowledgeDisplay(display.Id));
+        AssertResumed(0);
+        AssertForeign();
+
+        void AssertWaiting()
+        {
+            Assert.Equal(0, world.ObjectScripts[(65535, 1)]);
+            Assert.Equal(otherBank, world.ObjectScripts.Where(pair => pair.Key != (65535, 1)).OrderBy(pair => pair.Key).ToArray());
+            Assert.Same(display, script.PendingDisplay);
+            Assert.Same(battle, script.PendingBattle);
+            Assert.Equal(hook, script.RunningBattleHook);
+            Assert.Equal(hook, script.PendingBattleHook);
+            Assert.Equal(TriggerScriptPhase.WaitingForDisplay, script.Phase);
+            Assert.Equal(ClassicBattlePhase.RoleHook, battle.Lifecycle.Current.Combat.Phase);
+            Assert.Equal(1, script.Caller);
+            Assert.Equal(28, battle.Caller);
+            Assert.Equal(callId, script.CallId);
+            Assert.Equal(1, script.ReturnEntry);
+            Assert.Null(battle.Lifecycle.Completion);
+            random.AssertExhausted();
+        }
+
+        void AssertForeign()
+        {
+            Assert.Same(foreignDisplay, foreign.PendingDisplay);
+            Assert.Equal(foreignSnapshot, foreignDisplay.Display.Current);
+            Assert.Equal(DialogueDisplayPhase.Completed, foreignDisplay.Display.Current.Phase);
+            Assert.Equal(TriggerScriptPhase.WaitingForDisplay, foreign.Phase);
+            Assert.Equal(foreignCallId, foreign.CallId);
+            Assert.Equal(43, foreign.Caller);
+            Assert.Equal(1, foreign.ReturnEntry);
+            Assert.Null(foreign.PendingBattle);
+            Assert.Null(foreign.PendingBattleHook);
+            Assert.Null(foreign.RunningBattleHook);
+            foreignRandom.AssertExhausted();
+        }
+
+        void AssertResumed(int entry)
+        {
+            Assert.Equal(entry, world.ObjectScripts[(65535, 1)]);
+            Assert.Equal(otherBank, world.ObjectScripts.Where(pair => pair.Key != (65535, 1)).OrderBy(pair => pair.Key).ToArray());
+            Assert.Same(battle, script.PendingBattle);
+            Assert.Equal(callId, script.CallId);
+            Assert.Equal(1, script.ReturnEntry);
+            Assert.Equal(new TriggerPosition("hooks", "L0007", 7), script.CurrentPosition);
+            Assert.Equal(28, script.Caller);
+            Assert.Equal(28, battle.Caller);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+            Assert.Null(script.PendingDisplay);
+            Assert.Null(script.RunningBattleHook);
+            Assert.Null(script.PendingBattleHook);
+            Assert.Equal(ClassicBattlePhase.Resolving, battle.Lifecycle.Current.Combat.Phase);
+            Assert.Null(battle.Lifecycle.Completion);
+            random.AssertExhausted();
+        }
+    }
+
     private static HookFixture CapturedKeepFixture(int ownerName, int slotIndex)
     {
         var fixture = Fixture();
