@@ -1,6 +1,6 @@
 # 战斗图像包契约（battle-image-schema）v1
 
-状态：**abc 形状已冻结并交付（#92）；ball 按同形交付（#93）；f 按同形交付（#94）；fbp 按同形交付（#95，MKF 四票收官）**。忠实还原以 `reference/sdlpal/` 为权威（[ADR-0001](../adr/0001-faithful-event-transcription.md)、[ADR-0004](../adr/0004-data-and-script-layers.md)）；通用 JSON 规则与 [data-schema](data-schema.md) 一致（camelCase、严格校验、只读提取）。
+状态：**abc 形状已冻结并交付（#92）；ball 按同形交付（#93）；f 按同形交付（#94）；fbp 按同形交付（#95，M5 MKF 四票收官）**。M6 的 FIRE 扩展（#146）已批准并形成局部验证候选：生产注册/help、指定 RED 与两个 CLI 工程回归已完成，尚待 fresh 双轴审查及集成；其契约与完整门限制见文末，不能据本文称整票已交付。忠实还原以 `reference/sdlpal/` 为权威（[ADR-0001](../adr/0001-faithful-event-transcription.md)、[ADR-0004](../adr/0004-data-and-script-layers.md)）；通用 JSON 规则与 [data-schema](data-schema.md) 一致（camelCase、严格校验、只读提取）。
 
 ## 参考事实（abc.mkf）
 
@@ -36,19 +36,19 @@
 
 ## 范围与边界
 
-- 只读提取：`abc.mkf`（+ `pat.mkf` 供 PNG 着色）→ 完整图像包；无重编码、无 rebuild。`ball.mkf` 同理（`ball.mkf` + `pat.mkf`），`f.mkf` 同理（`f.mkf` + `pat.mkf`），`fbp.mkf` 同理（`fbp.mkf` + `pat.mkf`）。
+- 只读提取：`abc.mkf`（+ `pat.mkf` 供 PNG 着色）→ 完整图像包；无重编码、无 rebuild。`ball.mkf` 同理（`ball.mkf` + `pat.mkf`），`f.mkf` 同理（`f.mkf` + `pat.mkf`），`fbp.mkf` 同理（`fbp.mkf` + `pat.mkf`）；FIRE 候选同理（`fire.mkf` + `pat.mkf`）。
 - 输出目录必须新建或为空、不在输入内、拒绝链接（与其他 export 一致）；清单最后发布。
 - PNG 着色固定用 `pat.mkf` chunk 0 日间色，仅作可视化；原版战斗实际按当前场景调色板绘制（`battle.c` `PAL_FadeIn(wNumPalette, ...)`），消费方应以索引平面 + 运行时调色板着色。
 - 资源上限：单 chunk 原始 ≤8 MiB、解压 ≤8 MiB；整包解压合计 ≤256 MiB、像素合计 ≤128M（真实 abc：解压约 1.9 MB、像素约 6.4M；真实 ball 无解压，chunk 原始字节即解压字节，合计约 0.14 MB；真实 f：解压合计 329,624 B、像素约 1.32M，最大单 chunk 解压 58,116 B；真实 fbp：解压合计 4,864,000 B = 76 屏 × 64000，像素合计同 4.87M，最大单 chunk 解压恒 64,000 B）。
 
-## CLI 动词（四票冻结形状）
+## CLI 动词（四票冻结形状与 #146 FIRE 候选）
 
 ```
-pal-extract export-battle-images --input <目录> --archive <abc|ball|f|fbp> --output <新建或空目录>
+pal-extract export-battle-images --input <目录> --archive <abc|ball|f|fbp|fire> --output <新建或空目录>
 ```
 
-- `--archive` 接受 `abc`（#92）、`ball`（#93）、`f`（#94）与 `fbp`（#95）；其他值按参数错误退出 2。
-- 必需归档按 profile 声明：abc → `abc.mkf`、`pat.mkf`；ball → `ball.mkf`、`pat.mkf`；f → `f.mkf`、`pat.mkf`；fbp → `fbp.mkf`、`pat.mkf`（大小写不敏感，唯一匹配）。
+- `--archive` 接受 `abc`（#92）、`ball`（#93）、`f`（#94）、`fbp`（#95）与候选新增的 `fire`（#146）；其他值按参数错误退出 2。
+- 必需归档按 profile 声明：abc → `abc.mkf`、`pat.mkf`；ball → `ball.mkf`、`pat.mkf`；f → `f.mkf`、`pat.mkf`；fbp → `fbp.mkf`、`pat.mkf`；fire → `fire.mkf`、`pat.mkf`（大小写不敏感，唯一匹配）。
 
 ## 输出布局
 
@@ -66,10 +66,10 @@ pal-extract export-battle-images --input <目录> --archive <abc|ball|f|fbp> --o
 | `formatVersion` | 整数 `1` |
 | `profile` | `"faithful"` |
 | `command` | `"export-battle-images"` |
-| `parameters.archive` | `"abc"`、`"ball"`、`"f"` 或 `"fbp"` |
-| `sources` | 数组：`name`（按 profile：abc.mkf/ball.mkf/f.mkf/fbp.mkf 与 pat.mkf）、`byteLength`、`sha256`（整档） |
+| `parameters.archive` | `"abc"`、`"ball"`、`"f"`、`"fbp"` 或候选新增的 `"fire"` |
+| `sources` | 数组：`name`（按 profile：abc.mkf/ball.mkf/f.mkf/fbp.mkf/fire.mkf 与 pat.mkf）、`byteLength`、`sha256`（整档） |
 | `palette` | `archive`/`chunk`/`lighting` 与 `usage` 说明（PNG 着色专用，权威平面在精灵文档） |
-| `chunks` | 每 chunk 一项，按 index 升序：`index`、`byteLength`（原始 chunk 字节）、`sha256`（原始 chunk）、`compression`（abc/f/fbp：`"yj2"`；ball：`"rle"`；空 chunk `"empty"`）；非空另有 `decodedByteLength`（abc/f/fbp 为 YJ2 解压后字节数，fbp 恒 64000；ball 无解压即 chunk 字节数）、`frameCount`（abc/f 名义 `PAL_SpriteGetNumFrames`；ball/fbp 恒 1）、`decodedFrameCount`（含真实额外帧；ball/fbp 恒 1）、`sprite`（`sprites/<n>.json`） |
+| `chunks` | 每 chunk 一项，按 index 升序：`index`、`byteLength`（原始 chunk 字节）、`sha256`（原始 chunk）、`compression`（abc/f/fbp/fire：`"yj2"`；ball：`"rle"`；空 chunk `"empty"`）；非空另有 `decodedByteLength`（abc/f/fbp/fire 为 YJ2 解压后字节数，fbp 恒 64000；ball 无解压即 chunk 字节数）、`frameCount`（abc/f/fire 名义 `PAL_SpriteGetNumFrames`；ball/fbp 恒 1）、`decodedFrameCount`（含真实额外帧；ball/fbp 恒 1）、`sprite`（`sprites/<n>.json`） |
 | `totals` | `chunks`/`decodedChunks`/`emptyChunks`/`frames`/`files`（不含 index.json 自身） |
 
 ### sprites/&lt;chunk&gt;.json 字段（v1）
@@ -78,10 +78,10 @@ pal-extract export-battle-images --input <目录> --archive <abc|ball|f|fbp> --o
 |---|---|
 | `formatVersion` / `profile` | `1` / `"faithful"` |
 | `chunk` | chunk 号 |
-| `source` | `archive`、`chunk`、`encoding`（abc/f/fbp：`"Windows YJ2"`；ball：`"uncompressed PAL RLE bitmap"`）、`frameLayout`（abc/f：PAL 精灵 WORD 偏移表 + RLE 帧；ball：单幅 RLE 位图，可选 `0x00000002` 头 + WORD 宽/高 + RLE 游程；fbp：单幅原始 320×200 索引位图，线性行主序） |
-| `decodedByteLength` | abc/f/fbp 为 YJ2 解压后字节数（fbp 恒 64000）；ball 无解压，即 chunk 原始字节数 |
-| `frameCount` | abc/f 名义帧数（`PAL_SpriteGetNumFrames`）；ball/fbp 恒 1 |
-| `frames` | 数组，每帧 `index`（abc/f 0..名义−1，可含额外下标；ball/fbp 恒 [0]）、`sourceOffset`、`width`、`height`（fbp 恒 320×200）、`png`（相对路径）、`indices`/`alpha`（base64，行长 width×height；fbp alpha 全 255） |
+| `source` | `archive`、`chunk`、`encoding`（abc/f/fbp/fire：`"Windows YJ2"`；ball：`"uncompressed PAL RLE bitmap"`）、`frameLayout`（abc/f/fire：PAL 精灵 WORD 偏移表 + RLE 帧；ball：单幅 RLE 位图，可选 `0x00000002` 头 + WORD 宽/高 + RLE 游程；fbp：单幅原始 320×200 索引位图，线性行主序） |
+| `decodedByteLength` | abc/f/fbp/fire 为 YJ2 解压后字节数（fbp 恒 64000）；ball 无解压，即 chunk 原始字节数 |
+| `frameCount` | abc/f/fire 名义帧数（`PAL_SpriteGetNumFrames`）；ball/fbp 恒 1 |
+| `frames` | 数组，每帧 `index`（abc/f/fire 0..名义−1，可含额外下标；ball/fbp 恒 [0]）、`sourceOffset`、`width`、`height`（fbp 恒 320×200）、`png`（相对路径）、`indices`/`alpha`（base64，行长 width×height；fbp alpha 全 255） |
 
 ## 与后续里程碑的衔接
 
@@ -90,3 +90,36 @@ pal-extract export-battle-images --input <目录> --archive <abc|ball|f|fbp> --o
 - M6 玩家战斗精灵按 player-roles `battleSprite`（含装备覆盖与 `battle-effect-index` 行下标）→ f chunk 下标消费，姿态按下标 0..9 分段；召唤神按魔法表 `summonEffect + 10` → f chunk 10..18 消费，动画播放到 `frameCount - 1`（不含末帧）。
 - M6 战斗 Prepare 按 `wNumBattleField`（battle-field 表行下标，即 fbp chunk 下标）消费整幅 320×200 背景帧；UI/结局画面同档固定 chunk（0/1/2/3/4、59..77）。
 - 真实原始/派生资源不入库：本契约产物只落临时目录，仓库仅保留代码、测试与人工微型夹具。
+
+## M6 FIRE 扩展（#146，已批准契约 / 局部验证候选）
+
+### 固定参考与复用依据
+
+- `fight.c` 的 `PAL_BattleShowPlayerDefMagicAnim`、`PAL_BattleShowPlayerOffMagicAnim`、`PAL_BattleShowEnemyMagicAnim` 均从对象 `magic.wMagicNumber` 查 MAGIC 记录，再以 `wEffect` 选择 `fpFIRE` chunk；先 `PAL_MKFGetDecompressedSize` / `PAL_MKFDecompressChunk`，随后 `PAL_SpriteGetNumFrames` / `PAL_SpriteGetFrame` 读取 RLE 帧。这是法术效果，不是 BALL 的未压缩物品位图，也不是 FBP 的原始 320×200 索引屏幕。
+- `global.c` 显式打开 `fire.mkf`，且 FIRE 是 `PAL_IsWINVersion` 探测的六个归档之一；`palcommon.c` 的统一解压与 WORD 帧寻址规则适用。因此 Windows 基线复用现有 `BattleImageDecoder` → `Yj2Decoder` / `SpriteDecoder`，不新增 FIRE 专用解码器。DOS YJ1 仍严格拒绝。
+- 参考只读，未编译或运行。此票没有读取真实 FIRE/PAT 资源；不声明真实 chunk 数、帧数或像素统计。上述参考的原字节 SHA-256 为：`fight.c` = `6d71434242de081d3cd2d5a0578d05485948e7c6cd507407805d0eafa3e761f5`，`global.c` = `6e7162374dca7af62e3e67b5ab1359f1dc0e040ac3a94612ae32f3ca37d82ddc`，`palcommon.c` = `919f428112e70c11b8db208e9bba486c8ab056aa4a893a8d4d6bae9b21b9aae6`。
+
+### 新 archive 值与 v1 字段
+
+批准后的正式形状为：
+
+```text
+pal-extract export-battle-images --input <directory> --archive <abc|ball|f|fbp|fire> --output <new-or-empty-directory>
+```
+
+- 唯一新增值是大小写精确的 `fire`；只需 `fire.mkf` 与 `pat.mkf`，归档文件名仍大小写不敏感且必须唯一匹配。argv 的固定顺序、缺失/重复/空值/以 `--` 开头值拒绝及旧四档行为保持不变；参数错误退出 2，资源/路径错误退出 1，成功退出 0 且无 stdout/stderr。
+- 延续 v1，不新增文件种类：`parameters.archive="fire"`，整档 `sources` 记录 `fire.mkf`、`pat.mkf` 各自 SHA-256/byteLength；每个原始 chunk 保留其 index、原字节 length/hash。非空 chunk 的 `compression="yj2"`，`decodedByteLength` 是解压后长度；`frameCount` 是首 WORD−1 的名义数量，`decodedFrameCount` 是实际导出数量。
+- `sprites/<chunk>.json` 的 `source.archive="fire.mkf"`、`source.chunk` 保留原下标、`source.encoding="Windows YJ2"`、`source.frameLayout="PAL sprite WORD offset table + RLE frames"`。每帧保留 index、解压字节中的 sourceOffset、width/height、权威 base64 indices/alpha 和根相对 PNG 路径。真实可解码的末表字额外帧、零/末尾哨兵、悬空可选指针都沿用 abc/f 的严格规则；名义帧损坏不能被丢弃。
+- 空 chunk 只写包含 index/byteLength/sha256/compression 的 bare entry（compression 为 `empty`），不写精灵/PNG，不重新编号后续 chunk。`totals.files` 不含 index.json。
+- PNG 固定用 PAT chunk 0 / day（六位分量 `<<2`）预览，不取代 indexed/alpha 权威平面，也不证明 GPU。法术定位、层偏移、重复、时序和运行时调色/播放不进入此数值包。
+
+### 人工预期、安全和验证边界
+
+- 主 CLI 夹具为三个 MKF chunks：空、YJ2(A)、YJ2(B)。A 的字面帧表 `[3,7,10]`：26 解压字节、名义 2/实际 3；帧 `(index,offset,width,height,indices,alpha)` 分别为 `(0,6,4,1,[7,0,0,0],[255,0,0,0])`、`(1,14,1,1,[9],[255])`、`(2,20,1,1,[4],[255])`。B 的帧表 `[2,6]` 末字指向 buffer 末尾：12 解压字节、名义/实际均 1，帧 `(0,4,2,1,[11,0],[255,0])`。合计 chunks=3、decodedChunks=2、emptyChunks=1、frames=4、files=6；文件集恰为 index.json、两个 sprite 文档与四张 PNG。
+- 预期由人工帧表/RLE 和测试自有 MKF/PAT 字节给出，不调用被测 decoder 生成。PAT7=(63,0,30) 的首像素 RGBA 为 (252,0,120,255)，透明像素保留 PAT0=(12,16,20) 的 RGB、alpha 为 0；CLI 预览经 BCL zlib 读取 scanline 与该字面值比较。
+- 保留单 chunk 原始/解压各 8 MiB、整包解压 256 MiB、像素 128M 及帧级 `IndexedImage.MaxPixels` 安全边界，不放宽解码失败。人工拒绝例覆盖缺 FIRE/PAT、YJ1、截断 YJ2、坏 table/名义 RLE、声明解压超限与超像素尺寸，诊断精确定位 fire.mkf/chunk，不泄漏绝对路径/堆栈；先前 chunk 成功不允许发布部分包或完整 index。
+- 新/空输出可用；输入内输出、非空目录、文件、链接或链接祖先仍拒绝。确定性例比较两次导出的完整文件集和逐文件原字节，并核输入 bytes/mtime/readonly attributes 保持；覆盖拒绝后原输出也保持不变。全部解码暂存完成、再发布文件且 index 最后发布的既有策略不变，不引入失败回滚。
+- 本轮原生验证确认新增 **10 个 Unit 案例**（8 个方法，含 theory 展开）和 **22 个 Integration 案例**（17 个 FIRE 正反例 + 现有参数 theory 新增 5 例）。完整 CLI Unit **475 passed / 0 failed / 0 skipped**；完整 CLI Integration **382 passed / 0 failed / 2 skipped**（共 384，只有既有两个 case-sensitive-filesystem skips），旧四档回归保留。与合同基数 465 / 360+2 及实际新增 +10 / +22 一致，不采用调查建议的 8/16。
+- 指定 RED 已通过真实 CLI 获得：`Export_fire_decodes_complete_indexed_package` 的首个 `Assert.Equal(0, result.ExitCode)` 实际为 2；TRX 仅此 1 个失败，test root exit=1，无编译/夹具/超时/中止替代。确认后才最小注册 fire strategy 与生产 help；随后两个完整工程 test root 均 exit=0，未重试、未改测试断言。原始命令、数字退出、stdout/stderr、UTC 和三份 TRX 保存在外部 `C:/evidence/m6/herdr-resume-20261109-1233/146/R3/`；文档更新不等于独立审查或集成。
+- 按工程规范的显式未同步分支，**full-gate 的非 Game 计数 pins 尚未同步，完整门被阻断**。#161 预约 `scripts/GameTestBatches.ps1` / `tests/Pal.Game.Tests/GameBatches.Tests.ps1`，本票五路径不触及它们；Main 须另授无冲突的 ledger 同步并消费真实执行计数，不能以局部候选关闭 #146 或解锁 #147。
+- FIRE Prepare/原生加载、法术播放、Game/headless、真实私有资源、GPU/人工、远端 CI 和完整 M6 均未由本源码准备证明。运行时不读取 MKF，不添加 Godot 依赖；只读输入不是新的可变玩法状态，也不提前冻结存档契约。

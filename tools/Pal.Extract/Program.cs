@@ -173,7 +173,7 @@ Console.WriteLine("""
            pal-extract export-events --input <directory> --output <directory>
            pal-extract rebuild-events --input <events-directory> --output <file>
            pal-extract export-data --input <directory> --output <new-or-empty-directory>
-           pal-extract export-battle-images --input <directory> --archive <abc|ball|f|fbp> --output <new-or-empty-directory>
+           pal-extract export-battle-images --input <directory> --archive <abc|ball|f|fbp|fire> --output <new-or-empty-directory>
            pal-extract author-battle-context --input <author.json> --output <new-or-empty-directory>
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
@@ -201,10 +201,11 @@ Console.WriteLine("""
                   Requires SSS.MKF and DATA.MKF in the input; writes a new or empty output directory.
                   All 13 frozen tables are registered (data-schema v1); this command never re-encodes tables.
 
-      export-battle-images Decode a battle image MKF (abc, ball, f or fbp) into a complete image package and an index.json manifest.
+      export-battle-images Decode a battle image MKF (abc, ball, f, fbp or fire) into a complete image package and an index.json manifest.
                             Every chunk becomes a sprite document with authoritative indices/alpha planes, source hashes
-                            and PNG frames; empty chunks stay empty entries. abc and f chunks are Windows YJ2 battle sprites
-                            (abc: enemy sprites by enemyId; f: player battle sprites by battleSprite/summon effect);
+                            and PNG frames; empty chunks stay empty entries. abc, f and fire chunks are Windows YJ2 sprites
+                            (abc: enemy sprites by enemyId; f: player battle sprites by battleSprite/summon effect;
+                            fire: magic-effect sprites by magic effect);
                             ball chunks are raw item bitmaps read without decompression; fbp chunks are YJ2 battle backgrounds
                             decompressing to one raw 320x200 screen each. Requires the selected archive
                             and pat.mkf; PNG frames use pat.mkf chunk 0 day colors. Writes a new or empty directory;
