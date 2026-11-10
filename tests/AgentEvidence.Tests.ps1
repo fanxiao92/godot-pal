@@ -163,6 +163,24 @@ try {
     Check 'GREEN accepts completed native feedback' 0 -Phase green
     Check 'Game GREEN exact independent FQN set' 0 -Game -Phase green -ActualCount 3 -MissingCount 0
     Check 'Game designated RED exact name message stack' 0 -Game
+    # Change stdout alone: complete identity graph, summary/counters and phase-native exit stay valid.
+    $stdoutDiagnosticFailures = [Collections.Generic.List[string]]::new()
+    foreach ($phase in @('green', 'red')) {
+        foreach ($diagnostic in @(
+            'Aborting test run: session timeout 300000 milliseconds',
+            'Test Run Aborted.',
+            'test run timeout: session exceeded 300000 milliseconds',
+            'The test host process crashed.',
+            'GdUnit4.TestAdapter: WindowsStdOutHook failed to initialize',
+            'FATAL: System.AccessViolationException: attempted to access protected memory',
+            'Unhandled exception. System.InvalidOperationException: fixture host failure'
+        )) {
+            try {
+                Check "Game $phase stdout-only diagnostic rejected: $diagnostic" 1 { $stdout = $diagnostic } -Game -Phase $phase -Reason 'agent-evidence:diagnostic' -ActualCount 3 -MissingCount 0
+            } catch { $stdoutDiagnosticFailures.Add($_.Exception.Message) }
+        }
+    }
+    Assert ($stdoutDiagnosticFailures.Count -eq 0) ($stdoutDiagnosticFailures -join "`n")
     Check 'Game wrong message substring is not exact' 1 { $trx = $trx.Replace('DESIGNATED_ASSERTION 中文', 'prefix DESIGNATED_ASSERTION 中文') } -Game -Reason 'agent-evidence:failure'
     Check 'Game stack substring is not exact' 1 { $trx = $trx.Replace('FixtureTests.cs:line 12', 'prefix FixtureTests.cs:line 12') } -Game -Reason 'agent-evidence:failure'
     Check 'Game missing summary rejected' 1 { $trx = [regex]::Replace($trx, '<ResultSummary.*?</ResultSummary>', '') } -Game -Phase green -Reason 'agent-evidence:trx'

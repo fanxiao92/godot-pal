@@ -35,7 +35,7 @@ source 只有 worktree、branch、40 位 head/tree、dirty 与 binding。authori
 
 ## 共享 JSON 读取
 
-状态解析复用 `scripts/AgentEvidenceJson.psm1`（严格 UTF-8、重复键拒绝、日期字符串保真）。JSON 与 stdout/stderr 允许 UTF-8 BOM；UTF-16/32 BOM 不会触发自动转码，仍按严格 UTF-8 拒绝。源码快照与精简交接工具属于 #169 后续叶，不属于本叶已验证能力；本分类器不授予 SDK/派发权限。
+状态解析复用 `scripts/AgentEvidenceJson.psm1`（严格 UTF-8、重复键拒绝、日期字符串保真）。JSON 与 stdout/stderr 允许 UTF-8 BOM；UTF-16/32 BOM 不会触发自动转码，仍按严格 UTF-8 拒绝。源码快照与精简交接已提供[固定入口](../agents/runtime-workflow.md)，并接入本地离线回归；本分类器不授予 SDK/派发权限。
 
 ### 命令账本容器读取
 
@@ -108,7 +108,7 @@ pwsh -NoProfile -File ./tests/Test-PowerShellSyntax.Tests.ps1 -EvidenceDirectory
 
 这是 Game 特有字段的节选，不是完整 manifest。GREEN 仍须 `expectedFailures=[]`、原 native 数字 0、全 Passed 与 Completed；RED 须原 native 数字 1、Failed Summary，失败名称/完整消息/完整 stack 按多重集合准确匹配。多余、缺失或位置不符的失败不算指定 RED。复用 `GameTestBatches.ps1` 的 `Read-TestRunIdentity` 和精确名称断言；GREEN 额外调用 `Assert-GameBatch`，不另建 XML 身份算法，也不改变固有批次/预算/门禁。
 
-Game 采用严格诊断模式：stderr 必须空、Summary 下 RunInfo 必须不存在；stdout 含独立单词 warning 或 error（忽略大小写）即拒绝，编译错误同样拒绝。没有字面 diagnostic 豁免输入，CaseMismatch 也不豁免；当前模式**不支持含这些真实警告或正常 Error 回显的原件**，不声称兼容任意 Game 日志。该限制不修改 xUnit 的既有诊断契约。
+Game 采用严格诊断模式：stderr 必须空、Summary 下 RunInfo 必须不存在；stdout 含独立单词 warning、error、fatal 或 Unhandled（忽略大小写），或含 `Aborting test run`、`Test Run Aborted`、`test run timeout`、`test host process crashed`、`WindowsStdOutHook` 即拒绝，编译错误同样拒绝。即使 TRX 身份图、summary/counters、预期及数字 native 全部合法，单独的 stdout 中止/崩溃诊断也阻断 GREEN 和指定 RED。没有字面 diagnostic 豁免输入，CaseMismatch 也不豁免；当前模式**不支持含这些真实警告、正常 Error 回显或上述诊断文本的原件**，不声称识别任意未知文本或兼容任意 Game 日志。该限制不修改 xUnit 的既有诊断契约。
 
 身份图可读时，短报告给出 `total`（实际）、`expectedTotal`、`missingTests`、`extraTests`；即使 native 未知或双流不完整，也保留观察到的覆盖，但不授予有效分类。合成 466 Passed / 冻结预期 474 / Failed Summary / 300000ms abort 在 GREEN 与 RED 均拒绝，列出八个缺失；stdout 中的 child 数字退出不填充未知 root native。缺报告/损坏图仍拒绝；未知 native/EOF 的状态独立为 incomplete。这里的日志扫描与合成反例都不能证明真实进程完整性。
 
@@ -121,4 +121,4 @@ pwsh -NoProfile -File ./tests/AgentEvidence.Tests.ps1 -EvidenceDirectory 'C:/evi
 
 回归从中文/空格 foreign cwd 调用真实公开检查器及导出的账本读取函数，使用合成 JSON/TRX/日志。账本回归覆盖单对象/单元素数组/多对象数组的稳定数组形状、未知字段及缺失字段保真，以及 null/空/标量/混合/重复键反例；语法回归覆盖显式 AST 规则的实际调用与文本提及反例，并用副作用标记确认未执行被扫描代码。保留全部 xUnit Theory/FAIL 回显、warning/编译错误、计数/时间/UTF-8/状态回归，并覆盖显式 Game GREEN、精确指定 RED、错位置/额外失败/多重集合、独立 FQN 集、skip/缺失/abort、重复身份图、未知 RunInfo/stderr、严格诊断，以及 466/474+300000ms 合成反例。子分类器的预期非零不是回归失败；每例实际 argv/cwd/数字退出及原输入输出保留。显式 EvidenceDirectory 必须全新；失败不删除，默认成功仅清理自有临时目录。
 
-以上为 SOURCE/OFFLINE 检查，不是实际 Unit、Game 或 M6 验收。`Test-Engineering.ps1 -Mode Offline` 与 CI 的接线属于 #169 后续叶；本叶尚未接线或运行（NOT RUN）。普通 Unit 默认入口保持原生 `dotnet test`，真实远端执行仍以对应 CI run 为准。
+以上为 SOURCE/OFFLINE 检查，不是实际 Unit、Game 或 M6 验收。[Engineering Offline 与 CI 离线 guard](engineering-checks.md#ci-离线-guard-与原件) 已接线并完成本地离线验证；远端 CI 未运行（NOT RUN），真实远端执行仍以对应 CI run 为准。普通 Unit 默认入口保持原生 `dotnet test`。

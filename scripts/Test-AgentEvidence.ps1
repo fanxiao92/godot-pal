@@ -76,6 +76,7 @@ try {
         if ($stdout.StartsWith([string][char]0xFEFF, [StringComparison]::Ordinal)) { $stdout = $stdout.Substring(1) }
         if ($stderr.StartsWith([string][char]0xFEFF, [StringComparison]::Ordinal)) { $stderr = $stderr.Substring(1) }
         foreach ($line in ($stdout -split '\r?\n')) {
+            if ($game -and $line -match '(?i)Aborting test run|Test Run Aborted|test run timeout|test host process crashed|WindowsStdOutHook|\bfatal\b|\bUnhandled\b') { Fail 'diagnostic' "Game strict mode rejects abort/crash diagnostics: $line" }
             if ($game -and $line -match '(?i)\bwarning\b') { Fail 'warning' "Game strict mode rejects warnings: $line" }
             if ($game -and $line -match '(?i)\berror\b') { Fail 'compiler' "Game strict mode rejects error diagnostics: $line" }
             if ($line -match '(?i)(?:^|:\s+)warning(?:\s+[a-z]+[0-9]+)?\s*:') {
