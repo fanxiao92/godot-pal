@@ -14,6 +14,13 @@ function Fails([scriptblock]$Action, [string]$Pattern) {
     Assert ($message -and $message -match $Pattern) "Expected '$Pattern', got '$message'."
 }
 function Case([string]$Name, [scriptblock]$Action) { & $Action; $results.Add($Name); Write-Host "PASS: $Name" }
+function Assert-AdapterCaseOwners($Plan, [string[]]$Names, [string]$Context) {
+    foreach ($name in $Names) {
+        $batch = if ($name.StartsWith('Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_', [StringComparison]::Ordinal)) { 'scene-realfull' } else { 'scene-dialogue' }
+        $owners = @($Plan.batches | Where-Object { $_.expected -ccontains $name })
+        Assert ($owners.Count -eq 1 -and $owners[0].name -ceq $batch) "${Context}: '$name' must belong only to $batch."
+    }
+}
 $expected = @('Pal.Game.Tests.Fixture.Alpha', 'Pal.Game.Tests.Fixture.Beta')
 $valid = @'
 <TestRun id="33333333-3333-3333-3333-333333333333" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
@@ -95,16 +102,22 @@ try {
             $heavy = @($candidate.batches | Where-Object name -CEQ 'scene-battle-heavy-d')[0]
             $public = @($candidate.batches | Where-Object name -CEQ 'scene-realfull')[0]
             Assert-ExactTestNames @($heavy.expected) $remainingHeavy "$scope remaining heavy-d"
-            $publicNames = @($oldPublic + $party)
-            $publicFilter = 'FullyQualifiedName~Pal.Game.Tests.SyntheticFirstBattleClosureTests.|FullyQualifiedName~' + $party
+            $firstBattleNames = @($candidate.inventory | Where-Object { $_.name.StartsWith('Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_', [StringComparison]::Ordinal) } | ForEach-Object name)
+            Assert ($firstBattleNames.Count -eq 31) "$scope must own exactly 31 world-bound first-battle identities, including the coverer and zero-display cases."
+            $publicNames = @($oldPublic + $party + $firstBattleNames)
+            $publicFilter = 'FullyQualifiedName~Pal.Game.Tests.SyntheticFirstBattleClosureTests.|FullyQualifiedName~' + $party + '|FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_'
+            $dialogue = @($candidate.batches | Where-Object name -CEQ 'scene-dialogue')[0]
+            Assert ($dialogue.count -eq 108 -and $dialogue.sessionTimeoutMs -eq 120000) 'Dialogue membership changes, not its session budget.'
+            Assert ($dialogue.filter -ceq '(FullyQualifiedName~Pal.Game.Tests.ExplorationSceneTests.|FullyQualifiedName~Pal.Game.Tests.NpcInteractionHostTests.|FullyQualifiedName~Pal.Game.Tests.DialogueDisplayFixtureTests.|FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.)&FullyQualifiedName!~Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') 'Dialogue must exclude only the full first-battle method prefix, with the whole class union grouped.'
+            Assert-AdapterCaseOwners $candidate $firstBattleNames "$scope moved first-battle identities"
             if ($scope -ceq 'full') {
                 $publicNames += $privateReal
                 $publicFilter = 'FullyQualifiedName~Pal.Game.Tests.RealFirstBattleFlowTests.|' + $publicFilter
             }
             Assert-ExactTestNames @($public.expected) $publicNames "$scope exact public positives"
-            Assert ($public.filter -ceq $publicFilter) 'Public filter must select only the existing classes and the full Story method identity.'
+            Assert ($public.filter -ceq $publicFilter) 'Public filter must select only the existing full flows, exact Story method and first-battle adapter prefix.'
             Assert ($public.sessionTimeoutMs -eq 300000) 'Public session budget must remain 300000ms.'
-            Assert-ExactTestNames @($public.classes) @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests') "$scope public class metadata"
+            Assert-ExactTestNames @($public.classes) @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests', 'TriggerDialogueFixtureTests') "$scope public class metadata"
             Assert-ExactTestNames @($heavy.expected + $public.expected) @($remainingHeavy + $publicNames) "$scope unchanged moved partition union"
             Assert-ExactTestNames @($candidate.batches.expected) @($candidate.inventory | Where-Object { $_.class -cne 'FailureControlTests' -and $_.name -cnotin $candidate.localOnly } | ForEach-Object name) "$scope disjoint full partition"
             if ($scope -ceq 'committable') {
@@ -135,9 +148,173 @@ public class Fixture
         [IO.File]::WriteAllText((Join-Path $source 'Fixture.cs'), $text.Replace('public void Beta()', 'public ValueTask Beta()'))
         Fails { Get-GameSourceInventory $source } 'Unparsed Game test attributes'
     }
-    Case 'real source partitions 85/74/2/5/6/3/4/28/473/4, preserves controls and solution test projects' {
-        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '85,74,2,5,6,3,4,28,473,4') 'Wrong batch sizes/order.'
-        Assert ($plan.inventory.Count -eq 687 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+    Case 'real source partitions 85/108/2/5/6/3/4/28/473/35, preserves controls and solution test projects' {
+        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '85,108,2,5,6,3,4,28,473,35') 'Wrong batch sizes/order.'
+        Assert ($plan.inventory.Count -eq 752 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+        $storyHookPositive = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_current_world_hook_uses_live_entry_and_owned_display_ack'
+        foreach ($scope in @('full', 'committable')) {
+            $candidate = Get-GameBatchPlan $repository -Scope $scope
+            Assert (@($candidate.inventory | Where-Object name -CEQ $storyHookPositive).Count -eq 1) 'Story current-hook positive must have exactly one no-argument identity.'
+            $owners = @($candidate.batches | Where-Object { $_.expected -ccontains $storyHookPositive })
+            Assert ($owners.Count -eq 1 -and $owners[0].name -ceq 'scene-dialogue') "$scope Story current-hook positive must belong exclusively to scene-dialogue."
+        }
+        $firstBattleGlyph = @($plan.inventory | Where-Object name -CEQ 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_current_world_hidden_glyph_is_rejected_before_production_Start')
+        Assert ($firstBattleGlyph.Count -eq 1) 'First-battle hidden-glyph regression must have exactly one no-argument identity.'
+        $dialogue = @($plan.batches | Where-Object name -CEQ 'scene-dialogue')[0]
+        $resourcePrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_current_world_bound_resource_faults_reject_before_production_Start.'
+        $resourceCases = @(
+            $resourcePrefix + 'Story_current_world_bound_resource_faults_reject_before_production_Start:0 ("missing-used-glyph")'
+            $resourcePrefix + 'Story_current_world_bound_resource_faults_reject_before_production_Start:1 ("duplicate-used-glyph")'
+            $resourcePrefix + 'Story_current_world_bound_resource_faults_reject_before_production_Start:2 ("bad-used-stride")'
+            $resourcePrefix + 'Story_current_world_bound_resource_faults_reject_before_production_Start:3 ("prompt-0")'
+            $resourcePrefix + 'Story_current_world_bound_resource_faults_reject_before_production_Start:4 ("prompt-1")'
+            $resourcePrefix + 'Story_current_world_bound_resource_faults_reject_before_production_Start:5 ("prompt-2")'
+            $resourcePrefix + 'Story_current_world_bound_resource_faults_reject_before_production_Start:6 ("portrait-7")'
+            $resourcePrefix + 'Story_current_world_bound_resource_faults_reject_before_production_Start:7 ("future-portrait-10")'
+        )
+        $firstBattlePrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_current_world_bound_resources_validate_before_production_Start.'
+        $firstBattleCases = @(
+            $firstBattlePrefix + 'First_battle_current_world_bound_resources_validate_before_production_Start:0 ("clean-control")'
+            $firstBattlePrefix + 'First_battle_current_world_bound_resources_validate_before_production_Start:1 ("missing-used-glyph")'
+            $firstBattlePrefix + 'First_battle_current_world_bound_resources_validate_before_production_Start:2 ("duplicate-used-glyph")'
+            $firstBattlePrefix + 'First_battle_current_world_bound_resources_validate_before_production_Start:3 ("bad-used-stride")'
+            $firstBattlePrefix + 'First_battle_current_world_bound_resources_validate_before_production_Start:4 ("prompt-0")'
+            $firstBattlePrefix + 'First_battle_current_world_bound_resources_validate_before_production_Start:5 ("prompt-1")'
+            $firstBattlePrefix + 'First_battle_current_world_bound_resources_validate_before_production_Start:6 ("prompt-2")'
+        )
+        foreach ($scope in @('full', 'committable')) {
+            $candidate = Get-GameBatchPlan $repository -Scope $scope
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name.StartsWith($resourcePrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $resourceCases "$scope literal eight Resource fault identities"
+            Assert-ExactTestNames @($candidate.batches | Where-Object name -CEQ 'scene-dialogue' | ForEach-Object expected | Where-Object { $_.StartsWith($resourcePrefix, [StringComparison]::Ordinal) }) $resourceCases "$scope Resource cases owned by scene-dialogue"
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name.StartsWith($firstBattlePrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $firstBattleCases "$scope literal seven firstbattle Resource identities"
+            Assert-ExactTestNames @($candidate.batches | Where-Object name -CEQ 'scene-realfull' | ForEach-Object expected | Where-Object { $_.StartsWith($firstBattlePrefix, [StringComparison]::Ordinal) }) $firstBattleCases "$scope firstbattle Resource cases owned by scene-realfull"
+            $fullTail = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_current_world_hook_uses_live_entry_and_owned_display_ack'
+            Assert (@($candidate.inventory | Where-Object name -CEQ $fullTail).Count -eq 1) "$scope must contain exactly one full firstbattle tail."
+            Assert (@($candidate.batches | Where-Object { $fullTail -cin $_.expected }).Count -eq 1 -and $fullTail -cin @($candidate.batches | Where-Object name -CEQ 'scene-realfull')[0].expected) "$scope full firstbattle tail must belong exclusively to scene-realfull."
+            $paletteFault = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_current_world_bound_palette_is_rejected_before_production_Start'
+            Assert (@($candidate.inventory | Where-Object name -CEQ $paletteFault).Count -eq 1) "$scope must contain exactly one no-argument palette rejection."
+            $paletteOwners = @($candidate.batches | Where-Object { $paletteFault -cin $_.expected })
+            Assert ($paletteOwners.Count -eq 1 -and $paletteOwners[0].name -ceq 'scene-realfull') "$scope palette rejection must belong exclusively to scene-realfull."
+            $basicPrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Basic_required_portrait_uses_native_file_identity_and_transactional_staging'
+            $basicCases = @(
+                $basicPrefix + '.Basic_required_portrait_uses_native_file_identity_and_transactional_staging:0 ("missing-file")'
+                $basicPrefix + '.Basic_required_portrait_uses_native_file_identity_and_transactional_staging:1 ("missing-identity")'
+                $basicPrefix + '.Basic_required_portrait_uses_native_file_identity_and_transactional_staging:2 ("later-glyph")'
+                $basicPrefix + '.Basic_required_portrait_uses_native_file_identity_and_transactional_staging:3 ("clean-control")'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name.StartsWith($basicPrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $basicCases "$scope literal four basic portrait cases"
+            Assert-ExactTestNames @($candidate.batches | Where-Object name -CEQ 'scene-dialogue' | ForEach-Object expected | Where-Object { $_.StartsWith($basicPrefix, [StringComparison]::Ordinal) }) $basicCases "$scope basic portrait cases owned by scene-dialogue"
+            Assert (@($candidate.batches | Where-Object name -CNE 'scene-dialogue' | ForEach-Object expected | Where-Object { $_.StartsWith($basicPrefix, [StringComparison]::Ordinal) }).Count -eq 0) "$scope basic portrait cases must not appear in another batch."
+            $seedNegative = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_missing_name_key_rejects_seed_glyph_before_production_Start'
+            $seedPrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_declared_seed_and_live_zero_reach_owned_outer_return.'
+            $seedCases = @(
+                $seedNegative
+                $seedPrefix + 'Story_declared_seed_and_live_zero_reach_owned_outer_return:0 ("absent-seed")'
+                $seedPrefix + 'Story_declared_seed_and_live_zero_reach_owned_outer_return:1 ("live-zero")'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name -ceq $seedNegative -or $_.name.StartsWith($seedPrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $seedCases "$scope literal three Story seed/live0 identities"
+            Assert-ExactTestNames @($candidate.batches | Where-Object name -CEQ 'scene-dialogue' | ForEach-Object expected | Where-Object { $_ -ceq $seedNegative -or $_.StartsWith($seedPrefix, [StringComparison]::Ordinal) }) $seedCases "$scope Story seed/live0 cases owned by scene-dialogue"
+            Assert (@($candidate.batches | Where-Object name -CNE 'scene-dialogue' | ForEach-Object expected | Where-Object { $_ -ceq $seedNegative -or $_.StartsWith($seedPrefix, [StringComparison]::Ordinal) }).Count -eq 0) "$scope Story seed/live0 cases must not appear in another batch."
+            $futurePrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_future_literal_0090_'
+            $futureCases = @(
+                $futurePrefix + 'glyph_rejects_before_Start'
+                $futurePrefix + 'reaches_owned_outer_return'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name.StartsWith($futurePrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $futureCases "$scope literal two Story future0090 identities"
+            Assert-ExactTestNames @($candidate.batches | Where-Object name -CEQ 'scene-dialogue' | ForEach-Object expected | Where-Object { $_.StartsWith($futurePrefix, [StringComparison]::Ordinal) }) $futureCases "$scope Story future0090 cases owned by scene-dialogue"
+            Assert (@($candidate.batches | Where-Object name -CNE 'scene-dialogue' | ForEach-Object expected | Where-Object { $_.StartsWith($futurePrefix, [StringComparison]::Ordinal) }).Count -eq 0) "$scope Story future0090 cases must not appear in another batch."
+            $secondOrderPrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_second_order_literal_0090_'
+            $secondOrderCases = @(
+                $secondOrderPrefix + 'glyph_rejects_before_Start'
+                $secondOrderPrefix + 'reaches_owned_outer_return'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name.StartsWith($secondOrderPrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $secondOrderCases "$scope literal two Story second-order0090 identities"
+            Assert-ExactTestNames @($candidate.batches | Where-Object name -CEQ 'scene-dialogue' | ForEach-Object expected | Where-Object { $_.StartsWith($secondOrderPrefix, [StringComparison]::Ordinal) }) $secondOrderCases "$scope Story second-order0090 cases owned by scene-dialogue"
+            Assert (@($candidate.batches | Where-Object name -CNE 'scene-dialogue' | ForEach-Object expected | Where-Object { $_.StartsWith($secondOrderPrefix, [StringComparison]::Ordinal) }).Count -eq 0) "$scope Story second-order0090 cases must not appear in another batch."
+            $firstFuturePrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_future_literal_0090_'
+            $firstFutureCases = @(
+                $firstFuturePrefix + 'glyph_rejects_before_Start'
+                $firstFuturePrefix + 'reaches_owned_outer_return'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name.StartsWith($firstFuturePrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $firstFutureCases "$scope literal two firstbattle future0090 identities"
+            Assert-AdapterCaseOwners $candidate $firstFutureCases "$scope firstbattle future0090"
+            $firstSecondOrderPrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_second_order_literal_0090_'
+            $firstSecondOrderCases = @(
+                $firstSecondOrderPrefix + 'glyph_rejects_before_Start'
+                $firstSecondOrderPrefix + 'reaches_owned_outer_return'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name.StartsWith($firstSecondOrderPrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $firstSecondOrderCases "$scope literal two firstbattle second-order0090 identities"
+            Assert-AdapterCaseOwners $candidate $firstSecondOrderCases "$scope firstbattle second-order0090"
+            $friendDeathPositive = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_second_order_0090_executes_real_coverer_friend_death_and_owned_ack'
+            Assert (@($candidate.inventory | Where-Object name -CEQ $friendDeathPositive).Count -eq 1) "$scope must contain exactly one real coverer FriendDeath continuation."
+            Assert-AdapterCaseOwners $candidate @($friendDeathPositive) "$scope real coverer continuation"
+            $storyFriendDeath = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_second_order_0090_executes_real_coverer_friend_death_and_owned_ack'
+            Assert (@($candidate.inventory | Where-Object name -CEQ $storyFriendDeath).Count -eq 1) "$scope must contain exactly one Story real coverer continuation."
+            Assert-AdapterCaseOwners $candidate @($storyFriendDeath) "$scope Story real coverer continuation"
+            $firstZeroPrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_zero_display_ignores_unused_resources_but_validates_bound_portrait.'
+            $firstZeroCases = @(
+                $firstZeroPrefix + 'First_battle_zero_display_ignores_unused_resources_but_validates_bound_portrait:0 ("no-portrait")'
+                $firstZeroPrefix + 'First_battle_zero_display_ignores_unused_resources_but_validates_bound_portrait:1 ("valid-portrait")'
+                $firstZeroPrefix + 'First_battle_zero_display_ignores_unused_resources_but_validates_bound_portrait:2 ("bad-portrait")'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name.StartsWith($firstZeroPrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $firstZeroCases "$scope literal three strict first-battle zero-display cases"
+            Assert-AdapterCaseOwners $candidate $firstZeroCases "$scope strict first-battle zero-display"
+            $randomCases = @(
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_random_hook_branch_glyphs_reject_before_Start.Story_random_hook_branch_glyphs_reject_before_Start:0 ("random-miss-glyph")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_random_hook_branch_glyphs_reject_before_Start.Story_random_hook_branch_glyphs_reject_before_Start:1 ("random-target-glyph")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_random_hook_target_reaches_owned_outer_return'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_random_hook_branch_glyphs_reject_before_Start.First_battle_random_hook_branch_glyphs_reject_before_Start:0 ("random-miss-glyph")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_random_hook_branch_glyphs_reject_before_Start.First_battle_random_hook_branch_glyphs_reject_before_Start:1 ("random-target-glyph")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_random_hook_target_reaches_owned_outer_return'
+            )
+            $randomPattern = '^Pal\.Game\.Tests\.TriggerDialogueFixtureTests\.(Story|First_battle)_random_hook_'
+            Assert-ExactTestNames @($candidate.inventory | Where-Object name -Match $randomPattern | ForEach-Object name) $randomCases "$scope literal six random hook identities"
+            Assert-AdapterCaseOwners $candidate $randomCases "$scope random hook"
+            $titleCases = @(
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_title_only_glyph_faults_reject_before_Start.Story_title_only_glyph_faults_reject_before_Start:0 ("title-missing-glyph")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_title_only_glyph_faults_reject_before_Start.Story_title_only_glyph_faults_reject_before_Start:1 ("title-duplicate-glyph")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_title_only_glyph_faults_reject_before_Start.Story_title_only_glyph_faults_reject_before_Start:2 ("title-bad-stride")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_title_and_body_reach_owned_outer_return'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_title_only_glyph_faults_reject_before_Start.First_battle_title_only_glyph_faults_reject_before_Start:0 ("title-missing-glyph")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_title_only_glyph_faults_reject_before_Start.First_battle_title_only_glyph_faults_reject_before_Start:1 ("title-duplicate-glyph")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_title_only_glyph_faults_reject_before_Start.First_battle_title_only_glyph_faults_reject_before_Start:2 ("title-bad-stride")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_title_and_body_reach_owned_outer_return'
+            )
+            $titlePattern = '^Pal\.Game\.Tests\.TriggerDialogueFixtureTests\.(Story|First_battle)_title_'
+            Assert-ExactTestNames @($candidate.inventory | Where-Object name -Match $titlePattern | ForEach-Object name) $titleCases "$scope literal eight title identities"
+            Assert-AdapterCaseOwners $candidate $titleCases "$scope title"
+            $missingPortraitCases = @(
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_hidden_portrait_without_bound_mapping_rejects_before_Start'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_hidden_portrait_without_bound_mapping_rejects_before_Start'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object name -Match '_hidden_portrait_without_bound_mapping_rejects_before_Start$' | ForEach-Object name) $missingPortraitCases "$scope literal two missing portrait identities"
+            Assert-AdapterCaseOwners $candidate $missingPortraitCases "$scope missing portrait"
+            $zeroDisplayCases = @(
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_zero_display_ignores_unused_font_and_prompts_but_validates_portrait.Story_zero_display_ignores_unused_font_and_prompts_but_validates_portrait:0 ("no-portrait")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_zero_display_ignores_unused_font_and_prompts_but_validates_portrait.Story_zero_display_ignores_unused_font_and_prompts_but_validates_portrait:1 ("valid-portrait")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_zero_display_ignores_unused_font_and_prompts_but_validates_portrait.Story_zero_display_ignores_unused_font_and_prompts_but_validates_portrait:2 ("bad-portrait")'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_portrait_without_showDialog_still_requires_bound_mapping'
+            )
+            $zeroDisplayPattern = 'Story_zero_display_ignores_unused_font_and_prompts_but_validates_portrait\.|First_battle_portrait_without_showDialog_still_requires_bound_mapping$'
+            Assert-ExactTestNames @($candidate.inventory | Where-Object name -Match $zeroDisplayPattern | ForEach-Object name) $zeroDisplayCases "$scope literal four zero-display/portrait-only identities"
+            Assert-AdapterCaseOwners $candidate $zeroDisplayCases "$scope zero-display/portrait-only"
+            $warmupCases = @(
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_completed_warmup_preserves_rejection_priority_and_caller'
+                'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_completed_warmup_preserves_rejection_priority_and_caller'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object name -Match '_completed_warmup_preserves_rejection_priority_and_caller$' | ForEach-Object name) $warmupCases "$scope literal two completed warmup identities"
+            Assert-AdapterCaseOwners $candidate $warmupCases "$scope warmup"
+            $firstSeedNegative = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_missing_name_key_rejects_seed_glyph_before_production_Start'
+            $firstSeedPrefix = 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_declared_seed_and_live_zero_reach_owned_outer_return.'
+            $firstSeedCases = @(
+                $firstSeedNegative
+                $firstSeedPrefix + 'First_battle_declared_seed_and_live_zero_reach_owned_outer_return:0 ("absent-seed")'
+                $firstSeedPrefix + 'First_battle_declared_seed_and_live_zero_reach_owned_outer_return:1 ("live-zero")'
+            )
+            Assert-ExactTestNames @($candidate.inventory | Where-Object { $_.name -ceq $firstSeedNegative -or $_.name.StartsWith($firstSeedPrefix, [StringComparison]::Ordinal) } | ForEach-Object name) $firstSeedCases "$scope literal three firstbattle seed/live0 identities"
+            Assert-AdapterCaseOwners $candidate $firstSeedCases "$scope firstbattle seed/live0"
+        }
+        Assert-AdapterCaseOwners $plan @('Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_current_world_hidden_glyph_is_rejected_before_production_Start') 'First-battle hidden-glyph regression'
         Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Wrong serial project identities/order.'
         Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj',
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
@@ -147,7 +324,7 @@ public class Fixture
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 465, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 360, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 89, 0)
-            game = @('src/Pal.Game/Pal.Game.csproj', 684, 0)
+            game = @('src/Pal.Game/Pal.Game.csproj', 749, 0)
         }
         foreach ($project in $plan.projects) {
             $expectedProject = $expectedProjects[$project.name]
@@ -168,33 +345,33 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1329 passed; CLI unit 465 passed; CLI integration 360 passed + 2 skipped (362 total); Prepare 89 passed; Godot source/discovery 687; positives 684 as serial 85/74/2/5/6/3/4/28/473/4 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1329 passed; CLI unit 465 passed; CLI integration 360 passed + 2 skipped (362 total); Prepare 89 passed; Godot source/discovery 752; positives 749 as serial 85/108/2/5/6/3/4/28/473/35 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }
-    Case 'committable scene-realfull executes synthetic positives plus the exact Story party method' {
+    Case 'committable scene-realfull executes synthetic, exact Story and first-battle adapter positives' {
         $plan = Get-GameBatchPlan $repository -Scope committable
         Assert ($plan.scope -ceq 'committable') 'Plan must record its scope.'
         $realfull = @($plan.batches | Where-Object name -CEQ 'scene-realfull')
-        Assert ($realfull.Count -eq 1 -and $realfull[0].count -eq 3) 'scene-realfull must drop exactly its local-only real positive.'
-        Assert ($realfull[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.SyntheticFirstBattleClosureTests.|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin') 'Committable scene-realfull filter must exclude the private-asset class.'
-        Assert (($plan.batches | ForEach-Object count) -join ',' -ceq '85,74,2,5,6,3,4,28,473,3') 'Wrong committable batch sizes/order.'
+        Assert ($realfull.Count -eq 1 -and $realfull[0].count -eq 34) 'scene-realfull must drop exactly its local-only real positive.'
+        Assert ($realfull[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.SyntheticFirstBattleClosureTests.|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin|FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') 'Committable scene-realfull filter must exclude the private-asset class.'
+        Assert (($plan.batches | ForEach-Object count) -join ',' -ceq '85,108,2,5,6,3,4,28,473,34') 'Wrong committable batch sizes/order.'
         $game = @($plan.projects | Where-Object name -CEQ 'game')[0]
-        Assert ($game.passed -eq 683) 'Committable game positives must drop the local-only case.'
-        Assert ($plan.inventory.Count -eq 687) 'Committable scope keeps the real class compiled and discoverable.'
+        Assert ($game.passed -eq 748) 'Committable game positives must drop the local-only case.'
+        Assert ($plan.inventory.Count -eq 752) 'Committable scope keeps the real class compiled and discoverable.'
         Assert-ExactTestNames @($plan.localOnly) @('Pal.Game.Tests.RealFirstBattleFlowTests.Real_phases_search_pages_engagement_and_bounded_damage_trajectory') 'Local-only positive identity'
         Assert-ExactTestNames @($plan.batches.expected) @($plan.inventory | Where-Object { $_.class -NE 'FailureControlTests' -and $_.name -cnotin $plan.localOnly } | ForEach-Object name) 'committable partition'
     }
-    Case 'full scope keeps the real positive alongside synthetic and exact Story positives, with no exclusions' {
+    Case 'full scope keeps the real positive alongside public full flows and first-battle adapters, with no exclusions' {
         $full = Get-GameBatchPlan $repository
         Assert ($full.scope -ceq 'full' -and @($full.localOnly).Count -eq 0) 'Full scope must stay the default with no exclusions.'
         $realfull = @($full.batches | Where-Object name -CEQ 'scene-realfull')[0]
-        Assert ($realfull.count -eq 4) 'Full scene-realfull count changed.'
+        Assert ($realfull.count -eq 35) 'Full scene-realfull count changed.'
         Assert ($realfull.filter -cmatch 'RealFirstBattleFlowTests') 'Full scene-realfull filter must still select the real positive.'
     }
     Case 'committable gate PASS summary declares scope and the private-asset boundary' {
         $summary = Get-GatePassSummary (Get-GameBatchPlan $repository -Scope committable)
-        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1329 passed; CLI unit 465 passed; CLI integration 360 passed + 2 skipped (362 total); Prepare 89 passed; Godot source/discovery 687; positives 683 as serial 85/74/2/5/6/3/4/28/473/3 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
+        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1329 passed; CLI unit 465 passed; CLI integration 360 passed + 2 skipped (362 total); Prepare 89 passed; Godot source/discovery 752; positives 748 as serial 85/108/2/5/6/3/4/28/473/34 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
         Assert ($summary -ceq $expected) "Wrong committable gate PASS summary: $summary"
         Assert ($summary -cmatch 'committable-scope full gate') 'Committable identity missing.'
         Assert ($summary -cmatch 'local-only real-asset positives excluded') 'Private-asset boundary missing.'

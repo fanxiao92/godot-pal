@@ -8,6 +8,18 @@ Game 测试继续使用现有 Godot 程序集、固定 GdUnit 包和 `tests/Pal.
 
 共享完整门仍唯一使用 `scripts/Test-M0.ps1`，依赖 Core→CLI→Prepare→Game 的串行顺序和当前脚本生成的批次/身份。当前库存和批次从 `scripts/GameTestBatches.ps1` 与测试定义核对，不在本页复制案例计数；已完成运行见历史索引并保持原身份。保留完整门实现不证明当前 M4 候选的完整门运行兼容性已验证。
 
+## #161 first-battle 适配器用例的当前执行归属
+
+`TriggerDialogueFixtureTests.First_battle_` 全族（含参数化实例）归入已有 `scene-realfull`，不再属于 `scene-dialogue`。其余 TriggerDialogue、NpcInteraction、DialogueDisplay 和 Exploration 场景仍在 `scene-dialogue`。两者按完整方法前缀互斥分区；没有新增批次或改变原会话预算、断言、捕获设置、控制测试与完整门总执行集合。full 保留既有私有真实正例，committable 仍只排除该私有正例，公开 first-battle 适配器用例不被排除。
+
+定点 first-battle 用例须改用 `-GameBatch scene-realfull`；旧的 `-GameBatch scene-dialogue -Filter FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_` 不再是合法归属。需要运行整个 TriggerDialogue 类时，在 PowerShell 内传 `-GameBatch @('scene-dialogue', 'scene-realfull') -Filter FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.`，由同一 Range 入口串行执行两个精确交集，而不是把整类重复运行两次。选择整个批次时省略 Filter。路径、资源包、全新输出目录和全局引擎串行要求仍按下方入口核对。
+
+本票的二阶正控分别从真实敌方行动产生 Dying，再让 coverer role0 的真实 FriendDeath 消费前一个钩子通过0090写入的入口；经适配器、实际显示更新与输入完成 owned ACK。两个新增钩子正控只验证到仍在进行的战斗，不伪造 Completion 或外层返回；完整 Won/Lost 与外层回环仍由相应独立正控负责。初始态与完成 warmup 后的拒绝优先级使用真实搜索请求；display-busy 来自另一次公开显示 Start，不构造假请求/phase。
+
+first-battle 的 `zeroDisplay` 仅为默认关闭的人工准备变体：保留 team18 双敌、原09FE操作数、A96E/A9B5声明及严格双语 Load，以独立字面命令移除显示。非零 portrait7 在合法静态分支声明并经正式 prepare 绑定，不修改只读 checked map。Load/Initialize 后才故意破坏本例字体、prompt 和可选 portrait planes；无 portrait 的正控还绑定255色 host palette。成功标准是忽略未使用资源、保留真实 pending battle 与缺键 seed；坏 portrait 必须在 Start 前拒绝且全状态不变。这不删掉严格战斗来伪装 world-bound 零显示，也不代表完整零售剧情/热重载保证。
+
+此前完整 dialogue 会话的超时中止与输出排空失败仍是失败；拆批不将其部分结果转签成验收，也不以补跑缺失项拼接成功。新分区必须分别取得新鲜完整 TRX、精确身份集合、原生退出、双流完成及清理证据；离线分区检查不等于 runtime 或整票/M6 验收。
+
 ## 选择运行范围
 
 - 新增/迁移场景行为：默认选 SceneRunner，遵循真实 Main 初始化、`UpdateCompleted` 完成边界、输入释放、finally 清理和资源隔离。
