@@ -96,8 +96,9 @@ public sealed class TriggerEventCollection
             command.NextAddress = actual;
             if (command.TargetReference is not null)
             {
-                int target = collection.Resolve(command.TargetReference, command.Position.FileId, command.Position.ToString());
-                if (command.Op == "randomJump") command.TargetAddress = target;
+                int target = collection.Resolve(command.TargetReference, command.Position.FileId,
+                    command.Op == "changeCash" ? $"{command.Position} changeCash.to" : command.Position.ToString());
+                if (command.Op is "randomJump" or "changeCash") command.TargetAddress = target;
             }
             foreach (var reference in command.ContentReferences)
             {
@@ -479,6 +480,14 @@ public sealed class TriggerEventCollection
                     // — the cross-fade pacing word (larger = slower), not a mode selector.
                     if (opcode != 0x73) throw new InvalidDataException("Invalid fadeScene mapping.");
                     command.FadeSpeed = EventJson.Word(node, "speed");
+                    break;
+                case "changeCash":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.Amount = EventJson.Number(node, "amount");
+                    command.TargetReference = EventJson.Reference(node, "to");
+                    break;
+                case "halveCash":
+                    _ = TriggerNamedContentProfile.Validate(node, op, opcode);
                     break;
                 case "markFailed":
                     // script.c 0x0041: g_fScriptSuccess = FALSE.
