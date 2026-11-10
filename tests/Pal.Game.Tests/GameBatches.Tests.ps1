@@ -131,10 +131,15 @@ finally {
 }
 exit $exitCode
 '@, [Text.UTF8Encoding]::new($false))
+        $pwsh = (Get-Process -Id $PID).Path # Only this test's own executable.
+        $syntaxEntry = Join-Path $repository 'scripts/Test-PowerShellSyntax.ps1'
+        & $pwsh -NoProfile -File $syntaxEntry -Path $fixture 1> (Join-Path $temp 'headless-entry-syntax.stdout.log') 2> (Join-Path $temp 'headless-entry-syntax.stderr.log')
+        $syntaxExit = $LASTEXITCODE
+        [IO.File]::WriteAllText((Join-Path $temp 'headless-entry-syntax.exit.txt'), [string]$syntaxExit, [Text.UTF8Encoding]::new($false))
+        Assert ($syntaxExit -eq 0) 'Generated headless entry fixture failed syntax preflight; it was not executed.'
         $keys = @('PAL_STATIC_GPU_EVIDENCE', 'PAL_EXPLORATION_GPU_EVIDENCE')
         $before = @{}
         foreach ($key in $keys) { $before[$key] = [Environment]::GetEnvironmentVariable($key) }
-        $pwsh = (Get-Process -Id $PID).Path # Only this test's own executable.
         try {
             foreach ($selected in @(@($keys[0]), @($keys[1]), @($keys[0..1]))) {
                 foreach ($key in $keys) { Set-FixtureEnvironment $key $null }
