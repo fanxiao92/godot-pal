@@ -1,4 +1,14 @@
-# Shared gate metadata only. No SDK, engine, process or resource operations.
+# Shared gate metadata and read-only environment checks. No SDK, engine, process or resource operations.
+function Assert-HeadlessGpuEnvironment {
+    # These two inherited opt-ins change process tests from headless to GPU readback.
+    $nonempty = @(foreach ($key in @('PAL_STATIC_GPU_EVIDENCE', 'PAL_EXPLORATION_GPU_EVIDENCE')) {
+        if (-not [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($key))) { $key }
+    })
+    if ($nonempty.Count) {
+        throw "[headless:gpu-inheritance] Nonempty GPU evidence environment variable(s): $($nonempty -join ', '). Use an explicit GPU entry instead; inherited values were not changed."
+    }
+}
+
 function Assert-ExactTestNames([string[]]$Actual, [string[]]$Expected, [string]$Context) {
     $actualSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $expectedSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)

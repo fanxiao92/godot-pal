@@ -11,11 +11,12 @@ param(
     [switch]$SkipAffectedBatchGuard
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
+if ('game' -cin $Scope) { Assert-HeadlessGpuEnvironment }
 $utf8 = [Text.UTF8Encoding]::new($false)
 $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
-. (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
 # Warning baseline: strict shape; a missing scope key is a guard malfunction, not a pass.
 $warningBaselinePath = Join-Path $PSScriptRoot 'warning-baseline.json'
 try { $warningBaseline = [Collections.Generic.Dictionary[string, int]]::new(); foreach ($p in (Get-Content -LiteralPath $warningBaselinePath -Raw | ConvertFrom-Json -AsHashtable).GetEnumerator()) { if ($p.Key -cne '_comment') { $warningBaseline[$p.Key] = [int]$p.Value } } } catch { throw "warning-baseline: cannot read $warningBaselinePath : $($_.Exception.Message)" }

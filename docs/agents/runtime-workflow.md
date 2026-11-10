@@ -39,6 +39,14 @@ RepositoryRoot 必须是实际 Git worktree 根目录，不能使用子目录缩
 
 `tests/AgentWorkflow.Tests.ps1` 是公开 SOURCE/OFFLINE 回归：合成 current 的日期精度、原件/历史保留、归还权限、旧 SHA、分类器拒绝和显式应用；以及当前工作树的只读 Git 快照、根目录边界、同源与路径并集 delta。它独立于 CI 接线，不运行 SDK、Godot、网络或创建测试 Git 仓库。
 
-本叶只交付快照和交接工具；尚未接入 Engineering Offline/CI（后续接线叶负责，当前 NOT RUN）。反馈分类仍是既有 xUnit 契约，不宣称任意 Game 原件分类、命令账本形状校验、AST 规则或 headless GPU 继承保护已经交付。派发预检、自动链执行和 Pi 全局配置不属于这两个工具。
+快照和交接工具尚未接入 Engineering Offline/CI（后续接线叶负责，当前 NOT RUN）。它们不承担 Game 原件分类、命令账本读取或 AST 规则；这些能力见[证据工具说明](../testing/agent-evidence.md)。派发预检、自动链执行和 Pi 全局配置不属于这两个工具。
 
 SOURCE/OFFLINE 通过不等于完整 Engineering、Game、GPU/人工或远端验收。独立评审仍读冻结 diff 和适用原件；实际端到端成本变化需未来同类任务测量。
+
+## headless 入口的 GPU 继承保护
+
+`Test-M0.ps1` 始终检查；`Test-Range.ps1` 只在 `Scope` 包含 `game` 时检查。两者在创建输出、修改环境、SDK/engine、CIM 或执行 hooks 之前调用 `GameTestBatches.ps1` 的只读 `Assert-HeadlessGpuEnvironment`。非空（包括纯空白）的 `PAL_STATIC_GPU_EVIDENCE` 或 `PAL_EXPLORATION_GPU_EVIDENCE` 会触发 `[headless:gpu-inheritance]`，仅报告键名，不输出值、不静默清空后继续；拒绝时保留继承环境。
+
+这两个变量分别让 Main/Exploration 的进程测试进入 GPU readback，不能继承到 headless 验收。先由操作者确认并移除不需要的继承值，再另行授权重跑；需要 GPU 核对时使用显式 GPU 入口（如 `Test-M4FirstBattleGpu.ps1`、`Test-RealDialogueGpu.ps1`），这些入口未改变。不泛禁其它 `PAL_*` 变量，Range 的非 Game scope 不应用此保护。
+
+`tests/Pal.Game.Tests/GameBatches.Tests.ps1` 的 SOURCE/OFFLINE 回归覆盖空/非空输入、键名脱敏、环境不变，以及两个真实公开入口的 sentinel 拒绝路径（含 Range 混合/非 Game scope）。可用 `-EvidenceDirectory <全新外部目录>` 保留原日志、数字退出和环境不变结果；fixture 对 SDK/进程/output hooks 设拒绝桩，断言入口输出目录不存在。它不调用 clean 路径的 SDK，也不运行 GPU、Godot 或实际完整门；后续 Engineering Offline/CI 接线当前 NOT RUN。

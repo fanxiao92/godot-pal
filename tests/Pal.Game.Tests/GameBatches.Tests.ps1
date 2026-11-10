@@ -1,13 +1,24 @@
-# Offline metadata regression: synthetic C#/XML/text only. No SDK, Godot, CIM or network.
+# Offline metadata/entry rejection regression. No SDK, Godot, CIM or network.
+[CmdletBinding()]
+param([string]$EvidenceDirectory)
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 . (Join-Path $repository 'scripts/GameTestBatches.ps1')
-$temp = Join-Path ([IO.Path]::GetTempPath()) ('pal-batch-metadata-' + [guid]::NewGuid().ToString('N'))
+$temp = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory) } else {
+    Join-Path ([IO.Path]::GetTempPath()) ('pal-batch-metadata-' + [guid]::NewGuid().ToString('N'))
+}
+if (Test-Path -LiteralPath $temp) { throw 'Use a new metadata evidence directory.' }
 New-Item -ItemType Directory $temp | Out-Null
 $results = [Collections.Generic.List[string]]::new()
 function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
+function Set-FixtureEnvironment([string]$Key, [AllowNull()][object]$Value) {
+    # Preserve absent vs empty on runtimes that support empty environment values.
+    if ($null -eq $Value) { [Environment]::SetEnvironmentVariable($Key, [NullString]::Value) }
+    else { [Environment]::SetEnvironmentVariable($Key, [string]$Value) }
+}
 function Fails([scriptblock]$Action, [string]$Pattern) {
     $message = $null
     try { & $Action | Out-Null } catch { $message = $_.Exception.Message }
@@ -45,6 +56,116 @@ function Fixture([string]$Text) {
     return $path
 }
 try {
+    Case 'headless GPU environment check is read-only, rejects nonempty values and names only the two opt-ins' {
+        $keys = @('PAL_STATIC_GPU_EVIDENCE', 'PAL_EXPLORATION_GPU_EVIDENCE', 'PAL_UNRELATED_FIXTURE')
+        $before = @{}
+        foreach ($key in $keys) { $before[$key] = [Environment]::GetEnvironmentVariable($key) }
+        try {
+            [Environment]::SetEnvironmentVariable('PAL_UNRELATED_FIXTURE', 'unrelated-safe-sentinel')
+            foreach ($empty in @($null, '')) {
+                foreach ($key in $keys[0..1]) { Set-FixtureEnvironment $key $empty }
+                $configured = @{}
+                foreach ($key in $keys[0..1]) { $configured[$key] = [Environment]::GetEnvironmentVariable($key) }
+                Assert (@(Assert-HeadlessGpuEnvironment).Count -eq 0) 'Empty opt-ins must pass without output.'
+                foreach ($key in $keys[0..1]) { Assert ([Environment]::GetEnvironmentVariable($key) -ceq $configured[$key]) 'Passing check changed an empty opt-in.' }
+            }
+            foreach ($value in @('safe-gpu-sentinel', ' ')) {
+                foreach ($selected in @(@($keys[0]), @($keys[1]), @($keys[0..1]))) {
+                    foreach ($key in $keys[0..1]) { Set-FixtureEnvironment $key $null }
+                    foreach ($key in $selected) { [Environment]::SetEnvironmentVariable($key, $value) }
+                    $configured = @{}
+                    foreach ($key in $keys[0..1]) { $configured[$key] = [Environment]::GetEnvironmentVariable($key) }
+                    $message = $null
+                    try { Assert-HeadlessGpuEnvironment } catch { $message = $_.Exception.Message }
+                    Assert ($message -like '[[]headless:gpu-inheritance]*') 'Expected the specific GPU inheritance rejection.'
+                    Assert (-not $message.Contains($value, [StringComparison]::Ordinal) -or $value -ceq ' ') 'Diagnostic leaked the sentinel value.'
+                    foreach ($key in $keys[0..1]) {
+                        Assert ([Environment]::GetEnvironmentVariable($key) -ceq $configured[$key]) "Read-only check changed $key."
+                        Assert ($message.Contains($key, [StringComparison]::Ordinal) -eq ($key -cin $selected)) 'Diagnostic named the wrong keys.'
+                    }
+                    Assert ([Environment]::GetEnvironmentVariable('PAL_UNRELATED_FIXTURE') -ceq 'unrelated-safe-sentinel') 'Unrelated PAL variable changed.'
+                }
+            }
+        } finally { foreach ($key in $keys) { Set-FixtureEnvironment $key $before[$key] } }
+    }
+    Case 'actual headless entries reject inherited GPU opt-ins before output, environment changes or SDK/process hooks' {
+        $fixture = Join-Path $temp 'headless-entry-fixture.ps1'
+        [IO.File]::WriteAllText($fixture, @'
+param([string]$Repository, [string]$CaseDirectory, [string]$Mode)
+$ErrorActionPreference = 'Stop'
+$keys = @('PAL_STATIC_GPU_EVIDENCE', 'PAL_EXPLORATION_GPU_EVIDENCE', 'GODOT_BIN', 'PAL_TEST_GODOT', 'DOTNET_CLI_UI_LANGUAGE', 'DOTNET_NOLOGO', 'NUGET_PACKAGES', 'NUGET_HTTP_CACHE_PATH', 'NUGET_FALLBACK_PACKAGES')
+$before = @{}
+foreach ($key in $keys) { $before[$key] = [Environment]::GetEnvironmentVariable($key) }
+function Unexpected([string]$Name) {
+    [IO.File]::AppendAllText((Join-Path $CaseDirectory 'unexpected-operation.txt'), "$Name`n")
+    throw "[fixture:unexpected-operation] $Name"
+}
+function Get-Command { Unexpected 'SDK/command lookup' }
+function Get-CimInstance { Unexpected 'CIM' }
+function Get-Process { Unexpected 'process query' }
+function New-Item { Unexpected 'new output' }
+function Start-Transcript { Unexpected 'transcript' }
+$exitCode = 1
+try {
+    $output = Join-Path $CaseDirectory 'must-not-exist'
+    if ($Mode -ceq 'm0') {
+        & (Join-Path $Repository 'scripts/Test-M0.ps1') -GodotPath $PSCommandPath -EvidenceDirectory $output
+    } else {
+        $scope = switch ($Mode) {
+            'range-game' { @('game') }
+            'range-mixed' { @('cli-integration', 'game') }
+            'range-cli' { @('cli-integration') }
+            'range-prepare' { @('prepare') }
+        }
+        $parameters = @{ Scope = $scope; RepositoryRoot = $Repository; OutputDirectory = $output; GodotPath = $PSCommandPath; FixedPackageDirectory = $CaseDirectory }
+        if ('game' -cin $scope) { $parameters.GameBatch = @('process') }
+        # Non-Game scopes exercise selection/prerequisite rejection, never the SDK clean path.
+        else { $parameters.RepositoryRoot = Join-Path $CaseDirectory 'missing-repository' }
+        & (Join-Path $Repository 'scripts/Test-Range.ps1') @parameters
+        $exitCode = $LASTEXITCODE
+    }
+} catch { [Console]::Error.WriteLine($_.Exception.Message) }
+finally {
+    $changed = @(foreach ($key in $keys) { if ([Environment]::GetEnvironmentVariable($key) -cne $before[$key]) { $key } })
+    @{ changedEnvironmentKeys = $changed } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $CaseDirectory 'environment-after.json') -Encoding utf8
+}
+exit $exitCode
+'@, [Text.UTF8Encoding]::new($false))
+        $keys = @('PAL_STATIC_GPU_EVIDENCE', 'PAL_EXPLORATION_GPU_EVIDENCE')
+        $before = @{}
+        foreach ($key in $keys) { $before[$key] = [Environment]::GetEnvironmentVariable($key) }
+        $pwsh = (Get-Process -Id $PID).Path # Only this test's own executable.
+        try {
+            foreach ($selected in @(@($keys[0]), @($keys[1]), @($keys[0..1]))) {
+                foreach ($key in $keys) { Set-FixtureEnvironment $key $null }
+                foreach ($key in $selected) { [Environment]::SetEnvironmentVariable($key, 'safe-inherited-gpu-sentinel') }
+                foreach ($mode in @('m0', 'range-game', 'range-mixed', 'range-cli', 'range-prepare')) {
+                    $caseDirectory = Join-Path $temp ("entry-$mode-" + ($selected -join '-'))
+                    [IO.Directory]::CreateDirectory($caseDirectory) | Out-Null
+                    $stdout = Join-Path $caseDirectory 'stdout.log'; $stderr = Join-Path $caseDirectory 'stderr.log'
+                    & $pwsh -NoLogo -NoProfile -File $fixture -Repository $repository -CaseDirectory $caseDirectory -Mode $mode 1> $stdout 2> $stderr
+                    $code = $LASTEXITCODE
+                    [IO.File]::WriteAllText((Join-Path $caseDirectory 'exit.txt'), [string]$code)
+                    $text = [IO.File]::ReadAllText($stdout) + [IO.File]::ReadAllText($stderr)
+                    Assert ($code -eq 1) "Actual entry must reject with exit 1: $mode."
+                    if ($mode -cin @('range-cli', 'range-prepare')) {
+                        Assert ($text.Contains('[range:project-missing]') -and -not $text.Contains('[headless:gpu-inheritance]')) "Non-Game scope incorrectly applied GPU protection: $mode."
+                    } else {
+                        Assert ($text.Contains('[headless:gpu-inheritance]')) "Actual entry missed GPU inheritance rejection: $mode."
+                        foreach ($key in $keys) { Assert ($text.Contains($key) -eq ($key -cin $selected)) 'Actual entry diagnostic named the wrong keys.' }
+                    }
+                    Assert (-not $text.Contains('safe-inherited-gpu-sentinel')) 'Actual entry leaked an inherited value.'
+                    Assert (-not (Test-Path -LiteralPath (Join-Path $caseDirectory 'must-not-exist'))) 'Actual entry created output before rejection.'
+                    Assert (-not (Test-Path -LiteralPath (Join-Path $caseDirectory 'unexpected-operation.txt'))) 'Actual entry entered an SDK/process/output hook.'
+                    $after = Get-Content -LiteralPath (Join-Path $caseDirectory 'environment-after.json') -Raw | ConvertFrom-Json
+                    if ($mode -cnotin @('range-cli', 'range-prepare')) {
+                        Assert (@($after.changedEnvironmentKeys).Count -eq 0) 'Actual GPU inheritance rejection changed its process environment.'
+                    }
+                    Write-Host "PASS actual entry: $mode / $($selected -join ',') / exit=$code"
+                }
+            }
+        } finally { foreach ($key in $keys) { Set-FixtureEnvironment $key $before[$key] } }
+    }
     Case 'filtered native-map without a record requires full verification' {
         $guardRoot = Join-Path $temp 'filtered-missing'
         [IO.Directory]::CreateDirectory((Join-Path $guardRoot 'src/Pal.Game/Scripts/Profiles')) | Out-Null
@@ -653,5 +774,5 @@ public class Fixture
             Write-Host "PASS AST slice: $($scenario.name)"
         }
     }
-} finally { Remove-Item -LiteralPath $temp -Recurse -Force }
+} finally { if (-not $EvidenceDirectory) { Remove-Item -LiteralPath $temp -Recurse -Force } }
 Write-Host "PASS: $($results.Count) offline batch metadata groups; no SDK/engine/CIM/network; synthetic TRX are not runtime passes."

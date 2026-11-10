@@ -9,6 +9,8 @@ param(
     [ValidateSet('full', 'committable')][string]$Scope = 'full'
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
+Assert-HeadlessGpuEnvironment
 $GodotPath = (Resolve-Path $GodotPath).Path
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $evidence = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory) } else {
@@ -109,7 +111,6 @@ try {
         $checks | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $evidence 'test-results.json')
     }
 
-    . (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
     & (Join-Path $repository 'tests/Pal.Game.Tests/GameBatches.Tests.ps1')
     $gamePlan = Get-GameBatchPlan $repository -Scope $Scope
     $gameProject = @($gamePlan.projects | Where-Object name -CEQ 'game')
