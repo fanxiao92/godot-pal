@@ -88,6 +88,12 @@ next: <required-acceptance-or-follow-up>
 
 派发前区分必须存在的输入和必须全新的输出，核对工作树身份。候选检查工具及其[离线回归](../testing/agent-evidence.md)只在需要强分类时使用；普通 Unit 继续按短指南直接运行。
 
+## 工具包装与 inline child
+
+派发时先读所选安装的实际定义，区分两种接口：原生 `subagent` 工具把 `context`、`timeoutMs`、`outputSchema` 等放在 `options` 中，由 `flattenSubagentToolOptions` 展平；脚本内的 `runs.run(key, child)` 和 `runs.all([{key, ...child}])` 则直接使用平铺的 child 参数，不再套 `options`。例如 inline child 使用 `{agent, task, context: 'fresh', timeoutMs, outputSchema}`。
+
+本次核对来源为所选安装 `%USERPROFILE%/.pi/agent/npm/node_modules/pi-subagents`，版本 `0.84.0`：`src/extension/subagent-options.js` 的 `flattenSubagentToolOptions`、`src/extension/schemas.js` 的 `SubagentParams`/`SubagentFlatParams`，以及 `src/runs/foreground/subagent-executor.js` 的 `prepareWorkflowLaunchParams`。`src/workflows/scripted-workflow.d.ts` 的 `WorkflowScriptChildResult` 将 `structuredOutput` 定为可选；`ok`、schema 结果与原件需分别核对，不能将启动收据或缺失结果当作验收授权。安装变化时重新核定义，不改全局安装来迁就任务书。
+
 ## 等待、恢复与评审
 
 - **长时门等待型子任务的执行形态**：子代理默认时限与 15–25 分钟的共享门不匹配（M5 中三次超时均发生在纯等待段）。两种形态择一：协调者对含长门的任务显式调大子代理超时；或子代理以分离进程启动门（日志与状态 json 落盘），用短轮询查状态文件而非占住单次工具调用，时限内只做收尾。恢复时先读状态文件与日志尾部，不重跑已绿部分。
