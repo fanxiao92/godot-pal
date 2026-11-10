@@ -139,6 +139,11 @@ try {
     exit 0
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
 '@
+    $syntaxEntry = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../scripts/Test-PowerShellSyntax.ps1'))
+    & $hostPath -NoProfile -File $syntaxEntry -Path $ledgerRunner 1> (Join-Path $evidence 'ledger-syntax.stdout.log') 2> (Join-Path $evidence 'ledger-syntax.stderr.log')
+    $syntaxExit = $LASTEXITCODE
+    Put (Join-Path $evidence 'ledger-syntax.exit.txt') ([string]$syntaxExit)
+    Assert ($syntaxExit -eq 0) 'Generated command ledger helper failed syntax preflight; it was not executed.'
     $producer = '{"producerSpecific":{"nullable":null,"enabled":false,"items":[1,{"value":"中文"},[2,3]]},"exitCode":0,"startedUtc":"2026-11-07T13:00:00.1234567Z"}'
     Check-Ledger 'ledger single object returns array and preserves producer fields' $producer
     Check-Ledger 'ledger singleton array remains an array' ('[' + $producer + ']')
