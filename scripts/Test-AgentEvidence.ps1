@@ -48,8 +48,21 @@ try {
         $report.nextAction = $inputData['nextAction']['action']; $report.updatedUtc = $inputData['updatedUtc']
     } else {
         $native = $inputData['native']; $phase = $inputData['phase']; $expected = @($inputData['expectedFailures'])
-        if ($null -eq $native['exitCode'] -or -not $native['rootExited'] -or -not $native['stdoutComplete'] -or
-            -not $native['stderrComplete'] -or -not $native['cleanupComplete'] -or $native['timedOut']) {
+        $game = $report.kind -ceq 'agent_game_test_feedback'
+        $report.native = $native
+        $nativeIncomplete = $null -eq $native['exitCode'] -or -not $native['rootExited'] -or -not $native['stdoutComplete'] -or
+            -not $native['stderrComplete'] -or -not $native['cleanupComplete'] -or $native['timedOut']
+        if ($game) {
+            . (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
+            # Record observed coverage even when the native exit is unknown. Never infer it from TRX.
+            if ($nativeIncomplete) { $exitCode = 2 }
+            $identity = Read-TestRunIdentity -Path (Resolve-Input $inputData['files']['trx'])
+            $report.total = @($identity.names).Count
+            $report.expectedTotal = @($inputData['expectedTests']).Count
+            $report.missingTests = @($inputData['expectedTests'] | Where-Object { $_ -cnotin $identity.names })
+            $report.extraTests = @($identity.names | Where-Object { $_ -cnotin $inputData['expectedTests'] })
+        }
+        if ($nativeIncomplete) {
             $exitCode = 2; Fail 'incomplete' 'Unknown exit, timeout, incomplete streams or cleanup; retain originals and stop.'
         }
         $started = Stamp $native['startedUtc']; $ended = Stamp $native['endedUtc']
@@ -63,13 +76,17 @@ try {
         if ($stdout.StartsWith([string][char]0xFEFF, [StringComparison]::Ordinal)) { $stdout = $stdout.Substring(1) }
         if ($stderr.StartsWith([string][char]0xFEFF, [StringComparison]::Ordinal)) { $stderr = $stderr.Substring(1) }
         foreach ($line in ($stdout -split '\r?\n')) {
+            if ($game -and $line -match '(?i)\bwarning\b') { Fail 'warning' "Game strict mode rejects warnings: $line" }
+            if ($game -and $line -match '(?i)\berror\b') { Fail 'compiler' "Game strict mode rejects error diagnostics: $line" }
             if ($line -match '(?i)(?:^|:\s+)warning(?:\s+[a-z]+[0-9]+)?\s*:') {
                 if ($line -cnotin @($inputData['allowedWarnings'])) { Fail 'warning' "Unapproved warning: $line" }
             }
             if ($line -match '(?i):\s+error\s+[a-z]+[0-9]+\s*:') { Fail 'compiler' "Compiler error: $line" }
         }
-        . (Join-Path $PSScriptRoot 'TestRunDefinitions.ps1')
-        $identity = Read-XUnitTrxIdentity -Path (Resolve-Input $files['trx']) -Assembly (Resolve-Input $inputData['assembly'])
+        if (-not $game) {
+            . (Join-Path $PSScriptRoot 'TestRunDefinitions.ps1')
+            $identity = Read-XUnitTrxIdentity -Path (Resolve-Input $files['trx']) -Assembly (Resolve-Input $inputData['assembly'])
+        }
         $doc = $identity.document; $ns = $identity.ns
         foreach ($element in @('Times', 'Results', 'TestDefinitions', 'TestEntries', 'ResultSummary')) {
             if ($doc.SelectNodes("/t:TestRun/t:$element", $ns).Count -ne 1) { Fail 'trx' "Missing/duplicate element: $element" }
@@ -80,6 +97,7 @@ try {
         if ($trxStart -lt $started -or $trxEnd -gt $ended -or $trxEnd -lt $trxStart) { Fail 'time' 'TRX times fall outside the supplied native window.' }
         $rows = @($doc.SelectNodes('/t:TestRun/t:Results/t:UnitTestResult', $ns))
         if ($rows.Count -ne $inputData['total']) { Fail 'count' 'Unexpected total result count.' }
+        if ($game) { Assert-ExactTestNames $identity.names @($inputData['expectedTests']) 'Game feedback' }
         $remaining = [Collections.Generic.List[object]]::new()
         foreach ($failure in $expected) { $remaining.Add($failure) }
         $failedNames = [Collections.Generic.List[string]]::new()
@@ -92,9 +110,16 @@ try {
             $index = -1
             for ($i = 0; $i -lt $remaining.Count; $i++) {
                 $failure = $remaining[$i]
-                if ($name -ceq $failure['name'] -and $message -and $stack -and
-                    $message.InnerText.Contains($failure['messageContains'], [StringComparison]::Ordinal) -and
-                    $stack.InnerText.Contains($failure['stackContains'], [StringComparison]::Ordinal)) { $index = $i; break }
+                $matchesFailure = $false
+                if ($name -ceq $failure['name'] -and $message -and $stack) {
+                    $matchesFailure = if ($game) {
+                        $message.InnerText -ceq $failure['message'] -and $stack.InnerText -ceq $failure['stack']
+                    } else {
+                        $message.InnerText.Contains($failure['messageContains'], [StringComparison]::Ordinal) -and
+                        $stack.InnerText.Contains($failure['stackContains'], [StringComparison]::Ordinal)
+                    }
+                }
+                if ($matchesFailure) { $index = $i; break }
             }
             if ($index -lt 0) { Fail 'failure' "Non-designated failure: $name" }
             $remaining.RemoveAt($index); $failedNames.Add($name)
@@ -114,15 +139,18 @@ try {
             if ($attribute.Name -notin @('total','executed','passed','failed') -and $attribute.Value -cne '0') { Fail 'counter' 'Unknown nonzero counter.' }
         }
         $stderrLines = if ($stderr.Length) { @($stderr.TrimEnd("`r", "`n") -split '\r?\n') } else { @() }
-        Assert-FailEchoes $stderrLines $failedNames.ToArray()
+        if ($game -and $stderrLines.Count) { Fail 'diagnostic' 'Game strict mode requires empty stderr.' }
+        if (-not $game) { Assert-FailEchoes $stderrLines $failedNames.ToArray() }
         $infos = @($summary.SelectNodes('t:RunInfos/t:RunInfo', $ns))
+        if ($game -and $infos.Count) { Fail 'runinfo' 'Game strict mode requires no RunInfo diagnostics.' }
         $infoLines = @(foreach ($info in $infos) {
             $text = $info.SelectSingleNode('t:Text', $ns)
             $stamp = Stamp $info.GetAttribute('timestamp')
             if ($info.GetAttribute('outcome') -cne 'Error' -or -not $text -or $stamp -lt $trxStart -or $stamp -gt $trxEnd) { Fail 'runinfo' 'Unbound or unexpected RunInfo.' }
             $text.InnerText
         })
-        Assert-FailEchoes $infoLines $failedNames.ToArray()
+        if (-not $game) { Assert-FailEchoes $infoLines $failedNames.ToArray() }
+        if ($game -and $phase -ceq 'green') { $null = Assert-GameBatch (Resolve-Input $files['trx']) @($inputData['expectedTests']) }
         $report.classification = if ($phase -ceq 'red') { 'expected-red' } else { 'green-feedback' }
         $report.total = $rows.Count; $report.failed = $failedNames.Count; $report.runId = $identity.runId
         $report.startedUtc = $native['startedUtc']; $report.endedUtc = $native['endedUtc']
@@ -133,5 +161,6 @@ try {
     $report.failure = $_.Exception.Message
     [Console]::Error.WriteLine($report.failure)
 }
+$report.classifierExitCode = $exitCode
 $report | ConvertTo-Json -Depth 8
 exit $exitCode

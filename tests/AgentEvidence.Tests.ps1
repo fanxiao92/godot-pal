@@ -42,10 +42,40 @@ function Trx([string]$Phase) {
 </TestRun>
 "@
 }
-function Check([string]$Name, [int]$ExpectedExit, [scriptblock]$Change = {}, [string]$Phase = 'red', [string]$Reason = '') {
+function New-GameFeedback([string]$Phase) {
+    $manifest = New-Feedback $Phase
+    $manifest.kind = 'agent_game_test_feedback'
+    $manifest.Remove('assembly'); $manifest.Remove('allowedWarnings')
+    # Frozen independently of the TRX writer, not learned from observed results.
+    $manifest.expectedTests = @('Pal.Game.Tests.Fixture.Case1', 'Pal.Game.Tests.Fixture.Case2', 'Pal.Game.Tests.Fixture.Case3')
+    $manifest.expectedFailures = @(if ($Phase -ceq 'red') {
+        @{ name = 'Pal.Game.Tests.Fixture.Case1'; message = 'DESIGNATED_ASSERTION 中文'; stack = 'FixtureTests.cs:line 12' }
+        @{ name = 'Pal.Game.Tests.Fixture.Case2'; message = 'DESIGNATED_ASSERTION 中文'; stack = 'FixtureTests.cs:line 12' }
+    })
+    return $manifest
+}
+function GameTrx([string]$Phase, [int]$Count = 3) {
+    $text = Trx $Phase
+    $rows = ''; $definitions = ''; $entries = ''
+    foreach ($i in 1..$Count) {
+        $outcome = if ($Phase -ceq 'red' -and $i -le 2) { 'Failed' } else { 'Passed' }
+        $errorInfo = if ($outcome -ceq 'Failed') { '<Output><ErrorInfo><Message>DESIGNATED_ASSERTION 中文</Message><StackTrace>FixtureTests.cs:line 12</StackTrace></ErrorInfo></Output>' } else { '' }
+        $rows += "<UnitTestResult testId='case-$i' executionId='exec-$i' testName='Pal.Game.Tests.Fixture.Case$i' outcome='$outcome'>$errorInfo</UnitTestResult>"
+        $definitions += "<UnitTest id='case-$i' name='Case$i'><Execution id='exec-$i'/><TestMethod adapterTypeName='executor://gdunit4.testadapter/' className='Pal.Game.Tests.Fixture' name='Case$i'/></UnitTest>"
+        $entries += "<TestEntry testId='case-$i' executionId='exec-$i'/>"
+    }
+    $text = [regex]::Replace($text, '<Results>.*?</Results>', "<Results>$rows</Results>", 'Singleline')
+    $text = [regex]::Replace($text, '<TestDefinitions>.*?</TestDefinitions>', "<TestDefinitions>$definitions</TestDefinitions>", 'Singleline')
+    $text = [regex]::Replace($text, '<TestEntries>.*?</TestEntries>', "<TestEntries>$entries</TestEntries>", 'Singleline')
+    if ($Count -ne 3) { $text = $text.Replace("total='3'", "total='$Count'").Replace("executed='3'", "executed='$Count'").Replace("passed='3'", "passed='$Count'") }
+    return $text
+}
+function Check([string]$Name, [int]$ExpectedExit, [scriptblock]$Change = {}, [string]$Phase = 'red', [string]$Reason = '', [switch]$Game, [int]$ActualCount = -1, [int]$MissingCount = -1) {
     $dir = Join-Path $evidence ("{0:D2}" -f ($records.Count + 1)); $null = [IO.Directory]::CreateDirectory($dir)
     $script:assembly = [Security.SecurityElement]::Escape((Join-Path $dir 'fixture.dll'))
-    $manifest = New-Feedback $Phase; $trx = Trx $Phase; $stdout = 'native fixture stdout'; $stderr = ''; $inputBytes = $null
+    $manifest = if ($Game) { New-GameFeedback $Phase } else { New-Feedback $Phase }
+    $trx = if ($Game) { GameTrx $Phase } else { Trx $Phase }
+    $stdout = 'native fixture stdout'; $stderr = ''; $inputBytes = $null
     . $Change
     if ($null -ne $inputBytes) { [IO.File]::WriteAllBytes((Join-Path $dir 'input.json'), $inputBytes) }
     else { Put (Join-Path $dir 'input.json') (Json $manifest) }
@@ -62,6 +92,13 @@ function Check([string]$Name, [int]$ExpectedExit, [scriptblock]$Change = {}, [st
     Assert ($actual -eq $ExpectedExit) "${Name}: expected $ExpectedExit, got $actual; $text"
     Assert (($actual -eq 0) -eq ($report.status -ceq 'valid')) "${Name}: false validity"
     if ($Reason) { Assert ($report.failure -match $Reason) "${Name}: wrong failure reason: $($report.failure)" }
+    Assert ($report.classifierExitCode -eq $actual) "${Name}: classifier exit conflated"
+    if ($Game -and $report.native) {
+        Assert ($report.native.exitCode -ceq $manifest.native.exitCode) "${Name}: native exit inferred or changed"
+        Assert ($report.native.cleanupComplete -ceq $manifest.native.cleanupComplete) "${Name}: cleanup state lost"
+    }
+    if ($ActualCount -ge 0) { Assert ($report.total -eq $ActualCount) "${Name}: observed count lost" }
+    if ($MissingCount -ge 0) { Assert (@($report.missingTests).Count -eq $MissingCount) "${Name}: missing identities lost" }
     Write-Output "PASS $Name"
 }
 try {
@@ -72,6 +109,53 @@ try {
         $trx = $trx.Replace('<RunInfos/>', "<RunInfos>$infos</RunInfos>")
     }
     Check 'GREEN accepts completed native feedback' 0 -Phase green
+    Check 'Game GREEN exact independent FQN set' 0 -Game -Phase green -ActualCount 3 -MissingCount 0
+    Check 'Game designated RED exact name message stack' 0 -Game
+    Check 'Game wrong message substring is not exact' 1 { $trx = $trx.Replace('DESIGNATED_ASSERTION 中文', 'prefix DESIGNATED_ASSERTION 中文') } -Game -Reason 'agent-evidence:failure'
+    Check 'Game stack substring is not exact' 1 { $trx = $trx.Replace('FixtureTests.cs:line 12', 'prefix FixtureTests.cs:line 12') } -Game -Reason 'agent-evidence:failure'
+    Check 'Game missing summary rejected' 1 { $trx = [regex]::Replace($trx, '<ResultSummary.*?</ResultSummary>', '') } -Game -Phase green -Reason 'agent-evidence:trx'
+    Check 'Game missing report rejected' 1 { $manifest.files.trx = 'absent.trx' } -Game -Reason 'Could not find|cannot find'
+    Check 'Game missing required counter rejected' 1 { $trx = $trx.Replace(" executed='3'", '') } -Game -Phase green -Reason 'agent-evidence:counter'
+    Check 'Game nonzero aborted counter rejected' 1 { $trx = $trx.Replace("aborted='0'", "aborted='1'") } -Game -Phase green -Reason 'agent-evidence:counter'
+    Check 'Game wrong assertion position' 1 { $trx = $trx.Replace('line 12', 'line 13') } -Game -Reason 'agent-evidence:failure'
+    Check 'Game wrong designated name' 1 { $manifest.expectedFailures[0].name = 'Case1' } -Game -Reason 'agent-evidence:failure'
+    Check 'Game extra failure cannot be designated RED' 1 { $trx = $trx.Replace("Case3' outcome='Passed'", "Case3' outcome='Failed'") } -Game -Reason 'agent-evidence:failure'
+    Check 'Game failure multiplicity cannot be replaced by set matching' 1 { $manifest.expectedFailures[1] = $manifest.expectedFailures[0] } -Game -Reason 'agent-evidence:failure'
+    Check 'Game missing designated failure' 1 { $manifest.expectedFailures += @{ name = 'Pal.Game.Tests.Fixture.Case3'; message = 'DESIGNATED_ASSERTION 中文'; stack = 'FixtureTests.cs:line 12' } } -Game -Reason 'agent-evidence:failure'
+    Check 'Game skip rejected' 1 { $trx = $trx.Replace("outcome='Passed'", "outcome='NotExecuted'") } -Game -Phase green -Reason 'agent-evidence:result'
+    Check 'Game independent set detects wrong test with same count' 1 { $manifest.expectedTests[2] = 'Pal.Game.Tests.Fixture.Absent' } -Game -Phase green -Reason 'set mismatch' -ActualCount 3 -MissingCount 1
+    Check 'Game missing result records coverage' 1 { $manifest.total = 4; $manifest.expectedTests += 'Pal.Game.Tests.Fixture.Absent' } -Game -Phase green -Reason 'agent-evidence:count' -ActualCount 3 -MissingCount 1
+    Check 'Game duplicate expected FQN rejected' 1 { $manifest.expectedTests[2] = $manifest.expectedTests[0] } -Game -Phase green -Reason 'agent-evidence:schema'
+    Check 'Game duplicate result graph rejected' 1 { $trx = $trx.Replace('case-2', 'case-1') } -Game -Reason 'duplicate identity|definition identity'
+    Check 'Game duplicate execution graph rejected' 1 { $trx = $trx.Replace('exec-2', 'exec-1') } -Game -Reason 'duplicate identity'
+    Check 'Game missing entry graph rejected' 1 { $trx = $trx.Replace("<TestEntry testId='case-3' executionId='exec-3'/>", '') } -Game -Reason 'Incomplete TRX identity graph'
+    foreach ($phase in @('green', 'red')) {
+        Check "Game $phase summary abort cannot be feedback" 1 { $trx = $trx.Replace("outcome='Completed'", "outcome='Aborted'").Replace("outcome='Failed'><Counters", "outcome='Aborted'><Counters") } -Game -Phase $phase -Reason 'agent-evidence:summary'
+        Check "Game $phase unknown native exit remains incomplete" 2 { $manifest.native.exitCode = $null } -Game -Phase $phase -Reason 'agent-evidence:incomplete'
+        Check "Game $phase incomplete EOF is not child exit" 2 { $manifest.native.stdoutComplete = $false } -Game -Phase $phase -Reason 'agent-evidence:incomplete'
+        Check "Game $phase timeout cannot be designated RED" 2 { $manifest.native.timedOut = $true } -Game -Phase $phase -Reason 'agent-evidence:incomplete'
+        Check "Game $phase abort 466 of frozen 474 reports eight missing and unknown native" 2 {
+            $manifest.total = 474
+            $manifest.expectedTests = @(1..474 | ForEach-Object { "Pal.Game.Tests.Fixture.Case$_" })
+            $manifest.native.exitCode = $null
+            $trx = (GameTrx green 466).Replace("outcome='Completed'", "outcome='Failed'").Replace('<RunInfos/>', "<RunInfos><RunInfo outcome='Error' timestamp='2026-11-07T13:00:03Z'><Text>Aborting test run: session timeout 300000 milliseconds</Text></RunInfo></RunInfos>")
+            $stdout = 'child exit code 1; 466 Passed; Aborting after 300000 milliseconds'
+        } -Game -Phase $phase -Reason 'agent-evidence:incomplete' -ActualCount 466 -MissingCount 8
+        Check "Game $phase 466 of 474 cannot pass even with known phase exit" 1 {
+            $manifest.total = 474
+            $manifest.expectedTests = @(1..474 | ForEach-Object { "Pal.Game.Tests.Fixture.Case$_" })
+            $trx = (GameTrx green 466).Replace("outcome='Completed'", "outcome='Failed'").Replace('<RunInfos/>', "<RunInfos><RunInfo outcome='Error' timestamp='2026-11-07T13:00:03Z'><Text>Aborting test run: 300000 milliseconds</Text></RunInfo></RunInfos>")
+        } -Game -Phase $phase -Reason 'agent-evidence:count' -ActualCount 466 -MissingCount 8
+        Check "Game $phase unknown RunInfo rejected" 1 { $trx = $trx.Replace('<RunInfos/>', "<RunInfos><RunInfo outcome='Warning' timestamp='2026-11-07T13:00:03Z'><Text>CaseMismatch</Text></RunInfo></RunInfos>") } -Game -Phase $phase -Reason 'agent-evidence:runinfo'
+        Check "Game $phase Error RunInfo is not GREEN or designated RED" 1 { $trx = $trx.Replace('<RunInfos/>', "<RunInfos><RunInfo outcome='Error' timestamp='2026-11-07T13:00:03Z'><Text>DESIGNATED_ASSERTION 中文</Text></RunInfo></RunInfos>") } -Game -Phase $phase -Reason 'agent-evidence:runinfo'
+        Check "Game $phase stderr cannot be waived by test name" 1 { $stderr = 'Pal.Game.Tests.Fixture.Case1 DESIGNATED_ASSERTION 中文' } -Game -Phase $phase -Reason 'agent-evidence:diagnostic'
+        Check "Game $phase warning rejected without CaseMismatch exception" 1 { $stdout = 'WARNING: CaseMismatch: fixture.cs' } -Game -Phase $phase -Reason 'agent-evidence:warning'
+        Check "Game $phase compiler error rejected" 1 { $stdout = 'Fixture.cs(1,2): error CS9007: invalid syntax' } -Game -Phase $phase -Reason 'agent-evidence:compiler'
+        Check "Game $phase native exit mismatch" 1 { $manifest.native.exitCode = 7 } -Game -Phase $phase -Reason 'agent-evidence:native'
+    }
+    Check 'Game strict mode has no warning allowlist' 1 { $manifest.allowedWarnings = @('WARNING: CaseMismatch') } -Game -Reason 'agent-evidence:schema'
+    Check 'Game GREEN rejects failed summary even all passed' 1 { $trx = $trx.Replace("outcome='Completed'", "outcome='Failed'") } -Game -Phase green -Reason 'agent-evidence:summary'
+    Check 'Game GREEN rejects Error stdout' 1 { $stdout = 'ERROR: adapter failure' } -Game -Phase green -Reason 'agent-evidence:compiler'
     Check 'duplicate root JSON property rejected' 1 {
         $inputBytes = $utf8.GetBytes((Json $manifest).Replace('"schemaVersion": 1', '"schemaVersion": 1, "schemaVersion": 1'))
     } -Reason 'agent-evidence:json.*Duplicate property'

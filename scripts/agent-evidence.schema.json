@@ -2,7 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "oneOf": [
     { "$ref": "#/$defs/state" },
-    { "$ref": "#/$defs/feedback" }
+    { "$ref": "#/$defs/feedback" },
+    { "$ref": "#/$defs/gameFeedback" }
   ],
   "$defs": {
     "text": { "type": "string", "minLength": 1 },
@@ -71,6 +72,26 @@
         "stderrComplete": { "type": "boolean" }, "cleanupComplete": { "type": "boolean" }, "timedOut": { "type": "boolean" },
         "startedUtc": { "$ref": "#/$defs/text" }, "endedUtc": { "$ref": "#/$defs/text" }
       }
+    },
+    "gameFeedback": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "phase", "total", "expectedTests", "native", "files", "expectedFailures"],
+      "properties": {
+        "schemaVersion": { "const": 1 }, "kind": { "const": "agent_game_test_feedback" },
+        "phase": { "enum": ["red", "green"] },
+        "total": { "type": "integer", "minimum": 1 }, "native": { "$ref": "#/$defs/native" },
+        "files": { "$ref": "#/$defs/feedback/properties/files" },
+        "expectedTests": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+        "expectedFailures": {
+          "type": "array", "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "message", "stack"],
+            "properties": { "name": { "$ref": "#/$defs/text" }, "message": { "$ref": "#/$defs/text" }, "stack": { "$ref": "#/$defs/text" } }
+          }
+        }
+      },
+      "if": { "properties": { "phase": { "const": "red" } } },
+      "then": { "properties": { "expectedFailures": { "minItems": 1 } } },
+      "else": { "properties": { "expectedFailures": { "maxItems": 0 } } }
     },
     "feedback": {
       "type": "object", "additionalProperties": false,
