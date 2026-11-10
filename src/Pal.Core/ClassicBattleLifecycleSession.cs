@@ -11,6 +11,7 @@ public sealed class ClassicBattleLifecycleSession
     private readonly Dictionary<int, BattleRoleState> roles;
     private readonly IReadOnlyDictionary<int, ClassicBattleGrowthData> growth;
     private readonly IBattleRandom random;
+    private readonly CashLiveState? cashLiveState;
     private readonly ClassicBattleEndScript[] battleEndScripts;
     private int battleEndScriptIndex = -1;
     private ClassicBattleSession? activeCombat;
@@ -36,7 +37,7 @@ public sealed class ClassicBattleLifecycleSession
     internal ClassicBattleLifecycleSession(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
         IReadOnlyList<ClassicBattleEnemy> enemies, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth, IBattleRandom random,
         BattleEquipmentState? equipment, bool runEnemyBattleEndScripts, bool isBossBattle,
-        Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript)
+        Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript, CashLiveState? cashLiveState = null)
     {
         ArgumentNullException.ThrowIfNull(random);
         Validate(roles, players, enemies, growth, equipment);
@@ -53,6 +54,7 @@ public sealed class ClassicBattleLifecycleSession
         this.growth = growth.ToDictionary(x => x.Key, x => new ClassicBattleGrowthData(
             Array.AsReadOnly(x.Value.LevelUpExperience.ToArray()), Array.AsReadOnly(x.Value.LevelUpMagics.ToArray())));
         this.random = random;
+        this.cashLiveState = cashLiveState;
         foreach (var role in this.roles.Values)
         {
             role.Hp = Math.Max(1, role.Hp);
@@ -167,6 +169,9 @@ public sealed class ClassicBattleLifecycleSession
     {
         experienceGranted = activeCombat!.ExperienceGained;
         cashGranted = activeCombat.CashGained;
+        // battle.c:1054: the Won settlement credits cash before growth/enemy-end scripts.
+        // Completion is only a handoff of these facts; acknowledging it must not grant again.
+        cashLiveState?.Credit((uint)cashGranted);
         var growthReports = new List<ClassicBattleRoleGrowth>();
         foreach (var player in combat.Players)
         {

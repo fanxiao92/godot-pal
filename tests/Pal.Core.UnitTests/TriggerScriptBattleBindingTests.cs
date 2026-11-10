@@ -1175,6 +1175,172 @@ public sealed class TriggerScriptBattleBindingTests
         Assert.Equal(20, initial.Hp);
     }
 
+    [Fact]
+    public void Shared_cash_victory_settles_once_before_enemy_scripts_and_owned_completion_never_regrants()
+    {
+        // battle.c:1054,1334-1337: cash precedes every enemy-end script, even with zero exp.
+        var fixture = Fixture();
+        fixture.Index["source"]!["instructionCount"] = 14;
+        fixture.Index["source"]!["byteLength"] = 112;
+        Pad(fixture, 14);
+        for (int i = 5; i < 14; i++)
+        {
+            fixture.Commands[i]!["label"] = $"L{i:X4}";
+            fixture.Commands[i]!["next"] = i == 13 ? null : $"L{i + 1:X4}";
+        }
+        fixture.Commands[2] = CashChange(2, -1);
+        fixture.Commands[3] = Battle(3, team: 19);
+        fixture.Commands[4] = End(4);
+        fixture.Commands[8] = CashChange(8, -28);
+        fixture.Commands[9] = JsonNode.Parse("""
+          {"label":"L0009","op":"showDialog","messageId":61,"descriptionLineWord":0,"next":"L000A","source":{"index":9,"opcode":65535,"operands":[61,0,0]}}
+          """);
+        fixture.Commands[10] = End(10);
+        fixture.Commands[11] = CashChange(11, 1);
+        fixture.Commands[12] = End(12);
+        var content = new TriggerBattleContent([Role()], [new(1, 100, 150, 40, 20, 100)],
+            new Dictionary<int, ClassicBattleGrowthData> { [1] = Growth() },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> {
+                [18] = new[] { new ClassicBattleEnemy(7, 0, 1, 0, 0, 0, 1) { Cash = 7, BattleEndScript = 8 },
+                    new ClassicBattleEnemy(8, 0, 1, 0, 0, 0, 1) { Cash = 11, BattleEndScript = 11 } },
+                [19] = new[] { new ClassicBattleEnemy(7, 0, 43, 0, 0, 0, 1) { Cash = 5 } }
+            });
+        var cash = new CashLiveState(10);
+        var random = new BindingRandom();
+        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("After victory")])]);
+        var script = TriggerScriptSession.ForSharedRoles(fixture.Load(), language, content,
+            random, new RoleLiveState([Role()]), cashLiveState: cash);
+        Assert.Equal(new[] { 18, 19 }, script.GetCurrentEntryRequirements("shared", "npc", 28).BattleTeamIds);
+        TriggerScriptSession.ValidateEntry(fixture.Load(), language, content,
+            "shared", "npc", cashLiveState: cash);
+        Assert.Equal(10u, cash.Cash);
+        Assert.Equal(0, random.Draws);
+        script.Start("shared", "npc", 28);
+        var first = script.PendingBattle!;
+        Assert.False(script.AcknowledgeBattle(first.Id, null));
+        Assert.Equal(10u, cash.Cash);
+
+        var isolatedCash = new CashLiveState(100);
+        var foreign = new TriggerScriptSession(Fixture().Load(), TriggerScriptSessionTests.Language(),
+            Content(enemy: new(7, 0, 43, 0, 0, 0, 1) { Cash = 7 }), new BindingRandom(), cashLiveState: isolatedCash);
+        foreign.Start("shared", "npc", 28);
+        var foreignRequest = foreign.PendingBattle!;
+        Win(foreignRequest);
+        Assert.False(script.AcknowledgeBattle(first.Id, foreignRequest.Lifecycle.Completion));
+        Assert.Equal(10u, cash.Cash);
+
+        first.Lifecycle.SelectAttack(0, 0);
+        for (int i = 0; i < 8 && first.Lifecycle.Current.Combat.Phase == ClassicBattlePhase.Resolving; i++)
+            Assert.True(first.Lifecycle.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Selecting, first.Lifecycle.Current.Combat.Phase);
+        Assert.Equal(10u, cash.Cash); // A partial KO is not a victory grant.
+        first.Lifecycle.SelectAttack(0, 1);
+        Assert.True(first.Lifecycle.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Won, first.Lifecycle.Current.Combat.Phase);
+        Assert.Equal(18, first.Lifecycle.VictorySettlement!.CashGranted);
+        Assert.Equal(0, first.Lifecycle.VictorySettlement.ExperienceGranted);
+        Assert.Null(first.Lifecycle.Completion);
+        Assert.Equal(28u, cash.Cash); // Specified RED: actual10 before the production binding exists.
+        Assert.Equal(107u, isolatedCash.Cash);
+        Assert.False(first.Lifecycle.ResolveNextAction());
+        Assert.Equal(28u, cash.Cash);
+        Assert.False(script.AcknowledgeBattle(first.Id, null));
+        script.StartBattleEndScript();
+        Assert.Equal(0u, cash.Cash); // The first script consumes the entire seed + reward.
+        Assert.Equal(TriggerScriptPhase.WaitingForDisplay, script.Phase);
+        Assert.Throws<InvalidOperationException>(script.StartBattleEndScript);
+        var display = script.PendingDisplay!;
+        Assert.False(script.AcknowledgeDisplay(display.Id));
+        Assert.False(script.AcknowledgeBattle(first.Id, foreignRequest.Lifecycle.Completion));
+        FinishDisplay(script);
+        Assert.False(script.AcknowledgeDisplay(display.Id));
+        Assert.Equal(0u, cash.Cash);
+        Assert.Equal(11, first.Lifecycle.PendingBattleEndScript!.ScriptAddress);
+        script.StartBattleEndScript();
+        Assert.Equal(1u, cash.Cash);
+        var receipt = first.Lifecycle.Completion!;
+        Assert.Equal(18, receipt.CashGranted); // Reward facts are not the post-script balance.
+        Assert.False(script.AcknowledgeBattle(Guid.NewGuid(), receipt));
+        Assert.False(script.AcknowledgeBattle(first.Id, foreignRequest.Lifecycle.Completion));
+        Assert.Equal(1u, cash.Cash);
+        Assert.True(script.AcknowledgeBattle(first.Id, receipt));
+        Assert.True(script.ScriptSuccess);
+        Assert.Equal(0u, cash.Cash); // The caller's debit then enters a new real battle.
+        var second = script.PendingBattle!;
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.False(script.AcknowledgeBattle(first.Id, receipt));
+        Assert.False(script.AcknowledgeBattle(second.Id, receipt));
+        Assert.Equal(0u, cash.Cash);
+        Win(second);
+        Assert.Equal(5u, cash.Cash);
+        Assert.Equal(5, second.Lifecycle.Completion!.CashGranted);
+        Assert.False(second.Lifecycle.ResolveNextAction());
+        Assert.True(script.AcknowledgeBattle(second.Id, second.Lifecycle.Completion));
+        Assert.False(script.AcknowledgeBattle(second.Id, second.Lifecycle.Completion));
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Equal(5u, cash.Cash);
+        Assert.Equal(107u, isolatedCash.Cash);
+
+        // No-end-script wins preserve the full DWORD domain; no exp/UI gate or modern cap.
+        foreach (var (initial, expected) in new (uint, uint)[] { (10, 17), (4294967292, 3) })
+        {
+            var owner = new CashLiveState(initial);
+            var call = new TriggerScriptSession(Fixture().Load(), TriggerScriptSessionTests.Language(),
+                Content(enemy: new(7, 0, 43, 0, 0, 0, 1) { Cash = 7 }), new BindingRandom(), cashLiveState: owner);
+            call.Start("shared", "npc", 28);
+            var request = call.PendingBattle!;
+            Win(request);
+            Assert.Equal(expected, owner.Cash);
+            Assert.True(call.AcknowledgeBattle(request.Id, request.Lifecycle.Completion));
+            Assert.False(call.AcknowledgeBattle(request.Id, request.Lifecycle.Completion));
+            Assert.Equal(expected, owner.Cash);
+        }
+        var legacy = Script(Fixture(), new BindingRandom(), Content(enemy: new(7, 0, 43, 0, 0, 0, 1) { Cash = 7 }));
+        legacy.Start("shared", "npc", 28);
+        var legacyRequest = legacy.PendingBattle!;
+        Win(legacyRequest);
+        Assert.Null(legacy.CashLiveState);
+        Assert.Equal(7, legacyRequest.Lifecycle.Completion!.CashGranted);
+        Assert.True(legacy.AcknowledgeBattle(legacyRequest.Id, legacyRequest.Lifecycle.Completion));
+
+        var lostCash = new CashLiveState(100);
+        var lost = new TriggerScriptSession(Fixture().Load(), TriggerScriptSessionTests.Language(),
+            Content(role: Role() with { Hp = 20 }, enemy: new(7, 0, 100, 0, 0, 0, 1) { Cash = 99 }),
+            new BindingRandom(), cashLiveState: lostCash);
+        lost.Start("shared", "npc", 28);
+        var loss = lost.PendingBattle!;
+        loss.Lifecycle.SelectAttack(7);
+        Assert.True(loss.Lifecycle.ResolveNextAction());
+        Assert.True(loss.Lifecycle.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Lost, loss.Lifecycle.Completion!.Outcome);
+        Assert.Null(loss.Lifecycle.VictorySettlement);
+        Assert.Equal(0, loss.Lifecycle.Completion.CashGranted);
+        Assert.Equal(100u, lostCash.Cash);
+        Assert.True(lost.AcknowledgeBattle(loss.Id, loss.Lifecycle.Completion));
+        Assert.False(lost.AcknowledgeBattle(loss.Id, loss.Lifecycle.Completion));
+        Assert.Equal(100u, lostCash.Cash);
+
+        // The complete enemy-end closure must be accepted before any gameplay/RNG mutation.
+        fixture.Commands[8] = JsonNode.Parse("""
+          {"label":"L0008","op":"raw","next":"L0009","source":{"index":8,"opcode":134,"operands":[0,65535,8]}}
+          """);
+        var preflightRandom = new BindingRandom();
+        var rejected = new TriggerScriptSession(fixture.Load(), language, content,
+            preflightRandom, cashLiveState: cash);
+        Assert.Throws<InvalidDataException>(() => rejected.Start("shared", "npc", 28));
+        Assert.Equal(Guid.Empty, rejected.CallId);
+        Assert.Null(rejected.PendingBattle);
+        Assert.Equal(0, preflightRandom.Draws);
+        Assert.Equal(5u, cash.Cash);
+
+        static JsonObject CashChange(int address, int amount) => new()
+        {
+            ["label"] = $"L{address:X4}", ["op"] = "changeCash", ["amount"] = amount, ["to"] = "L0000",
+            ["next"] = $"L{address + 1:X4}",
+            ["source"] = new JsonObject { ["index"] = address, ["opcode"] = 0x1e, ["operands"] = new JsonArray(123, 0, 0) }
+        };
+    }
+
     private static DynamicEventWorld SharedWorld(RoleLiveState owner) => DynamicEventWorld.ForHost(
         new StaticSceneRules(new SceneMap(2, new uint[16384], [new SceneFrame(0, 32, 15)]), []),
         new StaticLeader(320, 320, 0, 0, 0, 3,

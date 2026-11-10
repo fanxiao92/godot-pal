@@ -628,7 +628,7 @@ public sealed class TriggerScriptSession
                     var lifecycle = new ClassicBattleLifecycleSession(battleRoles.Values.ToArray(), _battleContent.SettledPlayers(battleRoles),
                         _battleContent.Enemies(command.EnemyTeamId), _battleContent.GrowthByRole, _battleRandom!,
                         BattleEquipmentState.Initialize(_battleContent), runEnemyBattleEndScripts: true, isBossBattle: command.IsBoss,
-                        readRoleHookScript: _world is null ? null : ReadRoleHookScript);
+                        readRoleHookScript: _world is null ? null : ReadRoleHookScript, cashLiveState: CashLiveState);
                     PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.EnemyTeamId, command.IsBoss,
                         Next(command), command.LossAddress, command.FleeAddress, lifecycle);
                     Phase = TriggerScriptPhase.WaitingForBattle;
