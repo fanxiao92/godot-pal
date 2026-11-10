@@ -148,6 +148,19 @@ public class Fixture
         [IO.File]::WriteAllText((Join-Path $source 'Fixture.cs'), $text.Replace('public void Beta()', 'public ValueTask Beta()'))
         Fails { Get-GameSourceInventory $source } 'Unparsed Game test attributes'
     }
+    Case 'solution builds the Game host before its Prepare consumer without a reverse dependency' {
+        $solution = [IO.File]::ReadAllText((Join-Path $repository 'GodotPal.sln'))
+        $blocks = [regex]::Matches($solution, '(?ms)^Project\("[^"]+"\) = "(?<name>[^"]+)", "[^"]+", "(?<guid>\{[0-9A-Fa-f-]+\})"\r?\n(?<body>.*?)^EndProject\r?$')
+        $game = @($blocks | Where-Object { $_.Groups['name'].Value -ceq 'Pal.Game' })
+        $prepare = @($blocks | Where-Object { $_.Groups['name'].Value -ceq 'Pal.Prepare.Tests' })
+        Assert ($game.Count -eq 1 -and $prepare.Count -eq 1) 'Missing or duplicate Game/Prepare solution project.'
+        $prepareGuid = [regex]::Escape($prepare[0].Groups['guid'].Value)
+        Assert ($game[0].Groups['body'].Value -notmatch $prepareGuid) 'Game solution dependency on its Prepare consumer creates the MSB4006 build cycle.'
+        [xml]$project = [IO.File]::ReadAllText((Join-Path $repository 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'))
+        $hostReference = @($project.Project.ItemGroup.ProjectReference | Where-Object { $_.Include.Replace('\', '/') -ceq '../../src/Pal.Game/Pal.Game.csproj' })
+        Assert ($hostReference.Count -eq 1 -and $hostReference[0].ReferenceOutputAssembly -ceq 'false' -and $hostReference[0].Private -ceq 'false') 'Prepare must retain its isolated build-only Game host reference.'
+        Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Explicit test scheduling must still finish Prepare before Game.'
+    }
     Case 'real source partitions 85/108/2/5/6/3/4/28/473/35, preserves controls and solution test projects' {
         Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '85,108,2,5,6,3,4,28,473,35') 'Wrong batch sizes/order.'
         Assert ($plan.inventory.Count -eq 752 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
@@ -414,7 +427,7 @@ public class Fixture
         $originalSolution = [IO.File]::ReadAllText($solution)
         foreach ($project in $plan.projects) {
             $windowsPath = $project.path.Replace('/', '\')
-            # Game alone has a dependency section; removing its path still tests omission.
+            # Removing a project path tests omission independently of its dependency sections.
             $omitted = $originalSolution.Replace('"' + $windowsPath + '"', '"omitted-project"')
             [IO.File]::WriteAllText($solution, $omitted)
             Fails { Get-GameBatchPlan $fixtureRepo } 'Solution project classification: identity set mismatch'
