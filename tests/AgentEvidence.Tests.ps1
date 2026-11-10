@@ -101,7 +101,54 @@ function Check([string]$Name, [int]$ExpectedExit, [scriptblock]$Change = {}, [st
     if ($MissingCount -ge 0) { Assert (@($report.missingTests).Count -eq $MissingCount) "${Name}: missing identities lost" }
     Write-Output "PASS $Name"
 }
+function Check-Ledger([string]$Name, [string]$Text, [int]$ExpectedExit = 0, [int]$ExpectedCount = 1, [string]$Reason = 'agent-evidence:ledger') {
+    $dir = Join-Path $evidence ("{0:D2}" -f ($records.Count + 1)); $null = [IO.Directory]::CreateDirectory($dir)
+    $inputFile = Join-Path $dir 'commands.json'; Put $inputFile $Text
+    $arguments = @('-NoProfile', '-File', $ledgerRunner, '-ModulePath', $ledgerModule, '-Path', $inputFile)
+    Push-Location $foreign
+    try { & $hostPath @arguments 1> (Join-Path $dir 'reader.stdout.json') 2> (Join-Path $dir 'reader.stderr.txt'); $actual = $LASTEXITCODE } finally { Pop-Location }
+    Put (Join-Path $dir 'exit.txt') ([string]$actual)
+    $output = [IO.File]::ReadAllText((Join-Path $dir 'reader.stdout.json'), $utf8)
+    $errorText = [IO.File]::ReadAllText((Join-Path $dir 'reader.stderr.txt'), $utf8)
+    $records.Add(@{ name = $Name; executable = $hostPath; arguments = $arguments; cwd = $foreign; exitCode = $actual; expectedExit = $ExpectedExit })
+    Put (Join-Path $evidence 'commands.json') (Json $records.ToArray())
+    Assert ($actual -eq $ExpectedExit) "${Name}: expected $ExpectedExit, got $actual; $errorText"
+    if ($ExpectedExit -eq 0) {
+        $report = $output | ConvertFrom-Json -AsHashtable
+        Assert ($report.arrayType -ceq 'System.Object[]' -and $report.count -eq $ExpectedCount) "${Name}: unstable array return shape"
+        $expectedArray = if ($Text.TrimStart().StartsWith('[')) { $Text } else { '[' + $Text + ']' }
+        $expected = ('{"commands":' + $expectedArray + '}') | ConvertFrom-Json -AsHashtable
+        Assert ((Json $report.commands) -ceq (Json $expected.commands)) "${Name}: producer fields changed, defaulted or dropped"
+        Assert ([string]::IsNullOrWhiteSpace($errorText)) "${Name}: unexpected reader diagnostic"
+        if ($Text.Contains('2026-11-07T13:00:00.1234567Z')) {
+            Assert ($output.Contains('"2026-11-07T13:00:00.1234567Z"')) "${Name}: date string coerced"
+        }
+    } else { Assert ($errorText -match $Reason) "${Name}: wrong rejection: $errorText" }
+    Write-Output "PASS $Name"
+}
 try {
+    $ledgerModule = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../scripts/AgentEvidenceJson.psm1'))
+    $ledgerRunner = Join-Path $evidence 'read-command-ledger.ps1'
+    Put $ledgerRunner @'
+param([string]$ModulePath, [string]$Path)
+$ErrorActionPreference = 'Stop'
+try {
+    Import-Module $ModulePath -Force
+    $commands = Read-AgentCommandLedger -Path $Path
+    ConvertTo-Json -InputObject @{ arrayType = $commands.GetType().FullName; count = $commands.Count; commands = $commands } -Depth 100
+    exit 0
+} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+'@
+    $producer = '{"producerSpecific":{"nullable":null,"enabled":false,"items":[1,{"value":"中文"},[2,3]]},"exitCode":0,"startedUtc":"2026-11-07T13:00:00.1234567Z"}'
+    Check-Ledger 'ledger single object returns array and preserves producer fields' $producer
+    Check-Ledger 'ledger singleton array remains an array' ('[' + $producer + ']')
+    Check-Ledger 'ledger object array preserves order and missing fields' ('[' + $producer + ',{"other":"second"}]') -ExpectedCount 2
+    Check-Ledger 'ledger container reader does not require producer fields' '{}'
+    foreach ($invalid in @('null', '[]', '0', 'false', '"command"', '[null]', '[{},null]', '[{},1]', '[{},"command"]', '[{},false]', '[[],{}]', '[[{}]]')) {
+        Check-Ledger "ledger rejects invalid container $invalid" $invalid -ExpectedExit 1
+    }
+    Check-Ledger 'ledger rejects duplicate root key' '{"a":1,"a":2}' -ExpectedExit 1 -Reason 'agent-evidence:json.*Duplicate property'
+    Check-Ledger 'ledger rejects nested duplicate key in array' '[{"producer":{"a":1,"a":2}}]' -ExpectedExit 1 -Reason 'agent-evidence:json.*Duplicate property'
     Check 'RED accepts empty diagnostic streams and shared theory testId' 0
     Check 'RED accepts exact FAIL echo multisets' 0 {
         $stderr = "[xUnit.net 00:00:01.00] Fixture.Case(scenario: 1) [FAIL]`n[xUnit.net 00:00:01.01] Fixture.Case(scenario: 2) [FAIL]`n"

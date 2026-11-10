@@ -30,6 +30,21 @@ function Read-AgentJson {
     }
     return ,$value
 }
+function Read-AgentCommandLedger {
+    param([Parameter(Mandatory)][string]$Path)
+    # Container shape only: producer fields and command/EOF claims are not validated or filled in.
+    $value = Read-AgentJson -Path $Path
+    if ($value -is [Collections.IDictionary]) { return ,@($value) }
+    if ($value -isnot [object[]] -or $value.Count -eq 0) {
+        throw '[agent-evidence:ledger] Expected a command object or a nonempty array of command objects.'
+    }
+    foreach ($command in $value) {
+        if ($command -isnot [Collections.IDictionary]) {
+            throw '[agent-evidence:ledger] Every command ledger item must be an object.'
+        }
+    }
+    return ,$value
+}
 function Write-AgentNewFile {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
     $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
@@ -40,4 +55,4 @@ function Write-AgentNewJson {
     $text = (ConvertTo-Json -InputObject $Value -Depth 100) + "`n"
     Write-AgentNewFile $Path ([Text.UTF8Encoding]::new($false).GetBytes($text))
 }
-Export-ModuleMember -Function Read-AgentJson, Write-AgentNewFile, Write-AgentNewJson
+Export-ModuleMember -Function Read-AgentJson, Read-AgentCommandLedger, Write-AgentNewFile, Write-AgentNewJson

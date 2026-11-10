@@ -37,6 +37,27 @@ source 只有 worktree、branch、40 位 head/tree、dirty 与 binding。authori
 
 状态解析复用 `scripts/AgentEvidenceJson.psm1`（严格 UTF-8、重复键拒绝、日期字符串保真）。JSON 与 stdout/stderr 允许 UTF-8 BOM；UTF-16/32 BOM 不会触发自动转码，仍按严格 UTF-8 拒绝。源码快照与精简交接工具属于 #169 后续叶，不属于本叶已验证能力；本分类器不授予 SDK/派发权限。
 
+### 命令账本容器读取
+
+```powershell
+Import-Module ./scripts/AgentEvidenceJson.psm1
+$commands = Read-AgentCommandLedger -Path 'C:/evidence/run/commands.json'
+# 无需 @(...): 单对象、单元素数组、多元素数组均返回 System.Object[]。
+```
+
+`Read-AgentCommandLedger` 接受单个 JSON object 或非空 `array<object>`，保持顺序、所有 producer 字段及日期字符串，不添加默认值。null、空数组、标量、混合数组、嵌套数组元素均拒绝；任意深度重复 JSON 键仍由严格读取器拒绝。空对象 `{}` 是合法容器项：这里**只检查容器形状**，不规定各 producer 的字段 schema，不补造退出码、EOF 或清理标志，不证明原始命令已运行或其观察可信。需要协议验证时仍须使用对应 producer 的契约与原件；不能以读取成功替代反馈分类或进程完整性证据。
+
+### 显式无参 WaitForExit AST 规则
+
+```powershell
+pwsh -NoProfile -File ./scripts/Test-PowerShellSyntax.ps1 -Path ./scripts/AgentEvidenceJson.psm1 -RejectParameterlessWaitForExit
+pwsh -NoProfile -File ./tests/Test-PowerShellSyntax.Tests.ps1 -EvidenceDirectory 'C:/evidence/new-syntax-regression'
+```
+
+默认仍为 syntax-only，输出及文件选择规则不变。显式 `-RejectParameterlessWaitForExit` 在所选 PowerShell AST 中查找 `InvokeMemberExpressionAst`：字面成员名为 `WaitForExit`（忽略大小写，含引号字面成员名）且参数数为零时，以 `[syntax:parameterless-wait-for-exit]`、文件/行/列及非零退出拒绝；嵌套脚本块同样检查。带毫秒参数的 `WaitForExit(...)`、`WaitForExitAsync(...)`、普通字符串/注释/属性读取及目录内非 PowerShell 文本不触发该规则。显式选择不支持的扩展名仍按既有 range 规则拒绝。
+
+此规则只解析、不执行、不导入所选文件；不解析动态计算的成员名，不推断接收者类型或验证超时值，也不证明等待/EOF/清理协议完整。按需显式选范围，不默认全仓启用或修订存量 Prepare 的进程协议。本规则与合成回归仅为 SOURCE/OFFLINE 证据。
+
 ## 指定 RED/GREEN
 
 输入示例（纯示例，不是运行收据）：
@@ -98,6 +119,6 @@ pwsh -NoProfile -File ./scripts/Test-PowerShellSyntax.ps1
 pwsh -NoProfile -File ./tests/AgentEvidence.Tests.ps1 -EvidenceDirectory 'C:/evidence/new-agent-evidence-regression'
 ```
 
-回归从中文/空格 foreign cwd 调用真实公开检查器，使用合成 JSON/TRX/日志。保留全部 xUnit Theory/FAIL 回显、warning/编译错误、计数/时间/UTF-8/状态回归，并覆盖显式 Game GREEN、精确指定 RED、错位置/额外失败/多重集合、独立 FQN 集、skip/缺失/abort、重复身份图、未知 RunInfo/stderr、严格诊断，以及 466/474+300000ms 合成反例。子分类器的预期非零不是回归失败；每例实际 argv/cwd/数字退出及原输入输出保留。显式 EvidenceDirectory 必须全新；失败不删除，默认成功仅清理自有临时目录。
+回归从中文/空格 foreign cwd 调用真实公开检查器及导出的账本读取函数，使用合成 JSON/TRX/日志。账本回归覆盖单对象/单元素数组/多对象数组的稳定数组形状、未知字段及缺失字段保真，以及 null/空/标量/混合/重复键反例；语法回归覆盖显式 AST 规则的实际调用与文本提及反例，并用副作用标记确认未执行被扫描代码。保留全部 xUnit Theory/FAIL 回显、warning/编译错误、计数/时间/UTF-8/状态回归，并覆盖显式 Game GREEN、精确指定 RED、错位置/额外失败/多重集合、独立 FQN 集、skip/缺失/abort、重复身份图、未知 RunInfo/stderr、严格诊断，以及 466/474+300000ms 合成反例。子分类器的预期非零不是回归失败；每例实际 argv/cwd/数字退出及原输入输出保留。显式 EvidenceDirectory 必须全新；失败不删除，默认成功仅清理自有临时目录。
 
 以上为 SOURCE/OFFLINE 检查，不是实际 Unit、Game 或 M6 验收。`Test-Engineering.ps1 -Mode Offline` 与 CI 的接线属于 #169 后续叶；本叶尚未接线或运行（NOT RUN）。普通 Unit 默认入口保持原生 `dotnet test`，真实远端执行仍以对应 CI run 为准。
