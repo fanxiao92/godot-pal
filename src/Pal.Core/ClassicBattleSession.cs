@@ -506,6 +506,14 @@ public sealed class ClassicBattleSession
             || p.DyingScript is < 0 or > 65535 || p.FriendDeathScript is < 0 or > 65535
             || p.CoveredByRoleId is < 0 or > 5 || p.AttackAll)
             throw new InvalidDataException("Classic combat does not yet support statuses, poisons, attack-all or an equipment battle-sprite override; equipment requires its declared closure and cover must name a role 0..5.");
+        if (equipment is not null)
+            for (int register = 0; register < BattleEquipmentState.RegisterCount; register++)
+            {
+                if (equipment.AttackAllWord(p.RoleId, register) is int attackAll && attackAll != 0)
+                    throw new InvalidDataException($"Classic combat does not yet support equipment attackAll for role {p.RoleId} at register {register}.");
+                if (equipment.CooperativeMagicWord(p.RoleId, register) is int cooperativeMagic && cooperativeMagic != 0)
+                    throw new InvalidDataException($"Classic combat does not yet support equipment cooperativeMagic for role {p.RoleId} at register {register}.");
+            }
     }
 
     private static void ValidateEnemy(ClassicBattleEnemy e)

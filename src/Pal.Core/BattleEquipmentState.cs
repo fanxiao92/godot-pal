@@ -3,22 +3,28 @@ using System.Collections.ObjectModel;
 namespace Pal.Core;
 
 /// <summary>Per-role effect row of one equipment object's equip script (global.c script 0x0017/0x001A/0x002D word writes).
-/// The three optional words cover PLAYERROLES stat 18/21/22 equipment writes (magicStrength, fleeRate,
-/// poisonResistance); absent means the script never writes them, so all #48-era content stays legal.</summary>
+/// The optional stat words cover PLAYERROLES stat 18/21/22 equipment writes (magicStrength, fleeRate,
+/// poisonResistance). AttackAll and CooperativeMagic retain nullable field 4/65 WORDs in content and
+/// equipment registers; selected combat rejects nonzero values rather than executing their effects.</summary>
 public sealed record BattleEquipmentEffect(int Attack, int Defense, int Dexterity, int BattleSprite, IReadOnlyList<int> Statuses,
-    int? MagicPower = null, int? FleeRate = null, int? PoisonResistance = null);
+    int? MagicPower = null, int? FleeRate = null, int? PoisonResistance = null)
+{
+    public int? AttackAll { get; init; }
+    public int? CooperativeMagic { get; init; }
+}
 
 /// <summary>Authored equip-script closure for one object: exactly six role-indexed effect rows (ObjectId is 1..65535).</summary>
 public sealed record BattleEquipmentObject(int ObjectId, IReadOnlyList<BattleEquipmentEffect> Effects);
 
 /// <summary>Formal six-role equipment initialization (PAL_UpdateEquipments, global.c:1352) and effective panel
 /// projections (PAL_GetPlayerAttackStrength/Defense/Dexterity global.c:1736/1800/1832 and PAL_GetPlayerBattleSprite
-/// global.c:1978-2008). Pure data; battle execution semantics are delivered by a later ticket and are not wired here.</summary>
+/// global.c:1978-2008). Retains nullable field 4/65 equipment words for selected-combat validation,
+/// not attack-all or cooperative-magic execution.</summary>
 public sealed class BattleEquipmentState
 {
     public const int RoleCount = 6;   // MAX_PLAYER_ROLES (palcommon.h)
     public const int SlotCount = 6;   // MAX_PLAYER_EQUIPMENTS (kBodyPartHead..kBodyPartWear)
-    public const int RegisterCount = SlotCount + 1; // kBodyPartExtra register; stays zero until temporary effects are delivered
+    public const int RegisterCount = SlotCount + 1; // kBodyPartExtra: numeric registers stay zero, nullable words stay unwritten
     public const int StatusCount = 9; // kStatusAll
     internal const int PersistentStatusFloor = 1000; // PAL_RemovePlayerStatus keeps values above 999 (global.c:2297)
     internal const int GoodStatusFirstIndex = 5;     // bravery, protect, haste, dualAttack (global.h tagSTATUS)
@@ -31,6 +37,8 @@ public sealed class BattleEquipmentState
     private readonly int[,] magicPower = new int[RoleCount, RegisterCount];
     private readonly int[,] fleeRate = new int[RoleCount, RegisterCount];
     private readonly int[,] poisonResistance = new int[RoleCount, RegisterCount];
+    private readonly int?[,] attackAll = new int?[RoleCount, RegisterCount];
+    private readonly int?[,] cooperativeMagic = new int?[RoleCount, RegisterCount];
     private readonly int[,] statuses = new int[RoleCount, StatusCount];
 
     private BattleEquipmentState() { }
@@ -51,7 +59,8 @@ public sealed class BattleEquipmentState
         return Initialize(content.RoleEquipment, content.EquipmentObjects);
     }
 
-    /// <summary>Clears all registers, then applies every equipped object's effect row to its (role, slot) context.</summary>
+    /// <summary>Initializes all registers, then copies every equipped object's effect row to its (role, slot)
+    /// context. Nullable WORDs preserve explicit zero; item zero and unwritten registers remain null.</summary>
     public static BattleEquipmentState Initialize(IReadOnlyList<IReadOnlyList<int>> roleEquipment,
         IReadOnlyDictionary<int, BattleEquipmentObject> equipmentObjects)
     {
@@ -75,6 +84,8 @@ public sealed class BattleEquipmentState
                 state.magicPower[role, slot] = effect.MagicPower ?? 0;
                 state.fleeRate[role, slot] = effect.FleeRate ?? 0;
                 state.poisonResistance[role, slot] = effect.PoisonResistance ?? 0;
+                state.attackAll[role, slot] = effect.AttackAll;
+                state.cooperativeMagic[role, slot] = effect.CooperativeMagic;
                 // PAL_SetPlayerStatus good-status branch (global.c:2255): keep the longer value, never stack.
                 for (int status = GoodStatusFirstIndex; status < StatusCount; status++)
                     if (effect.Statuses[status] > state.statuses[role, status])
@@ -114,6 +125,8 @@ public sealed class BattleEquipmentState
                         if (value is < PersistentStatusFloor or > 65535)
                             throw Error("$.equipments", $"equipment object {obj.ObjectId} status slot {status} must be a persistent word {PersistentStatusFloor}..65535");
                     }
+                    if ((effect.AttackAll is < 0 or > 65535) || (effect.CooperativeMagic is < 0 or > 65535))
+                        throw Error("$.equipments", $"equipment object {obj.ObjectId} optional effect words must be 0..65535");
                 }
                 if (!declared.TryAdd(obj.ObjectId, obj))
                     throw Error("$.equipments", $"duplicate equipment object ID {obj.ObjectId}");
@@ -144,6 +157,24 @@ public sealed class BattleEquipmentState
     {
         Role(roleId);
         return Array.AsReadOnly(Enumerable.Range(0, SlotCount).Select(slot => equipment[roleId, slot]).ToArray());
+    }
+
+    /// <summary>Retained field 4 WORD for one equipment register; null means no write, not an attack-all capability.</summary>
+    public int? AttackAllWord(int roleId, int registerIndex)
+    {
+        Role(roleId);
+        if (registerIndex is < 0 or >= RegisterCount)
+            throw new ArgumentOutOfRangeException(nameof(registerIndex), registerIndex, "Equipment register index must be 0..6.");
+        return attackAll[roleId, registerIndex];
+    }
+
+    /// <summary>Retained field 65 WORD for one equipment register; not a known magic or combat ability.</summary>
+    public int? CooperativeMagicWord(int roleId, int registerIndex)
+    {
+        Role(roleId);
+        if (registerIndex is < 0 or >= RegisterCount)
+            throw new ArgumentOutOfRangeException(nameof(registerIndex), registerIndex, "Equipment register index must be 0..6.");
+        return cooperativeMagic[roleId, registerIndex];
     }
 
     /// <summary>WORD sum over the equipment effect registers (global.c:1760/1825/1861); the extra register stays zero in this slice.</summary>

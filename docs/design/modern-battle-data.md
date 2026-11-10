@@ -2,6 +2,8 @@
 
 状态：纯 Core `ModernBattleContent.Parse(string)` → 既有 `TriggerBattleContent`，及独立 typed native Resource 编解码 `NativeBattleContent.Write/CreateCore/Load` 已实现。Core 不读文件、不抽 RNG、不创建战斗或模拟获胜；native runtime 不重读 JSON。显式离线 `PrepareBattleData.Prepare`、Editor scene 和正常 PowerShell wrapper 也已交付（见下方准备契约）；**数值准备不是完整人工 package 或 Main 资源链**。Core 测试字符串与可提交 `tests/Fixtures/ModernBattleData/battle-data.json` 均为独立人工数值，不是完整 storypackage 或原版认证。冻结的真实 `first-mandatory-battle-pre-trigger-v1`、envelope/provenance 和 owner28 `@09C3` gate 均未改动。
 
+当前 #167 的新增装备 WORD 仅接通 Core 源码，**不在上述既有 native/Prepare 交付范围内**；运输缺口、禁止旧 writer 使用及验收状态见下方 [#167 Core 窄契约](#167-core装备-word-保真与选中战斗拒绝)。其余带票号的检查点保留各自历史范围。
+
 ## 显式角色名字对象声明与 JSON/native 运输（#158 / #159）
 
 `ClassicBattlePlayer.NameObjectId` 是非位置构造参数的可选 `int?` 声明，默认 null 表示旧内容未声明映射；0 与 65535 都是合法对象编号，不把0当作缺省哨兵。参考 `fight.c` 的濒死/友亡检查，角色以名字编号选择全局对象，不能用 RoleId、队伍位置或相等的脚本入口反推对象身份。
@@ -115,7 +117,7 @@ Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
 
 `roleEquipment`：恰 6 行 × 6 槽 WORD，即参考 `rgwEquipment[6][6]`（global.h）的六角色网格；非 party 角色行同样必须声明（参考 `PAL_UpdateEquipments` 遍历全部 `MAX_PLAYER_ROLES`）。每个 party 角色行必须与 `roles[].equipment` 逐字相等，不匹配即拒。
 
-`equipments`：数组，每项恰 `objectId`（非零 WORD，全数组唯一）与 `effects`（恰 6 行，按 role 索引）——即该对象装备脚本（0x0017/0x001A/0x002D）对每个 role 的真实效应行。每行恰 `attack`/`defense`/`dexterity`/`battleSprite`（WORD，寄存器 SET 语义）与 `statuses`（恰 9 WORD），另可选 `magicPower`/`fleeRate`/`poisonResistance`（WORD，缺席即脚本未写；#53 依 retail stat18/21/22 装备写入加入，有效面板=基面板+寄存器和，同一 WORD 回绕规则；poisonResistance 仅入面板投影，战斗毒域仍不消费）。非零 status 仅允许 bravery/protect/haste/dualAttack（index 5..8）且值 1000..65535：>999 是参考 `PAL_RemovePlayerStatus` 判定“装备持续状态，不随普通清理清除”的边界，普通 1..999 回合值不属于装备闭包。网格非零项必须在 `equipments` 声明（缺失即拒）；已声明但未被穿戴的对象合法保留（同未引用队）。仅声明其中一个 section 亦合法（零网格+对象、或未带网格的旧内容）；无 section 时非零 `roles[].equipment` 保持格式合法但 `BattleEquipmentState.Initialize` 在任何状态前拒绝（“补闭实际装备脚本”的缺省拒绝面）。
+`equipments`：数组，每项恰 `objectId`（非零 WORD，全数组唯一）与 `effects`（恰 6 行，按 role 索引）——即该对象装备脚本（0x0017/0x001A/0x002D）对每个 role 的真实效应行。每行恰 `attack`/`defense`/`dexterity`/`battleSprite`（WORD，寄存器 SET 语义）与 `statuses`（恰 9 WORD），另可选 `magicPower`/`fleeRate`/`poisonResistance`（WORD，旧 JSON 省略时解析为0；typed 可为 null，既有 native reader 将这些旧字段的所有负数读为 null，历史行为不变；#53 依 retail stat18/21/22 装备写入加入，有效面板=基面板+寄存器和，同一 WORD 回绕规则；poisonResistance 仅入面板投影，战斗毒域仍不消费）。非零 status 仅允许 bravery/protect/haste/dualAttack（index 5..8）且值 1000..65535：>999 是参考 `PAL_RemovePlayerStatus` 判定“装备持续状态，不随普通清理清除”的边界，普通 1..999 回合值不属于装备闭包。网格非零项必须在 `equipments` 声明（缺失即拒）；已声明但未被穿戴的对象合法保留（同未引用队）。仅声明其中一个 section 亦合法（零网格+对象、或未带网格的旧内容）；无 section 时非零 `roles[].equipment` 保持格式合法但 `BattleEquipmentState.Initialize` 在任何状态前拒绝（“补闭实际装备脚本”的缺省拒绝面）。
 
 Core 正式规则（`Pal.Core.BattleEquipmentState`，纯数据）：
 
@@ -125,6 +127,21 @@ Core 正式规则（`Pal.Core.BattleEquipmentState`，纯数据）：
 - `StatusOverlay/ApplyStatuses` 按 `PAL_SetPlayerStatus` 好状态分支（global.c:2255）：仅取更大值、不叠加；既有 lifecycle 基础清理（<=999 清零）自然保留持续装备状态。
 
 typed 同步：`PalBattleContent` 新增 `Equipments: PalBattleEquipment[]` 与展平 `RoleEquipment: int[]`（空=未声明，否则恰 36 WORD；Godot 导出不支持嵌套数组）；`PalBattleEquipment`/`PalBattleEquipmentEffect` 逐字段导出效应行。`Write/CreateCore` 与 JSON 同一套严格校验（形状、WORD、重复、闭包、party 行一致、status 域）；`PrepareBattleData` 无需改动即携带装备闭包，Prepare 新增两例真实走 fixture→Prepare→Load→Initialize 手算断言。选中入口对非零装备仍拒绝（本 unit 边界）：装备影响真实战斗循环留待 unit 2。
+
+
+## #167 Core：装备 WORD 保真与选中战斗拒绝
+
+状态：#166 拆分为 #167 Core 与 #168 native/Prepare 两个独立叶子。以下描述当前 #167 源码契约，不是全叶交付收据：Parse 与 selected-guard 两轮及其余四个边界 Fact 已经完整 Core **1335 GREEN**；全叶交付另以独立 Standards/Spec 双审、checkpoint 与实际集成记录为准，本页不替代这些记录。Core 反馈不证明 #168、真实私有 profile、#166/#161 或完整 M6 验收，不增加 story credit。
+
+- **v1 严格 JSON / typed**：`formatVersion` 仍为1；`equipments[].effects[]` 新增可选、Ordinal 精确键 `attackAll` / `cooperativeMagic`，都是整数 WORD `0..65535`，不是 player 的 bool `attackAll`。缺席→null，显式整数0→0，非零值原样保留；显式 JSON null、负数、越界、非整数、布尔、字符串、对象和数组均带对应字段路径拒绝。直接 typed 值的 null 是合法未声明，非 null 值须为 WORD。此规则不改旧 `magicPower/fleeRate/poisonResistance` 的 JSON omission→0 或 native all-negative→null 行为。
+- **兼容与复制**：在既有 `BattleEquipmentEffect` 上增加非位置 `int? AttackAll { get; init; }` / `int? CooperativeMagic { get; init; }`；旧八位置构造与生成的八输出 `Deconstruct` 不变，旧五参数调用仍可使用原默认值。`TriggerBattleContent` 既有 record-with 防御复制保留新标量并复制 statuses，不新增模型或改变基表/已知法术槽。
+- **六角色寄存器**：`BattleEquipmentState.Initialize` 按六角色×六穿戴槽保留两套 nullable WORD 寄存器（每角色七项，index6 为 extra）；每个实际穿戴对象只使用对应 role 效应行，SET 不叠加。item0、extra 和未写寄存器均为 null，显式0不丢；已声明但未穿戴的对象不应用。重复初始化从空寄存器开始，快照不保留输入可变 alias。这些 WORD 不加入基面板或数值加成，不把 field65 当作 known magic，也不把 field4 转成已支持的全体攻击能力。
+- **只读查询**：公开 `int? AttackAllWord(int roleId, int registerIndex)` 与 `int? CooperativeMagicWord(int roleId, int registerIndex)` 均为 O(1)，不暴露数组；先验证 roleId `0..5`，再验证 registerIndex `0..6`，越界抛含相应参数名和值的 `ArgumentOutOfRangeException`。
+- **格式合法不代表可执行**：直接 `ClassicBattleSession`、lifecycle 与 trigger 的选中入口预检复用同一 `ClassicBattleSession.ValidatePlayer`。所选角色任一寄存器的新 WORD 非零（不限于1）即在有效面板/状态投影、公开状态/战斗请求、事件前缀副作用及 RNG 前拒绝；null/0 通过此项检查，其他未参战角色的合法非零值允许保留。既有 player 数值及能力检查顺序和原诊断不变（包括 bool `p.AttackAll`、sprite override、status）；仅在这些旧检查通过后，新增错误才指出 equipment `attackAll/cooperativeMagic` 的 role/register。原 battleSprite 与 player attack-all 拒绝边界不变，不开放全体攻击、合击或其他 M7 能力。
+
+来源例子仅为 role2/slot3/item163 的 `attackAll=1`、`battleSprite=6`，及 role3/slot5/item260 的 `cooperativeMagic=351`；不据此宣称整个测试网格或四个新增 Fact 是 retail/natural-save。其余人工哨兵和布置只作独立保真/边界核对，不能替代真实六角色来源、前置进度或私有资源闭包。
+
+**当前 native/Prepare 缺口**：`PalBattleEquipmentEffect` 与 `NativeBattleContent.Write/CreateCore` 尚未运输这两个新字段，`PrepareBattleData` 仍经过该旧 writer；它会丢失新值，不能把当前 Core 接受当作 native 往返保真。**在 #168 实际交付前，禁止将含这两个新字段的内容经旧 native writer 作者化或 Prepare**（包括显式0）。#168 是待 Core 叶实际验收并集成后的独立后续工作；未来计划为这两个新导出使用 -1↔null、0..65535 原值往返，其他负数或越界拒绝，但当前未实现，新的保存/加载及公开 Prepare 证据也未交付。下节既有 Prepare 契约与历史计数不为新字段补签。
 
 
 ## 显式离线数值准备（#46 有界 Prepare 检查点）

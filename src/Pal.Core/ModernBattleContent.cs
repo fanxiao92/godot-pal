@@ -97,7 +97,7 @@ public static partial class ModernBattleContent
             {
                 string effectPath = path + $".effects[{rowIndex++}]";
                 EventJson.Keys(row, effectPath, ["attack", "defense", "dexterity", "battleSprite", "statuses"],
-                    ["magicPower", "fleeRate", "poisonResistance"]);
+                    ["magicPower", "fleeRate", "poisonResistance", "attackAll", "cooperativeMagic"]);
                 var statuses = Words(row, "statuses", effectPath, BattleEquipmentState.StatusCount);
                 for (int status = 0; status < statuses.Count; status++)
                 {
@@ -110,7 +110,11 @@ public static partial class ModernBattleContent
                 effects.Add(new(Number(row, "attack", effectPath), Number(row, "defense", effectPath),
                     Number(row, "dexterity", effectPath), Number(row, "battleSprite", effectPath), statuses,
                     OptionalWord(row, "magicPower", effectPath), OptionalWord(row, "fleeRate", effectPath),
-                    OptionalWord(row, "poisonResistance", effectPath)));
+                    OptionalWord(row, "poisonResistance", effectPath))
+                {
+                    AttackAll = NullableWord(row, "attackAll", effectPath),
+                    CooperativeMagic = NullableWord(row, "cooperativeMagic", effectPath)
+                });
             }
             objects.Add(new(id, effects));
         }
@@ -183,6 +187,9 @@ public static partial class ModernBattleContent
 
     private static int OptionalWord(JsonElement value, string key, string path) =>
         value.TryGetProperty(key, out var item) ? Integer(item, path + "." + key, 0, 65535) : 0;
+
+    private static int? NullableWord(JsonElement value, string key, string path) =>
+        value.TryGetProperty(key, out var item) ? Integer(item, path + "." + key, 0, 65535) : null;
 
     private static ClassicBattleEnemy Enemy(JsonElement value, string path)
     {
