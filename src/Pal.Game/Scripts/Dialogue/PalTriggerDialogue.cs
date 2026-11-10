@@ -152,30 +152,40 @@ public partial class PalTriggerDialogue : Node
         if (_story is not null)
         {
             if (entry != _story.Entry) throw new InvalidDataException("Story adapter only supports its checked selected entry.");
-            if (sourceRequestId is not { } requestId)
+            if (sourceRequestId is null)
                 throw new InvalidOperationException("A story trigger requires its source interaction request.");
-            Session.Start(fileId, entryId, caller, requestId);
-            BindPendingDisplay();
-            return;
         }
-        ValidateOwner(entry);
-        // Preflight every selected display and native resource before modifying the real call.
-        // This separate executor uses the same public rules; it never advances request.Display.
-        var lease = CreatePreviewSession();
-        using (lease.Lifetime)
-        {
-            var preview = lease.Session;
-            preview.Start(fileId, entryId, caller);
-            while (preview.PendingDisplay is { } request)
-            {
-                ValidateRequest(request);
-                while (request.Display.Current.Phase != DialogueDisplayPhase.Completed) request.Display.Update(request.Display.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
-                preview.AcknowledgeDisplay(request.Id);
-            }
-        }
+        else ValidateOwner(entry);
+        var requirements = Session.GetCurrentEntryRequirements(fileId, entryId, caller);
+        var stagedPortraits = ValidateResources(entry, requirements);
         if (sourceRequestId is { } origin) Session.Start(fileId, entryId, caller, origin);
         else Session.Start(fileId, entryId, caller);
+        foreach (var pair in stagedPortraits) _portraits.Add(pair.Key, pair.Value);
         BindPendingDisplay();
+    }
+
+    private Dictionary<int, PalDialogueIndexedImage> ValidateResources(TriggerEventEntry entry, TriggerEntryRequirements requirements)
+    {
+        var stagedPortraits = new Dictionary<int, PalDialogueIndexedImage>();
+        foreach (int id in requirements.PortraitIds)
+        {
+            if (id == 0) continue;
+            if (!_portraits.TryGetValue(id, out var portrait))
+            {
+                if (_story is not null || _previewContent is not null)
+                    throw new InvalidDataException($"{entry.FileId}.json entry {entry.Id} @{entry.SourceAddress:X4}: missing bound dialogue portrait {id}.");
+                portrait = Load<PalDialogueIndexedImage>($"Portrait-{id:D3}.tres");
+                stagedPortraits.Add(id, portrait);
+            }
+            try { portrait.Validate(); }
+            catch (InvalidDataException error) { throw new InvalidDataException($"{portrait.ResourcePath}: {error.Message}", error); }
+        }
+        foreach (var display in requirements.DisplayBlocks)
+        {
+            try { PalDialogueDisplay.ValidateContent(display.Content, Session!.Context.Color, _font!, null, _prompts, _palette); }
+            catch (InvalidDataException error) { throw new InvalidDataException($"{display.MessageReferences[0].Position}: {error.Message}", error); }
+        }
+        return stagedPortraits;
     }
 
     private (TriggerScriptSession Session, IDisposable? Lifetime) CreatePreviewSession()

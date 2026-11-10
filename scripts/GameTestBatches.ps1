@@ -77,7 +77,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
     $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
     $definitions = @(
         @{ name = 'process'; count = 85; classes = @('StoryMainProcessTests', 'MainProcessTests', 'ExplorationProcessTests') }
-        @{ name = 'scene-dialogue'; count = 74; classes = @('ExplorationSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
+        @{ name = 'scene-dialogue'; count = 108; classes = @('ExplorationSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests'); excludeMatches = @('Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') }
         @{ name = 'scene-dynamic'; count = 2; classes = @('DynamicSceneTests') }
         @{ name = 'scene-battle-heavy-a'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
             'Pal.Game.Tests.StoryRoundtripSceneTests.ActiveBattleExit', 'Pal.Game.Tests.StoryRoundtripSceneTests.DeadMember',
@@ -103,7 +103,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
             'Pal.Game.Tests.StoryRoundtripSceneTests.PlayerPhysical', 'Pal.Game.Tests.StoryRoundtripSceneTests.StoryBattlePoseClock',
             'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects') }
         @{ name = 'native-map'; count = 473; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
-        @{ name = 'scene-realfull'; count = 4; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin') }
+        @{ name = 'scene-realfull'; count = 35; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests', 'TriggerDialogueFixtureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin', 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') }
     )
     $localOnly = if ($Scope -ceq 'committable') {
         @($inventory | Where-Object { $name = $_.name; $script:LocalOnlyRealMatches | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)
@@ -133,6 +133,12 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         } else {
             @($inventory | Where-Object class -CIn $definition.classes | ForEach-Object name)
         }
+        # The same name-level exclusion must apply to both source identities and runtime.
+        # World-bound first-battle adapter tests use the existing full-flow batch budget.
+        foreach ($excludedMatch in $definition.excludeMatches) {
+            $names = @($names | Where-Object { -not $_.Contains($excludedMatch, [StringComparison]::Ordinal) })
+            $filter = "($filter)&FullyQualifiedName!~$excludedMatch"
+        }
         $expected = [int]$definition.count - @($localOnly | Where-Object { $name = $_; @($definition.matches) | Where-Object { $name -CLike "*$_*" } }).Count
         if ($names.Count -ne $expected) { throw "Batch $($definition.name) $Scope source count differs: $($names.Count)/$expected." }
         [pscustomobject]@{ name = $definition.name; count = $expected; classes = $definition.classes; expected = $names; filter = $filter; sessionTimeoutMs = [int]($definition.sessionTimeoutMs ?? 120000) }
@@ -142,15 +148,21 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.class -CNE 'FailureControlTests' -and $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 687) { throw "Game inventory differs: $($inventory.Count)/687." }
+    if ($inventory.Count -ne 752) { throw "Game inventory differs: $($inventory.Count)/752." }
+    $storyHookPositive = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_current_world_hook_uses_live_entry_and_owned_display_ack'
+    $storyHookCases = @($inventory | Where-Object name -CEQ $storyHookPositive)
+    $storyHookOwners = @($batches | Where-Object { $_.expected -ccontains $storyHookPositive })
+    if ($storyHookCases.Count -ne 1 -or $storyHookOwners.Count -ne 1 -or $storyHookOwners[0].name -cne 'scene-dialogue') {
+        throw 'Story current-hook positive must have exactly one identity owned only by scene-dialogue.'
+    }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
         [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 1329; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 465; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 360; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
-        # 684 full-scope positives; committable scope executes one fewer (#76 local-only split).
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (684 - $localOnly.Count); skipped = 0 }
+        # 749 full-scope positives; committable scope executes one fewer (#76 local-only split).
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (749 - $localOnly.Count); skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {
