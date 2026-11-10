@@ -95,13 +95,26 @@ foreach ($entry in @(@{code=$core;project='Pal.Core.UnitTests';name='core'},@{co
 Assert ($unit.IndexOf('name: Run Core Unit') -lt $unit.IndexOf('name: Run CLI Unit')) 'Project order changed.'
 Assert ([regex]::Matches($unit, 'timeout-minutes: 10').Count -eq 2) 'Each direct project must keep a ten-minute step budget.'
 # Execute the actual offline shell block against synthetic public tools, never the SDK/engine.
-$offlineFixture = Join-Path $base 'offline-repository'
-$null = [IO.Directory]::CreateDirectory($offlineFixture)
 $pwsh = (Get-Process -Id $PID).Path
 $offlineRecords = [Collections.Generic.List[object]]::new()
-$nestedNative = Join-Path $base 'expected-native-failure.ps1'; Put $nestedNative 'exit 9'
-function Run-OfflineGuard([string]$Name, [int]$FailAt = -1) {
+$syntaxRecords = [Collections.Generic.List[object]]::new()
+$syntaxEntry = Join-Path $root 'scripts/Test-PowerShellSyntax.ps1'
+function Assert-GeneratedSyntax([string]$Path) {
+    $arguments = @('-NoProfile', '-File', $syntaxEntry, '-Path', $Path)
+    & $pwsh @arguments 1> "$Path.syntax.stdout.log" 2> "$Path.syntax.stderr.log"
+    $syntaxExit = $LASTEXITCODE
+    Put "$Path.syntax.exit.txt" ([string]$syntaxExit)
+    $syntaxRecords.Add(@{executable=$pwsh; arguments=$arguments; cwd=(Get-Location).Path; exitCode=$syntaxExit})
+    Put (Join-Path $base 'syntax-commands.json') (ConvertTo-Json -InputObject $syntaxRecords.ToArray() -Depth 6)
+    Assert ($syntaxExit -eq 0) "Generated PowerShell failed syntax preflight: $Path; it was not executed."
+}
+function Run-OfflineGuard([string]$Name, [int]$FailAt = -1, [ValidateSet('None', 'Nested', 'Tool', 'Block')][string]$InvalidHelper = 'None') {
     $dir = Join-Path $base $Name; $null = [IO.Directory]::CreateDirectory($dir)
+    $offlineFixture = Join-Path $dir 'offline-repository'
+    $null = [IO.Directory]::CreateDirectory($offlineFixture)
+    $nestedNative = Join-Path $dir 'expected-native-failure.ps1'
+    Put $nestedNative $(if ($InvalidHelper -eq 'Nested') { 'if (' } else { 'exit 9' })
+    Assert-GeneratedSyntax $nestedNative
     for ($i = 0; $i -lt $guardTools.Count; $i++) {
         $file = Join-Path $offlineFixture $guardTools[$i].script
         $null = [IO.Directory]::CreateDirectory((Split-Path $file -Parent))
@@ -113,16 +126,24 @@ if (`$EvidenceDirectory) {
     `$null = [IO.Directory]::CreateDirectory(`$EvidenceDirectory)
     [IO.File]::WriteAllText((Join-Path `$EvidenceDirectory 'original.txt'), 'fixture $i exit $nativeExit')
 }
-& (Get-Process -Id `$PID).Path -NoProfile -File '$($nestedNative.Replace("'", "''"))'
+`$nativePrefix = Join-Path `$env:RUNNER_TEMP 'native-$i'
+`$childHost = (Get-Process -Id `$PID).Path
+`$childArguments = @('-NoProfile', '-File', '$($nestedNative.Replace("'", "''"))')
+& `$childHost @childArguments 1> "`$nativePrefix.stdout.log" 2> "`$nativePrefix.stderr.log"
+`$childExit = `$LASTEXITCODE
+[IO.File]::WriteAllText("`$nativePrefix.exit.txt", [string]`$childExit)
+[IO.File]::WriteAllText("`$nativePrefix.command.json", (ConvertTo-Json @{executable=`$childHost; arguments=`$childArguments; cwd=(Get-Location).Path; exitCode=`$childExit}))
+if (`$childExit -ne 9) { throw 'Expected native child exit 9.' }
 if ($nativeExit -ne 0) { exit $nativeExit }
 Write-Output 'normal-after-expected-native-failure'
 "@
+        if ($InvalidHelper -eq 'Tool' -and $i -eq 0) { $fake += "`nif (" }
         Put $file $fake
-        $tokens = $null; $errors = $null
-        $null = [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
-        Assert (-not $errors.Count) 'Synthetic guard tool must parse before execution.'
+        Assert-GeneratedSyntax $file
     }
-    $blockFile = Join-Path $dir 'block.ps1'; Put $blockFile $agentEvidence
+    $blockFile = Join-Path $dir 'block.ps1'
+    Put $blockFile $(if ($InvalidHelper -eq 'Block') { $agentEvidence + "`nif (" } else { $agentEvidence })
+    Assert-GeneratedSyntax $blockFile
     $psi = [Diagnostics.ProcessStartInfo]::new($pwsh)
     $psi.UseShellExecute = $false; $psi.WorkingDirectory = $offlineFixture
     $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
@@ -156,7 +177,12 @@ Write-Output 'normal-after-expected-native-failure'
     $calls = @([IO.File]::ReadAllLines($callsFile))
     $last = if ($FailAt -ge 0) { $FailAt } else { $guardTools.Count - 1 }
     Assert (($calls -join ',') -ceq ((0..$last) -join ',')) 'Offline failure did not stop later tools.'
+    $normalCount = if ($FailAt -ge 0) { $last } else { $last + 1 }
+    Assert ([regex]::Matches([IO.File]::ReadAllText((Join-Path $dir 'stdout.log')), '(?m)^normal-after-expected-native-failure\r?$').Count -eq $normalCount) 'Expected native failure did not preserve normal parent completion.'
     foreach ($i in 0..$last) {
+        $nativePrefix = Join-Path $dir "native-$i"
+        Assert ([IO.File]::ReadAllText("$nativePrefix.exit.txt") -ceq '9') 'Expected-failure child did not actually exit 9.'
+        Assert ([IO.File]::ReadAllText("$nativePrefix.stderr.log").Length -eq 0) 'Expected-failure child emitted unexpected stderr.'
         if ($guardTools[$i].evidence) {
             Assert (Test-Path -LiteralPath (Join-Path $dir ($guardTools[$i].evidence + '/original.txt'))) 'Offline original lost on success/failure.'
         }
@@ -164,8 +190,25 @@ Write-Output 'normal-after-expected-native-failure'
 }
 Run-OfflineGuard 'offline-green'
 for ($i = 0; $i -lt $guardTools.Count; $i++) { Run-OfflineGuard "offline-exit7-$i" $i }
-Put (Join-Path $base 'offline-summary.json') (@{cases=$offlineRecords.Count; failed=0; realSdk=$false; realEngine=$false; realGpu=$false; network=$false; actualShellBlock=$true} | ConvertTo-Json)
-Write-Output "PASS offline CI workflow: $($offlineRecords.Count) controls; actual AST/shell block, synthetic tools, no SDK/engine/GPU/download."
+foreach ($helper in @('Nested', 'Tool', 'Block')) {
+    $name = "offline-invalid-$helper"
+    $before = $offlineRecords.Count; $rejected = $false
+    try { Run-OfflineGuard $name -InvalidHelper $helper }
+    catch {
+        Put (Join-Path $base "$name/rejection.txt") $_.Exception.Message
+        $rejected = $_.Exception.Message.StartsWith('Generated PowerShell failed syntax preflight:')
+    }
+    Assert $rejected "Invalid $helper helper was not rejected by syntax preflight."
+    $syntaxRecord = $syntaxRecords[$syntaxRecords.Count - 1]
+    $invalidPath = $syntaxRecord.arguments[-1]
+    Assert ($syntaxRecord.exitCode -eq 1 -and [IO.File]::ReadAllText("$invalidPath.syntax.stderr.log").Contains('[syntax:error]')) 'Invalid helper lost its syntax diagnostic or numeric exit.'
+    Assert ($offlineRecords.Count -eq $before) 'Invalid helper reached shell-block process launch.'
+    Assert (-not (Test-Path (Join-Path $base "$name/calls.txt"))) 'Invalid helper started the tool chain.'
+    Assert (-not (Test-Path (Join-Path $base "$name/native-0.exit.txt"))) 'Invalid helper started the nested child.'
+}
+$offlineControls = $offlineRecords.Count + 3
+Put (Join-Path $base 'offline-summary.json') (@{cases=$offlineControls; syntaxRejections=3; failed=0; realSdk=$false; realEngine=$false; realGpu=$false; network=$false; actualShellBlock=$true} | ConvertTo-Json)
+Write-Output "PASS offline CI workflow: $offlineControls controls; actual AST/shell block, synthetic tools, no SDK/engine/GPU/download."
 if ($Mode -eq 'Offline') { exit 0 }
 # Reuse approved package versions from the actual csproj, not another handwritten dependency policy.
 $fixture = Join-Path $base 'owned-repository'; $null = New-Item -ItemType Directory $fixture
@@ -190,10 +233,7 @@ $pwsh = (Get-Process -Id $PID).Path
 function Run([string]$Name, [string]$Code, [string]$ExpectedSha = $sha) {
     $dir = Join-Path $base $Name; $null = New-Item -ItemType Directory $dir
     $script = Join-Path $dir 'block.ps1'; Put $script ("`$ErrorActionPreference = 'Stop'`n" + $Code + "`nexit 0`n")
-    $tokens = $null; $parseErrors = $null
-    $null = [Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$parseErrors)
-    $diagnostics = @($parseErrors | ForEach-Object { '{0}:{1}:{2}: {3}' -f $script, $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message })
-    Assert ($parseErrors.Count -eq 0) ("Generated workflow block does not parse: {0}`n{1}" -f $Name, ($diagnostics -join "`n"))
+    Assert-GeneratedSyntax $script
     $psi = [Diagnostics.ProcessStartInfo]::new($pwsh)
     $psi.WorkingDirectory = $fixture; $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
     foreach ($arg in @('-NoProfile','-File',$script)) { $psi.ArgumentList.Add($arg) }
@@ -214,7 +254,7 @@ $parseRejected = $false
 try { $null = Run 'invalid-generated' 'if (' }
 catch {
     Put "$base/invalid-generated/parse-error.txt" $_.Exception.Message
-    $parseRejected = $_.Exception.Message.Contains('Generated workflow block does not parse:')
+    $parseRejected = $_.Exception.Message.StartsWith('Generated PowerShell failed syntax preflight:')
 }
 Assert $parseRejected 'Malformed generated block was not rejected before launch.'
 Assert (-not (Test-Path "$base/invalid-generated/command.json")) 'Malformed generated block reached process execution.'
