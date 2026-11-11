@@ -101,6 +101,20 @@ API itemId 必须是 WORD。非法参数抛 `ArgumentOutOfRangeException`，在�
 
 公开 Core Fact `InventoryEquipmentRemovalTests.Count_gated_removal_consumes_stock_then_current_party_gear_in_reference_order_without_refund` 通过真 owner/API 验证独立字面数量及角色/槽结果：库存2移除5只退角色5首三个匹配槽，保留wear和角色3；下次调用从当前状态继续；拒绝与允许不足、库存精确/部分/不存在/耗尽、65535无SHORT截断、满256槽末项、空及五人队伍/倒序、item0空hand/wear、效果/实际角色/毒对同步、旧视图与实例隔离、后续角色错配写前拒绝、非法参数及未触及角色无需全量seed。人工数据不是自然存档或真实资源证据，普通 Core Unit 不证明 trigger/Main/战斗消费和请求幂等。
 
-本操作只是一项可复用的真实领域规则，不负责判断活动战斗安全边界、推进脚本地址或验证显示/战斗回执；重复显式调用就是另一项移除，不自动去重。后续生产接线必须将同一组三个既有 owner 和库存绑定在宿主整个生命周期内，避免下一场战斗从旧 author 重新覆盖装备。现阶段不开放活动战斗副本修改、毒执行或成员迁移，不新增菜单、预留或保存字段。
+本操作只是一项可复用的真实领域规则，不负责判断活动战斗安全边界、推进脚本地址或验证显示/战斗回执；重复显式调用就是另一项移除，不自动去重。后续生产接线必须将同一组三个既有 owner 和库存绑定在宿主整个生命周期内；#187 已提供下述显式 Core 战斗消费者，Main/native 仍须接入，避免下一场战斗从旧 author 重新覆盖装备。现阶段不开放活动战斗副本修改、毒执行或成员迁移，不新增菜单、预留或保存字段。
 
 未来持久化重建责任在宿主：从已批准的独立上下文或恢复记录构造一次，保留有意义的槽顺序/耗尽记录/in-use 字段，再重新绑定消费者。活动预留的保留/清除策略尚未由本票冻结；不定义槽位、schema、磁盘读写或自然剧情 save。#131 未完成的 Main/native 现金接线及 #129/#147 阻塞、#165/#168 旧失败不由本票解决；无故事或完整 M6 验收增加。
+
+## Core trigger 战斗消费当前装备（#187）
+
+`TriggerScriptSession.ForSharedRoles` 末尾追加可选 `BattleEquipmentState? equipmentState = null`；只读 `EquipmentState` 暴露实际绑定身份。只有这个要求显式 `RoleLiveState` 的既有 factory 能绑定装备，world 存在时仍必须共享同一角色 owner；没有新状态框架、隐式 seed、运行中 rebind 或二进制 ABI 承诺。其它构造、未传装备的 factory 和静态 `ValidateEntry` 继续按原 author 检查/构造，既有源码调用不必迁移。
+
+对显式装备绑定，`GetCurrentEntryRequirements`、`Start` 的保守闭包和实际 `startBattle` 都读取同一当前装备实例及当前参与角色记录。`SettledPlayers` 只在这条路径把玩家装备改为当前 live role 的装备，现有 declared-panel/legacy-base-panel、HP/MP 和角色身份规则不变。预检不复制另一份真状态、不 Initialize(author)、不改库存/装备/角色/毒、CallId 或随机数；参与者装备必须与当前网格一致，缺角色/错配、非法 live 状态或当前不支持的 field4/65/精灵覆盖仍由既有校验在副作用前拒绝。已合法移除的旧 author 装备不复活，未参与角色也不要求制造新记录。
+
+沿用现有 lifecycle/combat 构造中的有效面板及状态投影，不新增公开投影 API。玩家内容的 `Statuses` 保留原先零状态能力门；live role 的持久状态由既有 lifecycle 按**当前**装备 overlay 校验并投影，不能把非零持久状态数组直接塞进另一个零状态专用入口，也不放宽未支持的临时状态或毒能力。hand 移除已经清掉的 actual/overlay dualAttack 不会在入战重现；其它效果/状态保留既有单槽语义，不重扫装备重算。
+
+装备网格/寄存器仍是宿主当前真值，角色装备是同步记录；每场战斗只在构造时读取并形成既有战斗局部数值/状态/boost 数组。**战斗活动期间不得外部修改这些共享 owner**；须真实完成并 ACK 后才执行下一项装备操作，再入战重新读当前值。此票不支持活动战斗投影修改或装备/毒脚本；结果仍仅凭所属 completion 合并角色一次，不回写/重建装备寄存器。新 session 若显式绑定同一 owners，也消费当前装备，而不是旧 author。
+
+`TriggerScriptBattleBindingTests.Explicit_current_equipment_flows_into_next_trigger_battles_without_author_reseeding` 经公开真 owner、完整移除原语、requirements/Start/真实 lifecycle 攻击和 completion 验证独立字面预期：库存2+hand1移除后，head 贡献 attack10/defense4/dexterity20，declared base40 得50而 legacy base70得80；完成/ACK后移除head，第二场得40/70，不重置或叠加。覆盖 world/无world、角色与装备 owner 隔离/历史记录、队外角色、持久hand清除与未移除overlay、错/旧/重复回执、缺失/错配拒绝、已移除的 field4/65/精灵不再阻塞以及未声明零装备兼容。测试使用人工数据，不冒充自然存档、真实资产或正常 Main 证据。
+
+这是 #132 的必要 Core 消费链前置，不是整票交付：`removeItem` 仍预先拒绝，即使同时绑定库存/装备也不执行。生产0020现代目标/ScriptSuccess/闭包、唯一库存/角色/装备/毒生命周期接线、Main/native 显式 seed/preview 隔离/重复过期请求与正常 Main/SceneRunner 连续性仍开放。Core 反馈不签 Game、Prepare、私有/GPU/桌面/CI、故事或 fullM6；未来重建仍由宿主从合法上下文一次构造再绑定，不新增保存字段。

@@ -74,22 +74,29 @@ public sealed class TriggerBattleContent
     internal IReadOnlyList<ClassicBattleEnemy> Enemies(int enemyTeamId) => EnemyTeams.TryGetValue(enemyTeamId, out var enemies) ? enemies
         : throw new InvalidDataException($"Missing battle team {enemyTeamId}.");
 
-    internal IReadOnlyList<ClassicBattlePlayer> SettledPlayers(IReadOnlyDictionary<int, BattleRoleSnapshot> roles) =>
+    internal IReadOnlyList<ClassicBattlePlayer> SettledPlayers(IReadOnlyDictionary<int, BattleRoleSnapshot> roles,
+        bool useCurrentEquipment = false) =>
         Players.Select(x =>
         {
             BattleRoleSnapshot settled = roles[x.RoleId];
-            return PanelDeclaredRoles.Contains(x.RoleId)
+            var player = PanelDeclaredRoles.Contains(x.RoleId)
                 ? x with { Hp = settled.Hp, MaxHp = settled.MaxHp, Attack = settled.Attack, Defense = settled.Defense,
                     Dexterity = settled.Dexterity, MagicPower = settled.MagicPower, FleeRate = settled.FleeRate }
                 : x with { Hp = settled.Hp, MaxHp = settled.MaxHp };
+            // Only explicit current-equipment bindings may replace frozen gear. Keep the player
+            // content's status gate; live role statuses and the current overlay are validated and
+            // projected separately by the existing lifecycle/combat constructors.
+            return useCurrentEquipment ? player with { Equipment = settled.Equipment } : player;
         }).ToArray();
 
-    internal void Validate(int enemyTeamId, IReadOnlyDictionary<int, BattleRoleSnapshot> roles)
+    internal void Validate(int enemyTeamId, IReadOnlyDictionary<int, BattleRoleSnapshot> roles,
+        BattleEquipmentState? equipmentState = null)
     {
         if (roles.Values.Any(x => x.MaxHp > 32767))
             throw new InvalidDataException("Trigger battle content requires maxHP <= 32767 for subsequent battles.");
-        ClassicBattleLifecycleSession.Validate(roles.Values.ToArray(), SettledPlayers(roles), Enemies(enemyTeamId), GrowthByRole,
-            BattleEquipmentState.Initialize(this));
+        ClassicBattleLifecycleSession.Validate(roles.Values.ToArray(),
+            SettledPlayers(roles, useCurrentEquipment: equipmentState is not null), Enemies(enemyTeamId), GrowthByRole,
+            equipmentState ?? BattleEquipmentState.Initialize(this));
     }
 
     internal static BattleRoleSnapshot Freeze(BattleRoleSnapshot role) => role with

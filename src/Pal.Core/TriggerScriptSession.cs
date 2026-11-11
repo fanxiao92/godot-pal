@@ -77,6 +77,8 @@ public sealed class TriggerScriptSession
     public CashLiveState? CashLiveState { get; }
     /// <summary>The explicit shared inventory owner; null keeps inventory commands unsupported.</summary>
     public InventoryLiveState? InventoryLiveState { get; }
+    /// <summary>The explicit current equipment owner, bound only together with shared live roles.</summary>
+    public BattleEquipmentState? EquipmentState { get; private set; }
 
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
         int inheritedColor = DialogueTextTokenizer.DefaultColor, CashLiveState? cashLiveState = null,
@@ -119,11 +121,14 @@ public sealed class TriggerScriptSession
     }
 
     /// <summary>Explicit shared-owner battle binding, with or without a world. A supplied world
-    /// must already use this owner; construction never seeds or rebinds either side.</summary>
+    /// must already use this owner; construction never seeds or rebinds either side. Optional
+    /// current equipment is read at preflight/each battle construction, never reseeded from author.
+    /// Shared owners must not be mutated while the battle's local projection is active.</summary>
     public static TriggerScriptSession ForSharedRoles(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent battleContent, IBattleRandom battleRandom, RoleLiveState roleLiveState,
         DynamicEventWorld? world = null, int inheritedColor = DialogueTextTokenizer.DefaultColor,
-        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null)
+        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null,
+        BattleEquipmentState? equipmentState = null)
     {
         ArgumentNullException.ThrowIfNull(roleLiveState);
         if (world is not null && !ReferenceEquals(world.RoleLiveState, roleLiveState))
@@ -132,6 +137,7 @@ public sealed class TriggerScriptSession
             ? new TriggerScriptSession(events, language, battleContent, battleRandom, inheritedColor, cashLiveState, inventoryLiveState)
             : new TriggerScriptSession(events, language, battleContent, battleRandom, world, inheritedColor, cashLiveState, inventoryLiveState);
         session.BindRoleLiveState(roleLiveState);
+        session.EquipmentState = equipmentState;
         return session;
     }
 
@@ -353,7 +359,8 @@ public sealed class TriggerScriptSession
         ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, requirements, context,
             rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true,
             currentObjectScripts: _world?.ObjectScripts, rejectObjectScriptWithoutWorld: _world is null,
-            hasCashOwner: CashLiveState is not null, hasInventoryOwner: InventoryLiveState is not null);
+            hasCashOwner: CashLiveState is not null, hasInventoryOwner: InventoryLiveState is not null,
+            equipmentState: EquipmentState);
 
     private sealed class EntryRequirementsCollector
     {
@@ -367,7 +374,8 @@ public sealed class TriggerScriptSession
         EntryRequirementsCollector? requirements = null, TriggerScriptContext context = TriggerScriptContext.Event,
         bool rejectMappedBattlesWithoutWorld = false, bool validateNameMappings = false,
         IReadOnlyDictionary<(int ObjectId, int SlotIndex), int>? currentObjectScripts = null,
-        bool rejectObjectScriptWithoutWorld = false, bool hasCashOwner = false, bool hasInventoryOwner = false)
+        bool rejectObjectScriptWithoutWorld = false, bool hasCashOwner = false, bool hasInventoryOwner = false,
+        BattleEquipmentState? equipmentState = null)
     {
         var pending = new Stack<(int Address, TriggerScriptContext Context)>();
         var visited = new HashSet<(int Address, TriggerScriptContext Context)>();
@@ -408,7 +416,7 @@ public sealed class TriggerScriptSession
                             throw new InvalidDataException($"{command.Position}: players with the same nameObjectId must declare identical friendDeathScript seeds.");
                     }
                 }
-                try { battleContent.Validate(command.EnemyTeamId, battleRoles!); }
+                try { battleContent.Validate(command.EnemyTeamId, battleRoles!, equipmentState); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 requirements?.Teams.Add(command.EnemyTeamId);
                 pending.Push((Next(command), TriggerScriptContext.Event));
@@ -416,7 +424,7 @@ public sealed class TriggerScriptSession
                 if (command.FleeAddress is { } flee) pending.Push((flee, TriggerScriptContext.Event));
                 // fight.c 768-880: preflight the party's current Name-owned hook entries. A stored
                 // entry (including disabled WORD 0) wins; only a missing key uses the declared seed.
-                foreach (var player in battleContent.SettledPlayers(battleRoles!))
+                foreach (var player in battleContent.SettledPlayers(battleRoles!, useCurrentEquipment: equipmentState is not null))
                 {
                     int friendDeath = player.FriendDeathScript, dying = player.DyingScript;
                     if (currentObjectScripts is not null && player.NameObjectId is int nameObjectId)
@@ -634,9 +642,10 @@ public sealed class TriggerScriptSession
                     break;
                 case "startBattle" when _battleContent is not null:
                     var battleRoles = BattleRoles!;
-                    var lifecycle = new ClassicBattleLifecycleSession(battleRoles.Values.ToArray(), _battleContent.SettledPlayers(battleRoles),
+                    var lifecycle = new ClassicBattleLifecycleSession(battleRoles.Values.ToArray(),
+                        _battleContent.SettledPlayers(battleRoles, useCurrentEquipment: EquipmentState is not null),
                         _battleContent.Enemies(command.EnemyTeamId), _battleContent.GrowthByRole, _battleRandom!,
-                        BattleEquipmentState.Initialize(_battleContent), runEnemyBattleEndScripts: true, isBossBattle: command.IsBoss,
+                        EquipmentState ?? BattleEquipmentState.Initialize(_battleContent), runEnemyBattleEndScripts: true, isBossBattle: command.IsBoss,
                         readRoleHookScript: _world is null ? null : ReadRoleHookScript, cashLiveState: CashLiveState);
                     PendingBattle = new TriggerBattleRequest(Guid.NewGuid(), Caller, command.Position, command.EnemyTeamId, command.IsBoss,
                         Next(command), command.LossAddress, command.FleeAddress, lifecycle);

@@ -6,6 +6,177 @@ namespace Pal.Core.Tests;
 public sealed class TriggerScriptBattleBindingTests
 {
     [Fact]
+    public void Explicit_current_equipment_flows_into_next_trigger_battles_without_author_reseeding()
+    {
+        // global.c PAL_UpdateEquipments / battle.c:1754 consume current gear, not an old author seed.
+        foreach (bool withWorld in new[] { false, true })
+        foreach (bool declaredPanels in new[] { false, true })
+        {
+            var content = EquippedContent(declaredPanels);
+            var equipment = BattleEquipmentState.Initialize(content);
+            var owner = new RoleLiveState([content.InitialRole, Role() with { RoleId = 5, Equipment = [0, 0, 0, 171, 0, 0] }]);
+            var historical = owner.Roles[1];
+            var spectator = owner.Roles[5];
+            var stock = new InventoryLiveState([new(171, 2, 9)]);
+            var poisons = new PartyPoisonState([1], [Enumerable.Repeat(new PoisonSlot(0, 0), 16).ToArray()],
+                new Dictionary<int, int>());
+            Assert.True(equipment.TryRemoveItem(171, 3, false, stock, owner, poisons));
+            Assert.Equal(new[] { 170, 0, 0, 0, 0, 0 }, owner.Roles[1].Equipment);
+            var fixture = Fixture();
+            fixture.Commands[2] = End(2);
+            var random = new BindingRandom();
+            var world = withWorld ? SharedWorld(owner) : null;
+            var script = TriggerScriptSession.ForSharedRoles(fixture.Load(), TriggerScriptSessionTests.Language(),
+                content, random, owner, world, inventoryLiveState: stock, equipmentState: equipment);
+            var current = owner.Roles[1];
+            var projection = script.BattleRoles!;
+            Assert.Equal(new[] { 18 }, script.GetCurrentEntryRequirements("shared", "npc", 60).BattleTeamIds); // Designated RED.
+            Assert.Same(equipment, script.EquipmentState);
+            Assert.Same(stock, script.InventoryLiveState);
+            Assert.Same(current, projection[1]);
+            Assert.Same(current, owner.Roles[1]);
+            Assert.Equal(Guid.Empty, script.CallId);
+            Assert.Equal(0, random.Draws);
+            Assert.Equal(new InventorySlot(171, 0, 9), stock.Slots[0]);
+            Assert.Equal(10, equipment.AttackBonus(1));
+            Assert.Equal(0, equipment.StatusOverlay(1)[8]);
+            // Static/legacy checks still describe frozen content, and cannot silently bind current gear.
+            Assert.Single(TriggerScriptSession.ValidateEntry(fixture.Load(), TriggerScriptSessionTests.Language(),
+                content, "shared", "npc").BattleTeamIds);
+            var legacy = TriggerScriptSession.ForSharedRoles(fixture.Load(), TriggerScriptSessionTests.Language(),
+                content, new BindingRandom(), owner);
+            Assert.Null(legacy.EquipmentState);
+            Assert.Throws<InvalidDataException>(() => legacy.Start("shared", "npc", 60));
+            script.Start("shared", "npc", 60);
+            var first = script.PendingBattle!;
+            var firstCall = script.CallId;
+            Assert.Equal((declaredPanels ? 50 : 80, 24, 120),
+                (first.Lifecycle.Current.Combat.Players[0].Attack, first.Lifecycle.Current.Combat.Players[0].Defense,
+                    first.Lifecycle.Current.Combat.Players[0].Dexterity));
+            Assert.Equal(new[] { 170, 0, 0, 0, 0, 0 }, first.Lifecycle.Current.Role.Equipment);
+            Assert.Equal(new int[9], first.Lifecycle.Current.Role.Statuses);
+            Assert.Equal(0, random.Draws);
+            Assert.Same(current, owner.Roles[1]);
+            Win(first);
+            Assert.False(script.AcknowledgeBattle(Guid.NewGuid(), first.Lifecycle.Completion));
+            Assert.Same(current, owner.Roles[1]);
+            Assert.True(script.AcknowledgeBattle(first.Id, first.Lifecycle.Completion));
+            Assert.False(script.AcknowledgeBattle(first.Id, first.Lifecycle.Completion));
+            Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+            Assert.Equal((40, 20, 100), (owner.Roles[1].Attack, owner.Roles[1].Defense, owner.Roles[1].Dexterity));
+            // Only after completion/ACK: remove the remaining head, then consume current values again.
+            equipment.RemoveEquippedItem(1, 0, owner, poisons);
+            var afterRemoval = owner.Roles[1];
+            int draws = random.Draws;
+            script.GetCurrentEntryRequirements("shared", "npc", 60);
+            Assert.Equal(draws, random.Draws);
+            Assert.Same(afterRemoval, projection[1]);
+            script.Start("shared", "npc", 60);
+            Assert.NotEqual(firstCall, script.CallId);
+            var second = script.PendingBattle!;
+            Assert.Equal((declaredPanels ? 40 : 70, 20, 100),
+                (second.Lifecycle.Current.Combat.Players[0].Attack, second.Lifecycle.Current.Combat.Players[0].Defense,
+                    second.Lifecycle.Current.Combat.Players[0].Dexterity));
+            Assert.Equal(new int[6], second.Lifecycle.Current.Role.Equipment);
+            Assert.Equal(new int[9], second.Lifecycle.Current.Role.Statuses);
+            Assert.False(script.AcknowledgeBattle(second.Id, first.Lifecycle.Completion));
+            Win(second);
+            Assert.True(script.AcknowledgeBattle(second.Id, second.Lifecycle.Completion));
+            Assert.False(script.AcknowledgeBattle(second.Id, second.Lifecycle.Completion));
+            Assert.Equal(0, equipment.AttackBonus(1));
+            Assert.Same(spectator, owner.Roles[5]);
+            Assert.Equal(171, equipment.Equipment(5)[3]);
+            Assert.Equal(171, historical.Equipment[3]);
+            Assert.Equal(171, content.RoleEquipment[1][3]);
+            Assert.Equal(170, content.InitialRole.Equipment[0]);
+            Assert.Equal(0, stock.GetAmount(171));
+            Assert.All(poisons.Slots(1), slot => Assert.Equal(new PoisonSlot(0, 0), slot));
+            if (world is not null) Assert.Equal(owner.Roles[1].Hp, world.PartyVitals[1].Hp);
+            var next = TriggerScriptSession.ForSharedRoles(fixture.Load(), TriggerScriptSessionTests.Language(),
+                content, random, owner, world, equipmentState: equipment);
+            next.Start("shared", "npc", 60);
+            Assert.Equal(declaredPanels ? 40 : 70, next.PendingBattle!.Lifecycle.Current.Combat.Players[0].Attack);
+            Assert.Equal(new int[6], next.PendingBattle.Lifecycle.Current.Role.Equipment);
+        }
+
+        // Selected current capability, not unselected/frozen equipment, governs acceptance.
+        foreach (string unsupported in new[] { "attackAll", "cooperativeMagic", "sprite" })
+        {
+            var content = EquippedContent(true, unsupported);
+            var equipment = BattleEquipmentState.Initialize(content);
+            var owner = new RoleLiveState([content.InitialRole]);
+            var random = new BindingRandom();
+            var fixture = Fixture();
+            fixture.Commands[2] = End(2);
+            var script = TriggerScriptSession.ForSharedRoles(fixture.Load(), TriggerScriptSessionTests.Language(),
+                content, random, owner, equipmentState: equipment);
+            var before = owner.Roles[1];
+            Assert.Throws<InvalidDataException>(() => script.GetCurrentEntryRequirements("shared", "npc", 60));
+            Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 60));
+            Assert.Same(before, owner.Roles[1]);
+            Assert.Equal(0, random.Draws);
+            Assert.Equal(Guid.Empty, script.CallId);
+            Assert.Null(script.PendingBattle);
+            var poisons = new PartyPoisonState([1], [Enumerable.Repeat(new PoisonSlot(0, 0), 16).ToArray()], new Dictionary<int, int>());
+            equipment.RemoveEquippedItem(1, 0, owner, poisons);
+            script.GetCurrentEntryRequirements("shared", "npc", 60); // Removed unsupported author gear must not resurrect.
+            script.Start("shared", "npc", 60);
+            Assert.Equal(60, script.PendingBattle!.Lifecycle.Current.Combat.Players[0].Attack); // Only hand +20 remains.
+            Assert.Equal(60000, script.PendingBattle.Lifecycle.Current.Role.Statuses[8]);
+        }
+
+        var normal = EquippedContent(true);
+        foreach (var owner in new[] { new RoleLiveState([]), new RoleLiveState([normal.InitialRole with { Equipment = new int[6] }]) })
+        {
+            var random = new BindingRandom();
+            var equipment = BattleEquipmentState.Initialize(normal);
+            var script = TriggerScriptSession.ForSharedRoles(Fixture().Load(), TriggerScriptSessionTests.Language(), normal,
+                random, owner, equipmentState: equipment);
+            Assert.Throws<InvalidDataException>(() => script.GetCurrentEntryRequirements("shared", "npc", 60));
+            Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 60));
+            Assert.Equal(0, random.Draws);
+            Assert.Equal(Guid.Empty, script.CallId);
+            Assert.Equal(30, equipment.AttackBonus(1));
+        }
+        var zeroContent = Content();
+        var zero = BattleEquipmentState.Initialize(zeroContent);
+        var zeroScript = TriggerScriptSession.ForSharedRoles(Fixture().Load(), TriggerScriptSessionTests.Language(), zeroContent,
+            new BindingRandom(), new RoleLiveState([zeroContent.InitialRole]), equipmentState: zero);
+        zeroScript.Start("shared", "npc", 60);
+        Assert.False(zero.Declared);
+        Assert.Equal(40, zeroScript.PendingBattle!.Lifecycle.Current.Combat.Players[0].Attack);
+        var isolated = BattleEquipmentState.Initialize(normal);
+        Assert.Equal(30, isolated.AttackBonus(1));
+        Assert.Equal(60000, isolated.StatusOverlay(1)[8]);
+        var remove = Fixture();
+        remove.Commands[1] = new JsonObject { ["label"] = "L0001", ["op"] = "removeItem", ["itemId"] = 170,
+            ["count"] = 1, ["shortageTarget"] = null, ["next"] = "L0002",
+            ["source"] = new JsonObject { ["index"] = 1, ["opcode"] = 0x20, ["operands"] = new JsonArray(170, 1, 0) } };
+        var stillUnsupported = TriggerScriptSession.ForSharedRoles(remove.Load(), TriggerScriptSessionTests.Language(), normal,
+            new BindingRandom(), new RoleLiveState([normal.InitialRole]), inventoryLiveState: new InventoryLiveState([]), equipmentState: isolated);
+        Assert.Contains("removeItem", Assert.Throws<InvalidDataException>(() => stillUnsupported.Start("shared", "npc", 60)).Message);
+        Assert.Equal(30, isolated.AttackBonus(1));
+
+        static TriggerBattleContent EquippedContent(bool declaredPanels, string? unsupported = null)
+        {
+            int[] worn = [170, 0, 0, 171, 0, 0];
+            var role = Role() with { Equipment = worn, Attack = 40, MagicPower = 12, Defense = 20, Dexterity = 100, FleeRate = 6 };
+            var grid = Enumerable.Range(0, 6).Select(id => (IReadOnlyList<int>)(id == 1 ? worn : id == 5 ? new[] { 0, 0, 0, 171, 0, 0 } : new int[6])).ToArray();
+            var head = Enumerable.Range(0, 6).Select(id => id == 1
+                ? new BattleEquipmentEffect(10, 4, 20, unsupported == "sprite" ? 9 : 0, new int[9], 3, 4, 5)
+                    { AttackAll = unsupported == "attackAll" ? 2 : 0, CooperativeMagic = unsupported == "cooperativeMagic" ? 7 : 0 }
+                : new BattleEquipmentEffect(0, 0, 0, 0, new int[9])).ToArray();
+            var hand = Enumerable.Range(0, 6).Select(id => id == 1
+                ? new BattleEquipmentEffect(20, 0, 0, 0, [0, 0, 0, 0, 0, 0, 0, 0, 60000])
+                : new BattleEquipmentEffect(0, 0, 0, 0, new int[9])).ToArray();
+            return new TriggerBattleContent([role], [new(1, 100, 150, 70, 20, 100) { Equipment = worn }],
+                new Dictionary<int, ClassicBattleGrowthData> { [1] = Growth() },
+                new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = new[] { new ClassicBattleEnemy(7, 0, 1, 0, 0, 0, 1) } },
+                grid, [new(170, head), new(171, hand)], panelDeclaredRoles: declaredPanels ? [1] : null);
+        }
+    }
+
+    [Fact]
     public void ValidateEntry_returns_selected_named_requirements_without_executing_battles()
     {
         var fixture = Fixture(); // EnemyTeamId=18 is edited; source operands deliberately still say 99.
