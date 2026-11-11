@@ -4,6 +4,44 @@
 
 当前 #167 的新增装备 WORD 仅接通 Core 源码，**不在上述既有 native/Prepare 交付范围内**；运输缺口、禁止旧 writer 使用及验收状态见下方 [#167 Core 窄契约](#167-core装备-word-保真与选中战斗拒绝)。其余带票号的检查点保留各自历史范围。
 
+## M5 基表普通物理战离线投影（#133）
+
+正式 CLI（可重排四个选项，每项恰一次）：
+
+```powershell
+dotnet run --project tools/Pal.Extract -- project-battle-data `
+  --input <已由上游核对的M5现代目录> --roles 4,0 --teams 1,0 `
+  --output <新或空且与输入双向不重叠的目录>
+```
+
+`--roles` / `--teams` 是无空白/符号/十六进制的十进制逗号列表，ID 不重复；角色列表顺序就是队序，敌队选择顺序也保留。缺失/重复/未知选项或非法列表退出2；数据、能力、I/O拒绝退出1；完整写出后退出0并输出 `Battle data projected: independent base-table context (upstream-verified input required).`。不依赖 Godot、不执行脚本、不读原档、不重提取、不抽玩法随机。新增纯内存 `BattleDataProjector.Project(files, roles, teams)` 与文件边界 `Export` 供正式 CLI 调用，没有另一套战斗引擎。
+
+### 输入信任 A 与严格包门
+
+#133 的 OWNER 评论已批准信任A：上游提取正确性和原始来源核对是调用者前提，不是本 CLI 新认证的结果。输入必须恰含 `index.json` 与13张已注册现代JSON表（不含原档）；严格 UTF-8（可有计入身份的BOM）、递归重复键、v1/faithful、精确字段/维数/WORD/SHORT全部复用M5规则。下划线注释字段继续允许但重复键仍拒绝。每个文件限制1..64MiB、JSON深度沿用默认64，完整包先校验，不能因某列/表未被选择就跳过结构。PLAYERROLES、LEVELUPEXP、ENEMYPOS、BATTLEEFFECTINDEX必须各一行。
+
+索引必须声明且仅声明SSS.MKF/DATA.MKF两个来源和13个唯一表：各表文件名→固定archive/chunk、recordCount、byteLength=记录数×固定宽度及实际现代records数一致，hash为64位十六进制。OBJECT按Windows14字节/记录核对，沿用M5的variant判别，DOS或12/14倍数歧义拒绝，不猜variant。散列/长度是**原归档或chunk声明**；另外记录全部14个实际现代文件的精确字节SHA-256/长度，绝不将JSON散列和chunk散列混比。合法改值仍可能通过结构门，但其现代输入/输出身份改变；这叫追溯，不是独立来源认证或防篡改。
+
+### 投影与保守支持域
+
+- 当前1–2角色、每队密集1–2敌位，角色身份不重编号。基表 `[field][role]`、装备 `[slot][role]`、法术 `[slot][role]` 按实际轴投影；role/player的五基面板显式同源。名字编号查OBJECT player view及两个钩子，不按party位置猜名字对象。当前无事件输入，所选角色/敌位的钩子非零均定位拒绝。
+- 角色等级、HP/MP、六装备槽、32已知法术槽保真；HP0不改1（归一化属后续正式入战）。采用固定 `global.c PAL_LoadDefaultGame/PAL_InitGameData` 默认初始化：primary和七种hidden的value/count=0、level=原角色level，角色状态和毒为空。这是**独立基表起始上下文**，不是自然剧情save，也不是冻结M4 author。非零装备因缺真实装备脚本闭包拒绝，不捏造零effects；cooperativeMagic/attackAll非零拒绝。
+- 完整100项阈值照level索引，有序升级法术照原RoleId取五列之一；保留零行、重复和顺序。role5没有第六列，明确拒绝本投影的成长来源，而非声称Core不支持role5。level0/threshold[0]=0不因此拒绝；其他成长/最大HP域沿用 #196。已知/升级法术仅保留ID、不承诺施法；非零ID仍须有可证明的OBJECT magic view并指向存在的MAGIC行（undetermined view不能在本入口冒充已证明magic）。
+- coveredBy按原角色身份保留，包括0=role0；player仍保留该身份，不以0映射null或party索引，实际掩护由正式combat按队伍成员/HP/状态判断。不向文档未声明的自然快照推导无毒或装备闭包。
+- ENEMYTEAM存的是OBJECT enemy view编号，再由enemyId查ENEMY；FFFF跳过而不递增compact slot，**0是真空槽、连尾部0也拒绝**，不压缩稀疏队。重复对象仍是两个战内槽；生成非零唯一battleId=compactSlot+1。收据逐个保留全部5个sourceSlot、FFFF skip以及已载objectId/enemyId/compactSlot/battleId映射。enemy attack/defense/dexterity按物理消费点解释为SHORT，不夹零、不预加等级公式；奖励WORD原样。
+- enemy magic（含FFFF及rate0）、dualMove、等效物品/率等不可消费能力拒绝，不洗字段为0。FFFF魔法带不同RNG消费的空动作，不等于物理攻击。其余未被数值格式消费的M5元数据保留在输入身份中；不声称已接通偷窃、图像、音效、事件、语言、场景或自然存档闭包。非选中队伍只要求格式，不强求其能力已支持。
+
+生成的数值先经公开 `ModernBattleContent.Parse/Validate`、再逐队经 `ValidatePhysicalBattle`；不是只通过格式就宣称可执行。数值格式仍v1，无额外来源键。数值UTF-8输出限制≤16MiB，与既有Prepare输入上限相容；不改任何Prepare/native/Main能力。
+
+### 输出、来源收据与文件保护
+
+- `output/numeric/battle-data.json`：numeric目录恰一张数值文档，可显式交给既有Prepare；本票不执行Prepare。
+- `output/receipt.json`：独立版本1、kind=`m5-base-table-physical-projection`；snapshotKind=`independent-base-table-context-not-natural-save`。含输入信任级别、原sources/tables声明、全部modernInputs字节身份、有序roles/teams选择、enemySlots、逐输出叶字段（含显式空数组）的fieldSources及数值输出file/byteLength/sha256。来源数组轴/默认初始化/SHORT解释另附可读规则。收据不是数值输入或独立认证文件，不为自身作递归hash。
+
+两侧及祖先拒绝link/reparse，所需14个输入路径逐个检查。文件边界用只读 `FileShare.Read` 持有全部输入句柄直至发布结束（Windows正常共享规则下阻止写/删），只投影实际读到的字节；不改输入bytes/mtime。输出新/空、两侧双向不重叠，发布前重查新/空条件；所有输出使用CreateNew，绝不覆盖、回滚或清理未知文件。所有数据/能力检查在创建输出前完成；真正I/O失败可能保留本次不完整文件，不发成功标记。不是多文件事务、断电安全或抵抗恶意并发路径替换的承诺；失败目录应保留诊断并用另一个新目录，不能自动删除后重试。
+
+人工 Unit 固定角色[4,0]、多队顺序、EXP、二维轴、成长重复、HP0、SHORT、引用/能力拒绝与身份反例；Integration用既有CliProcess/正式Test-Range核真实argv/exit、bytes/mtime、确定性、单文档numeric目录、链接和输出保护。运行结果以本票实际收据为准；无真实资产/Godot/Prepare/Main/GPU/桌面/CI/fullM6验收。下文带票号的旧“单角色/暂无作者CLI”等叙述保留历史边界，不覆盖本节与已交付能力门。
+
 ## 显式角色名字对象声明与 JSON/native 运输（#158 / #159）
 
 `ClassicBattlePlayer.NameObjectId` 是非位置构造参数的可选 `int?` 声明，默认 null 表示旧内容未声明映射；0 与 65535 都是合法对象编号，不把0当作缺省哨兵。参考 `fight.c` 的濒死/友亡检查，角色以名字编号选择全局对象，不能用 RoleId、队伍位置或相等的脚本入口反推对象身份。
@@ -91,7 +129,7 @@ JSON player 可选精确字段 `nameObjectId`：缺席才表示 legacy null，�
 - 此门没有事件集合来证明钩子闭包，因此所选所有 player 的 `dyingScript/friendDeathScript` 与所选所有敌位的 `battleEndScript` 必须为0；错误指出 party 索引或 `teams[teamId].enemies[slot]` 字段。既有 turnStart/ready 拒绝仍复用 combat 门，其错误加选中 team 上下文。这不是撤销有能力 trigger 宿主的角色/战后钩子支持，更不能通过清零钩子来通过预检。
 - 声明完整且当前可消费的装备闭包可以通过；所选角色的 sprite override 或非零装备 attackAll/cooperativeMagic 仍拒绝，非参战角色的合法值不混入所选角色。**本门不能认证装备脚本来源**；#133 的投影器没有事件输入，不能凭本门接受人工装备闭包就伪造M5装备效果。
 
-#133 后续仍须负责M5版本/profile/结构/引用、实际普通战支持域、来源声明与现代输入字节身份、字段映射/收据、严格四选项真实CLI和路径保护。信任A是已批准的上游前提，不是此门提供的来源认证。此门也不证明图像、事件、语言、Prepare/native/Main或自然存档闭包；#133并未因此完成。
+#196交付时，M5版本/profile/结构/引用、实际普通战支持域、来源声明与现代输入字节身份、字段映射/收据、严格四选项真实CLI和路径保护仍属#133后续职责；本次实现见上文#133专节，实际整票验收仍依独立收据。信任A是已批准的上游前提，不是此门提供的来源认证。此门本身不证明图像、事件、语言、Prepare/native/Main或自然存档闭包，不能单凭#196宣布#133完成。
 
 公开 Core 人工用例覆盖上述正反例、非首角色/敌位钩子、选中与未选中能力区别、完整格式先行、HP0/level0/signed边界、重复校验与嵌套输入不变、装备选择域；实际本轮Unit及后续独立审查收据是验收依据，不以文档描述代替运行。既有下文带票号/单角色描述保留历史交付边界，不用它们转签本门或完整M6。
 

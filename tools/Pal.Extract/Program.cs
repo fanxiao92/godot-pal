@@ -68,6 +68,36 @@ if (args.Length == 5 && args[0] == "export-data" && args[1] == "--input" && args
     }
 }
 
+if (args.Length == 9 && args[0] == "project-battle-data")
+{
+    var options = new Dictionary<string, string>(StringComparer.Ordinal);
+    for (int i = 1; i < args.Length; i += 2)
+    {
+        if (string.IsNullOrWhiteSpace(args[i + 1]) || args[i + 1].StartsWith("--", StringComparison.Ordinal)
+            || !options.TryAdd(args[i], args[i + 1])) break;
+    }
+    if (options.Count == 4 && options.TryGetValue("--input", out var input)
+        && options.TryGetValue("--output", out var output)
+        && options.TryGetValue("--roles", out var roleText) && BattleDataProjector.TrySelection(roleText, out var roles)
+        && options.TryGetValue("--teams", out var teamText) && BattleDataProjector.TrySelection(teamText, out var teams))
+    {
+        try
+        {
+            BattleDataProjector.Export(input, output, roles, teams);
+            Console.WriteLine("Battle data projected: independent base-table context (upstream-verified input required).");
+            return 0;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException
+            or ArgumentException or NotSupportedException or JsonException or InvalidOperationException or FormatException or OverflowException)
+        {
+            Console.Error.WriteLine(exception is InvalidDataException or JsonException or InvalidOperationException or FormatException or OverflowException
+                ? $"Battle data projection failed: {exception.Message}"
+                : $"Battle data projection failed: unable to read input or write output ({exception.GetType().Name}).");
+            return 1;
+        }
+    }
+}
+
 if (args.Length == 5 && args[0] == "author-battle-context" && args[1] == "--input" && args[3] == "--output"
     && !string.IsNullOrWhiteSpace(args[2]) && !args[2].StartsWith("--", StringComparison.Ordinal)
     && !string.IsNullOrWhiteSpace(args[4]) && !args[4].StartsWith("--", StringComparison.Ordinal))
@@ -155,7 +185,7 @@ if (args.Length == 11 && args[0] is "export-map" or "export-scene" or "extract-s
 
 if (args.Length != 0 && (args.Length != 1 || args[0] != "--help"))
 {
-    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" or "author-battle-context" or "export-data" or "export-battle-images" ? $"Unsupported arguments for {args[0]}."
+    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" or "author-battle-context" or "export-data" or "export-battle-images" or "project-battle-data" ? $"Unsupported arguments for {args[0]}."
         : $"Unsupported arguments: {string.Join(" ", args)}");
     Console.Error.WriteLine("Use --help for usage.");
     return 2;
@@ -175,6 +205,7 @@ Console.WriteLine("""
            pal-extract export-data --input <directory> --output <new-or-empty-directory>
            pal-extract export-battle-images --input <directory> --archive <abc|ball|f|fbp|fire> --output <new-or-empty-directory>
            pal-extract author-battle-context --input <author.json> --output <new-or-empty-directory>
+           pal-extract project-battle-data --input <verified-M5-directory> --roles <ordered-ids> --teams <ids> --output <new-or-empty-directory>
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
 
@@ -200,6 +231,12 @@ Console.WriteLine("""
       export-data Extract the 13 registered read-only data tables (event-object, scene, store, enemy, enemy-team, player-roles, magic, battle-field, level-up-magic, battle-effect-index, enemy-pos, level-up-exp, object) and their index manifest.
                   Requires SSS.MKF and DATA.MKF in the input; writes a new or empty output directory.
                   All 13 frozen tables are registered (data-schema v1); this command never re-encodes tables.
+
+      project-battle-data Project caller-verified M5 Windows base tables to host-free physical numeric content.
+                          IDs are unique decimal comma-lists; roles retain party order (currently one or two).
+                          Writes numeric/battle-data.json and separate receipt.json; no scripts or RNG.
+                          Source declarations and modern byte identities are not independent authentication.
+                          Input/output must be disjoint; links and nonempty outputs are rejected.
 
       export-battle-images Decode a battle image MKF (abc, ball, f, fbp or fire) into a complete image package and an index.json manifest.
                             Every chunk becomes a sprite document with authoritative indices/alpha planes, source hashes

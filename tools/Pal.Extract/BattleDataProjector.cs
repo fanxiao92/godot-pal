@@ -60,7 +60,9 @@ public static class BattleDataProjector
         foreach (DataTableDescriptor table in Tables)
         {
             string file = table.FileId + ".json";
-            DataTableSchema.ValidateDocument(table, docs[file]);
+            try { DataTableSchema.ValidateDocument(table, docs[file]); }
+            catch (Exception error) when (error is InvalidOperationException or FormatException or OverflowException)
+            { throw new InvalidDataException($"{file}: invalid field type or shape: {error.Message}", error); }
             CheckEntry(entries[file], file, table.Archive, table.Chunk, table.RecordByteSize, docs[file]);
             if (table == DataTables.PlayerRoles || table == DataTables.LevelUpExp || table == DataTables.EnemyPos || table == DataTables.BattleEffectIndex)
                 if (Records(docs, table.FileId).Count != 1) throw new InvalidDataException($"{file}: requires exactly one record.");
@@ -134,7 +136,7 @@ public static class BattleDataProjector
             if (cover > 5) throw new InvalidDataException($"{From("coveredBy")}: cover must be a role identity 0..5.");
             Add(role, "coveredByRoleId", JsonValue.Create(cover), rp, From("coveredBy"));
             // Preserve role0 as role0, including self/out-of-party IDs. Combat resolves by
-            // identity and only a responsive, distinct party member can cover (fight.c).
+            // identity and checks the coverer's actual party membership/status/HP (fight.c).
             Add(player, "coveredByRoleId", JsonValue.Create(cover), pp, From("coveredBy"));
             int nameId = Read("name");
             var nameObject = View(nameId, "player", From("name"));
@@ -219,6 +221,8 @@ public static class BattleDataProjector
         var numeric = new JsonObject { ["roles"] = outputRoles, ["players"] = players, ["growth"] = growth, ["teams"] = outputTeams };
         Add(numeric, "formatVersion", JsonValue.Create(1), "", "modern-battle-data v1");
         string numericJson = numeric.ToJsonString(JsonOptions) + "\n";
+        if (Utf8.GetByteCount(numericJson) > 16 * 1024 * 1024)
+            throw new InvalidDataException("numeric/battle-data.json: output exceeds the existing PrepareBattleData 16MiB input limit.");
         TriggerBattleContent content = ModernBattleContent.Parse(numericJson);
         foreach (int team in teams)
         {
@@ -263,7 +267,11 @@ public static class BattleDataProjector
         void Record(JsonNode? node, string path, string source)
         {
             if (node is JsonObject o) { foreach (var pair in o) Record(pair.Value, path + "." + pair.Key, source); }
-            else if (node is JsonArray a && a.Count > 0) { for (int i = 0; i < a.Count; i++) Record(a[i], path + $"[{i}]", source); }
+            else if (node is JsonArray a && a.Count > 0)
+            {
+                for (int i = 0; i < a.Count; i++)
+                    Record(a[i], path + $"[{i}]", source.Replace("[slot]", $"[{i}]", StringComparison.Ordinal).Replace("[level]", $"[{i}]", StringComparison.Ordinal));
+            }
             else sources.Add(new JsonObject { ["path"] = path, ["source"] = source });
         }
     }
