@@ -159,8 +159,9 @@ public static class NativeBattleVisualProfile
     /// as possibly cyclic, without claiming cycle identity detection. Compatibility/full-profile
     /// loading does not acquire these limits. An owned ordinal hash snapshot authenticates the
     /// prepared native content dependency graph, including the sprite root, and exact manifest
-    /// membership before loading and after field/Source comparison. Texture equivalence is not
-    /// checked by this slice; no expected Texture Resource reference is retained.</summary>
+    /// membership before loading and after field/Source comparison. Optional Texture identity is
+    /// captured as normalized native URI, native type and frame dimensions, never a Resource
+    /// reference. Null must match null; non-null textures must match this full descriptor.</summary>
     public static PalSprite LoadSprite(string uri, PalSprite expected, IReadOnlyDictionary<string, string> resourceSha256)
     {
         try
@@ -187,7 +188,8 @@ public static class NativeBattleVisualProfile
     private sealed record SpriteExpectation(int SpriteId, int DecodedByteLength, int FrameCount,
         IReadOnlyDictionary<int, SpriteFrameExpectation> Frames, SpriteSourceValue Source);
     private sealed record SpriteFrameExpectation(int SourceOffset, int Width, int Height,
-        IReadOnlyList<byte> Indices, IReadOnlyList<byte> Alpha);
+        IReadOnlyList<byte> Indices, IReadOnlyList<byte> Alpha, SpriteTextureExpectation? Texture);
+    private sealed record SpriteTextureExpectation(string Uri, string NativeType, int Width, int Height);
 
     private static SpriteExpectation SnapshotSpriteExpectation(PalSprite? expected)
     {
@@ -200,7 +202,7 @@ public static class NativeBattleVisualProfile
         Require(frameCount is > 0 and <= 4096, "expected FrameCount is invalid");
         var nativeFrames = expected.Frames ?? throw new InvalidDataException("expected Frames is required");
         var frames = new Dictionary<int, SpriteFrameExpectation>();
-        // Mirror the shared structural core, not a new count/offset/alpha/Texture policy.
+        // Preserve the shared count/offset/alpha policy; Texture identity is checked-mode only.
         foreach (var frame in nativeFrames)
         {
             if (frame is null) throw new InvalidDataException("expected Frames contains null frame");
@@ -218,13 +220,25 @@ public static class NativeBattleVisualProfile
             Require(indices.Length == pixels, path + ": Indices plane length must match Width/Height");
             Require(alpha.Length == indices.Length, path + ": Alpha plane length must match Indices");
             frames.Add(index, new(sourceOffset, width, height,
-                Array.AsReadOnly(indices.ToArray()), Array.AsReadOnly(alpha.ToArray())));
+                Array.AsReadOnly(indices.ToArray()), Array.AsReadOnly(alpha.ToArray()),
+                SnapshotSpriteTexture(frame.Texture, path, width, height)));
         }
         Require(Enumerable.Range(0, frameCount).All(frames.ContainsKey), "expected sprite nominal frame Index missing");
         int visited = 0;
         var source = SnapshotSpriteSource(metadata, "Source", 0, ref visited);
         return new(spriteId, decodedByteLength, frameCount,
             new ReadOnlyDictionary<int, SpriteFrameExpectation>(frames), source);
+    }
+
+    private static SpriteTextureExpectation? SnapshotSpriteTexture(Texture2D? texture, string path, int width, int height)
+    {
+        if (texture is null) return null;
+        string uri = texture.ResourcePath;
+        try { NativeExplorationProfile.ValidateUri(uri); }
+        catch (InvalidDataException error) { throw new InvalidDataException(path + ": Texture URI: " + error.Message, error); }
+        int textureWidth = texture.GetWidth(), textureHeight = texture.GetHeight();
+        Require(textureWidth == width && textureHeight == height, path + ": Texture dimensions must match frame Width/Height");
+        return new(uri, texture.GetClass(), textureWidth, textureHeight);
     }
 
     private static void CompareSpriteExpectation(SpriteExpectation expected, PalSprite actual)
@@ -245,6 +259,17 @@ public static class NativeBattleVisualProfile
             Require(wanted.Height == frame.Height, path + ": Height differs from expected");
             Require(wanted.Indices.SequenceEqual(frame.Indices), path + ": Indices plane differs from expected");
             Require(wanted.Alpha.SequenceEqual(frame.Alpha), path + ": Alpha plane differs from expected");
+            var texture = SnapshotSpriteTexture(frame.Texture, path, frame.Width, frame.Height);
+            if (wanted.Texture is not { } wantedTexture)
+                Require(texture is null, path + ": Texture must be null as expected");
+            else
+            {
+                if (texture is null) throw new InvalidDataException(path + ": Texture is required as expected");
+                Require(wantedTexture.Uri == texture.Uri, path + ": Texture URI differs from expected");
+                Require(wantedTexture.NativeType == texture.NativeType, path + ": Texture native type differs from expected");
+                Require(wantedTexture.Width == texture.Width && wantedTexture.Height == texture.Height,
+                    path + ": Texture dimensions differ from expected");
+            }
         }
     }
 

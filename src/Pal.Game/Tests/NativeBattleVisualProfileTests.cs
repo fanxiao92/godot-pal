@@ -652,6 +652,216 @@ public class NativeBattleVisualProfileTests
     }
 
     [TestCase]
+    public void StandaloneCheckedSpriteMatchesTextureIdentityAndExactDependencies()
+    {
+        string root = "res://Assets/RuntimeTests/checked-sprite-texture-" + Guid.NewGuid().ToString("N");
+        string directory = ProjectSettings.GlobalizePath(root);
+        string uri = root + "/Sprite.tres";
+        const string textureUri = NativeStoryProfileFixture.TextureSource;
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        Texture2D Texture() => ResourceLoader.Load<Texture2D>(textureUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep)
+            ?? throw new InvalidOperationException("literal fixture texture missing");
+        PalSprite Literal(Texture2D? texture) => new()
+        {
+            SpriteId = 73, DecodedByteLength = 512, FrameCount = 1,
+            Source = new Godot.Collections.Dictionary { ["archive"] = "literal-textured.mkf", ["chunk"] = 73 },
+            Frames = [new PalFrame { Index = 0, SourceOffset = 4, Width = 11, Height = 19,
+                Indices = Enumerable.Repeat((byte)4, 209).ToArray(), Alpha = Enumerable.Repeat((byte)255, 209).ToArray(), Texture = texture! }]
+        };
+        var authored = Literal(Texture());
+        var expected = Literal(Texture()); // Independent literal, never populated from the target sprite.
+        void Save(params string[] dependencies)
+        {
+            AssertThat(ResourceSaver.Save(authored, uri)).IsEqual(Error.Ok);
+            hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string path in new[] { uri }.Concat(dependencies)) hashes.Add(path, Godot.FileAccess.GetSha256(path));
+        }
+        string Reject(string field, string? target = null)
+        {
+            string failure = Failure(() => NativeBattleVisualProfile.LoadSprite(target ?? uri, expected, hashes));
+            AssertThat(failure.Contains(target ?? uri, StringComparison.Ordinal)).IsTrue();
+            AssertThat(failure.Contains(field, StringComparison.OrdinalIgnoreCase)).IsTrue();
+            return failure;
+        }
+        void Prove(PalSprite sprite)
+        {
+            AssertThat(sprite.SpriteId).IsEqual(73);
+            AssertThat(sprite.Frames[0].Texture.ResourcePath).IsEqual(textureUri);
+            AssertThat(sprite.Frames[0].Texture.GetClass()).IsEqual("CompressedTexture2D");
+            AssertThat(sprite.Frames[0].Texture.GetWidth()).IsEqual(11);
+            AssertThat(sprite.Frames[0].Texture.GetHeight()).IsEqual(19);
+            AssertThat(sprite.Frames[0].Indices.SequenceEqual(Enumerable.Repeat((byte)4, 209))).IsTrue();
+            AssertThat(sprite.Frames[0].Alpha.SequenceEqual(Enumerable.Repeat((byte)255, 209))).IsTrue();
+        }
+        try
+        {
+            Directory.CreateDirectory(directory);
+            Save(textureUri, textureUri + ".import");
+            Prove(ResourceLoader.Load<PalSprite>(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            Prove(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            string unchangedRoot = hashes[uri];
+            // Designated first RED: only expected optionality changes, not URI/file/manifest/planes/Source.
+            expected.Frames[0].Texture = null!;
+            AssertThat(Godot.FileAccess.GetSha256(uri)).IsEqual(unchangedRoot);
+            Reject("Texture");
+
+            expected = Literal(Texture());
+            authored.Frames[0].Texture = null!;
+            Save();
+            AssertThat(ResourceLoader.Load<PalSprite>(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep).Frames[0].Texture is null).IsTrue();
+            Reject("Texture");
+            expected.Frames[0].Texture = null!;
+            AssertThat(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes).Frames[0].Texture is null).IsTrue();
+            authored = Literal(Texture()); expected = Literal(Texture());
+            Save(textureUri, textureUri + ".import");
+            foreach (string path in new[] { uri, textureUri, textureUri + ".import" })
+            {
+                string value = hashes[path];
+                hashes.Remove(path); Reject("SHA-256"); hashes.Add(path, value);
+                hashes[path] = new string('0', 64); Reject("SHA-256"); hashes[path] = value;
+            }
+            // The root's external frame and opaque metadata participate in the same exact graph.
+            string frameUri = root + "/Frame.tres", opaqueUri = root + "/Opaque.tres";
+            AssertThat(ResourceSaver.Save(authored.Frames[0], frameUri)).IsEqual(Error.Ok);
+            authored.Frames[0] = ResourceLoader.Load<PalFrame>(frameUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+            AssertThat(ResourceSaver.Save(new Resource(), opaqueUri)).IsEqual(Error.Ok);
+            authored.SetMeta("opaque", ResourceLoader.Load<Resource>(opaqueUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            Save(frameUri, opaqueUri, textureUri, textureUri + ".import");
+            Prove(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            foreach (string path in new[] { frameUri, opaqueUri })
+            {
+                string value = hashes[path];
+                hashes.Remove(path); Reject("SHA-256"); hashes.Add(path, value);
+                hashes[path] = new string('0', 64); Reject("SHA-256"); hashes[path] = value;
+            }
+            string unused = root + "/Unused.tres";
+            AssertThat(ResourceSaver.Save(new Resource(), unused)).IsEqual(Error.Ok);
+            hashes.Add(unused, Godot.FileAccess.GetSha256(unused)); Reject("manifest"); hashes.Remove(unused);
+            // These are ordinary native textures, not an invented PNG/import/cache certificate.
+            using var image = Image.CreateEmpty(11, 19, false, Image.Format.Rgba8);
+            image.Fill(Colors.Magenta);
+            string firstUri = root + "/FirstTexture.tres", secondUri = root + "/SecondTexture.tres";
+            AssertThat(ResourceSaver.Save(ImageTexture.CreateFromImage(image), firstUri)).IsEqual(Error.Ok);
+            AssertThat(ResourceSaver.Save(ImageTexture.CreateFromImage(image), secondUri)).IsEqual(Error.Ok);
+            authored = Literal(ResourceLoader.Load<Texture2D>(firstUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            expected = Literal(ResourceLoader.Load<Texture2D>(secondUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            Save(firstUri);
+            Reject("Texture URI"); // Same type/dimensions, different normalized native URI.
+            expected.Frames[0].Texture = ResourceLoader.Load<Texture2D>(firstUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+            AssertThat(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes).Frames[0].Texture.GetClass()).IsEqual("ImageTexture");
+            var atlas = new AtlasTexture { Atlas = Texture(), Region = new Rect2(0, 0, 11, 19) };
+            string typeUri = root + "/TypeTexture.tres";
+            AssertThat(ResourceSaver.Save(atlas, typeUri)).IsEqual(Error.Ok);
+            // Save does not establish ResourcePath on this newly created object in the actual runtime.
+            // Read back the independently authored Atlas fixture before replacing its file type.
+            var expectedAtlas = ResourceLoader.Load<AtlasTexture>(typeUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+            AssertThat(expectedAtlas.ResourcePath).IsEqual(typeUri);
+            AssertThat(expectedAtlas.GetClass()).IsEqual("AtlasTexture");
+            AssertThat(expectedAtlas.GetWidth()).IsEqual(11);
+            AssertThat(ResourceSaver.Save(ImageTexture.CreateFromImage(image), typeUri)).IsEqual(Error.Ok);
+            authored = Literal(ResourceLoader.Load<Texture2D>(typeUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            expected = Literal(expectedAtlas);
+            Save(typeUri);
+            AssertThat(authored.Frames[0].Texture.GetClass()).IsEqual("ImageTexture");
+            Reject("native type"); // Same URI and dimensions, independently expected AtlasTexture type.
+            expected.Frames[0].Texture = ImageTexture.CreateFromImage(image);
+            Reject("Texture", "user://intentionally-invalid.tres"); // Invalid expected path wins before target I/O.
+            using var small = Image.CreateEmpty(2, 1, false, Image.Format.Rgba8);
+            string smallUri = root + "/Small.tres";
+            AssertThat(ResourceSaver.Save(ImageTexture.CreateFromImage(small), smallUri)).IsEqual(Error.Ok);
+            expected.Frames[0].Texture = ResourceLoader.Load<Texture2D>(smallUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+            Reject("Texture", "user://intentionally-invalid.tres"); // Invalid expected dimensions also precede target I/O.
+            expected = Literal(null); expected.SpriteId = -1;
+            Reject("SpriteId", "user://intentionally-invalid.tres");
+            expected = Literal(Texture());
+            authored = Literal(ResourceLoader.Load<Texture2D>(smallUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            Save(smallUri);
+            AssertThat(ResourceLoader.Load<PalSprite>(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep).Frames[0].Texture.GetWidth()).IsEqual(2);
+            Reject("Texture dimensions");
+            authored = Literal(ResourceLoader.Load<Texture2D>(firstUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            expected = Literal(ResourceLoader.Load<Texture2D>(firstUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            Save(firstUri);
+            var isolated = NativeBattleVisualProfile.LoadSprite(uri, expected, hashes);
+            ((ImageTexture)isolated.Frames[0].Texture).SetSizeOverride(new(2, 1));
+            AssertThat(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes).Frames[0].Texture.GetWidth()).IsEqual(11);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestCase]
+    public void StandaloneCheckedSpriteRejectsUnsafeOpaqueAndImportGraphsBeforeLoading()
+    {
+        string root = "res://Assets/RuntimeTests/checked-sprite-graph-" + Guid.NewGuid().ToString("N");
+        string directory = ProjectSettings.GlobalizePath(root);
+        string uri = root + "/Sprite.tres", extra = root + "/Extra.tres", unused = root + "/Unused.tres";
+        const string texture = NativeStoryProfileFixture.TextureSource;
+        PalSprite Literal() => new() { SpriteId = 73, DecodedByteLength = 16, FrameCount = 1,
+            Source = new Godot.Collections.Dictionary { ["archive"] = "literal-graph.mkf", ["chunk"] = 73 },
+            Frames = [new PalFrame { Index = 0, SourceOffset = 4, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] }] };
+        var authored = Literal(); var expected = Literal();
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Plain(string target, string uid = "") => "[gd_resource type=\"Resource\" format=3]\n"
+            + $"[ext_resource type=\"Resource\"{uid} path=\"{target}\" id=\"leaf\"]\n[resource]\nmetadata/leaf = ExtResource(\"leaf\")\n";
+        void Hash(params string[] paths)
+        {
+            hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string path in paths) hashes.Add(path, Godot.FileAccess.GetSha256(path));
+        }
+        void WriteExtra(string text) => File.WriteAllText(ProjectSettings.GlobalizePath(extra), text);
+        void Reject(string context)
+        {
+            string failure = Failure(() => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            AssertThat(failure.Contains(uri, StringComparison.Ordinal)).IsTrue();
+            AssertThat(failure.Contains(context, StringComparison.OrdinalIgnoreCase)).IsTrue();
+        }
+        try
+        {
+            Directory.CreateDirectory(directory);
+            AssertThat(ResourceSaver.Save(new Resource(), unused)).IsEqual(Error.Ok);
+            WriteExtra(Plain(texture));
+            authored.SetMeta("opaque", ResourceLoader.Load<Resource>(extra, cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+            AssertThat(ResourceSaver.Save(authored, uri)).IsEqual(Error.Ok);
+            Hash(uri, extra, texture, texture + ".import");
+            var clean = NativeBattleVisualProfile.LoadSprite(uri, expected, hashes);
+            AssertThat(clean.Frames[0].Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
+            AssertThat(clean.GetMeta("opaque").AsGodotObject() is Resource).IsTrue();
+            foreach (string invalid in new[] { "", "not-a-hash", new string('A', 64) })
+            {
+                string saved = hashes[extra]; hashes[extra] = invalid; Reject("SHA-256"); hashes[extra] = saved;
+            }
+            WriteExtra(Plain(extra)); Hash(uri, extra); Reject("cyclic native content");
+            string unknown = root + "/Unknown.txt";
+            File.WriteAllText(ProjectSettings.GlobalizePath(unknown), "not a supported native resource");
+            WriteExtra(Plain(unknown)); Hash(uri, extra, unknown); Reject("unsupported native content dependency type");
+            WriteExtra(Plain("user://outside.tres")); Hash(uri, extra); Reject("normalized res://");
+            WriteExtra(Plain(root + "/Missing.tres")); Hash(uri, extra); Reject("SHA-256");
+            foreach (bool matching in new[] { false, true })
+            {
+                long uid = ResourceUid.CreateId();
+                try
+                {
+                    ResourceUid.AddId(uid, matching ? unused : root + "/Other.tres");
+                    WriteExtra(Plain(unused, " uid=\"" + ResourceUid.IdToText(uid) + "\"")); Hash(uri, extra, unused);
+                    if (matching) AssertThat(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes).SpriteId).IsEqual(73);
+                    else Reject("UID/fallback identity mismatch");
+                }
+                finally { if (ResourceUid.HasId(uid)) ResourceUid.RemoveId(uid); }
+            }
+            // Actual PNG bytes without a prepared remap must fail before the loader/importer can run.
+            string png = root + "/Unprepared.png";
+            using var image = Image.CreateEmpty(2, 1, false, Image.Format.Rgba8);
+            image.Fill(Colors.Magenta);
+            AssertThat(image.SavePng(ProjectSettings.GlobalizePath(png))).IsEqual(Error.Ok);
+            AssertThat(Godot.FileAccess.FileExists(png + ".import")).IsFalse();
+            WriteExtra(Plain(png)); Hash(uri, extra, png); Reject("Unprepared.png.import");
+            // A native wrong root type with its own correct exact manifest is not a valid sprite.
+            AssertThat(ResourceSaver.Save(new Resource(), uri)).IsEqual(Error.Ok);
+            Hash(uri); Reject("expected PalSprite");
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestCase]
     public void DeclaredNumberSpriteCannotEscapeExactHashClosure()
     {
         using var f = new NativeBattleVisualProfileFixture();

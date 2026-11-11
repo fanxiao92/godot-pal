@@ -21,6 +21,23 @@
 
 返回 role/坐标/metadata 是值投影，teams/hash 是独立只读集合；持有本次 IgnoreDeep 的 sprite/palette/background 实例。**原生 Resource 仍可变**，调用方须按 prepared-resource 只读契约消费，不保证深不可变或热重载，不 clone-on-get。没有 Node 实例化，失败不留下视觉节点。
 
+## #164：独立 sprite 的公开结构加载与 checked 加载
+
+复用同一模块和原生 `PalSprite` / `PalFrame`，不新增 Resource、格式或运行时准备器：
+
+- `NativeBattleVisualProfile.LoadSprite(uri)`：规范 URI 和数据依赖预检后，以 `IgnoreDeep` 加载，执行与完整 visual 共用的结构校验。保留 Source 声明、可选/null Texture、额外可寻址 alias 和原 indices/alpha；不认证原档来源。完整 visual 内部仍直接使用共用结构 core，保持原 root 的 hash 流程与诊断优先级，不因新增 standalone 包装重复改变旧错误上下文。
+- `LoadSprite(uri, expected, resourceSha256)`：`expected` 必须由调用者独立 author，或从已校验现代包构造，不能先加载目标再把目标当唯一预期。开始任何目标 I/O 前，先捕获完整、纯 managed 的 scalar/frame/plane/Source/Texture descriptor，再复制 Ordinal hash map；不持有调用者可变 Resource、Variant collection、planes 或 dictionary。返回值仍是隔离但可变的原生 Resource，调用者按只读契约消费。
+
+checked 精确比较 `SpriteId`、`DecodedByteLength`、nominal `FrameCount`、包含 alias 的实际 Index 集合，以及各 Index 的 `SourceOffset`、宽高、indices/alpha。帧集合顺序不构成身份，alias 不增加 nominal count。结构上非法的 expected 在目标预检前拒绝；不能通过提供坏 URI 掩盖 expected 的字段错误。
+
+Source 是有类型的 JSON-like 值树：Nil/Bool/Int/有限 Float/String、String-key Dictionary、Array。严格保留 Variant 类型、key/value、数组顺序，字典枚举顺序不构成身份。expected 与 actual 各有独立 **depth64（root0）/work65536** 上限，key 也计数、深度为 parent+1。重复别名按值拷贝合法；不使用私有指针、反射或未验证的 collection identity。循环或更深/更大的有限树均有界拒绝，准确报告 `exceeds depth/work bound (possibly cyclic)`，不声称已证明循环。此限制仅适用于新 checked overload，旧 compatibility/full-profile Source 不增加限制。
+
+Texture 可选性精确：null 只能匹配 null。非 null 的 expected 必须有规范 native `ResourcePath`，尺寸与所在 frame 一致；快照并比较 URI、`GetClass()` 原生类型及宽高。实际同 URI 异类型、同类型异 URI、缺失/多出或尺寸不符均拒绝。不会把 generic indexed sprite 改成强制有纹理；未来 FIRE Prepare 必须从其已验证包显式构造实际 PNG Texture 预期，不能用 null expectation 绕过必需纹理。不会复制缓存或在加载时自动 import。
+
+checked hash map **包含 sprite root**（区别于完整 visual 的不自 hash 根）；复用 `NativeContentDependencies` 在加载前、字段/Source/Texture 比较后认证整个数据图，并精确比较 key 集合。包括 external frame、opaque metadata、Texture、image source 和 `.import`；缺/多/错 hash、非法类型/路径、循环或 UID/fallback 冲突明确拒绝。仍排除 scripts/engine/generated `.godot` output；源归档 SHA 仍只是声明。同步前后检查不是文件系统锁、并发快照、缓存真实性或 GPU 认证，也不保证返回后任意热修改安全。
+
+自动化从真实 `ResourceSaver`/typed `IgnoreDeep` 和独立 literal 构造证明字段/Source/Texture、精确依赖、URI/type/dimensions、null 双向、外部 frame/opaque、UID、未准备 PNG remap 拒绝及新加载隔离；原 full-profile 回归保留。SVG 的实际 source/`.import` 正例与自有 PNG 缺 remap 负例分别标识，不宣称已交付 FIRE PNG Prepare。指定 RED、普通 fixture 错误、实际 GREEN 和正常 Main 兼容的本轮数字退出与原件见绑定候选收据；SOURCE/metadata 不代替实际 Game，也不补签 #147、完整共享门、真实资源、GPU/人工或整个 M6。
+
 ## 参考与明确留待后续的行为
 
 只读 `reference/sdlpal/battle.c`：27 单角色位置表；880–949 按 role→F 图档、enemy object→enemy definition→ABC 图档加载，enemy 位置含 Y offset；124/199 bottom-center；735 当前 palette/night；982–987 FBP320×200。`fight.c`：2079/2120 普攻 player8/9；4987–5045 enemy idle/magic/attack 分段，attack loop `<=AttackFrames` 末索引为 idle+magic+attack−1；zero attack 取 idle−1。这里保留全原索引帧和必要分段 metadata，不猜动画帧索引、坐标或时间。
