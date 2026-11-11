@@ -30,6 +30,83 @@ public sealed class FirstMandatoryBattleClosureTests
     }
 
     [Fact]
+    public void Explicit_cash_capability_preflights_both_languages_and_all_branches_without_execution()
+    {
+        var (profile, fixture) = PreparedProfile();
+        var commands = fixture.EventFile["commands"]!.AsArray();
+        // Independent modern literals: a debit then halve would change every nonzero seed if run.
+        // The shortage goes straight to battle; preflight must still walk the normal path too.
+        void CashCommand(int address, string op, int opcode, int? amount = null, int target = 0x09fe)
+        {
+            var command = new JsonObject
+            {
+                ["label"] = $"L{address:X4}", ["op"] = op, ["next"] = $"L{address + 1:X4}",
+                ["source"] = new JsonObject { ["index"] = address, ["opcode"] = opcode,
+                    ["operands"] = new JsonArray(amount is null ? 0 : 65535, target, 0) }
+            };
+            if (amount is not null) { command["amount"] = amount.Value; command["to"] = $"L{target:X4}"; }
+            commands[address] = command;
+        }
+        CashCommand(0x09c5, "changeCash", 0x001e, -1);
+        CashCommand(0x09c6, "halveCash", 0x008f);
+        var events = fixture.Events();
+        var content = fixture.Content();
+        string eventBytes = fixture.EventFile.ToJsonString();
+        string contentBytes = System.Text.Json.JsonSerializer.Serialize(content);
+        string authorBytes = System.Text.Json.JsonSerializer.Serialize(profile.World);
+        var chinese = fixture.Chinese();
+        var english = fixture.English();
+        Assert.Contains("cash owner", Assert.Throws<InvalidDataException>(() =>
+            FirstMandatoryBattleClosure.Verify(profile, events, chinese, english, content, Images())).Message);
+        foreach (uint initial in new uint[] { 0, 10, 2147483648, 4294967295 })
+        {
+            var cash = new CashLiveState(initial);
+            for (int repeat = 0; repeat < 2; repeat++)
+            {
+                // Designated RED: the API shell ignores the explicit owner at @09C5.
+                var receipt = FirstMandatoryBattleClosure.Verify(profile, events, chinese, english, content,
+                    Images(), cashLiveState: cash);
+                Assert.Equal(new[] { 18 }, receipt.VerifiedBattleTeamIds);
+                Assert.Equal(profile.ContextSha256, receipt.ContextSha256);
+                Assert.Equal(0x09c3, receipt.TriggerEntryAddress);
+                Assert.Equal(initial, cash.Cash);
+            }
+        }
+        // The receipt never supplies a default owner for a later unbound caller.
+        Assert.Contains("cash owner", Assert.Throws<InvalidDataException>(() =>
+            FirstMandatoryBattleClosure.Verify(profile, events, chinese, english, content, Images(), cashLiveState: null)).Message);
+
+        // Both language checks must remain in force after cash capability was added. Message11
+        // is on the Won continuation, after the cash prefix; no execution reaches that boundary.
+        var missingWon = new DialogueLanguagePackage("en",
+            Enumerable.Range(10, 15).Where(id => id != 11).Select(id => english.Resolve(id, 0))
+                .Concat(Enumerable.Range(0, 4).Select(band => english.Resolve(13 + band * 2, 1))));
+        var unchanged = new CashLiveState(10);
+        Assert.Contains("11", Assert.Throws<InvalidDataException>(() =>
+            FirstMandatoryBattleClosure.Verify(profile, events, chinese, missingWon, content, Images(), unchanged)).Message);
+        Assert.Equal(10u, unchanged.Cash);
+
+        // Positive credit can never take shortage at runtime, but its target is still raw and
+        // must reject. Do not prune the branch using balance or the sign of the cash amount.
+        CashCommand(0x09c5, "changeCash", 0x001e, 7, 0x0a33);
+        var unsupported = fixture.Events();
+        foreach (uint initial in new uint[] { 0, 4294967295 })
+        {
+            var cash = new CashLiveState(initial);
+            var error = Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleClosure.Verify(profile,
+                unsupported, chinese, english, content, Images(), cash));
+            Assert.Contains("@0A33", error.Message);
+            Assert.Equal(initial, cash.Cash);
+        }
+        // Restore only our authored test command; the production checker must not change inputs.
+        CashCommand(0x09c5, "changeCash", 0x001e, -1);
+        Assert.Equal(eventBytes, fixture.EventFile.ToJsonString());
+        Assert.Equal(contentBytes, System.Text.Json.JsonSerializer.Serialize(content));
+        Assert.Equal(authorBytes, System.Text.Json.JsonSerializer.Serialize(profile.World));
+        // No random interface is supplied to Verify: battle execution/RNG is not this seam.
+    }
+
+    [Fact]
     public void Search_opens_the_trigger_only_once_and_parks_exploration()
     {
         (FirstMandatoryBattleProfile profile, RealClosureFixture fixture) = PreparedProfile();

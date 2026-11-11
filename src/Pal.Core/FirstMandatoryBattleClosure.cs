@@ -42,9 +42,12 @@ public static class FirstMandatoryBattleClosure
     public const string ContractOnlyDiagnostic =
         "closure entry '{0}' is still contract-only; bind real modern resources before @09C3 can open.";
 
+    /// <summary>An explicitly supplied cash owner enables cash commands in both language walks.
+    /// Only its presence is checked: the wallet is neither executed, retained nor supplied by
+    /// the receipt to a later runtime session. Null means no cash capability, not a zero seed.</summary>
     public static FirstMandatoryBattleClosureReceipt Verify(FirstMandatoryBattleProfile profile,
         TriggerEventCollection events, DialogueLanguagePackage chinese, DialogueLanguagePackage english,
-        TriggerBattleContent battleContent, FirstMandatoryBattleImageClosure images)
+        TriggerBattleContent battleContent, FirstMandatoryBattleImageClosure images, CashLiveState? cashLiveState = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(events);
@@ -81,8 +84,10 @@ public static class FirstMandatoryBattleClosure
         // Every reachable local path, role hook, battle-end script, dynamic verb and the reload
         // boundary are preflighted per language; unknown or raw commands and missing messages,
         // names or portraits reject here, before any side effect.
-        TriggerEntryRequirements chineseRequirements = TriggerScriptSession.ValidateEntry(events, chinese, battleContent, entry28.FileId, entry28.Id);
-        TriggerEntryRequirements englishRequirements = TriggerScriptSession.ValidateEntry(events, english, battleContent, entry28.FileId, entry28.Id);
+        TriggerEntryRequirements chineseRequirements = TriggerScriptSession.ValidateEntry(events, chinese, battleContent, entry28.FileId, entry28.Id,
+            cashLiveState: cashLiveState);
+        TriggerEntryRequirements englishRequirements = TriggerScriptSession.ValidateEntry(events, english, battleContent, entry28.FileId, entry28.Id,
+            cashLiveState: cashLiveState);
         if (!chineseRequirements.BattleTeamIds.SequenceEqual(englishRequirements.BattleTeamIds)
             || !chineseRequirements.PortraitIds.SequenceEqual(englishRequirements.PortraitIds))
             throw new InvalidDataException("real closure: the selected entry requires different battles or portraits across languages.");
