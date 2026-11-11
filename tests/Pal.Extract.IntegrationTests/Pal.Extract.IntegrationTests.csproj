@@ -15,6 +15,7 @@
     </PackageReference>
     <ProjectReference Include="../../tools/Pal.Extract/Pal.Extract.csproj" />
     <Compile Include="../Pal.Extract.Tests/Fixtures/Yj2TestData.cs" Link="Fixtures/Yj2TestData.cs" />
+    <Compile Include="../Fixtures/BattleProjectionFixture.cs" Link="Fixtures/BattleProjectionFixture.cs" />
   </ItemGroup>
   <!-- Run the built CLI, not dotnet run, so builds cannot hide its output/exit code. -->
   <Target Name="CopyCliForProcessTests" AfterTargets="Build">

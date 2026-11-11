@@ -15,5 +15,6 @@
     </PackageReference>
     <ProjectReference Include="../../tools/Pal.Extract/Pal.Extract.csproj" />
     <Compile Include="../Pal.Extract.Tests/Fixtures/Yj2TestData.cs" Link="Fixtures/Yj2TestData.cs" />
+    <Compile Include="../Fixtures/BattleProjectionFixture.cs" Link="Fixtures/BattleProjectionFixture.cs" />
   </ItemGroup>
 </Project>
