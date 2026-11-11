@@ -117,4 +117,18 @@ API itemId 必须是 WORD。非法参数抛 `ArgumentOutOfRangeException`，在�
 
 `TriggerScriptBattleBindingTests.Explicit_current_equipment_flows_into_next_trigger_battles_without_author_reseeding` 经公开真 owner、完整移除原语、requirements/Start/真实 lifecycle 攻击和 completion 验证独立字面预期：库存2+hand1移除后，head 贡献 attack10/defense4/dexterity20，declared base40 得50而 legacy base70得80；完成/ACK后移除head，第二场得40/70，不重置或叠加。覆盖 world/无world、角色与装备 owner 隔离/历史记录、队外角色、持久hand清除与未移除overlay、错/旧/重复回执、缺失/错配拒绝、已移除的 field4/65/精灵不再阻塞以及未声明零装备兼容。测试使用人工数据，不冒充自然存档、真实资产或正常 Main 证据。
 
-这是 #132 的必要 Core 消费链前置，不是整票交付：`removeItem` 仍预先拒绝，即使同时绑定库存/装备也不执行。生产0020现代目标/ScriptSuccess/闭包、唯一库存/角色/装备/毒生命周期接线、Main/native 显式 seed/preview 隔离/重复过期请求与正常 Main/SceneRunner 连续性仍开放。Core 反馈不签 Game、Prepare、私有/GPU/桌面/CI、故事或 fullM6；未来重建仍由宿主从合法上下文一次构造再绑定，不新增保存字段。
+这是 #132 的必要 Core 消费链前置，不是整票交付。#187 的交付版本仍拒绝 `removeItem`；下节 #188 增加显式完整绑定下的 Event 消费者。唯一库存/角色/装备/毒宿主生命周期接线、Main/native 显式 seed/preview 隔离/重复过期请求与正常 Main/SceneRunner 连续性仍开放。Core 反馈不签 Game、Prepare、私有/GPU/桌面/CI、故事或 fullM6；未来重建仍由宿主从合法上下文一次构造再绑定，不新增保存字段。
+
+## Event 的现代 removeItem 消费者（#188）
+
+既有 `TriggerScriptSession.ForSharedRoles` 在 `equipmentState` 后追加可选 `PartyPoisonState? partyPoisons = null`；只读 `PartyPoisons` 暴露所绑定的同一实例。不增加其它构造、隐式 seed、复制 owner 或运行中 rebind；未传新参数的旧调用和静态 `ValidateEntry` 保持 `removeItem` 能力拒绝。只在显式共享的库存、当前装备、角色与毒四个 owner 齐备时支持 Event 上下文，复用 #186 的 `TryRemoveItem`，不另写移除算法或脚本执行器。
+
+解析和执行消费现代 `itemId`/unsigned WORD `count`/`shortageTarget`；归档 source operands 只作诊断。`shortageTarget=null` 对应参考0，允许耗尽仍不足；非null须为非零同文件或跨文件地址。引用地址0必须写null，不允许以指向归档0位置的字符串代替。`count=0` 由现有完整原语转换成1，65535不截成SHORT；false只选择短缺目标，true继续后继，均不写 `ScriptSuccess`，不把允许的部分消耗退款。`addItem` 负数仍只减库存，`itemShortageJump` 仍比较库存和 signed count，不被0020的含装备计数替代。
+
+requirements/Start 的保守闭包检查后继和每个非null目标，不因数量、当前库存或必然足量而剪枝。预检不读写库存、模拟装备移除、重播装备初始化、消耗随机数或修改 CallId。被实际选中回退角色的装备/状态一致性仍由 #186 在命令执行的写前校验负责；这不是对整个脚本做预测或事务回滚。库存/装备变更立即提交，显示完成回执只推进后继；过早、外来、重复、旧显示/战斗回执不重放命令。新的显式 Start 则是新操作，不新增请求自动去重承诺。
+
+**固定成员与活动战斗边界**：计数/回退共用 `PartyPoisons.PartyRoleIds` 的固定当前顺序；绑定 world 时，选中含0020闭包要求其与 `world.PartyRoles` 当前顺序完全相同。任何同时可达 `setParty` 的0020闭包（包括成员不变的写入）均在副作用前拒绝，不能在未迁移毒槽时静默使用旧队伍。没有0020的既有 `setParty` 闭包不受此限制；若另一调用已改队伍，下一次0020重新检查并拒绝错配。`RoleHook` 与 `BattleEnd` 中的0020即使四个 owner 齐备也预先拒绝，以免活动战斗的局部投影与外部真值分离。未来宿主不得在活动 battle 或显示/事件暂停期间外部改写这些共享 owner；当前票不开放活动战斗装备/毒修改、成员迁移或这些上下文的完整物品能力，这些仍是 #132 及后续必需消费链的开放契约。
+
+公开 Core `TriggerScriptRemovalTests.Modern_removal_branches_preserve_script_success_and_share_current_stock_gear_roles_and_poisons` 使用人工独立字面夹具和真实四 owner、trigger/display/lifecycle：库存2+hand1请求3，清手部实际/overlay双击，显示后正式战斗读取剩余wear贡献attack10（base40得到50）；完成并ACK后新调用移除wear并整理毒ID/脚本对，再按当前成员顺序消耗另一角色装备，队外角色及author不变。覆盖零/65535/item0、允许不足与目标拒绝、成功标志保留、signed0058、跨文件/非法目标、完整绑定拒绝、两分支闭包、world顺序/setParty和两个battle脚本上下文拒绝及旧回执。它不模拟自然save、真实资产或正常 Main。
+
+本前置只闭合 Event 生产0020的现代字段/分支及公开 Core 消费链。#132 保持开放：Main/native 初始来源及唯一生命周期绑定、preview 隔离、宿主重复过期请求保护、正常 Main/SceneRunner 连续性与所需活动战斗/成员迁移消费者仍未交付；#131 现金 Main/native、#129/#147 与旧 #165/#168 停止失败不由本票解决。无菜单、预留、存档schema或故事/fullM6验收增加。

@@ -97,8 +97,9 @@ public sealed class TriggerEventCollection
             if (command.TargetReference is not null)
             {
                 int target = collection.Resolve(command.TargetReference, command.Position.FileId,
-                    command.Op is "changeCash" or "itemShortageJump" ? $"{command.Position} {command.Op}.to" : command.Position.ToString());
-                if (command.Op is "randomJump" or "changeCash" or "itemShortageJump") command.TargetAddress = target;
+                    command.Op is "changeCash" or "itemShortageJump" ? $"{command.Position} {command.Op}.to"
+                        : command.Op == "removeItem" ? $"{command.Position} removeItem.shortageTarget" : command.Position.ToString());
+                if (command.Op is "randomJump" or "changeCash" or "itemShortageJump" or "removeItem") command.TargetAddress = target;
             }
             foreach (var reference in command.ContentReferences)
             {
@@ -250,6 +251,12 @@ public sealed class TriggerEventCollection
                     command.ObjectId = EventJson.Word(node, "itemId");
                     if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("addItem.count must be a signed WORD.");
                     command.Amount = EventJson.Number(node, "count");
+                    break;
+                case "removeItem":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.ObjectId = EventJson.Word(node, "itemId");
+                    command.Amount = EventJson.Word(node, "count");
+                    command.TargetReference = EventJson.Reference(node, "shortageTarget");
                     break;
                 case "itemShortageJump":
                     command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);

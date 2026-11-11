@@ -79,6 +79,8 @@ public sealed class TriggerScriptSession
     public InventoryLiveState? InventoryLiveState { get; }
     /// <summary>The explicit current equipment owner, bound only together with shared live roles.</summary>
     public BattleEquipmentState? EquipmentState { get; private set; }
+    /// <summary>The explicit fixed-party poison owner used by complete equipment removal.</summary>
+    public PartyPoisonState? PartyPoisons { get; private set; }
 
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
         int inheritedColor = DialogueTextTokenizer.DefaultColor, CashLiveState? cashLiveState = null,
@@ -128,7 +130,7 @@ public sealed class TriggerScriptSession
         TriggerBattleContent battleContent, IBattleRandom battleRandom, RoleLiveState roleLiveState,
         DynamicEventWorld? world = null, int inheritedColor = DialogueTextTokenizer.DefaultColor,
         CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null,
-        BattleEquipmentState? equipmentState = null)
+        BattleEquipmentState? equipmentState = null, PartyPoisonState? partyPoisons = null)
     {
         ArgumentNullException.ThrowIfNull(roleLiveState);
         if (world is not null && !ReferenceEquals(world.RoleLiveState, roleLiveState))
@@ -138,6 +140,7 @@ public sealed class TriggerScriptSession
             : new TriggerScriptSession(events, language, battleContent, battleRandom, world, inheritedColor, cashLiveState, inventoryLiveState);
         session.BindRoleLiveState(roleLiveState);
         session.EquipmentState = equipmentState;
+        session.PartyPoisons = partyPoisons;
         return session;
     }
 
@@ -360,7 +363,9 @@ public sealed class TriggerScriptSession
             rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true,
             currentObjectScripts: _world?.ObjectScripts, rejectObjectScriptWithoutWorld: _world is null,
             hasCashOwner: CashLiveState is not null, hasInventoryOwner: InventoryLiveState is not null,
-            equipmentState: EquipmentState);
+            equipmentState: EquipmentState,
+            hasRemovalOwners: InventoryLiveState is not null && EquipmentState is not null && _roleLiveState is not null && PartyPoisons is not null,
+            removalPartyMatchesWorld: _world is null || PartyPoisons is not null && PartyPoisons.PartyRoleIds.SequenceEqual(_world.PartyRoles));
 
     private sealed class EntryRequirementsCollector
     {
@@ -375,7 +380,7 @@ public sealed class TriggerScriptSession
         bool rejectMappedBattlesWithoutWorld = false, bool validateNameMappings = false,
         IReadOnlyDictionary<(int ObjectId, int SlotIndex), int>? currentObjectScripts = null,
         bool rejectObjectScriptWithoutWorld = false, bool hasCashOwner = false, bool hasInventoryOwner = false,
-        BattleEquipmentState? equipmentState = null)
+        BattleEquipmentState? equipmentState = null, bool hasRemovalOwners = false, bool removalPartyMatchesWorld = true)
     {
         var pending = new Stack<(int Address, TriggerScriptContext Context)>();
         var visited = new HashSet<(int Address, TriggerScriptContext Context)>();
@@ -383,6 +388,7 @@ public sealed class TriggerScriptSession
         var hookWrites = new Dictionary<(int ObjectId, int SlotIndex), List<TriggerCommand>>();
         var relevantHookKeys = new HashSet<(int ObjectId, int SlotIndex)>();
         var hookRoots = new HashSet<(int ObjectId, int SlotIndex, int Entry)>();
+        TriggerPosition? removalPosition = null, partyChangePosition = null;
         pending.Push((address, context));
         while (pending.TryPop(out var item))
         {
@@ -394,6 +400,15 @@ public sealed class TriggerScriptSession
                 throw new InvalidDataException($"{command.Position}: content-only command '{command.Op}' is unsupported in trigger context {item.Context}."
                     + (command.Op is "changeCash" or "halveCash" ? " An explicit cash owner is required." : "")
                     + (command.Op is "addItem" or "itemShortageJump" ? " An explicit inventory owner is required." : ""));
+            if (command.Op == "removeItem")
+            {
+                if (!hasRemovalOwners || item.Context != TriggerScriptContext.Event)
+                    throw new InvalidDataException($"{command.Position}: content-only command 'removeItem' is unsupported in trigger context {item.Context}. Explicit inventory, equipment, live-role and poison owners outside active battle scripts are required.");
+                if (!removalPartyMatchesWorld)
+                    throw new InvalidDataException($"{command.Position}: removeItem poison party must match the bound world's current party order.");
+                removalPosition ??= command.Position;
+            }
+            if (command.Op == "setParty") partyChangePosition ??= command.Position;
             if (command.Op == "end" && command.Mode == "keep") continue;
             if (command.Op == "startBattle" && battleContent is not null && item.Context == TriggerScriptContext.Event)
             {
@@ -464,6 +479,13 @@ public sealed class TriggerScriptSession
                 pending.Push((Next(command), item.Context));
                 pending.Push((command.TargetAddress!.Value, item.Context));
             }
+            else if (command.Op == "removeItem")
+            {
+                // A null shortage target permits partial removal; a reference adds a second arm.
+                // Never prune either arm from current stock or simulate equipment writes here.
+                pending.Push((Next(command), item.Context));
+                if (command.TargetAddress is int shortage) pending.Push((shortage, item.Context));
+            }
             else if (command.Op is "setMusic" or "fadeToRed" or "halveCash" or "addItem")
             {
                 pending.Push((Next(command), item.Context));
@@ -531,6 +553,11 @@ public sealed class TriggerScriptSession
             }
             else throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
         }
+
+        // PartyPoisonState membership is fixed. Even a no-op setParty would cross a migration
+        // seam this binding cannot yet support; reject the whole selected closure before writes.
+        if (removalPosition is not null && partyChangePosition is not null)
+            throw new InvalidDataException($"{removalPosition}: removeItem with setParty at {partyChangePosition} requires unsupported poison party migration.");
 
         void PushHookCandidate((int ObjectId, int SlotIndex) key, TriggerPosition position, int entry)
         {
@@ -655,6 +682,11 @@ public sealed class TriggerScriptSession
                     // script.c 0x001F ignores even a shortage/full return; no equipment fallback.
                     InventoryLiveState.AddItem(command.ObjectId, command.Amount);
                     _address = Next(command);
+                    break;
+                case "removeItem" when InventoryLiveState is not null && EquipmentState is not null && _roleLiveState is not null && PartyPoisons is not null:
+                    // script.c 0x0020 does not write ScriptSuccess, even after allowed partial removal.
+                    _address = EquipmentState.TryRemoveItem(command.ObjectId, command.Amount, command.TargetAddress is null,
+                        InventoryLiveState, _roleLiveState, PartyPoisons) ? Next(command) : command.TargetAddress!.Value;
                     break;
                 case "itemShortageJump" when InventoryLiveState is not null:
                     // script.c 0x0058 compares inventory-only quantity to the literal signed count.
