@@ -57,7 +57,8 @@
 - `coveredBy[role]`保留角色身份。snapshot的0仍是role0，不是null sentinel；player的可空实际cover是不同表示，需依据所选队伍和既有有效cover语义明确映射并留来源说明，不按party位置替换。无法证明的组合拒绝，不一律null清除。
 - `DataTables.cs:246` 的 level-up-magic 每行只有roles[5]，按**原RoleId**取列并保留全行顺序/重复/零magic；`DataTables.cs:307` 的level-up-exp单记录完整100项按level索引。RoleId5没有第六升级法术列；本窄入口必须明确定位“不支持该角色的完整成长来源”，不能生成零表、借用第0/party列或声称Core不支持role5（Core实际允许其身份）。
 - 角色32个已知法术与升级法术是静态数据，不等于施法执行；支持域须按#133普通物理目标及实际消费界定。原值/引用保真，不删掉非零槽假称无魔法。未能证明所选成长/钩子闭包可消费的情况拒绝；不要把“本投影入口缺少事件/法术依赖”写成“Core所有hooks/成长均未实现”。
-- Level0配threshold[0]=0会使胜利结算无法前进；现有格式允许0、内部growth门只强制threshold[1..99]为正。投影需明确拒绝这个不可消费组合，而不是把表项补1或声称单靠既有门就已安全；不执行结算来试验。HP0基表值不能悄悄变1：`reference/sdlpal/battle.c:1567` 的HP0→1是入战步骤，lifecycle已有相应职责。格式允许HP0，保存原始基表值；后续能力检查必须针对正式入口的真实归一化，而非直接combat的活人限制。角色maxHP>32767、等级/EXP表等仍受当前trigger/lifecycle门限制，不放宽现有检查。
+- Level0配threshold[0]=0**不会因此使结算停滞**。`src/Pal.Core/ClassicBattleLifecycleSession.cs:194` 的primary循环扣除阈值后，在等级小于99时调用 `:279` 的LevelUp递增角色等级；`:218` 的hidden循环在实际进入时同样递增track.Level。固定参考 `reference/sdlpal/battle.c:1106`、`:1252` 与 `reference/sdlpal/global.c:2373` 的推进路径一致。当前growth门允许level0和threshold[0]=0，要求threshold[1..99]为正；源码中“zero threshold would loop forever”的泛化注释不能替代上述控制流。独立静态反例：存活角色level0、primary value0、胜利经验0、threshold[0]=0且[1..99]均100，首轮升至level1，下一轮0>=100为假，余值0；hidden总count0时不进入hidden分支，若进入且hidden累计值0/level0，则该track也推进到1后退出（仍有该次成长及RNG副作用）。这些均为SOURCE推导，未执行测试。投影不得仅因可到达index0而拒绝、补1或改写表项；真正无法以升级越过的情况是**等级已达上限99且threshold[99]=0**，循环扣0且等级不再增长，现有门已拒绝该表项。其他索引仍沿用现有正阈值限制，不借此放宽支持域。
+- HP0基表值不能悄悄变1：`reference/sdlpal/battle.c:1567` 的HP0→1是入战步骤，lifecycle已有相应职责。格式允许HP0，保存原始基表值；后续能力检查必须针对正式入口的真实归一化，而非直接combat的活人限制。角色maxHP>32767、等级/EXP表等仍受当前trigger/lifecycle门限制，不放宽现有检查。
 
 ### 敌队、槽位与有符号解释
 
@@ -93,7 +94,7 @@
 | --- | --- |
 | 来源等级 | 合法10→11修改仍可通过schema，但不得产生“original chunk verified”结果；固定输入身份改变，原声明保留。若采用B，须与真正独立摘要不符而拒绝，不能用新生成自签摘要通过。 |
 | 身份/数组轴 | 人工role顺序[4,0]，role4 level7/attack123/hp80/maxHp100，role0不同哨兵；八EXP=(0,7,0)，两个角色不串位；装备/32magic取正确二维列；原值不改。role5、第三角色、重复roles/teams、空/带符号/非十进制列表精确拒绝。 |
-| growth/name | 100项threshold完整保留，index0允许0，reachable0拒绝；level-up两行零/重复/顺序与role4列独立字面值一致；nameObject不是RoleId，wrong view/缺行/不完整表拒绝；不能伪造slot5成长。 |
+| growth/name | 100项threshold完整保留；level0及threshold[0]=0不因该组合拒绝，仍须满足其他消费条件。独立结算预期：存活level0/primary value0/胜利经验0、threshold[0]=0且[1..99]均100、hidden总count0，结果level1/primary余值0且hidden不变；若hidden分支实际进入，累计值0/track level0应升至1、余值0，并保留正常成长/RNG副作用，不预期停滞。threshold[99]=0以及任意[1..99]零值仍由现有门拒绝，不放宽；level-up两行零/重复/顺序与role4列独立字面值一致；nameObject不是RoleId，wrong view/缺行/不完整表拒绝；不能伪造slot5成长。 |
 | 敌人/符号 | Aobject10→enemy2、Bobject11→enemy3；[10,FFFF,11,FFFF,FFFF]得到id1/2，原sourceSlot0/2；重复object仍两个槽。任何0/全FFFF/三活敌拒绝；WORD65535→-1，32768→-32768，不加入level基础公式。enemy.magicIdFFFF必须拒绝，包括rate0；不可清为0，否则丢空动作或多抽RNG。其他真实magic同样不能放行。 |
 | 消费能力 | Parse/Validate通过只是格式；公开纯能力门覆盖HP0/lifecycle、上限、EXP、无装备闭包、hook/魔法/双动/等效物品拒绝，旧Core兼容。无RNG、无状态写、无战斗模拟；未选内容合法性与所选可消费性分别检查。 |
 | 文件/真实CLI | 有效四选项正常及重排（按批准选项风格）、缺/重/未知/非法选项exit2；数据/来源拒绝exit1；成功exit0。通过既有CliProcess真实执行，核stdout/stderr、数值Parse及输出SHA；输入字节/mtime不变、两次新目录输出字节一致、非空/文件目标/双向重叠/链接/缺表/假hash语法/坏UTF8/重复未知键/records和长度不一致拒绝；原件不被覆盖。 |
