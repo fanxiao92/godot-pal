@@ -7,7 +7,7 @@
 1. 已批准的不变量：按 **RoleId** 严格绑定角色视觉，不按队伍位置合并，不把 RoleId 当 SpriteId；新声明缺失不能回退领队；旧未声明形态保留；攻击效果按实际战斗精灵解析；两人上限不扩展。
 2. 当前视觉 loader、checked 投影、renderer 及效果缓存均为单份玩家数据。Story 包装入口还把完整 party 折叠为领队 ID + 人数；另一个公共入口没有足够信息认证第二个 RoleId。
 3. “已有装备覆盖”只在投影能力层成立：Core 有最后非零覆盖投影，但当前开战门明确拒绝选中角色的非零覆盖。不能只改 renderer 或删除 Core 门就声称 #135 完整。
-4. 下述一种完整 typed 路线累计 **17 个路径**，还不包含装备开战能力的必要链路，超过十文件上限。应先确认兼容/API/装备边界，再分成完整能力叶；不能把本文推荐当作批准或再建同题 SOURCE 票循环。
+4. 下述 A/B/C 建议 typed 路线累计 **20 个去重路径**：17 个基础路径，加1个正式包装进程测试和2个非Story合成闭包测试/fixture；还不包含装备开战能力的必要链路及其它未决增量，超过十文件上限。应先确认兼容/API/装备边界，再分成完整能力叶；不能把本文推荐当作批准或再建同题 SOURCE 票循环。
 
 本轮只新增本文，不修改公共契约、Core、Prepare、资源、测试、登记或 UID，不读取/提取 raw，不执行参考、SDK、引擎或业务测试。外部 `acceptance.md`、`source-inputs.json` 和 `source-final/binding.json` 绑定实际命令、原字节和候选；路径/锚点/字面匹配只证明结构与身份，不自动证明语义。独立只读 scout 的原回复也保存在本轮证据目录，不把它当独立票级双轴验收。
 
@@ -71,7 +71,7 @@
 
 ## 完整影响与建议拆分
 
-一种满足全链的 typed 实现路线（不是唯一最小实现，也不是已批准改动列表）：
+A/B/C 建议 typed 路线的完整去重清单共 **20 路径**（不是唯一最小实现，也不是已批准改动列表）；1–17是基础清单，18–20是下述建议叶已经纳入的必要测试，不是可以从累计预算排除的条件增量。装备能力尾项及其它未决增量另计：
 
 | # | 路径 | 原因 |
 | --- | --- | --- |
@@ -90,14 +90,17 @@
 | 14 | `src/Pal.Game/Tests/AuthoredStoryFixture.cs` | 通过正式Prepare构建测试自有双精灵内容，不直接篡改checked结果 |
 | 15–16 | `scripts/GameTestBatches.ps1` 与 `tests/Pal.Game.Tests/GameBatches.Tests.ps1` | source/discovery/批次身份和独立字面登记 |
 | 17 | `docs/design/native-battle-visuals.md` | 当前新旧契约/所有权/证据边界文档 |
+| 18 | `tests/Pal.Prepare.Tests/StoryPackagePrepareProcessTests.cs` | B已纳入的真实包装进程契约，覆盖schema/CLI失败诊断与退出 |
+| 19 | `src/Pal.Game/Tests/SyntheticFirstBattleFixture.cs` | C已纳入的正常非Story双精灵内容；B若也需调整则共享此路径 |
+| 20 | `src/Pal.Game/Tests/SyntheticFirstBattleClosureTests.cs` | C已纳入的正常非Story实际呈现/同URI闭包；B若也需调整则共享此路径 |
 
-这17路径之外：`src/Pal.Game/Tests/SyntheticFirstBattleFixture.cs`、`src/Pal.Game/Tests/SyntheticFirstBattleClosureTests.cs` 是正常非Story合成闭包验收入口，若新增该入口实际呈现案例还需计入；`src/Pal.Game/Tests/RealFirstBattleFlowTests.cs` 是私有真实入口，不能由合成案例补签。`tests/Pal.Prepare.Tests/StoryPackagePrepareProcessTests.cs` 负责真实包装进程契约，schema若改变CLI失败诊断/退出须纳入。追加这些链路或新增样本会增加预算，不拿“可能不改”排除必要测试。现有wrapper、NativeContentDependencies、Core数值模型、通用时间轴不是仅因名字相关就必须修改的文件。
+累计去重为 **17 + 1 + 2 = 20**，即 A∪B∪C。B是否同时修改19–20只影响B自身为8还是10路径，不影响累计20，因为C已经包含它们。不删测试或以“可能不改”排除上述三项来保住17。`src/Pal.Game/Tests/RealFirstBattleFlowTests.cs` 是私有真实入口，不能由合成案例补签；若后续实际实现须修改它或新增样本/接口路径，须在20基础上追加并重新核算，不声称其已包含。装备能力链尚未冻结，另见下项。现有wrapper、NativeContentDependencies、Core数值模型、通用时间轴不是仅因名字相关就必须修改的文件。
 
 建议拆分（均为**待批准的后续叶**，不是现在发布的ready实施票）：
 
 - **A / 原生逐角色能力**：上述1–4、9–10、15–17，共 **9路径**（含新cs+uid）。闭合 typed ResourceSaver→完整party public Load/checked view、完整hash/frame/角色集合/legacy兼容与独立测试。Story wrapper可自然传完整party；旧 public入口保留legacy，对新形态明确拒绝。此阶段FirstBattle新形态不支持、Prepare/renderer未接，绝不签#135；不把新数组保存成功当可游玩。
-- **B / 正式准备和非Story caller**：上述5、6、11、12、15、16、17，另含 `tests/Pal.Prepare.Tests/StoryPackagePrepareProcessTests.cs`，共 **8路径**；若需更新 SyntheticFirstBattleFixture 与 SyntheticFirstBattleClosureTests，则正好 **10**。绑定已批准A接口，通过生产Prepare/strict Load证明完整身份；保留旧首战闭包。需更多路径则先重算/再拆，不能漏真实调用测试。
-- **C / 正常Main消费**：上述7、8、13、14、15、16、17，加 SyntheticFirstBattleFixture 与 SyntheticFirstBattleClosureTests，共 **9路径**，真实逐角色绘制/effect/受击/所有权闭环。若必须改变已有 snapshot/时间轴接口，先核调用方再重算；不得加只观察不参与绘制的测试入口。此叶不偷偷包含装备门放行。
+- **B / 正式准备和非Story caller**：上述5、6、11、12、15–18，共 **8路径**；若同时需更新上述19–20，则正好 **10**，两项在C与累计清单中始终保留。绑定已批准A接口，通过生产Prepare/strict Load证明完整身份；保留旧首战闭包。需更多路径则先重算/再拆，不能漏真实调用测试。
+- **C / 正常Main消费**：上述7、8、13–17、19–20，共 **9路径**，真实逐角色绘制/effect/受击/所有权闭环。若必须改变已有 snapshot/时间轴接口，先核调用方再重算；不得加只观察不参与绘制的测试入口。此叶不偷偷包含装备门放行。
 - **装备能力前置/尾项**：当前只能给“需要Core公开证明 + 外层完整视觉闭包承接”的边界，不能在未选能力契约前声称其精确文件预算已冻结。先选不含Godot依赖且不依赖test-only许可的能力证明，再核Core/modern/native/调用方/测试完整预算；这不是删掉#135原验收，也不是拆成多个commit规避上限。
 
 A→B→C 不表示装备问题消失，也不意味着#133信任根、#161/#165/#168已解除。本轮只交付#192报告，以上路径都**未实现**。
