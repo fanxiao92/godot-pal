@@ -539,6 +539,84 @@ public sealed class BattleEquipmentStateTests
         }
     }
 
+    [Fact]
+    public void Item_count_includes_only_current_party_equipment_without_consuming_or_caching_stock()
+    {
+        // PAL_CountItem (global.c:957): inventory3 + role5 two copies + role3 two copies = 7.
+        // All placements/effects are synthetic sentinels, not a natural save or retail equipment claim.
+        IReadOnlyList<int>[] grid = [[7, 0, 7, 0, 0, 0], [7, 7, 7, 7, 7, 7],
+            [0, 0, 0, 0, 0, 0], [7, 0, 0, 0, 0, 7], [7, 7, 7, 7, 7, 7], [65535, 0, 7, 0, 0, 7]];
+        var effect = new BattleEquipmentEffect(2, 3, 4, 5, [0, 0, 0, 0, 0, 0, 0, 0, 60000], 6, 7, 8)
+            { AttackAll = 65535, CooperativeMagic = 351 };
+        var objects = new Dictionary<int, BattleEquipmentObject>
+        {
+            [7] = new(7, [effect, effect, effect, effect, effect, effect]),
+            [65535] = new(65535, [effect, effect, effect, effect, effect, effect])
+        };
+        var state = BattleEquipmentState.Initialize(grid, objects);
+        var inventory = new InventoryLiveState([new(7, 3, 65535), new(65535, 0, 9)]);
+        Assert.Equal(7, state.CountItem(7, inventory, [5, 3])); // Designated RED: inventory-only shell returns3.
+        var slots = inventory.Slots.ToArray();
+        for (int pass = 0; pass < 3; pass++)
+        {
+            Assert.Equal(7, state.CountItem(7, inventory, [3, 5]));
+            Assert.Equal(3, state.CountItem(7, inventory, []));
+            Assert.Equal(3, state.CountItem(7, inventory, [2]));
+            Assert.Equal(5, state.CountItem(7, inventory, [0]));
+            Assert.Equal(15, state.CountItem(7, inventory, [1, 4]));
+            Assert.Equal(21, state.CountItem(7, inventory, [0, 1, 3, 4, 5]));
+            Assert.Equal(1, state.CountItem(65535, inventory, [5]));
+            Assert.Equal(0, state.CountItem(65535, inventory, [3]));
+            Assert.Equal(0, state.CountItem(0, inventory, [5, 3]));
+            Assert.Equal(0, state.CountItem(8, inventory, [5, 3]));
+        }
+        foreach (int item in new[] { 0, 7 })
+        {
+            Assert.Throws<ArgumentNullException>(() => state.CountItem(item, null!, [5]));
+            Assert.Throws<ArgumentNullException>(() => state.CountItem(item, inventory, null!));
+            foreach (int[] party in new int[][] { [-1], [6], [5, 5], [0, 1, 2, 3, 4, 5] })
+                Assert.ThrowsAny<ArgumentException>(() => state.CountItem(item, inventory, party));
+        }
+        foreach (int item in new[] { -1, 65536 })
+            Assert.Throws<ArgumentOutOfRangeException>(() => state.CountItem(item, inventory, [5]));
+        Assert.Equal(slots, inventory.Slots);
+        for (int role = 0; role < 6; role++)
+        {
+            Assert.Equal(grid[role], state.Equipment(role));
+            int copies = role == 2 ? 0 : role is 1 or 4 ? 6 : role == 5 ? 3 : 2;
+            Assert.Equal((2 * copies, 3 * copies, 4 * copies),
+                (state.AttackBonus(role), state.DefenseBonus(role), state.DexterityBonus(role)));
+            Assert.Equal((6 * copies, 7 * copies, 8 * copies),
+                (state.MagicPowerBonus(role), state.FleeRateBonus(role), state.PoisonResistanceBonus(role)));
+            Assert.Equal(role == 2 ? 0 : 5, state.BattleSprite(role, 0));
+            Assert.Equal(role == 2 ? new int[9] : [0, 0, 0, 0, 0, 0, 0, 0, 60000], state.StatusOverlay(role));
+            Assert.Equal(role == 2 ? null : (int?)65535, state.AttackAllWord(role, 0));
+            Assert.Equal(role == 2 ? null : (int?)351, state.CooperativeMagicWord(role, 0));
+        }
+        Assert.Equal(1, inventory.RemoveItem(7, 3));
+        Assert.Equal(4, state.CountItem(7, inventory, [5, 3])); // Depleted occupied slot, not a cached count.
+        Assert.Equal(1, inventory.AddItem(7, 2));
+        Assert.Equal(6, state.CountItem(7, inventory, [5, 3]));
+        Assert.Equal(65535, inventory.Slots[0].AmountInUse);
+        var empty = new InventoryLiveState([]);
+        Assert.Equal(4, state.CountItem(7, empty, [5, 3]));
+        Assert.Equal(2, inventory.GetAmount(7));
+        var legacy = BattleEquipmentState.Initialize(ModernBattleContent.Parse(Data().ToJsonString()));
+        Assert.False(legacy.Declared);
+        Assert.Equal(2, legacy.CountItem(7, inventory, [5, 3]));
+        Assert.Equal(0, legacy.CountItem(7, empty, [5, 3]));
+        var full = new InventoryLiveState(Enumerable.Range(1, 255).Select(id => new InventorySlot(id, 0, 0))
+            .Append(new(65535, 99, 65535)).ToArray());
+        Assert.Equal(100, state.CountItem(65535, full, [5])); // Last inventory slot; no 99 cap on total count.
+        Assert.Equal(99, full.GetAmount(65535));
+        IReadOnlyList<int>[] allSeven = Enumerable.Range(0, 6).Select(_ => (IReadOnlyList<int>)new[] { 7, 7, 7, 7, 7, 7 }).ToArray();
+        var allEquipped = BattleEquipmentState.Initialize(allSeven, objects);
+        var maximum = new InventoryLiveState([new(7, 99, 65535)]);
+        Assert.Equal(129, allEquipped.CountItem(7, maximum, [5, 4, 3, 2, 1])); // 99 + five rows of six, not six roles.
+        Assert.Equal(103, state.CountItem(7, maximum, [5, 3])); // Other equipment instance remains independent.
+        Assert.Equal(2, inventory.GetAmount(7));
+    }
+
     private static BattleEquipmentEffect WordEffect(int? attackAll = null, int? cooperativeMagic = null) =>
         new(0, 0, 0, 0, new int[9]) { AttackAll = attackAll, CooperativeMagic = cooperativeMagic };
 

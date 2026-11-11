@@ -159,6 +159,29 @@ public sealed class BattleEquipmentState
         return Array.AsReadOnly(Enumerable.Range(0, SlotCount).Select(slot => equipment[roleId, slot]).ToArray());
     }
 
+    /// <summary>Counts inventory plus equipped copies on the explicit current party (PAL_CountItem,
+    /// global.c:957). This is not the inventory-only shortage query and never consumes in-use stock.</summary>
+    public int CountItem(int itemId, InventoryLiveState inventory, IReadOnlyList<int> partyRoleIds)
+    {
+        ArgumentNullException.ThrowIfNull(inventory);
+        ArgumentNullException.ThrowIfNull(partyRoleIds);
+        if (!Word(itemId)) throw new ArgumentOutOfRangeException(nameof(itemId));
+        // MAX_PLAYABLE_PLAYER_ROLES is the exploration-party limit, not combat capacity.
+        if (partyRoleIds.Count > 5) throw new ArgumentException("Current party requires at most five roles.", nameof(partyRoleIds));
+        var seen = new HashSet<int>();
+        foreach (int roleId in partyRoleIds)
+        {
+            Role(roleId);
+            if (!seen.Add(roleId)) throw new ArgumentException("Current party requires distinct role IDs.", nameof(partyRoleIds));
+        }
+        if (itemId == 0) return 0;
+        int count = inventory.GetAmount(itemId);
+        foreach (int roleId in partyRoleIds)
+            for (int slot = 0; slot < SlotCount; slot++)
+                if (equipment[roleId, slot] == itemId) count++;
+        return count;
+    }
+
     /// <summary>Retained field 4 WORD for one equipment register; null means no write, not an attack-all capability.</summary>
     public int? AttackAllWord(int roleId, int registerIndex)
     {
