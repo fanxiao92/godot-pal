@@ -85,8 +85,22 @@ API itemId 必须是 WORD。非法参数抛 `ArgumentOutOfRangeException`，在�
 **所有权与接线责任**：现有网格/寄存器是装备的可变真值，live role 的装备数组是同步记录，不允许作为另一可独立编辑的网格；实际角色状态以 `RoleLiveState` 为准，overlay 只保留装备初始化贡献并同步 hand 清除。未来宿主必须在生命周期内绑定同一组三个实例，不能每次从 author 初始化或用空毒 owner 绕过能力检查。此方法本身不绑定宿主、不修改已开始战斗的投影副本；调用方须在合法玩法边界操作，并让下次正式战斗消费当前装备/角色值，避免旧 author 闭包重新覆盖。未来从合法内容/恢复记录重建一次并重绑，不定义存档 schema 或自然 save。
 
 #132 仍须补齐：
-- 0x0020 消费此查询的装备计数预检、分支和 ScriptSuccess 的真实参考行为；
-- 按当前队伍角色/槽顺序回退调用上述完整单槽操作，绑定唯一活装备/角色/毒状态；不得用库存返回0/负数直接代表脚本失败或退款；
+- 生产 0x0020 消费下述完整 Core 移除操作，接通现代语义字段、shortageTarget 分支及 ScriptSuccess 保留；
+- 在 trigger/正式战斗中绑定唯一活库存/装备/角色/毒状态，不能每次从 author 重建；Core 有序回退已具备，但尚未形成生产宿主接线，不得用库存返回0/负数直接代表脚本失败或退款；
 - 宿主显式初始库存、同一 owner 的 trigger/战斗连续性、重复/过期请求保护，原生内容兼容与正常 Main/SceneRunner 证据。
+
+## 计数预检与库存优先的有序装备回退（#186）
+
+`BattleEquipmentState.TryRemoveItem(itemId, amount, allowShortage, inventory, roleLiveState, partyPoisons)` 组合上述现有操作，交付 `script.c:977–1025` 的完整 Core 移除规则。没有新状态 owner，也没有另建脚本执行器。前面各节描述的是各自交付版本；本节增加组合能力，**trigger 的 removeItem 仍拒绝，Main/native/活动战斗未接线，#132 尚未交付**。
+
+- itemId、amount 均为 WORD0..65535，amount0 表示1，不截成 SHORT。`partyPoisons.PartyRoleIds` 是计数和移除共用的唯一当前队伍顺序，按角色身份读取网格，不扫描队外六角色记录。
+- `allowShortage=false` 且包含当前装备的 CountItem 不足时返回 false，所有状态不变；未来 trigger 必须据此跳到现代 shortageTarget。其余情况返回 true，表示**移除分支已经执行，不保证足量**。`allowShortage=true` 对应参考 shortageTarget0：允许耗尽后仍不足，不退款、不回滚。布尔返回不是库存原语的1/0/负数，也不是 ScriptSuccess；参考0020不写 ScriptSuccess，生产调用方以后仍须保留该标志。
+- 先扣库存：原语结果正数表示已足量，不碰装备；负数转成实际缺少量；0保留整个请求数量。之后按当前队伍角色顺序、每个角色槽0..5的顺序，逐个调用完整 RemoveEquippedItem，数量满足立即停，否则扫完即止。保留耗尽槽、AmountInUse、未选装备/队外角色/extra寄存器和旧不可变记录；hand/wear 真实状态及效果清理沿用单槽语义，不重算剩余装备、不初始化或复制另一份真状态。
+- **item0 的参考边界不可简化**：CountItem0仍是0，有短缺目标必定拒绝；没有目标时库存返回0，参考回退比较装备ID0，因此会清理匹配的空槽效果，包括实际走到的空 hand 的双击和空 wear 的装备毒。只读计数不计空槽，但执行回退不能擅自跳过 item0。本行为来自固定源码，不宣称真实游戏必然使用此边界。
+- null owner 抛 ArgumentNullException，非法 item/count 抛 ArgumentOutOfRangeException。移除分支写入前预先校验所有**实际将被回退选中**角色的六个一致装备WORD和九个合法状态WORD；缺角色/错配/非法维度或域抛 InvalidDataException，连库存前缀也不先扣。复用单槽校验，不要求制造六角色，库存足量或计数拒绝时也不强求无关 live gear 一致。这是现代绑定完整性拒绝，不是给有效脚本增添失败退款。同步 owner 无回调，方法返回为本操作的提交边界。
+
+公开 Core Fact `InventoryEquipmentRemovalTests.Count_gated_removal_consumes_stock_then_current_party_gear_in_reference_order_without_refund` 通过真 owner/API 验证独立字面数量及角色/槽结果：库存2移除5只退角色5首三个匹配槽，保留wear和角色3；下次调用从当前状态继续；拒绝与允许不足、库存精确/部分/不存在/耗尽、65535无SHORT截断、满256槽末项、空及五人队伍/倒序、item0空hand/wear、效果/实际角色/毒对同步、旧视图与实例隔离、后续角色错配写前拒绝、非法参数及未触及角色无需全量seed。人工数据不是自然存档或真实资源证据，普通 Core Unit 不证明 trigger/Main/战斗消费和请求幂等。
+
+本操作只是一项可复用的真实领域规则，不负责判断活动战斗安全边界、推进脚本地址或验证显示/战斗回执；重复显式调用就是另一项移除，不自动去重。后续生产接线必须将同一组三个既有 owner 和库存绑定在宿主整个生命周期内，避免下一场战斗从旧 author 重新覆盖装备。现阶段不开放活动战斗副本修改、毒执行或成员迁移，不新增菜单、预留或保存字段。
 
 未来持久化重建责任在宿主：从已批准的独立上下文或恢复记录构造一次，保留有意义的槽顺序/耗尽记录/in-use 字段，再重新绑定消费者。活动预留的保留/清除策略尚未由本票冻结；不定义槽位、schema、磁盘读写或自然剧情 save。#131 未完成的 Main/native 现金接线及 #129/#147 阻塞、#165/#168 旧失败不由本票解决；无故事或完整 M6 验收增加。

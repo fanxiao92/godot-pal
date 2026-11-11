@@ -182,6 +182,48 @@ public sealed class BattleEquipmentState
         return count;
     }
 
+    /// <summary>Count-gated stock removal and ordered current-party equipment fallback (script.c 0x0020).
+    /// False selects the shortage branch without writes; true means the removal arm ran, even if
+    /// allowShortage permitted partial consumption. The caller retains script control/success ownership.</summary>
+    public bool TryRemoveItem(int itemId, int amount, bool allowShortage, InventoryLiveState inventory,
+        RoleLiveState roleLiveState, PartyPoisonState partyPoisons)
+    {
+        ArgumentNullException.ThrowIfNull(inventory);
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        ArgumentNullException.ThrowIfNull(partyPoisons);
+        if (!Word(itemId)) throw new ArgumentOutOfRangeException(nameof(itemId));
+        if (!Word(amount)) throw new ArgumentOutOfRangeException(nameof(amount));
+        if (amount == 0) amount = 1;
+        if (amount > CountItem(itemId, inventory, partyPoisons.PartyRoleIds) && !allowShortage) return false;
+
+        // Resolve every row that fallback can touch before consuming even the stock prefix. These
+        // synchronous owners cannot change during the operation. Do not require unrelated live rows.
+        int remaining = Math.Max(0, amount - inventory.GetAmount(itemId));
+        var fallback = new List<(int RoleId, int Slot)>();
+        foreach (int roleId in partyPoisons.PartyRoleIds)
+        {
+            for (int slot = 0; slot < SlotCount && remaining > 0; slot++)
+            {
+                // Item0 deliberately matches EMPTY slots in the reference no-target removal arm.
+                if (equipment[roleId, slot] != itemId) continue;
+                ValidateRemovalRole(roleId, roleLiveState);
+                fallback.Add((roleId, slot));
+                remaining--;
+            }
+            if (remaining == 0) break;
+        }
+
+        int result = inventory.RemoveItem(itemId, amount);
+        if (result > 0) return true;
+        remaining = result < 0 ? -result : amount;
+        foreach (var (roleId, slot) in fallback)
+        {
+            RemoveEquippedItem(roleId, slot, roleLiveState, partyPoisons);
+            if (--remaining == 0) break;
+        }
+        return true;
+    }
+
     /// <summary>Clears only the represented effect-register words (global.c PAL_RemoveEquipmentEffect's
     /// first loop). Does not remove gear, reset hand dualAttack, or clean wear poisons; callers must
     /// compose those operations on the same live state before exposing an equipment-removal command.</summary>
@@ -210,12 +252,7 @@ public sealed class BattleEquipmentState
         Role(roleId);
         if (slotIndex is < 0 or >= SlotCount)
             throw new ArgumentOutOfRangeException(nameof(slotIndex), slotIndex, "Equipment slot index must be 0..5.");
-        if (!roleLiveState.Roles.TryGetValue(roleId, out var live)
-            || live.Equipment.Count != SlotCount || live.Equipment.Any(value => !Word(value))
-            || !live.Equipment.SequenceEqual(Equipment(roleId))
-            || live.Statuses.Count != StatusCount || live.Statuses.Any(value => !Word(value)))
-            throw new InvalidDataException("Equipment removal requires a live role with six agreeing gear WORDs and nine status WORDs.");
-
+        var live = ValidateRemovalRole(roleId, roleLiveState);
         int[] gear = live.Equipment.ToArray();
         int[] liveStatuses = live.Statuses.ToArray();
         gear[slotIndex] = 0;
@@ -227,6 +264,16 @@ public sealed class BattleEquipmentState
         if (slotIndex == 3) statuses[roleId, 8] = 0; // Do not resurrect it via the initialization overlay.
         else if (slotIndex == 5) partyPoisons.RemoveEquipmentPoisons(roleId); // kBodyPartWear.
         equipment[roleId, slotIndex] = 0;
+    }
+
+    private BattleRoleSnapshot ValidateRemovalRole(int roleId, RoleLiveState roleLiveState)
+    {
+        if (!roleLiveState.Roles.TryGetValue(roleId, out var live)
+            || live.Equipment.Count != SlotCount || live.Equipment.Any(value => !Word(value))
+            || !live.Equipment.SequenceEqual(Equipment(roleId))
+            || live.Statuses.Count != StatusCount || live.Statuses.Any(value => !Word(value)))
+            throw new InvalidDataException("Equipment removal requires a live role with six agreeing gear WORDs and nine status WORDs.");
+        return live;
     }
 
     /// <summary>Retained field 4 WORD for one equipment register; null means no write, not an attack-all capability.</summary>
