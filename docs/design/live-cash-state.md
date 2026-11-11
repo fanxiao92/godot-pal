@@ -1,4 +1,4 @@
-# 宿主持有的现金状态（#177、#178、#179 / #131 前置）
+# 宿主持有的现金状态（#177、#178、#179、#195 / #131 前置）
 
 `CashLiveState` 是纯 .NET 的显式现金所有者，沿用 `RoleLiveState` 的宿主持有方式，但不合并成通用 GameState。构造时必须给出 `uint initialCash`，只读 `Cash` 暴露完整 DWORD 域 `0..4294967295`。同一宿主的后续消费者应共享同一个实例，而不是复制余额或每次调用重建；另一个宿主应拥有独立实例。
 
@@ -20,7 +20,7 @@
 
 #177 仅关闭 Core 状态/算术前置；#178 增加现有 `TriggerScriptSession` 的显式现金执行能力。**#131 保持未完成**，正常 Main 尚未接线，`Main.StoryCashGranted` 仍只是既有奖励展示累计。后续 #131 必须补齐：
 - 正常 Main 持有/绑定同一现金 owner，沿现有当前战斗和完成回执门交接；不再从 `StoryCashGranted` 或完成回执重复发奖。Core 入账顺序与回执拒绝已由 #179 验证，仍须正常 Main 证据；
-- 独立上下文显式初始现金与旧未声明上下文的兼容策略、必要的原生准备和正常 Main/SceneRunner 实测；
+- 独立上下文显式初始现金、必要的原生准备和正常 Main/SceneRunner 实测；按 #126 的 `m6-no-legacy-compat-20261111` 统一当前格式并迁移活跃调用方，不再要求兼容旧缺字段资源。缺失是否允许由入口实际能力决定，不能默认可用余额0；
 - 未来重建责任：由宿主从已批准内容或恢复记录显式构造一次并重新绑定。这里不定义存档 schema、槽位、磁盘读写或自然剧情 save。
 
 ## trigger 现金执行契约（#178）
@@ -45,6 +45,14 @@
 
 `TriggerScriptBattleBindingTests.Shared_cash_victory_settles_once_before_enemy_scripts_and_owned_completion_never_regrants` 使用公开 Core 会话、真实行动、脚本和回执：独立字面预期10+7+11=28先于两段战后脚本，第一段扣28并等待显示、第二段加1，返回调用事件扣1至0，再战奖励5；另覆盖部分 KO 不发奖、零经验、无战后脚本、DWORD 回绕、owner 隔离、旧未绑定调用、Lost、预检与回执拒绝。没有直接调用私有结算或替代战斗引擎。
 
-重建责任仍在外层宿主：从已批准的独立上下文或未来恢复记录显式构造现金 owner 一次，再绑定 trigger（及未来菜单）。不从展示累计/原奖励回执重建余额，不在最终 ACK 重发已入账奖励；活跃战斗/脚本的持久化策略不在这里冻结。正常 Main、Dialogue 的显式绑定与 preview 隔离、原生初始现金声明/准备/旧内容兼容和正常 Main/SceneRunner 证据仍是 #131 未闭合项。
+重建责任仍在外层宿主：从已批准的独立上下文或未来恢复记录显式构造现金 owner 一次，再绑定 trigger（及未来菜单）。不从展示累计/原奖励回执重建余额，不在最终 ACK 重发已入账奖励；活跃战斗/脚本的持久化策略不在这里冻结。正常 Main、Dialogue 的显式绑定与 preview 隔离、原生初始现金声明/准备/活跃资源迁移和正常 Main/SceneRunner 证据仍是 #131 未闭合项。
+
+## 首战纯 Core 静态闭包的显式现金能力（#195）
+
+`FirstMandatoryBattleClosure.Verify` 在既有签名尾部接受 `CashLiveState? cashLiveState = null`，复用 `TriggerScriptSession.ValidateEntry` 的能力门，并对中文、英文两次检查传入同一个显式 owner。这里只读取**有无 owner**：不执行现金命令、不按当前余额或金额符号剪枝、不创建战斗、不调用随机数，也不将钱包保存到闭包回执。后续运行会话仍需宿主显式绑定自己的 owner，不能把 receipt 当作运行时钱包或默认0的许可。
+
+空 owner 对包含现金命令的所选闭包仍明确拒绝；不含现金命令的 Core 调用无需伪造钱包。这是纯 Core 的能力边界，不是保留另一套旧 native loader。现有 native 调用仍未传现金；本票没有改变原生格式、Prepare、Main、旧资源接受策略或冻结 author/envelope/source 身份，也没有选择初始声明的编码/位置。追加可选参数保留已知源码调用形式，但已编译外部调用方需要重编译，不承诺二进制 ABI。
+
+`FirstMandatoryBattleClosureTests.Explicit_cash_capability_preflights_both_languages_and_all_branches_without_execution` 经公开 Verify 验证完整人工闭包：显式余额 `0`、`10`、`2147483648`、`4294967295` 连续预检不变；缺 owner、第二语言缺消息11及正增量也不会实际走到的 raw shortage 分支 `@0A33` 仍拒绝。完整 Core Unit 新增1项，1349项通过；这不是原生保存重载、Main/SceneRunner、宿主重建或故事验收。
 
 #129/#147、#165 原 cold 失败和 #168 fatal/abort 均不由此解锁或改判。Core Unit 证据不是完整 M6、共享门、GPU、人工或远端 CI 证据。
