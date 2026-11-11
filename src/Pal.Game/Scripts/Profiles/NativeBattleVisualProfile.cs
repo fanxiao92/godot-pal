@@ -101,14 +101,14 @@ public static class NativeBattleVisualProfile
                 var expected = new Color(paletteResource.Rgb[i * 3] / 255f, paletteResource.Rgb[i * 3 + 1] / 255f, paletteResource.Rgb[i * 3 + 2] / 255f);
                 Require(expected == palette[i], "visual palette must match active story palette");
             }
-            var player = LoadSprite(native.PlayerSpriteUri);
+            var player = ReadAndValidateSprite(native.PlayerSpriteUri);
             Require(Enumerable.Range(0, 10).All(player.Frames.Select(x => x.Index).ToHashSet().Contains),
                 "player requires addressable frames 0..9");
-            PalSprite? effect = hasEffect ? LoadSprite(native.AttackEffectSpriteUri) : null;
+            PalSprite? effect = hasEffect ? ReadAndValidateSprite(native.AttackEffectSpriteUri) : null;
             if (effect is not null)
                 Require(Enumerable.Range(native.AttackEffectIndex * 3, 3).All(effect.Frames.Select(x => x.Index).ToHashSet().Contains),
                     "attack effect references unaddressable frames");
-            PalSprite? numbers = native.NumberSpriteUri != "" ? LoadSprite(native.NumberSpriteUri) : null;
+            PalSprite? numbers = native.NumberSpriteUri != "" ? ReadAndValidateSprite(native.NumberSpriteUri) : null;
             if (numbers is not null)
             {
                 var indices = numbers.Frames.Select(frame => frame.Index).ToHashSet();
@@ -122,7 +122,7 @@ public static class NativeBattleVisualProfile
                 background.Validate();
                 Require(!string.IsNullOrWhiteSpace(background.SourceIdentity) && background.Width == 320 && background.Height == 200,
                     "battle background requires SourceIdentity and 320x200 indexed planes");
-                var sprite = LoadSprite(team.EnemySpriteUri);
+                var sprite = ReadAndValidateSprite(team.EnemySpriteUri);
                 Require(Enumerable.Range(0, team.IdleFrames + team.MagicFrames + team.AttackFrames)
                     .All(sprite.Frames.Select(x => x.Index).ToHashSet().Contains), "enemy frame metadata references unaddressable frames");
                 checkedTeams.Add(team.TeamId, new(team, teamSlots[team.TeamId], background, sprite));
@@ -135,7 +135,202 @@ public static class NativeBattleVisualProfile
         { throw new InvalidDataException(uri + ": malformed native battle visuals: " + error.Message, error); }
     }
 
-    private static PalSprite LoadSprite(string uri)
+    /// <summary>Loads isolated native indexed sprite data with compatibility structural validation.
+    /// Source remains a declaration; null textures and extra addressable aliases remain legal.</summary>
+    public static PalSprite LoadSprite(string uri)
+    {
+        try
+        {
+            NativeExplorationProfile.ValidateUri(uri);
+            ContentDependencies(new[] { uri });
+            return ReadAndValidateSprite(uri);
+        }
+        catch (InvalidDataException error) { throw new InvalidDataException(uri + ": " + error.Message, error); }
+        catch (Exception error) when (error is ArgumentException or NullReferenceException or InvalidCastException or InvalidOperationException)
+        { throw new InvalidDataException(uri + ": malformed native sprite: " + error.Message, error); }
+    }
+
+    /// <summary>Checks sprite/frame scalars, the actual frame Index set (including aliases),
+    /// indexed planes and typed Source against an owned managed snapshot captured before target I/O.
+    /// Frame collection order is not semantic; nominal FrameCount does not count extra aliases.
+    /// Each Source tree is limited to depth 64 (root depth 0) and 65536 visited Variant values,
+    /// including dictionary keys; children and keys are at parent depth + 1. Repeated aliases
+    /// are copied by value. Cycles or otherwise valid trees exceeding either bound are rejected
+    /// as possibly cyclic, without claiming cycle identity detection. Compatibility/full-profile
+    /// loading does not acquire these limits. An owned ordinal hash snapshot authenticates the
+    /// prepared native content dependency graph, including the sprite root, and exact manifest
+    /// membership before loading and after field/Source comparison. Texture equivalence is not
+    /// checked by this slice; no expected Texture Resource reference is retained.</summary>
+    public static PalSprite LoadSprite(string uri, PalSprite expected, IReadOnlyDictionary<string, string> resourceSha256)
+    {
+        try
+        {
+            var expectation = SnapshotSpriteExpectation(expected);
+            if (resourceSha256 is null) throw new InvalidDataException("sprite manifest is required");
+            var ownedHashes = resourceSha256.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+            var dependencies = ContentDependencies(new[] { uri }, ownedHashes);
+            Require(dependencies.SetEquals(ownedHashes.Keys), "sprite manifest must cover exactly native content dependencies");
+            var sprite = LoadSprite(uri);
+            CompareSpriteExpectation(expectation, sprite);
+            int visited = 0;
+            var actualSource = SnapshotSpriteSource(sprite.Source, "Source", 0, ref visited);
+            CompareSpriteSource(expectation.Source, actualSource, "Source");
+            dependencies = ContentDependencies(new[] { uri }, ownedHashes);
+            Require(dependencies.SetEquals(ownedHashes.Keys), "sprite manifest must cover exactly native content dependencies");
+            return sprite;
+        }
+        catch (InvalidDataException error) { throw new InvalidDataException(uri + ": " + error.Message, error); }
+        catch (Exception error) when (error is ArgumentException or NullReferenceException or InvalidCastException or InvalidOperationException)
+        { throw new InvalidDataException(uri + ": malformed native sprite expectation/manifest: " + error.Message, error); }
+    }
+
+    private sealed record SpriteExpectation(int SpriteId, int DecodedByteLength, int FrameCount,
+        IReadOnlyDictionary<int, SpriteFrameExpectation> Frames, SpriteSourceValue Source);
+    private sealed record SpriteFrameExpectation(int SourceOffset, int Width, int Height,
+        IReadOnlyList<byte> Indices, IReadOnlyList<byte> Alpha);
+
+    private static SpriteExpectation SnapshotSpriteExpectation(PalSprite? expected)
+    {
+        if (expected is null) throw new InvalidDataException("expected sprite is required");
+        int spriteId = expected.SpriteId, decodedByteLength = expected.DecodedByteLength, frameCount = expected.FrameCount;
+        Require(Word(spriteId), "expected SpriteId must be WORD");
+        var metadata = expected.Source ?? throw new InvalidDataException("expected Source is required");
+        Require(metadata.Count > 0, "expected Source declaration is required");
+        Require(decodedByteLength is > 0 and <= 8 * 1024 * 1024, "expected DecodedByteLength is invalid");
+        Require(frameCount is > 0 and <= 4096, "expected FrameCount is invalid");
+        var nativeFrames = expected.Frames ?? throw new InvalidDataException("expected Frames is required");
+        var frames = new Dictionary<int, SpriteFrameExpectation>();
+        // Mirror the shared structural core, not a new count/offset/alpha/Texture policy.
+        foreach (var frame in nativeFrames)
+        {
+            if (frame is null) throw new InvalidDataException("expected Frames contains null frame");
+            int index = frame.Index;
+            Require(Word(index) && !frames.ContainsKey(index), "expected frame Index is invalid or duplicate: " + index);
+            string path = "expected Frames[Index=" + index + "]";
+            int sourceOffset = frame.SourceOffset, width = frame.Width, height = frame.Height;
+            Require(sourceOffset >= 0, path + ": SourceOffset must be nonnegative");
+            Require(width is > 0 and <= ushort.MaxValue, path + ": Width is invalid");
+            Require(height is > 0 and <= ushort.MaxValue, path + ": Height is invalid");
+            long pixels = (long)width * height;
+            Require(pixels <= 16 * 1024 * 1024, path + ": Width/Height exceed plane size bound");
+            var indices = frame.Indices ?? throw new InvalidDataException(path + ": Indices plane is required");
+            var alpha = frame.Alpha ?? throw new InvalidDataException(path + ": Alpha plane is required");
+            Require(indices.Length == pixels, path + ": Indices plane length must match Width/Height");
+            Require(alpha.Length == indices.Length, path + ": Alpha plane length must match Indices");
+            frames.Add(index, new(sourceOffset, width, height,
+                Array.AsReadOnly(indices.ToArray()), Array.AsReadOnly(alpha.ToArray())));
+        }
+        Require(Enumerable.Range(0, frameCount).All(frames.ContainsKey), "expected sprite nominal frame Index missing");
+        int visited = 0;
+        var source = SnapshotSpriteSource(metadata, "Source", 0, ref visited);
+        return new(spriteId, decodedByteLength, frameCount,
+            new ReadOnlyDictionary<int, SpriteFrameExpectation>(frames), source);
+    }
+
+    private static void CompareSpriteExpectation(SpriteExpectation expected, PalSprite actual)
+    {
+        Require(expected.SpriteId == actual.SpriteId, "SpriteId differs from expected");
+        Require(expected.DecodedByteLength == actual.DecodedByteLength, "DecodedByteLength differs from expected");
+        Require(expected.FrameCount == actual.FrameCount, "FrameCount differs from expected");
+        // The shared core has already rejected null, duplicate and non-WORD actual indices.
+        var frames = actual.Frames.ToDictionary(frame => frame.Index);
+        Require(expected.Frames.Keys.ToHashSet().SetEquals(frames.Keys), "Frames Index set differs from expected (including aliases)");
+        foreach (var entry in expected.Frames)
+        {
+            string path = "Frames[Index=" + entry.Key + "]";
+            var frame = frames[entry.Key];
+            var wanted = entry.Value;
+            Require(wanted.SourceOffset == frame.SourceOffset, path + ": SourceOffset differs from expected");
+            Require(wanted.Width == frame.Width, path + ": Width differs from expected");
+            Require(wanted.Height == frame.Height, path + ": Height differs from expected");
+            Require(wanted.Indices.SequenceEqual(frame.Indices), path + ": Indices plane differs from expected");
+            Require(wanted.Alpha.SequenceEqual(frame.Alpha), path + ": Alpha plane differs from expected");
+        }
+    }
+
+    // These private snapshots contain only immutable managed scalars and owned read-only trees,
+    // never a Variant or an aliased Godot collection. Type tags prevent numeric/string coercion.
+    private abstract record SpriteSourceValue(Variant.Type Type);
+    private sealed record SpriteSourceScalar(Variant.Type Type, object? Value) : SpriteSourceValue(Type);
+    private sealed record SpriteSourceDictionary(IReadOnlyDictionary<string, SpriteSourceValue> Fields)
+        : SpriteSourceValue(Variant.Type.Dictionary);
+    private sealed record SpriteSourceArray(IReadOnlyList<SpriteSourceValue> Items)
+        : SpriteSourceValue(Variant.Type.Array);
+
+    private static void VisitSpriteSource(string path, int depth, ref int visited)
+    {
+        Require(depth <= 64, path + ": Source metadata exceeds depth bound (possibly cyclic)");
+        Require(++visited <= 65536, path + ": Source metadata exceeds work bound (possibly cyclic)");
+    }
+
+    private static SpriteSourceValue SnapshotSpriteSource(Variant value, string path, int depth, ref int visited)
+    {
+        VisitSpriteSource(path, depth, ref visited);
+        switch (value.VariantType)
+        {
+            case Variant.Type.Nil: return new SpriteSourceScalar(Variant.Type.Nil, null);
+            case Variant.Type.Bool: return new SpriteSourceScalar(Variant.Type.Bool, value.AsBool());
+            case Variant.Type.Int: return new SpriteSourceScalar(Variant.Type.Int, value.AsInt64());
+            case Variant.Type.Float:
+                double number = value.AsDouble();
+                Require(double.IsFinite(number), path + ": Source Float must be finite JSON-like metadata");
+                return new SpriteSourceScalar(Variant.Type.Float, number);
+            case Variant.Type.String: return new SpriteSourceScalar(Variant.Type.String, value.AsString());
+            case Variant.Type.Dictionary:
+                var fields = new Dictionary<string, SpriteSourceValue>(StringComparer.Ordinal);
+                foreach (var entry in value.AsGodotDictionary())
+                {
+                    VisitSpriteSource(path + "[key]", depth + 1, ref visited);
+                    Require(entry.Key.VariantType == Variant.Type.String, path + "[key]: Source dictionary key must be String");
+                    string key = entry.Key.AsString();
+                    string fieldPath = SpriteSourceFieldPath(path, key);
+                    Require(fields.TryAdd(key, SnapshotSpriteSource(entry.Value, fieldPath, depth + 1, ref visited)),
+                        fieldPath + ": duplicate Source String key");
+                }
+                return new SpriteSourceDictionary(new ReadOnlyDictionary<string, SpriteSourceValue>(fields));
+            case Variant.Type.Array:
+                var items = new List<SpriteSourceValue>();
+                foreach (var item in value.AsGodotArray())
+                    items.Add(SnapshotSpriteSource(item, path + "[" + items.Count + "]", depth + 1, ref visited));
+                return new SpriteSourceArray(items.AsReadOnly());
+            default:
+                throw new InvalidDataException(path + ": unsupported Source Variant type " + value.VariantType);
+        }
+    }
+
+    private static string SpriteSourceFieldPath(string path, string key) => path + "[\""
+        + key.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t") + "\"]";
+
+    private static void CompareSpriteSource(SpriteSourceValue expected, SpriteSourceValue actual, string path)
+    {
+        Require(expected.Type == actual.Type, path + ": Source Variant type differs from expected " + expected.Type);
+        switch (expected)
+        {
+            case SpriteSourceScalar scalar:
+                Require(Equals(scalar.Value, ((SpriteSourceScalar)actual).Value), path + ": Source value differs from expected");
+                break;
+            case SpriteSourceDictionary dictionary:
+                var fields = ((SpriteSourceDictionary)actual).Fields;
+                foreach (var field in dictionary.Fields)
+                {
+                    string fieldPath = SpriteSourceFieldPath(path, field.Key);
+                    Require(fields.ContainsKey(field.Key), fieldPath + ": expected Source key is missing");
+                    CompareSpriteSource(field.Value, fields[field.Key], fieldPath);
+                }
+                foreach (string key in fields.Keys)
+                    Require(dictionary.Fields.ContainsKey(key), SpriteSourceFieldPath(path, key) + ": unexpected Source key");
+                break;
+            case SpriteSourceArray array:
+                var items = ((SpriteSourceArray)actual).Items;
+                Require(array.Items.Count == items.Count, path + ": Source array length differs from expected");
+                for (int index = 0; index < array.Items.Count; index++)
+                    CompareSpriteSource(array.Items[index], items[index], path + "[" + index + "]");
+                break;
+        }
+    }
+
+    // Full visual loading keeps its existing root diagnostic order and hash flow through this core.
+    private static PalSprite ReadAndValidateSprite(string uri)
     {
         var sprite = LoadResource<PalSprite>(uri);
         Require(Word(sprite.SpriteId) && sprite.Source is { Count: > 0 }, "sprite requires source declaration and WORD SpriteId");

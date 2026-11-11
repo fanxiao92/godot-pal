@@ -14,6 +14,644 @@ namespace Pal.Game.Tests;
 public class NativeBattleVisualProfileTests
 {
     [TestCase]
+    public void StandaloneCheckedSpriteRejectsChangedSourceAfterCleanRoundtrip()
+    {
+        string root = "res://Assets/RuntimeTests/checked-sprite-" + Guid.NewGuid().ToString("N");
+        string directory = ProjectSettings.GlobalizePath(root);
+        string uri = root + "/Sprite.tres";
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var authored = new PalSprite
+            {
+                SpriteId = 73, DecodedByteLength = 64, FrameCount = 2,
+                Source = new Godot.Collections.Dictionary { ["archive"] = "literal-battle.mkf", ["chunk"] = 73 },
+                Frames =
+                [
+                    new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] },
+                    new PalFrame { Index = 1, SourceOffset = 18, Width = 1, Height = 2, Indices = [22, 79], Alpha = [128, 17] }
+                ]
+            };
+            // Independently authored expectation, never derived from the loaded target or its fields.
+            var expected = new PalSprite
+            {
+                SpriteId = 73, DecodedByteLength = 64, FrameCount = 2,
+                Source = new Godot.Collections.Dictionary { ["archive"] = "literal-battle.mkf", ["chunk"] = 73 },
+                Frames =
+                [
+                    new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] },
+                    new PalFrame { Index = 1, SourceOffset = 18, Width = 1, Height = 2, Indices = [22, 79], Alpha = [128, 17] }
+                ]
+            };
+            NativeProfileFixture.SaveResource(authored, uri);
+            var hashes = new Dictionary<string, string>(StringComparer.Ordinal) { [uri] = Godot.FileAccess.GetSha256(uri) };
+            var clean = NativeBattleVisualProfile.LoadSprite(uri, expected, hashes);
+            AssertThat(ReferenceEquals(clean, authored)).IsFalse();
+            AssertThat(clean.SpriteId).IsEqual(73);
+            AssertThat(clean.DecodedByteLength).IsEqual(64);
+            AssertThat(clean.FrameCount).IsEqual(2);
+            AssertThat(clean.Frames.Count).IsEqual(2);
+            AssertThat(clean.Frames.Select(frame => frame.Index).Order().SequenceEqual(new[] { 0, 1 })).IsTrue();
+            var first = clean.Frames.Single(frame => frame.Index == 0);
+            AssertThat(first.SourceOffset).IsEqual(6);
+            AssertThat(first.Width).IsEqual(2);
+            AssertThat(first.Height).IsEqual(1);
+            AssertThat(first.Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
+            AssertThat(first.Alpha.SequenceEqual(new byte[] { 0, 255 })).IsTrue();
+            AssertThat(first.Texture is null).IsTrue();
+            var second = clean.Frames.Single(frame => frame.Index == 1);
+            AssertThat(second.SourceOffset).IsEqual(18);
+            AssertThat(second.Width).IsEqual(1);
+            AssertThat(second.Height).IsEqual(2);
+            AssertThat(second.Indices.SequenceEqual(new byte[] { 22, 79 })).IsTrue();
+            AssertThat(second.Alpha.SequenceEqual(new byte[] { 128, 17 })).IsTrue();
+            AssertThat(second.Texture is null).IsTrue();
+            AssertThat(clean.Source.Count).IsEqual(2);
+            AssertThat(clean.Source["archive"].VariantType).IsEqual(Variant.Type.String);
+            AssertThat(clean.Source["archive"].AsString()).IsEqual("literal-battle.mkf");
+            AssertThat(clean.Source["chunk"].VariantType).IsEqual(Variant.Type.Int);
+            AssertThat(clean.Source["chunk"].AsInt32()).IsEqual(73);
+
+            authored.Source["archive"] = "changed-battle.mkf";
+            NativeProfileFixture.SaveResource(authored, uri);
+            // The current bad file has a correct hash: byte identity is not the expected Source declaration.
+            hashes[uri] = Godot.FileAccess.GetSha256(uri);
+            string failure = Failure(() => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            AssertThat(failure.Contains("Source", StringComparison.Ordinal)).IsTrue();
+            AssertThat(failure.Contains(uri, StringComparison.Ordinal)).IsTrue();
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestCase]
+    public void StandaloneCheckedSpriteRejectsWrongRootHashAfterCleanRoundtrip()
+    {
+        string root = "res://Assets/RuntimeTests/checked-sprite-root-hash-" + Guid.NewGuid().ToString("N");
+        string directory = ProjectSettings.GlobalizePath(root);
+        string uri = root + "/Sprite.tres";
+        try
+        {
+            Directory.CreateDirectory(directory);
+            // Artificial literal fixture, not retail data; expected owns separate Source, frames and planes.
+            var authored = new PalSprite
+            {
+                SpriteId = 73, DecodedByteLength = 64, FrameCount = 2,
+                Source = new Godot.Collections.Dictionary { ["archive"] = "literal-battle.mkf", ["chunk"] = 73 },
+                Frames =
+                [
+                    new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] },
+                    new PalFrame { Index = 1, SourceOffset = 18, Width = 1, Height = 2, Indices = [22, 79], Alpha = [128, 17] }
+                ]
+            };
+            var expected = new PalSprite
+            {
+                SpriteId = 73, DecodedByteLength = 64, FrameCount = 2,
+                Source = new Godot.Collections.Dictionary { ["archive"] = "literal-battle.mkf", ["chunk"] = 73 },
+                Frames =
+                [
+                    new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] },
+                    new PalFrame { Index = 1, SourceOffset = 18, Width = 1, Height = 2, Indices = [22, 79], Alpha = [128, 17] }
+                ]
+            };
+            AssertThat(ResourceSaver.Save(authored, uri)).IsEqual(Error.Ok);
+            string actualHash = Godot.FileAccess.GetSha256(uri);
+            AssertThat(actualHash.Length).IsEqual(64);
+            var hashes = new Dictionary<string, string>(StringComparer.Ordinal) { [uri] = actualHash };
+            var clean = NativeBattleVisualProfile.LoadSprite(uri, expected, hashes);
+            AssertThat(ReferenceEquals(clean, authored)).IsFalse();
+            AssertThat(ReferenceEquals(clean, expected)).IsFalse();
+            AssertThat(clean.SpriteId).IsEqual(73);
+            AssertThat(clean.DecodedByteLength).IsEqual(64);
+            AssertThat(clean.FrameCount).IsEqual(2);
+            AssertThat(clean.Frames.Count).IsEqual(2);
+            AssertThat(clean.Frames.Select(frame => frame.Index).Order().SequenceEqual(new[] { 0, 1 })).IsTrue();
+            var first = clean.Frames.Single(frame => frame.Index == 0);
+            AssertThat(first.SourceOffset).IsEqual(6);
+            AssertThat(first.Width).IsEqual(2);
+            AssertThat(first.Height).IsEqual(1);
+            AssertThat(first.Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
+            AssertThat(first.Alpha.SequenceEqual(new byte[] { 0, 255 })).IsTrue();
+            AssertThat(first.Texture is null).IsTrue();
+            var second = clean.Frames.Single(frame => frame.Index == 1);
+            AssertThat(second.SourceOffset).IsEqual(18);
+            AssertThat(second.Width).IsEqual(1);
+            AssertThat(second.Height).IsEqual(2);
+            AssertThat(second.Indices.SequenceEqual(new byte[] { 22, 79 })).IsTrue();
+            AssertThat(second.Alpha.SequenceEqual(new byte[] { 128, 17 })).IsTrue();
+            AssertThat(second.Texture is null).IsTrue();
+            AssertThat(clean.Source.Count).IsEqual(2);
+            AssertThat(clean.Source["archive"].VariantType).IsEqual(Variant.Type.String);
+            AssertThat(clean.Source["archive"].AsString()).IsEqual("literal-battle.mkf");
+            AssertThat(clean.Source["chunk"].VariantType).IsEqual(Variant.Type.Int);
+            AssertThat(clean.Source["chunk"].AsInt32()).IsEqual(73);
+
+            const string wrongHash = "0000000000000000000000000000000000000000000000000000000000000000";
+            AssertThat(wrongHash == actualHash).IsFalse();
+            // Only the root manifest value changes; the same valid file and independent expectation remain.
+            hashes[uri] = wrongHash;
+            AssertThat(Godot.FileAccess.GetSha256(uri)).IsEqual(actualHash);
+            string failure = Failure(() => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            AssertThat(failure.Contains("SHA-256", StringComparison.Ordinal)).IsTrue();
+            AssertThat(failure.Contains(uri, StringComparison.Ordinal)).IsTrue();
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestCase]
+    public void StandaloneCheckedSpriteRejectsExtraManifestEntryAfterCleanRoundtrip()
+    {
+        string root = "res://Assets/RuntimeTests/checked-sprite-extra-manifest-" + Guid.NewGuid().ToString("N");
+        string directory = ProjectSettings.GlobalizePath(root);
+        string uri = root + "/Sprite.tres";
+        try
+        {
+            Directory.CreateDirectory(directory);
+            // Separate literal resources, Source dictionaries, frames and planes; no loaded-data oracle.
+            var authored = new PalSprite
+            {
+                SpriteId = 73, DecodedByteLength = 64, FrameCount = 2,
+                Source = new Godot.Collections.Dictionary { ["archive"] = "literal-battle.mkf", ["chunk"] = 73 },
+                Frames =
+                [
+                    new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] },
+                    new PalFrame { Index = 1, SourceOffset = 18, Width = 1, Height = 2, Indices = [22, 79], Alpha = [128, 17] }
+                ]
+            };
+            var expected = new PalSprite
+            {
+                SpriteId = 73, DecodedByteLength = 64, FrameCount = 2,
+                Source = new Godot.Collections.Dictionary { ["archive"] = "literal-battle.mkf", ["chunk"] = 73 },
+                Frames =
+                [
+                    new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] },
+                    new PalFrame { Index = 1, SourceOffset = 18, Width = 1, Height = 2, Indices = [22, 79], Alpha = [128, 17] }
+                ]
+            };
+            AssertThat(ResourceSaver.Save(authored, uri)).IsEqual(Error.Ok);
+            string rootHash = Godot.FileAccess.GetSha256(uri);
+            AssertThat(rootHash.Length).IsEqual(64);
+            AssertThat(rootHash.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')).IsTrue();
+            var hashes = new Dictionary<string, string>(StringComparer.Ordinal) { [uri] = rootHash };
+            var clean = NativeBattleVisualProfile.LoadSprite(uri, expected, hashes);
+            AssertThat(ReferenceEquals(clean, authored)).IsFalse();
+            AssertThat(ReferenceEquals(clean, expected)).IsFalse();
+            AssertThat(clean.SpriteId).IsEqual(73);
+            AssertThat(clean.DecodedByteLength).IsEqual(64);
+            AssertThat(clean.FrameCount).IsEqual(2);
+            AssertThat(clean.Frames.Count).IsEqual(2);
+            AssertThat(clean.Frames.Select(frame => frame.Index).Order().SequenceEqual(new[] { 0, 1 })).IsTrue();
+            var first = clean.Frames.Single(frame => frame.Index == 0);
+            AssertThat(first.SourceOffset).IsEqual(6);
+            AssertThat(first.Width).IsEqual(2);
+            AssertThat(first.Height).IsEqual(1);
+            AssertThat(first.Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
+            AssertThat(first.Alpha.SequenceEqual(new byte[] { 0, 255 })).IsTrue();
+            AssertThat(first.Texture is null).IsTrue();
+            var second = clean.Frames.Single(frame => frame.Index == 1);
+            AssertThat(second.SourceOffset).IsEqual(18);
+            AssertThat(second.Width).IsEqual(1);
+            AssertThat(second.Height).IsEqual(2);
+            AssertThat(second.Indices.SequenceEqual(new byte[] { 22, 79 })).IsTrue();
+            AssertThat(second.Alpha.SequenceEqual(new byte[] { 128, 17 })).IsTrue();
+            AssertThat(second.Texture is null).IsTrue();
+            AssertThat(clean.Source.Count).IsEqual(2);
+            AssertThat(clean.Source["archive"].VariantType).IsEqual(Variant.Type.String);
+            AssertThat(clean.Source["archive"].AsString()).IsEqual("literal-battle.mkf");
+            AssertThat(clean.Source["chunk"].VariantType).IsEqual(Variant.Type.Int);
+            AssertThat(clean.Source["chunk"].AsInt32()).IsEqual(73);
+
+            string unusedUri = root + "/Unused.tres";
+            var unused = new PalSprite
+            {
+                SpriteId = 74, DecodedByteLength = 32, FrameCount = 1,
+                Source = new Godot.Collections.Dictionary { ["archive"] = "unused-literal-battle.mkf", ["chunk"] = 74 },
+                Frames = [new PalFrame { Index = 0, SourceOffset = 4, Width = 1, Height = 1, Indices = [31], Alpha = [255] }]
+            };
+            AssertThat(ResourceSaver.Save(unused, unusedUri)).IsEqual(Error.Ok);
+            string unusedHash = Godot.FileAccess.GetSha256(unusedUri);
+            AssertThat(unusedHash.Length).IsEqual(64);
+            AssertThat(unusedHash.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')).IsTrue();
+            // Saving an unrelated sibling does not add a root dependency or change its bytes/hash.
+            string rootText = File.ReadAllText(ProjectSettings.GlobalizePath(uri));
+            AssertThat(rootText.Contains("Unused.tres", StringComparison.Ordinal)).IsFalse();
+            AssertThat(Godot.FileAccess.GetSha256(uri)).IsEqual(rootHash);
+            AssertThat(hashes.Count).IsEqual(1);
+            AssertThat(hashes[uri]).IsEqual(rootHash);
+            // Only exact manifest membership changes; both entries contain their real file hashes.
+            hashes.Add(unusedUri, unusedHash);
+            AssertThat(hashes.Count).IsEqual(2);
+            string failure = Failure(() => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            AssertThat(failure.Contains(uri, StringComparison.Ordinal)).IsTrue();
+            AssertThat(failure.Contains("dependency", StringComparison.OrdinalIgnoreCase)
+                || failure.Contains("dependencies", StringComparison.OrdinalIgnoreCase)
+                || failure.Contains("manifest", StringComparison.OrdinalIgnoreCase)).IsTrue();
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestCase]
+    public void StandaloneCheckedSpriteMatchesIndependentFieldsAndSourceBoundaries()
+    {
+        string root = "res://Assets/RuntimeTests/checked-sprite-fields-source-" + Guid.NewGuid().ToString("N");
+        string directory = ProjectSettings.GlobalizePath(root);
+        string uri = root + "/Sprite.tres";
+        string variant = "clean-literal-control";
+        var authored = Literal(true);
+        var expected = Literal(false);
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // Every call owns its resources, collections and planes. No target load supplies expectations.
+        PalSprite Literal(bool actualOrder)
+        {
+            var zero = new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] };
+            var one = new PalFrame { Index = 1, SourceOffset = 18, Width = 1, Height = 2, Indices = [22, 79], Alpha = [128, 17] };
+            var alias = new PalFrame { Index = 7, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] };
+            return new PalSprite
+            {
+                SpriteId = 73, DecodedByteLength = 64, FrameCount = 2,
+                Source = new Godot.Collections.Dictionary
+                {
+                    ["archive"] = "literal-battle.mkf", ["chunk"] = 73,
+                    ["meta"] = new Godot.Collections.Dictionary
+                    {
+                        ["enabled"] = true, ["nothing"] = default(Variant), ["weight"] = 1.5,
+                        ["sequence"] = new Godot.Collections.Array { 73, "73", 73.0 }
+                    },
+                    ["quoted\"\\\n\t"] = "literal-escaped"
+                },
+                Frames = actualOrder ? [alias, one, zero] : [zero, one, alias]
+            };
+        }
+        PalFrame Frame(PalSprite sprite, int index) => sprite.Frames.Single(frame => frame.Index == index);
+        void AssertLiteral(PalSprite sprite)
+        {
+            AssertThat(ReferenceEquals(sprite, authored) || ReferenceEquals(sprite, expected)).IsFalse();
+            AssertThat(sprite.SpriteId).IsEqual(73);
+            AssertThat(sprite.DecodedByteLength).IsEqual(64);
+            AssertThat(sprite.FrameCount).IsEqual(2);
+            AssertThat(sprite.Frames.Count).IsEqual(3);
+            AssertThat(sprite.Frames.Select(frame => frame.Index).Order().SequenceEqual(new[] { 0, 1, 7 })).IsTrue();
+            foreach (int index in new[] { 0, 1, 7 })
+            {
+                var frame = Frame(sprite, index);
+                AssertThat(frame.Index).IsEqual(index);
+                AssertThat(frame.SourceOffset).IsEqual(index == 1 ? 18 : 6);
+                AssertThat(frame.Width).IsEqual(index == 1 ? 1 : 2);
+                AssertThat(frame.Height).IsEqual(index == 1 ? 2 : 1);
+                AssertThat(frame.Indices.SequenceEqual(index == 1 ? new byte[] { 22, 79 } : new byte[] { 4, 19 })).IsTrue();
+                AssertThat(frame.Alpha.SequenceEqual(index == 1 ? new byte[] { 128, 17 } : new byte[] { 0, 255 })).IsTrue();
+                AssertThat(frame.Texture is null).IsTrue();
+            }
+            AssertThat(sprite.Source.Count).IsEqual(4);
+            AssertThat(sprite.Source["archive"].VariantType).IsEqual(Variant.Type.String);
+            AssertThat(sprite.Source["archive"].AsString()).IsEqual("literal-battle.mkf");
+            AssertThat(sprite.Source["chunk"].VariantType).IsEqual(Variant.Type.Int);
+            AssertThat(sprite.Source["chunk"].AsInt64()).IsEqual(73L);
+            AssertThat(sprite.Source["meta"].VariantType).IsEqual(Variant.Type.Dictionary);
+            var meta = sprite.Source["meta"].AsGodotDictionary();
+            AssertThat(meta.Count).IsEqual(4);
+            AssertThat(meta["enabled"].VariantType).IsEqual(Variant.Type.Bool);
+            AssertThat(meta["enabled"].AsBool()).IsTrue();
+            AssertThat(meta["nothing"].VariantType).IsEqual(Variant.Type.Nil);
+            AssertThat(meta["weight"].VariantType).IsEqual(Variant.Type.Float);
+            AssertThat(meta["weight"].AsDouble()).IsEqual(1.5);
+            AssertThat(meta["sequence"].VariantType).IsEqual(Variant.Type.Array);
+            var sequence = meta["sequence"].AsGodotArray();
+            AssertThat(sequence.Count).IsEqual(3);
+            AssertThat(sequence[0].VariantType).IsEqual(Variant.Type.Int);
+            AssertThat(sequence[0].AsInt64()).IsEqual(73L);
+            AssertThat(sequence[1].VariantType).IsEqual(Variant.Type.String);
+            AssertThat(sequence[1].AsString()).IsEqual("73");
+            AssertThat(sequence[2].VariantType).IsEqual(Variant.Type.Float);
+            AssertThat(sequence[2].AsDouble()).IsEqual(73.0);
+            AssertThat(sprite.Source["quoted\"\\\n\t"].VariantType).IsEqual(Variant.Type.String);
+            AssertThat(sprite.Source["quoted\"\\\n\t"].AsString()).IsEqual("literal-escaped");
+        }
+        void SaveActualAndProve(Action<PalSprite> prove)
+        {
+            // A serializer/parser failure is a setup failure, never a checked-validator rejection.
+            AssertThat(ResourceSaver.Save(authored, uri)).IsEqual(Error.Ok);
+            string hash = Godot.FileAccess.GetSha256(uri);
+            AssertThat(hash.Length).IsEqual(64);
+            AssertThat(hash.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')).IsTrue();
+            hashes = new Dictionary<string, string>(StringComparer.Ordinal) { [uri] = hash };
+            var roundtrip = ResourceLoader.Load<PalSprite>(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep)
+                ?? throw new InvalidOperationException(variant + ": public typed roundtrip setup failed");
+            prove(roundtrip);
+        }
+        void Reset(string name)
+        {
+            variant = name;
+            authored = Literal(true);
+            expected = Literal(false);
+            SaveActualAndProve(AssertLiteral);
+            AssertLiteral(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+        }
+        string Reject(string field, Action action)
+        {
+            string failure = Failure(action);
+            if (!failure.Contains(uri, StringComparison.Ordinal) || !failure.Contains(field, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(variant + ": missing URI/" + field + " context: " + failure);
+            return failure;
+        }
+        Godot.Collections.Dictionary DepthSource(int scalarDepth)
+        {
+            Variant value = 1;
+            for (int depth = 1; depth < scalarDepth; depth++) value = new Godot.Collections.Array { value };
+            return new Godot.Collections.Dictionary { ["depth"] = value };
+        }
+        Godot.Collections.Dictionary WorkSource(int scalars)
+        {
+            var values = new Godot.Collections.Array();
+            for (int index = 0; index < scalars; index++) values.Add(1);
+            // root dictionary + String key + array + scalars; keys consume work too.
+            return new Godot.Collections.Dictionary { ["work"] = values };
+        }
+        void ProveDepth(PalSprite sprite, int scalarDepth)
+        {
+            AssertThat(sprite.Source.Count).IsEqual(1);
+            Variant value = sprite.Source["depth"];
+            for (int depth = 1; depth < scalarDepth; depth++)
+            {
+                AssertThat(value.VariantType).IsEqual(Variant.Type.Array);
+                var array = value.AsGodotArray();
+                AssertThat(array.Count).IsEqual(1);
+                value = array[0];
+            }
+            AssertThat(value.VariantType).IsEqual(Variant.Type.Int);
+            AssertThat(value.AsInt64()).IsEqual(1L);
+        }
+        void ProveWork(PalSprite sprite, int scalars)
+        {
+            AssertThat(sprite.Source.Count).IsEqual(1);
+            AssertThat(sprite.Source["work"].VariantType).IsEqual(Variant.Type.Array);
+            var values = sprite.Source["work"].AsGodotArray();
+            AssertThat(values.Count).IsEqual(scalars);
+            AssertThat(values.All(value => value.VariantType == Variant.Type.Int && value.AsInt64() == 1)).IsTrue();
+        }
+        try
+        {
+            Directory.CreateDirectory(directory);
+            Reset("clean-literal-control");
+            var clean = NativeBattleVisualProfile.LoadSprite(uri, expected, hashes);
+            AssertLiteral(clean);
+            // Mutating this returned Resource must not change the independent expectation or disk.
+            clean.SpriteId = 99;
+            Frame(clean, 0).Indices = [99, 19];
+            Frame(clean, 1).Alpha = [0, 17];
+            clean.Source["meta"].AsGodotDictionary()["sequence"].AsGodotArray()[0] = 99;
+            AssertThat(Frame(expected, 0).Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
+            AssertThat(expected.Source["meta"].AsGodotDictionary()["sequence"].AsGodotArray()[0].AsInt64()).IsEqual(73L);
+            AssertLiteral(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            string cleanHash = hashes[uri];
+            AssertThat(hashes.Count).IsEqual(1);
+            AssertThat(hashes.Keys.Single()).IsEqual(uri);
+
+            // First designated negative: ONLY expected.SpriteId changes, retaining the actual URI/bytes/manifest/Source.
+            variant = "expected-SpriteId-74-versus-actual-73";
+            expected.SpriteId = 74;
+            AssertThat(Godot.FileAccess.GetSha256(uri)).IsEqual(cleanHash);
+            string firstFailure = Failure(() => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            AssertThat(firstFailure.Contains(uri, StringComparison.Ordinal)).IsTrue();
+            AssertThat(firstFailure.Contains("SpriteId", StringComparison.Ordinal)).IsTrue();
+
+            // Everything below is intentionally unreachable at the first safe-false-positive RED.
+            foreach (string name in new[] { "DecodedByteLength", "FrameCount", "alias-replaced", "alias-removed", "alias-added", "SourceOffset", "Width-Height", "Height", "Indices", "Alpha" })
+            {
+                Reset("expected-" + name);
+                string field;
+                switch (name)
+                {
+                    case "DecodedByteLength": expected.DecodedByteLength = 65; field = "DecodedByteLength"; break;
+                    case "FrameCount": expected.FrameCount = 1; field = "FrameCount"; break;
+                    case "alias-replaced": Frame(expected, 7).Index = 8; field = "Index"; break;
+                    case "alias-removed": expected.Frames.Remove(Frame(expected, 7)); field = "Index"; break;
+                    case "alias-added": expected.Frames.Add(new PalFrame { Index = 8, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] }); field = "Index"; break;
+                    case "SourceOffset": Frame(expected, 0).SourceOffset = 7; field = "SourceOffset"; break;
+                    case "Width-Height": Frame(expected, 0).Width = 1; Frame(expected, 0).Height = 2; field = "Width"; break;
+                    case "Height": Frame(expected, 0).Height = 2; Frame(expected, 0).Indices = [4, 19, 4, 19]; Frame(expected, 0).Alpha = [0, 255, 0, 255]; field = "Height"; break;
+                    case "Indices": Frame(expected, 0).Indices = [5, 19]; field = "Indices"; break;
+                    default: Frame(expected, 1).Alpha = [128, 18]; field = "Alpha"; break;
+                }
+                Reject(field, () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            }
+            foreach (string name in new[] { "replace", "remove", "add" })
+            {
+                Reset("actual-Index-set-" + name);
+                if (name == "replace") Frame(authored, 7).Index = 8;
+                else if (name == "remove") authored.Frames.Remove(Frame(authored, 7));
+                else authored.Frames.Add(new PalFrame { Index = 8, SourceOffset = 6, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] });
+                SaveActualAndProve(sprite => AssertThat(sprite.Frames.Select(frame => frame.Index).Order().SequenceEqual(
+                    name == "replace" ? new[] { 0, 1, 8 } : name == "remove" ? new[] { 0, 1 } : new[] { 0, 1, 7, 8 })).IsTrue());
+                // These sets all remain structurally legal: nominal 0/1 plus optional aliases.
+                AssertThat(NativeBattleVisualProfile.LoadSprite(uri).FrameCount).IsEqual(2);
+                Reject("Index", () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            }
+            Reset("order-ignored-positive");
+            expected.Frames = [Frame(expected, 1), Frame(expected, 7), Frame(expected, 0)];
+            AssertLiteral(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            foreach (bool actualSide in new[] { false, true })
+                foreach (string name in new[] { "duplicate", "negative", "overflow", "nominal-missing" })
+                {
+                    Reset((actualSide ? "actual-" : "expected-") + "invalid-Index-" + name);
+                    var target = actualSide ? authored : expected;
+                    if (name == "nominal-missing") target.Frames.Remove(Frame(target, 1));
+                    else Frame(target, 7).Index = name == "duplicate" ? 0 : name == "negative" ? -1 : 65536;
+                    if (actualSide) SaveActualAndProve(sprite =>
+                        AssertThat(name == "nominal-missing" ? sprite.Frames.Count == 2 && !sprite.Frames.Any(frame => frame.Index == 1)
+                            : sprite.Frames.Count == 3 && sprite.Frames.Count(frame => frame.Index == (name == "duplicate" ? 0 : name == "negative" ? -1 : 65536))
+                                == (name == "duplicate" ? 2 : 1)).IsTrue());
+                    Reject(name == "nominal-missing" ? "frame" : "Index", () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+                }
+
+            foreach (string name in new[] { "String", "Int", "String-type", "Float-type", "Float-value", "Bool", "Nil", "nested-value", "array-order", "array-length", "missing-key", "extra-key", "escaped-key", "Vector2", "non-String-key" })
+            {
+                Reset("expected-Source-" + name);
+                var meta = expected.Source["meta"].AsGodotDictionary();
+                string path = "Source";
+                switch (name)
+                {
+                    case "String": expected.Source["archive"] = "other.mkf"; path = "Source[\"archive\"]"; break;
+                    case "Int": expected.Source["chunk"] = 74; path = "Source[\"chunk\"]"; break;
+                    case "String-type": expected.Source["chunk"] = "73"; path = "Source[\"chunk\"]"; break;
+                    case "Float-type": expected.Source["chunk"] = 73.0; path = "Source[\"chunk\"]"; break;
+                    case "Float-value": meta["weight"] = 1.75; path = "Source[\"meta\"][\"weight\"]"; break;
+                    case "Bool": meta["enabled"] = false; path = "Source[\"meta\"][\"enabled\"]"; break;
+                    case "Nil": meta["nothing"] = false; path = "Source[\"meta\"][\"nothing\"]"; break;
+                    case "nested-value": meta["sequence"].AsGodotArray()[1] = "74"; path = "Source[\"meta\"][\"sequence\"][1]"; break;
+                    case "array-order": meta["sequence"] = new Godot.Collections.Array { "73", 73, 73.0 }; path = "Source[\"meta\"][\"sequence\"][0]"; break;
+                    case "array-length": meta["sequence"].AsGodotArray().Add(74); path = "Source[\"meta\"][\"sequence\"]"; break;
+                    case "missing-key": expected.Source.Remove("archive"); path = "Source[\"archive\"]"; break;
+                    case "extra-key": expected.Source["extra"] = 1; path = "Source[\"extra\"]"; break;
+                    case "escaped-key": expected.Source["quoted\"\\\n\t"] = "different"; path = "Source[\"quoted\\\"\\\\\\n\\t\"]"; break;
+                    case "Vector2": meta["unsupported"] = new Vector2(2, 3); path = "Source[\"meta\"][\"unsupported\"]"; break;
+                    default: expected.Source[7] = "non-string"; path = "Source[key]"; break;
+                }
+                Reject(path, () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            }
+            foreach (string name in new[] { "Vector2", "non-String-key" })
+            {
+                Reset("actual-Source-" + name);
+                if (name == "Vector2") authored.Source["unsupported"] = new Vector2(2, 3);
+                else authored.Source[7] = "non-string";
+                SaveActualAndProve(sprite =>
+                {
+                    if (name == "Vector2")
+                    {
+                        AssertThat(sprite.Source["unsupported"].VariantType).IsEqual(Variant.Type.Vector2);
+                        AssertThat(sprite.Source["unsupported"].AsVector2()).IsEqual(new Vector2(2, 3));
+                    }
+                    else AssertThat(sprite.Source.Any(entry => entry.Key.VariantType == Variant.Type.Int && entry.Key.AsInt64() == 7 && entry.Value.AsString() == "non-string")).IsTrue();
+                });
+                Reject("Source", () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            }
+            foreach (bool actualSide in new[] { false, true })
+                foreach (double number in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+                {
+                    Reset((actualSide ? "actual-" : "expected-") + "Source-nonfinite-" + number);
+                    if (actualSide)
+                    {
+                        authored.Source["number"] = number;
+                        // Do not credit this negative unless public Save/IgnoreDeep preserves the nonfinite value.
+                        SaveActualAndProve(sprite =>
+                        {
+                            AssertThat(sprite.Source["number"].VariantType).IsEqual(Variant.Type.Float);
+                            double saved = sprite.Source["number"].AsDouble();
+                            AssertThat(double.IsNaN(number) ? double.IsNaN(saved) : saved == number).IsTrue();
+                        });
+                    }
+                    else expected.Source["number"] = number;
+                    Reject("Source[\"number\"]", () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+                }
+            Reset("Source-dictionary-order-ignored-positive");
+            expected.Source = new Godot.Collections.Dictionary
+            {
+                ["quoted\"\\\n\t"] = "literal-escaped",
+                ["meta"] = new Godot.Collections.Dictionary
+                {
+                    ["sequence"] = new Godot.Collections.Array { 73, "73", 73.0 },
+                    ["weight"] = 1.5, ["nothing"] = default(Variant), ["enabled"] = true
+                },
+                ["chunk"] = 73, ["archive"] = "literal-battle.mkf"
+            };
+            AssertLiteral(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+
+            Reset("Source-depth64-both-independent-budgets-positive");
+            authored.Source = DepthSource(64);
+            expected.Source = DepthSource(64);
+            SaveActualAndProve(sprite => ProveDepth(sprite, 64));
+            ProveDepth(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes), 64);
+            foreach (bool actualSide in new[] { false, true })
+            {
+                Reset((actualSide ? "actual-" : "expected-") + "Source-depth65");
+                expected.Source = DepthSource(64);
+                authored.Source = DepthSource(actualSide ? 65 : 64);
+                SaveActualAndProve(sprite => ProveDepth(sprite, actualSide ? 65 : 64));
+                if (!actualSide) expected.Source = DepthSource(65);
+                string failure = Reject("Source", () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+                AssertThat(failure.Contains("depth bound (possibly cyclic)", StringComparison.Ordinal)).IsTrue();
+            }
+            Reset("Source-work65536-both-independent-budgets-positive");
+            authored.Source = WorkSource(65533);
+            expected.Source = WorkSource(65533);
+            SaveActualAndProve(sprite => ProveWork(sprite, 65533));
+            ProveWork(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes), 65533);
+            foreach (bool actualSide in new[] { false, true })
+            {
+                Reset((actualSide ? "actual-" : "expected-") + "Source-work65537-including-key");
+                authored.Source = WorkSource(actualSide ? 65534 : 65533);
+                expected.Source = WorkSource(65533);
+                SaveActualAndProve(sprite => ProveWork(sprite, actualSide ? 65534 : 65533));
+                if (!actualSide) expected.Source = WorkSource(65534);
+                string failure = Reject("Source", () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+                AssertThat(failure.Contains("work bound (possibly cyclic)", StringComparison.Ordinal)).IsTrue();
+            }
+            foreach (bool actualSide in new[] { false, true })
+            {
+                Reset((actualSide ? "actual-" : "expected-") + "Source-repeated-alias-by-value-positive");
+                var shared = new Godot.Collections.Array { 1, "two" };
+                var aliased = new Godot.Collections.Dictionary { ["repeat"] = new Godot.Collections.Array { shared, shared } };
+                var separate = new Godot.Collections.Dictionary { ["repeat"] = new Godot.Collections.Array
+                    { new Godot.Collections.Array { 1, "two" }, new Godot.Collections.Array { 1, "two" } } };
+                authored.Source = actualSide ? aliased : separate;
+                expected.Source = actualSide ? separate : aliased;
+                void ProveRepeated(PalSprite sprite)
+                {
+                    var values = sprite.Source["repeat"].AsGodotArray();
+                    AssertThat(values.Count).IsEqual(2);
+                    foreach (var value in values)
+                    {
+                        AssertThat(value.VariantType).IsEqual(Variant.Type.Array);
+                        var child = value.AsGodotArray();
+                        AssertThat(child.Count).IsEqual(2);
+                        AssertThat(child[0].VariantType).IsEqual(Variant.Type.Int);
+                        AssertThat(child[0].AsInt64()).IsEqual(1L);
+                        AssertThat(child[1].VariantType).IsEqual(Variant.Type.String);
+                        AssertThat(child[1].AsString()).IsEqual("two");
+                    }
+                }
+                SaveActualAndProve(ProveRepeated);
+                ProveRepeated(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            }
+            Reset("expected-Source-cycle-bounded-not-identity-detection");
+            var cycle = new Godot.Collections.Array();
+            try
+            {
+                cycle.Add(cycle);
+                expected.Source["cycle"] = cycle;
+                string failure = Reject("Source[\"cycle\"]", () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+                AssertThat(failure.Contains("bound (possibly cyclic)", StringComparison.Ordinal)).IsTrue();
+            }
+            finally { cycle.Clear(); }
+            // No actual cyclic Save: public serialization has no established cyclic-collection roundtrip.
+            foreach (string name in new[] { "expected-null", "expected-Source-null", "expected-Source-empty", "manifest-null", "expected-Frames-null", "expected-frame-null", "expected-Indices-null", "expected-Alpha-null" })
+            {
+                Reset(name);
+                // Intentional invalid-input null! follows existing native tests, not a production warning waiver.
+                string field = "Source";
+                switch (name)
+                {
+                    case "expected-null": Reject("expected", () => NativeBattleVisualProfile.LoadSprite(uri, null!, hashes)); continue;
+                    case "expected-Source-null": expected.Source = null!; break;
+                    case "expected-Source-empty": expected.Source.Clear(); break;
+                    case "manifest-null": Reject("manifest", () => NativeBattleVisualProfile.LoadSprite(uri, expected, null!)); continue;
+                    case "expected-Frames-null": expected.Frames = null!; field = "Frames"; break;
+                    case "expected-frame-null": expected.Frames[0] = null!; field = "frame"; break;
+                    case "expected-Indices-null": Frame(expected, 0).Indices = null!; field = "Indices"; break;
+                    default: Frame(expected, 0).Alpha = null!; field = "Alpha"; break;
+                }
+                Reject(field, () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            }
+            Reset("actual-Source-empty");
+            authored.Source.Clear();
+            SaveActualAndProve(sprite => AssertThat(sprite.Source.Count).IsEqual(0));
+            Reject("Source", () => NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+            foreach (string? badUri in new string?[] { null, "", "user://outside.tres", root + "/../Sprite.tres" })
+            {
+                Reset("invalid-URI-" + (badUri ?? "null"));
+                string failure = Failure(() => NativeBattleVisualProfile.LoadSprite(badUri!, expected, hashes));
+                AssertThat(failure.Contains("URI", StringComparison.OrdinalIgnoreCase)
+                    || failure.Contains("res://", StringComparison.Ordinal)).IsTrue();
+                if (!string.IsNullOrEmpty(badUri)) AssertThat(failure.Contains(badUri, StringComparison.Ordinal)).IsTrue();
+            }
+            Reset("returned-resource-mutations-do-not-pollute-IgnoreDeep-reload");
+            var isolated = NativeBattleVisualProfile.LoadSprite(uri, expected, hashes);
+            isolated.DecodedByteLength = 65;
+            isolated.FrameCount = 1;
+            Frame(isolated, 7).SourceOffset = 7;
+            Frame(isolated, 0).Width = 1;
+            Frame(isolated, 0).Height = 2;
+            Frame(isolated, 0).Indices = [5, 19];
+            Frame(isolated, 1).Alpha = [128, 18];
+            isolated.Source.Clear();
+            isolated.Frames.Clear();
+            AssertThat(Godot.FileAccess.GetSha256(uri)).IsEqual(hashes[uri]);
+            AssertLiteral(NativeBattleVisualProfile.LoadSprite(uri, expected, hashes));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestCase]
     public void DeclaredNumberSpriteCannotEscapeExactHashClosure()
     {
         using var f = new NativeBattleVisualProfileFixture();
