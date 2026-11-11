@@ -71,9 +71,22 @@ API itemId 必须是 WORD。非法参数抛 `ArgumentOutOfRangeException`，在�
 
 未来宿主必须从已批准上下文显式重建并绑定这一 owner，不得从旧角色快照缺字段推断“无毒”，也不得同时维护另一份活毒 ID/脚本真状态。当前成员固定；队伍变化时毒状态迁移、毒加入/排序/抗性/脚本推进以及战斗投影需后续按真实消费点接通，不能靠新建空状态丢弃毒。完整装备移除仍需将此 wear 操作与同一装备寄存器清零、hand 实际 dualAttack 清零、装备 ID/角色记录同步组合；本方法不清装备/状态、不开放 `removeItem`，也不授权修改活动战斗副本。不定义存档 schema、自然 save 或自动恢复。
 
+## 同步的单槽装备移除（#185）
+
+`BattleEquipmentState.RemoveEquippedItem(roleId, slotIndex, roleLiveState, partyPoisons)` 将 #183/#184 的原语组合为一个完整的单槽操作，对应 `global.c:1372–1455` 的效果清理及 `script.c:1006–1007` 的随后装备 ID 清零。复用现有装备实例、`RoleLiveState` 和 `PartyPoisonState`，不新增总状态、另一份装备 owner 或隐式 seed。尚无 trigger/Main 生产接线，**不是 #132 或完整装备菜单的交付**。
+
+- roleId 为0..5，slotIndex 为实际装备槽0..5；extra6只有效果寄存器，不是可移除装备槽。null owner 抛 `ArgumentNullException`，非法索引抛 `ArgumentOutOfRangeException`。任何写入前，要求选中 live role 存在、其六个装备 WORD 与当前装备实例完全一致、九个状态 WORD 合法；缺失/错配/非法形状抛 `InvalidDataException`。只需要选中角色记录，不强求六角色或当前参战成员。
+- 清指定寄存器的全部已建模效果字，指定装备 ID 写0并同步冻结的 live role 记录。hand3 **无条件**将实际 `Statuses[8]` 清0（临时或持久 dualAttack 均如此），同时清该实例的初始化 overlay[8]，避免 `ApplyStatuses` 再将它恢复。其它槽即使也曾授予 dualAttack，也不重扫/重放；其它持久状态不被泛化清除。
+- wear5 使用显式 `partyPoisons.PartyRoleIds` 的当前成员关系，调用既有稳定毒整理；非队员仍清装备/寄存器，但不改任何队员毒。其它部位不清毒，hand以外部位不清 dualAttack。空装备槽也执行清理；重复调用幂等，不向库存返还物品、不减库存、不重建装备效果。
+- 保留角色 HP/MP、永久面板、等级/经验、法术与其它状态、其它装备/寄存器/角色，以及库存和冻结声明。原公开记录和装备/status快照不可变；`RoleLiveState.Roles` 的既有只读字典则能观察新记录。先准备并经既有 `MergeSettledRoles` 冻结记录，再完成同步无回调的状态写入，方法返回为此操作提交边界；不是通用脚本回滚或退款。
+
+`EquipmentRemovalTests.Single_slot_removal_synchronizes_live_gear_status_and_wear_poisons_without_reseeding` 经公开真 owner/API 验证独立字面预期：六角色/六槽、hand临时/持久/空槽、其它装备仍授予双击但不重算、wear按角色清毒对和隐藏尾槽、非队员、数值与nullable WORD/精灵、重复清理、未声明旧零装备、旧记录与只读视图、owner隔离、库存不变和非法/错配输入无部分写入。它不调用私有接口或另建玩法宿主，人工数据不是自然存档或真实资源证据。
+
+**所有权与接线责任**：现有网格/寄存器是装备的可变真值，live role 的装备数组是同步记录，不允许作为另一可独立编辑的网格；实际角色状态以 `RoleLiveState` 为准，overlay 只保留装备初始化贡献并同步 hand 清除。未来宿主必须在生命周期内绑定同一组三个实例，不能每次从 author 初始化或用空毒 owner 绕过能力检查。此方法本身不绑定宿主、不修改已开始战斗的投影副本；调用方须在合法玩法边界操作，并让下次正式战斗消费当前装备/角色值，避免旧 author 闭包重新覆盖。未来从合法内容/恢复记录重建一次并重绑，不定义存档 schema 或自然 save。
+
 #132 仍须补齐：
 - 0x0020 消费此查询的装备计数预检、分支和 ScriptSuccess 的真实参考行为；
-- 按当前队伍角色/槽顺序回退移除装备、同步装备效果（包括 hand 双击状态、wear 毒清理）和唯一活状态；不得用库存返回0/负数直接代表脚本失败或退款；
+- 按当前队伍角色/槽顺序回退调用上述完整单槽操作，绑定唯一活装备/角色/毒状态；不得用库存返回0/负数直接代表脚本失败或退款；
 - 宿主显式初始库存、同一 owner 的 trigger/战斗连续性、重复/过期请求保护，原生内容兼容与正常 Main/SceneRunner 证据。
 
 未来持久化重建责任在宿主：从已批准的独立上下文或恢复记录构造一次，保留有意义的槽顺序/耗尽记录/in-use 字段，再重新绑定消费者。活动预留的保留/清除策略尚未由本票冻结；不定义槽位、schema、磁盘读写或自然剧情 save。#131 未完成的 Main/native 现金接线及 #129/#147 阻塞、#165/#168 旧失败不由本票解决；无故事或完整 M6 验收增加。

@@ -201,6 +201,34 @@ public sealed class BattleEquipmentState
         cooperativeMagic[roleId, registerIndex] = 0;
     }
 
+    /// <summary>Removes one equipped slot on this instance and its live role record. Composes effect
+    /// clearing, hand dualAttack reset and current-party wear poison cleanup without reinitializing.</summary>
+    public void RemoveEquippedItem(int roleId, int slotIndex, RoleLiveState roleLiveState, PartyPoisonState partyPoisons)
+    {
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        ArgumentNullException.ThrowIfNull(partyPoisons);
+        Role(roleId);
+        if (slotIndex is < 0 or >= SlotCount)
+            throw new ArgumentOutOfRangeException(nameof(slotIndex), slotIndex, "Equipment slot index must be 0..5.");
+        if (!roleLiveState.Roles.TryGetValue(roleId, out var live)
+            || live.Equipment.Count != SlotCount || live.Equipment.Any(value => !Word(value))
+            || !live.Equipment.SequenceEqual(Equipment(roleId))
+            || live.Statuses.Count != StatusCount || live.Statuses.Any(value => !Word(value)))
+            throw new InvalidDataException("Equipment removal requires a live role with six agreeing gear WORDs and nine status WORDs.");
+
+        int[] gear = live.Equipment.ToArray();
+        int[] liveStatuses = live.Statuses.ToArray();
+        gear[slotIndex] = 0;
+        if (slotIndex == 3) liveStatuses[8] = 0; // kBodyPartHand / kStatusDualAttack, even temporary status.
+        // Prepare/freeze the record before mutating registers. These synchronous owners have no
+        // callbacks; after validation the remaining operations cannot fail for missing content.
+        roleLiveState.MergeSettledRoles([live with { Equipment = gear, Statuses = liveStatuses }]);
+        ClearEffectRegister(roleId, slotIndex);
+        if (slotIndex == 3) statuses[roleId, 8] = 0; // Do not resurrect it via the initialization overlay.
+        else if (slotIndex == 5) partyPoisons.RemoveEquipmentPoisons(roleId); // kBodyPartWear.
+        equipment[roleId, slotIndex] = 0;
+    }
+
     /// <summary>Retained field 4 WORD for one equipment register; null means no write, not an attack-all capability.</summary>
     public int? AttackAllWord(int roleId, int registerIndex)
     {
