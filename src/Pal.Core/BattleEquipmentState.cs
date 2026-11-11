@@ -182,6 +182,25 @@ public sealed class BattleEquipmentState
         return count;
     }
 
+    /// <summary>Clears only the represented effect-register words (global.c PAL_RemoveEquipmentEffect's
+    /// first loop). Does not remove gear, reset hand dualAttack, or clean wear poisons; callers must
+    /// compose those operations on the same live state before exposing an equipment-removal command.</summary>
+    public void ClearEffectRegister(int roleId, int registerIndex)
+    {
+        Role(roleId);
+        if (registerIndex is < 0 or >= RegisterCount)
+            throw new ArgumentOutOfRangeException(nameof(registerIndex), registerIndex, "Equipment register index must be 0..6.");
+        attack[roleId, registerIndex] = 0;
+        defense[roleId, registerIndex] = 0;
+        dexterity[roleId, registerIndex] = 0;
+        battleSprite[roleId, registerIndex] = 0;
+        magicPower[roleId, registerIndex] = 0;
+        fleeRate[roleId, registerIndex] = 0;
+        poisonResistance[roleId, registerIndex] = 0;
+        attackAll[roleId, registerIndex] = 0;
+        cooperativeMagic[roleId, registerIndex] = 0;
+    }
+
     /// <summary>Retained field 4 WORD for one equipment register; null means no write, not an attack-all capability.</summary>
     public int? AttackAllWord(int roleId, int registerIndex)
     {

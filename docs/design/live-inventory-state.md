@@ -47,6 +47,16 @@ API itemId 必须是 WORD。非法参数抛 `ArgumentOutOfRangeException`，在�
 
 本前置不把 per-instance 装备网格升级为宿主共享活装备所有者。未来消费者必须绑定同一当前装备与库存状态，不能每次从冻结 author 重建；与 `RoleLiveState` 的装备记录和战斗结果同步、装备移除的提交点及重建责任仍须后续明确接通。本查询自身无提交点、不新增持久化字段。尚无 trigger/Main 调用本 API，`removeItem` 仍保持预先拒绝。
 
+## 装备效果寄存器清零（#183）
+
+`BattleEquipmentState.ClearEffectRegister(int roleId, int registerIndex)` 是 `PAL_RemoveEquipmentEffect`（`global.c:1395–1400`）**首个寄存器清零循环**的有界原语，不是整个函数。它在同一实例内清零角色0..5、寄存器0..6的全部已建模效果字：attack、defense、dexterity、battleSprite、magicPower、fleeRate、poisonResistance，以及 AttackAll / CooperativeMagic。后两者清为显式0而非null，忠实表达零写入，不开放这些战斗能力。索引6是 extra 寄存器，不是第七个装备槽；参考 `battle.c:1829` 也调用效果清理处理 extra。非法索引在任何写入前抛 `ArgumentOutOfRangeException`；重复调用幂等。
+
+清理只影响指定角色/寄存器，不重新 Initialize、不重放装备脚本、不扫描剩余装备重算状态。数值面板和精灵查询即时消费清理后的寄存器；最后非零精灵寄存器被清后按原顺序回落。装备ID、库存、RoleLiveState、持久状态 overlay、其余角色/寄存器及冻结来源均不改。未声明装备的旧零实例仍保持 `Declared=false`；对其中未写过的 nullable 字段清零也会留下显式0。已有视图仍为之前的不可变快照，而非可写入口。
+
+公开 Core Fact `Clearing_one_effect_register_preserves_gear_statuses_and_other_registers_without_reinitializing` 以独立字面效果哨兵覆盖全部六角色/七寄存器、九类已建模效果字、精灵回落、WORD面板回绕、nullable未写与显式0、重复清理/非法拒绝/旧视图、跨实例和author隔离、库存及装备计数不变、旧未声明状态兼容。人工夹具不是自然存档或真实装备来源证据。
+
+这是供未来完整移除消费者组合的操作，不是 test-only 替代宿主，也不定义新的装备/毒真状态。未来消费者必须在同一活状态上完成 hand 的实际 dualAttack 状态归零、wear 的当前队员毒槽整理（保留level<99及脚本入口、清空尾槽）、装备ID移除和角色记录同步；**不能把本方法或全量重新初始化当成完整效果清理**。现有 `BattleRoleSnapshot` 尚无毒脚本/等级状态，本票不伪造其所有者或存档字段。清理中的持久状态故意原样保留，不能据此启用 `removeItem`。没有新增 trigger/Main 调用，现有未绑定行为和预先拒绝不变；也不授权修改已开始战斗内部投影副本。Core寄存器操作的提交点是本方法，完整玩法提交/重建责任仍待后续宿主接线冻结。
+
 #132 仍须补齐：
 - 0x0020 消费此查询的装备计数预检、分支和 ScriptSuccess 的真实参考行为；
 - 按当前队伍角色/槽顺序回退移除装备、同步装备效果（包括 hand 双击状态、wear 毒清理）和唯一活状态；不得用库存返回0/负数直接代表脚本失败或退款；

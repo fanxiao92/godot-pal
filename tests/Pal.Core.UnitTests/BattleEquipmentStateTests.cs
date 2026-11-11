@@ -617,6 +617,129 @@ public sealed class BattleEquipmentStateTests
         Assert.Equal(2, inventory.GetAmount(7));
     }
 
+    [Fact]
+    public void Clearing_one_effect_register_preserves_gear_statuses_and_other_registers_without_reinitializing()
+    {
+        // global.c:1395-1400 writes zero to every PLAYERROLES word for ONE part and role.
+        // Later hand/wear cleanup is separate: this primitive must not rescan other equip scripts.
+        var primary = new BattleEquipmentEffect(7, 17, 27, 700, [0, 0, 0, 0, 0, 1000, 2000, 3000, 60000], 37, 47, 57)
+            { AttackAll = 65535, CooperativeMagic = 321 };
+        var secondary = new BattleEquipmentEffect(5, 11, 13, 300, new int[9], 19, 23, 29)
+            { AttackAll = 0 };
+        var objects = new Dictionary<int, BattleEquipmentObject>
+        {
+            [7] = new(7, Enumerable.Repeat(primary, 6).ToArray()),
+            [8] = new(8, Enumerable.Repeat(secondary, 6).ToArray())
+        };
+        IReadOnlyList<int>[] grid = Enumerable.Range(0, 6).Select(_ => (IReadOnlyList<int>)new[] { 8, 0, 0, 7, 0, 0 }).ToArray();
+        var state = BattleEquipmentState.Initialize(grid, objects);
+        var independent = BattleEquipmentState.Initialize(grid, objects);
+        var stock = new InventoryLiveState([new(7, 3, 65535)]);
+        var oldGear = state.Equipment(5);
+        var oldStatuses = state.StatusOverlay(5);
+        Assert.Equal(12, state.AttackBonus(5));
+        state.ClearEffectRegister(5, 3);
+        Assert.Equal(5, state.AttackBonus(5)); // Designated RED: no-op shell leaves12, expected5.
+        for (int repeat = 0; repeat < 2; repeat++)
+        {
+            Assert.True(state.Declared);
+            Assert.Equal((5, 11, 13, 19, 23, 29), (state.AttackBonus(5), state.DefenseBonus(5),
+                state.DexterityBonus(5), state.MagicPowerBonus(5), state.FleeRateBonus(5), state.PoisonResistanceBonus(5)));
+            Assert.Equal(300, state.BattleSprite(5, 2)); // Last nonzero falls back to the earlier register.
+            Assert.True(state.OverridesBattleSprite(5));
+            Assert.Equal(0, state.AttackAllWord(5, 3));
+            Assert.Equal(0, state.CooperativeMagicWord(5, 3));
+            Assert.Equal(0, state.AttackAllWord(5, 0));
+            Assert.Null(state.CooperativeMagicWord(5, 0));
+            Assert.Null(state.AttackAllWord(5, 2));
+            Assert.Equal([8, 0, 0, 7, 0, 0], state.Equipment(5));
+            Assert.Equal([8, 0, 0, 7, 0, 0], oldGear);
+            Assert.Equal([0, 0, 0, 0, 0, 1000, 2000, 3000, 60000], state.StatusOverlay(5));
+            Assert.Equal(oldStatuses, state.StatusOverlay(5));
+            Assert.Equal(oldStatuses, state.ApplyStatuses(5, new int[9]));
+            Assert.Equal(4, state.CountItem(7, stock, [5])); // Gear ID and stock are NOT removed by clearing effects.
+            Assert.Equal(new InventorySlot(7, 3, 65535), stock.Slots[0]);
+            Assert.Equal(12, independent.AttackBonus(5));
+            Assert.Equal(65535, independent.AttackAllWord(5, 3));
+            Assert.Equal(7, grid[5][3]);
+            Assert.Equal(7, objects[7].Effects[5].Attack);
+            foreach (int otherRole in new[] { 0, 1, 2, 3, 4 })
+            {
+                Assert.Equal(12, state.AttackBonus(otherRole));
+                Assert.Equal(700, state.BattleSprite(otherRole, 2));
+                Assert.Equal(65535, state.AttackAllWord(otherRole, 3));
+                Assert.Equal(321, state.CooperativeMagicWord(otherRole, 3));
+                Assert.Equal(oldStatuses, state.StatusOverlay(otherRole));
+            }
+            foreach (int invalidRole in new[] { -1, 6, int.MinValue, int.MaxValue })
+                Assert.Throws<ArgumentOutOfRangeException>(() => state.ClearEffectRegister(invalidRole, 0));
+            foreach (int invalidRegister in new[] { -1, 7, int.MinValue, int.MaxValue })
+                Assert.Throws<ArgumentOutOfRangeException>(() => state.ClearEffectRegister(5, invalidRegister));
+            state.ClearEffectRegister(5, 3);
+        }
+        state.ClearEffectRegister(5, 0);
+        Assert.Equal((0, 0, 0, 0, 0, 0), (state.AttackBonus(5), state.DefenseBonus(5), state.DexterityBonus(5),
+            state.MagicPowerBonus(5), state.FleeRateBonus(5), state.PoisonResistanceBonus(5)));
+        Assert.Equal(2, state.BattleSprite(5, 2));
+        Assert.False(state.OverridesBattleSprite(5));
+        Assert.Equal(0, state.CooperativeMagicWord(5, 0)); // Clearing an unwritten field is an explicit zero write.
+        Assert.Equal(oldStatuses, state.StatusOverlay(5)); // No generic status reset, including hand dualAttack.
+
+        IReadOnlyList<int>[] fullGrid = Enumerable.Range(0, 6).Select(_ => (IReadOnlyList<int>)new[] { 7, 7, 7, 7, 7, 7 }).ToArray();
+        for (int role = 0; role < 6; role++)
+            for (int register = 0; register < 7; register++)
+            {
+                var one = BattleEquipmentState.Initialize(fullGrid, objects);
+                Assert.Equal(1, one.EffectiveAttack(role, 65495)); // WORD:65495+42 wraps to1.
+                one.ClearEffectRegister(role, register);
+                if (register < 6)
+                {
+                    Assert.Equal((35, 85, 135, 185, 235, 285), (one.AttackBonus(role), one.DefenseBonus(role),
+                        one.DexterityBonus(role), one.MagicPowerBonus(role), one.FleeRateBonus(role), one.PoisonResistanceBonus(role)));
+                    Assert.Equal(65530, one.EffectiveAttack(role, 65495));
+                }
+                else
+                {
+                    Assert.Equal((42, 102, 162, 222, 282, 342), (one.AttackBonus(role), one.DefenseBonus(role),
+                        one.DexterityBonus(role), one.MagicPowerBonus(role), one.FleeRateBonus(role), one.PoisonResistanceBonus(role)));
+                    Assert.Equal(1, one.EffectiveAttack(role, 65495));
+                }
+                for (int part = 0; part < 7; part++)
+                {
+                    if (part == register)
+                    {
+                        Assert.Equal(0, one.AttackAllWord(role, part));
+                        Assert.Equal(0, one.CooperativeMagicWord(role, part));
+                    }
+                    else if (part < 6)
+                    {
+                        Assert.Equal(65535, one.AttackAllWord(role, part));
+                        Assert.Equal(321, one.CooperativeMagicWord(role, part));
+                    }
+                    else
+                    {
+                        Assert.Null(one.AttackAllWord(role, part));
+                        Assert.Null(one.CooperativeMagicWord(role, part));
+                    }
+                }
+                Assert.Equal([7, 7, 7, 7, 7, 7], one.Equipment(role));
+                Assert.Equal(oldStatuses, one.StatusOverlay(role));
+            }
+
+        var legacy = BattleEquipmentState.Initialize(ModernBattleContent.Parse(Data().ToJsonString()));
+        Assert.False(legacy.Declared);
+        legacy.ClearEffectRegister(0, 6);
+        Assert.False(legacy.Declared);
+        Assert.Equal(0, legacy.AttackAllWord(0, 6));
+        Assert.Equal(0, legacy.CooperativeMagicWord(0, 6));
+        Assert.Null(legacy.AttackAllWord(0, 0));
+        Assert.Null(legacy.AttackAllWord(5, 6));
+        Assert.Equal(new int[6], legacy.Equipment(0));
+        Assert.Equal(new int[9], legacy.StatusOverlay(0));
+        Assert.Equal(0, legacy.AttackBonus(0));
+        Assert.Equal(123, legacy.BattleSprite(0, 123));
+    }
+
     private static BattleEquipmentEffect WordEffect(int? attackAll = null, int? cooperativeMagic = null) =>
         new(0, 0, 0, 0, new int[9]) { AttackAll = attackAll, CooperativeMagic = cooperativeMagic };
 
