@@ -132,3 +132,15 @@ requirements/Start 的保守闭包检查后继和每个非null目标，不因数
 公开 Core `TriggerScriptRemovalTests.Modern_removal_branches_preserve_script_success_and_share_current_stock_gear_roles_and_poisons` 使用人工独立字面夹具和真实四 owner、trigger/display/lifecycle：库存2+hand1请求3，清手部实际/overlay双击，显示后正式战斗读取剩余wear贡献attack10（base40得到50）；完成并ACK后新调用移除wear并整理毒ID/脚本对，再按当前成员顺序消耗另一角色装备，队外角色及author不变。覆盖零/65535/item0、允许不足与目标拒绝、成功标志保留、signed0058、跨文件/非法目标、完整绑定拒绝、两分支闭包、world顺序/setParty和两个battle脚本上下文拒绝及旧回执。它不模拟自然save、真实资产或正常 Main。
 
 本前置只闭合 Event 生产0020的现代字段/分支及公开 Core 消费链。#132 保持开放：Main/native 初始来源及唯一生命周期绑定、preview 隔离、宿主重复过期请求保护、正常 Main/SceneRunner 连续性与所需活动战斗/成员迁移消费者仍未交付；#131 现金 Main/native、#129/#147 与旧 #165/#168 停止失败不由本票解决。无菜单、预留、存档schema或故事/fullM6验收增加。
+
+## setParty 的毒表清零边界（#189）
+
+固定参考 `script.c:2164–2197` 的 `0x0075` 先替换队伍，再对**整张** `rgPoisonStatus` 执行 `memset(0)`，然后 `PAL_UpdateEquipments`（`global.c:1333–1368`）重跑装备脚本。因此上述各票的“成员迁移”是未闭合链路的历史简称，不能据此实现按保留角色搬运旧毒：同成员、换序或离队都会清旧毒，装备毒只能在后继真实装备脚本中重新加入。本票不跳过这个后继，也不把装备初始化数据拷贝冒充完整脚本重算。
+
+`PartyPoisonState.ResetForPartyChange(IReadOnlyList<int> partyRoleIds)` 增加**同一 owner** 的显式清零操作。输入为已解析的有序唯一 RoleId0..5，最多5名，不是命令的 operand+1 WORD；`[]` 是安全的现代空上下文，未来 trigger 仍须自行按参考把全零操作数解析成 `[0]`。输入先复制且全部校验：null 抛 `ArgumentNullException`、非法角色抛 `ArgumentOutOfRangeException`、重复/超容量抛 `ArgumentException`，拒绝不改变任何成员或槽值。成功时清除全部旧行（含移出角色、首ID0的非零脚本及其后隐藏项）的16对ID/脚本字，新成员获得显式全零行；同成员写入、换序和重复调用也执行清零，而非按等级保留或迁移。无需制造新毒定义或重新 seed 所有者，已有静态等级/初始输入/其它实例不变。
+
+`PartyRoleIds` 由固定快照变为同一只读**实时成员视图**；已捕获的视图也观察新顺序。仍在队中的 `Slots` 视图保持身份且观察清零，移出成员的旧视图被清零后脱离，不重绑其它角色，重新入队获得新零行/视图；旧不可变 `PoisonSlot` 值不改。有效非成员 `Slots` 查询继续拒绝，wear清理继续无操作。既有 #186 消费者直接读取当前成员顺序，公开测试以重排 `[3,5]` 验证下一次同物品回退先移除角色3而非旧队首5，并在切换 `[0]` 后不计/移除队外装备；这不是触发链已获准改变队伍的证据。
+
+方法返回是**毒表清零**的提交边界，不负责 world、装备、角色/库存或资源 I/O；无回调、脚本、隐式恢复或另一个活毒真值。未来宿主须在合法边界协调 world 顺序、清毒与装备脚本重算，并从获准独立来源/恢复记录重建一次再绑定，不能从旧快照缺字段推断无毒，也不在活动事件/显示/战斗暂停期间外部调用本操作。#188 的 world/party一致性、含0020+setParty闭包及RoleHook/BattleEnd拒绝**全部保留**，没有开放完整生产setParty、装备毒重建、毒执行或活动战斗投影。本票是这些消费者的必要 Core 前置，不是 #132/Main/native 或故事验收，不定义存档schema或自然save。
+
+`PartyPoisonStateTests.Party_reset_clears_all_poison_pairs_and_updates_the_same_owner_without_migrating_old_rows` 经公开真 owner/API 验证上述字面预期、全部六角色身份、空/五人、完整16槽与WORD边界、读视图/防御复制/实例隔离、非法输入写前拒绝，以及既有计数/有序回退消费者读取新顺序。人工夹具不是自然存档或真实资源；Core Unit 不替代正常 Main、Game/Prepare、GPU/人工或完整 M6。

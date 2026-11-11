@@ -3,14 +3,16 @@ namespace Pal.Core;
 /// <summary>One immutable POISONSTATUS value: poison object ID and current script entry WORDs.</summary>
 public sealed record PoisonSlot(int PoisonId, int ScriptEntry);
 
-/// <summary>Explicit current-party poison columns, seeded once. Owns live slots, not poison
-/// execution or membership changes; outer consumers must bind this owner rather than reseed it.</summary>
+/// <summary>Explicit current-party poison columns, seeded once. Owns live slots and the
+/// explicit party-change clear boundary, not poison execution or complete setParty behavior.</summary>
 public sealed class PartyPoisonState
 {
     public const int Capacity = 16; // MAX_POISONS (palcommon.h)
     private readonly Dictionary<int, PoisonSlot[]> slots = new();
     private readonly Dictionary<int, IReadOnlyList<PoisonSlot>> views = new();
     private readonly Dictionary<int, int> levels = new();
+    private readonly List<int> partyRoles = new();
+    /// <summary>Read-only live membership order; reset never replaces this view.</summary>
     public IReadOnlyList<int> PartyRoleIds { get; }
 
     public PartyPoisonState(IReadOnlyList<int> partyRoleIds,
@@ -29,7 +31,8 @@ public sealed class PartyPoisonState
                 throw new InvalidDataException("Poison definitions require nonzero WORD IDs and WORD levels.");
             levels.Add(id, level);
         }
-        PartyRoleIds = Array.AsReadOnly(partyRoleIds.ToArray());
+        partyRoles.AddRange(partyRoleIds);
+        PartyRoleIds = partyRoles.AsReadOnly();
         for (int i = 0; i < partyRoleIds.Count; i++)
         {
             var row = initialPoisons[i];
@@ -48,6 +51,37 @@ public sealed class PartyPoisonState
         Role(roleId);
         return views.TryGetValue(roleId, out var row) ? row
             : throw new ArgumentException("Role is not in this current party.", nameof(roleId));
+    }
+
+    /// <summary>Poison-table clear boundary of script.c 0x0075: clear every old ID/script pair,
+    /// including removed members and stale suffixes, then expose the resolved party with zero rows.
+    /// Even unchanged membership clears. Does not update world, replay equipment or run scripts;
+    /// the caller must coordinate those separately, outside active trigger/display/battle work.</summary>
+    public void ResetForPartyChange(IReadOnlyList<int> partyRoleIds)
+    {
+        ArgumentNullException.ThrowIfNull(partyRoleIds);
+        int[] next = partyRoleIds.ToArray(); // Supports passing the live membership view itself.
+        if (next.Length > 5) throw new ArgumentException("Current poison party supports at most five roles.", nameof(partyRoleIds));
+        foreach (int id in next) Role(id);
+        if (next.Distinct().Count() != next.Length)
+            throw new ArgumentException("Current poison party requires distinct roles.", nameof(partyRoleIds));
+
+        // Prepare all new rows/views before mutation. Retained views stay live; removed views
+        // are cleared below and detached, never silently rebound to a different or rejoining role.
+        var nextRows = next.Select(id => slots.TryGetValue(id, out var row) ? row
+            : Enumerable.Repeat(new PoisonSlot(0, 0), Capacity).ToArray()).ToArray();
+        var nextViews = next.Select((id, i) => views.TryGetValue(id, out var view) ? view
+            : Array.AsReadOnly(nextRows[i])).ToArray();
+        foreach (var row in slots.Values) Array.Fill(row, new PoisonSlot(0, 0));
+        slots.Clear();
+        views.Clear();
+        for (int i = 0; i < next.Length; i++)
+        {
+            slots.Add(next[i], nextRows[i]);
+            views.Add(next[i], nextViews[i]);
+        }
+        partyRoles.Clear();
+        partyRoles.AddRange(next);
     }
 
     /// <summary>Wear branch of PAL_RemoveEquipmentEffect (global.c:1413-1455): retain level&lt;99
