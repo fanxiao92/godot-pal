@@ -81,6 +81,20 @@ JSON player 可选精确字段 `nameObjectId`：缺席才表示 legacy null，�
 
 战内ID在一场内唯一；当前一场仅一个敌人，所以任何多项都明确拒绝。不同队可使用相同战内ID；未来同原enemy97出现两次时，也不暗含两者必须共享一个target ID。原始定义身份/图片绑定由未来native包决定，此纯数值格式不臆造它们。
 
+## 无事件宿主的纯物理战能力门（#196 / #133 前置）
+
+`ModernBattleContent.ValidatePhysicalBattle(TriggerBattleContent content, int enemyTeamId)` 是供离线投影等**无事件宿主**调用方使用的公开纯数值预检，成功返回 void，格式、选择或能力错误抛 `InvalidDataException`。现有 `Parse`、`Validate`、trigger `Start` 和 native/Prepare 的行为与 v1 格式均不改变，也不自动改用本门。
+
+- 先调用既有 `Validate` 检查**整份内容**的数值格式；再核 teamId 是 WORD 且实际存在。未选中队伍的合法非零能力原样保留，畸形字段仍拒绝。
+- 对选中队伍复用 `TriggerBattleContent.Validate` 的真实 lifecycle/combat 能力门与纯装备初始化：当前为1–2角色、密集1–2敌位；角色按 RoleId 关联，party/敌位顺序不改变。不构造事件、语言、trigger/lifecycle/combat 会话，不抽随机数、不模拟获胜，也不修改输入。临时装备寄存器仅是校验所需的局部投影，不发布活状态。
+- 入战 HP0→1 只参与已有校验，原输入HP0不变（参考 `battle.c` 的 `PAL_StartBattle`）；角色 maxHP≤32767 的后续战斗限制、完整 EXP/成长域、已有装备闭包、状态/毒、attack-all、敌人 magic/dualMove/等价物品等拒绝条件继续生效。level0/threshold[0]=0、已知法术及有序重复升级法术行不因此被清零或拒绝。敌人 magicId=65535 仍拒绝，不能洗成0：固定 `fight.c` 的FFFF是带不同随机消费的空动作，不是物理攻击。
+- 此门没有事件集合来证明钩子闭包，因此所选所有 player 的 `dyingScript/friendDeathScript` 与所选所有敌位的 `battleEndScript` 必须为0；错误指出 party 索引或 `teams[teamId].enemies[slot]` 字段。既有 turnStart/ready 拒绝仍复用 combat 门，其错误加选中 team 上下文。这不是撤销有能力 trigger 宿主的角色/战后钩子支持，更不能通过清零钩子来通过预检。
+- 声明完整且当前可消费的装备闭包可以通过；所选角色的 sprite override 或非零装备 attackAll/cooperativeMagic 仍拒绝，非参战角色的合法值不混入所选角色。**本门不能认证装备脚本来源**；#133 的投影器没有事件输入，不能凭本门接受人工装备闭包就伪造M5装备效果。
+
+#133 后续仍须负责M5版本/profile/结构/引用、实际普通战支持域、来源声明与现代输入字节身份、字段映射/收据、严格四选项真实CLI和路径保护。信任A是已批准的上游前提，不是此门提供的来源认证。此门也不证明图像、事件、语言、Prepare/native/Main或自然存档闭包；#133并未因此完成。
+
+公开 Core 人工用例覆盖上述正反例、非首角色/敌位钩子、选中与未选中能力区别、完整格式先行、HP0/level0/signed边界、重复校验与嵌套输入不变、装备选择域；实际本轮Unit及后续独立审查收据是验收依据，不以文档描述代替运行。既有下文带票号/单角色描述保留历史交付边界，不用它们转签本门或完整M6。
+
 ## 格式合法 ≠ 选中入口可执行
 
 所有合法非零装备、status、毒、cover、hooks、attack-all、魔法/双动/等效物品、奖励，以及不能保证零成长的表，均原样进入 typed content。`TriggerScriptSession.Start` 对选中入口的 next/loss/flee 保守闭包调用既有纯预检，在任何caller/角色/请求副作用与RNG前拒绝不支持内容；未被选择入口引用的其他队可以保留。不会通过simulate获胜来验证内容，也不因来源为人工而放行。
