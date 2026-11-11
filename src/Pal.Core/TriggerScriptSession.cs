@@ -554,8 +554,8 @@ public sealed class TriggerScriptSession
             else throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
         }
 
-        // PartyPoisonState membership is fixed. Even a no-op setParty would cross a migration
-        // seam this binding cannot yet support; reject the whole selected closure before writes.
+        // This binding does not coordinate party poison reset with full equipment-script replay.
+        // Even a no-op setParty crosses that seam; reject the selected closure before writes.
         if (removalPosition is not null && partyChangePosition is not null)
             throw new InvalidDataException($"{removalPosition}: removeItem with setParty at {partyChangePosition} requires unsupported poison party migration.");
 
