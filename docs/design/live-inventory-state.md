@@ -57,6 +57,20 @@ API itemId 必须是 WORD。非法参数抛 `ArgumentOutOfRangeException`，在�
 
 这是供未来完整移除消费者组合的操作，不是 test-only 替代宿主，也不定义新的装备/毒真状态。未来消费者必须在同一活状态上完成 hand 的实际 dualAttack 状态归零、wear 的当前队员毒槽整理（保留level<99及脚本入口、清空尾槽）、装备ID移除和角色记录同步；**不能把本方法或全量重新初始化当成完整效果清理**。现有 `BattleRoleSnapshot` 尚无毒脚本/等级状态，本票不伪造其所有者或存档字段。清理中的持久状态故意原样保留，不能据此启用 `removeItem`。没有新增 trigger/Main 调用，现有未绑定行为和预先拒绝不变；也不授权修改已开始战斗内部投影副本。Core寄存器操作的提交点是本方法，完整玩法提交/重建责任仍待后续宿主接线冻结。
 
+## 当前队伍毒槽与 wear 效果整理（#184）
+
+`PartyPoisonState` 补足完整装备移除所缺的 `POISONSTATUS` 表达：`PoisonSlot(PoisonId, ScriptEntry)` 同时保留毒对象 ID 和当前脚本入口 WORD。现有 `BattleRoleSnapshot` 没有毒字段，`ClassicBattlePlayer.Poisons` 只是静态内容的 ID 列表且非零毒仍被所选战斗拒绝；它们都不是可复用的活毒槽 owner。因此新增最小纯 Core 所有者，不扩展冻结 author 或为测试另建宿主。本前置**尚未接入 trigger、战斗或 Main，不代表 #132 或完整 PAL_RemoveEquipmentEffect 已交付**。
+
+构造显式传入有序 `partyRoleIds`、与其逐行对应的 `initialPoisons`、静态 `poisonLevels`；全部复制，禁止隐式空 seed、每次调用重新初始化或借用可写数据。角色为不同的 RoleId0..5，最多5名（探索容量而非五人战斗支持），每行必须恰好16个 ID/脚本 WORD 对，行数与队伍一致。`PartyRoleIds` 是只读固定成员顺序，`Slots(roleId)` 是该角色16槽的只读实时视图；旧的不可变 `PoisonSlot` 值不随变更改写。有效但非队员角色查询抛 `ArgumentException`，非法角色抛 `ArgumentOutOfRangeException`。空队伍 `[]` 是安全的现代 API 上下文，不冒称参考存在自然空队伍。
+
+静态等级表的键是非零 WORD 毒对象 ID，值是 WORD 等级；所有非零槽 ID（包括首个空槽后的陈旧记录）都必须在构造时解析到等级。重复毒 ID、空洞、ID0而脚本非0的槽原样保留，不在 seed 时排序、去重或归一化。非法形状/域/缺失引用抛 `InvalidDataException`，顶层 null 参数抛 `ArgumentNullException`。完整预校验避免整理到一半才发现等级缺失；这不是任意原版存档加载器。
+
+`RemoveEquipmentPoisons(roleId)` 严格对应 `global.c:1413–1455` 的 wear 分支（结构见 `global.h:210–216,495–499,528,547`，容量见 `palcommon.h`）：先按角色身份定位**当前队伍列**，非队员有效角色无操作；只扫描首个 PoisonId0 之前的前缀，将等级**小于99**的 ID/脚本对按原顺序前移，其余全部尾槽的两个字都写0。等级99、100、65535均移除，不是仅等于99；首个0后的非零 ID 不参与保留。满16槽也扫描最后一项，低等级脚本65535或0原样保留。重复整理幂等，不排序、不执行或重置保留项脚本，不影响其它角色/owner/静态声明。提交点就在本方法，不依赖帧或外部时钟。
+
+公开 Core Fact `Wear_cleanup_preserves_low_level_poison_script_pairs_in_current_party_order_and_clears_the_tail` 以独立字面夹具覆盖阈值、非连续身份、顺序/重复、ID及脚本WORD边界、首槽空和隐藏尾项、全16槽、非队员/非法拒绝、显式空/五人、只读实时视图/旧值、seed及等级防御复制和实例隔离。人工夹具不是自然存档或真实资源；Core 反馈不证明正常 Game 或毒执行能力。
+
+未来宿主必须从已批准上下文显式重建并绑定这一 owner，不得从旧角色快照缺字段推断“无毒”，也不得同时维护另一份活毒 ID/脚本真状态。当前成员固定；队伍变化时毒状态迁移、毒加入/排序/抗性/脚本推进以及战斗投影需后续按真实消费点接通，不能靠新建空状态丢弃毒。完整装备移除仍需将此 wear 操作与同一装备寄存器清零、hand 实际 dualAttack 清零、装备 ID/角色记录同步组合；本方法不清装备/状态、不开放 `removeItem`，也不授权修改活动战斗副本。不定义存档 schema、自然 save 或自动恢复。
+
 #132 仍须补齐：
 - 0x0020 消费此查询的装备计数预检、分支和 ScriptSuccess 的真实参考行为；
 - 按当前队伍角色/槽顺序回退移除装备、同步装备效果（包括 hand 双击状态、wear 毒清理）和唯一活状态；不得用库存返回0/负数直接代表脚本失败或退款；
