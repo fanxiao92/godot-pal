@@ -2,6 +2,33 @@ namespace Pal.Core;
 
 public static partial class ModernBattleContent
 {
+    /// <summary>Validates one physical battle without an event host, session, RNG or input mutation.
+    /// Full numeric format is checked; only the selected team's capability closure is checked.</summary>
+    public static void ValidatePhysicalBattle(TriggerBattleContent content, int enemyTeamId)
+    {
+        Validate(content);
+        string teamPath = Root + $".teams[{enemyTeamId}]";
+        if (enemyTeamId is < 0 or > 65535)
+            throw Error(teamPath, "expected team ID in 0..65535");
+        if (!content.EnemyTeams.TryGetValue(enemyTeamId, out var enemies))
+            throw Error(teamPath, "missing selected battle team");
+        try { content.Validate(enemyTeamId, content.InitialRoles); }
+        catch (InvalidDataException error) { throw new InvalidDataException($"{teamPath}: {error.Message}", error); }
+
+        // The lifecycle/combat gates support these hooks with a capable host, but numeric
+        // content alone cannot prove their event closure. Never silently drop their seeds.
+        foreach (var (player, index) in content.Players.Select((player, index) => (player, index)))
+        {
+            if (player.DyingScript != 0)
+                throw Error(Root + $".players[{index}].dyingScript", "physical battle requires an event host for this hook");
+            if (player.FriendDeathScript != 0)
+                throw Error(Root + $".players[{index}].friendDeathScript", "physical battle requires an event host for this hook");
+        }
+        foreach (var (enemy, slot) in enemies.Select((enemy, slot) => (enemy, slot)))
+            if (enemy.BattleEndScript != 0)
+                throw Error(teamPath + $".enemies[{slot}].battleEndScript", "physical battle requires an event host for this hook");
+    }
+
     /// <summary>Validates numeric format only, not a selected trigger entry's supported capability closure.</summary>
     public static void Validate(TriggerBattleContent content)
     {
