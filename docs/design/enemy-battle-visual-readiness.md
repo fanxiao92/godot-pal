@@ -9,7 +9,7 @@
 - 下述完整候选路线 **A10 / B7 / C10，累计21个去重路径**，包括两种 Main 来源、正式 Prepare 进程测试、测试 fixture、双登记及必要文档；不是旧7–10路径估计可装下的整票。须确认新旧形态及标量投影策略后拆成实施叶，不能靠多个 commit 或漏测试压缩预算。
 - 可复用当前已集成 full-profile sprite/dependency 校验，**没有证据证明 #136 必须依赖 #164 的 standalone checked overload**。不能因名称相似把 #164 变成新 blocker，也不能将其停放候选/477未跑GREEN视为已交付。
 
-本轮只新增本文；不改 API、schema、资源、生产实现、测试、登记或 UID。所有 SDK/Unit/Game/Godot/Prepare/import/solution、真实内容、GPU/桌面/远端CI均 **NOT RUN**。外部本轮 `acceptance.md`、`source-inputs.json`、`source-final/binding.json` 保存实际检查/源身份；只读 scout 原回复另存，不替代外层票级 Standards/Spec。
+本轮只新增本文；不改 API、schema、资源、生产实现、测试、登记或 UID。所有 SDK/Unit/Game/Godot/Prepare/import/solution、真实内容、GPU/桌面/远端CI均 **NOT RUN**。外部本轮 `acceptance.md`、`source-inputs-final.json`、`source-final/binding.json` 保存实际检查/源身份；只读 scout 原回复另存，不替代外层票级 Standards/Spec。
 
 ## 固定参考与独立规则
 
@@ -60,7 +60,7 @@
 - `src/Pal.Game/Scripts/Main.Story.cs:44` 只有一个enemyIdle，`:148` 用整队metadata构造，启动两次Advance；`:166` outer、动作反馈/UpdateFighters都改此同一个状态。应复用 `src/Pal.Game/Scripts/Dialogue/StoryPlayerAttackPresentation.cs:29` 的现有WORD计数规则，为每槽拥有实例，而非新增第二时钟或让纹理Resource保存live计数。
 - Main `:263` 已按ActorIndex取位置但仍传team帧参数；`:523` 的effectEnemyHeight取team单sprite及共享帧。必须分别由ActorIndex取动作metadata、TargetIndex取目标当前sprite/frame高度；TRUE段推进所有适用槽，FALSE只驱动行动槽。不能把所有Advance机械替换成“只推actor”或“永远推全队”。
 - `src/Pal.Game/Scripts/Dialogue/PalStoryBattleView.cs:26` 纹理key为(bool Player,Frame,Shift)，`:67` 只装一份enemySprite。EnemyDraws在`:198` 留各槽HP/位置，却都取同idleFrame；`:222` foreach实际Sprite调用没有slot参数。新snapshot仅增加观察字段、但绘制仍用单sprite，不能算交付。
-- view的BuildDrawSnapshot `:120` 是否采用party绘制由**玩家人数>1**决定，不是敌人数。单玩家双敌是潜在额外边界，不能在未证明内容门允许/禁止前当完整#136验收；实施票必须冻结支持域和拒绝。本文不放宽人数/空槽上限（五敌位另归#138）。
+- view的BuildDrawSnapshot `:120` 是否采用party绘制由**玩家人数>1**决定，不是敌人数。`src/Pal.Core/TriggerBattleContent.cs:44` / `:60` 独立允许1–2角色与1–2敌，`src/Pal.Core/ClassicBattleSession.cs:483` 也没有要求两边人数相等。因此**单玩家双敌是当前Core已接受组合**，不是待选的新人数扩展；renderer不能因单玩家而只画第0敌。后续必须覆盖该组合，不能新增拒绝来掩盖现有绘制缺口。本文不放宽人数/空槽上限（五敌位另归#138）。
 - 纹理key至少要有slot或等价的已核资源身份，同一帧编号的不同图不能碰撞；重复Id不等于共享动画状态。死亡可见性要随实际呈现阶段控制，当前foreach无HP/存在过滤只是静态证据。命中抖动/shift/数字仍定位TargetIndex，不能让另一个相同Id敌位同闪或同消失。
 - Main `:144` 视图初始化异常会ReleaseTextures/Free；结束和ReleaseStory也释放view。view `:287` 的ReleaseTextures清理owned/frames/effects/numbers。新增每槽集合必须同一所有权收尾，部分初始化也能释放，不能清全局ResourceLoader/cache/UID掩盖污染。
 
@@ -72,7 +72,7 @@
 | checked标量投影 | A：统一成每槽checked数据，legacy标量仅legacy路径可访问，新形态明确拒绝标量投影；B：为纯同图同metadata证明后保留整队投影，额外等价判断成本。推荐A，防止非Story只校槽0 | **未批准**；FirstBattle调用者和测试不能漏掉。现有两个Load签名已有完整enemyTeams，不必为#136再造完整party API |
 | native精灵身份/真实来源 | 人工声明区分现代TargetId和独立SpriteId；严格覆盖、帧及依赖hash可证明内部一致性。零售对象→记录/图号关系需已核现代输入来源根，不能只把两个数字写相等就宣称真实正确 | 推荐复用已准备数据及#191来源结论，不扩raw/重编码。具体可选expected字段与来源证明另待实施规格冻结 |
 | #164 / 安全复用 | #136绑定的是整份visual已认证闭包，现有private sprite校验可复用；#164是新增standalone expected sprite完整对比契约，两者不是同一需求 | 不移植停放树，不宣称#164通过，不凭相似性增依赖。若实施时发现必须消费其新API，再核实际批准关系/身份，不自动扩权 |
-| 死亡/支持域 | 两槽独立死亡属于#136必验；fade/动作后隐藏的准确交接不能省略。是否接受单玩家双敌、何时移除可见sprite要依据当前能力门与参考细化，不能只用玩家人数决定敌数组绘制 | 不是删验收许可。实现改变其他时间轴/状态/格式路径时先更新预算；本报告没有复现或修复这些运行行为 |
+| 死亡/已接受人数域 | 两槽独立死亡属于#136必验；fade/动作后隐藏的准确交接不能省略。单玩家双敌已由当前Core独立人数门接受，不能只用玩家人数决定敌数组绘制；何时移除可见sprite仍须对齐参考动作检查边界 | 不重新决策该人数域、不新增拒绝来规避。实现改变其他时间轴/状态/格式路径时先更新预算；本报告没有复现或修复这些运行行为 |
 
 以上选择未获确认，不得把推荐误当已冻结API。没有新业务规则、敌方法术/召唤/变身、全状态系统、五槽/存档、资源自动准备或工具链升级授权。后续直接确认/实施，不再为同一缺口建同题SOURCE票空转。
 
@@ -114,7 +114,7 @@
 
 | 边界 / 独立错误反例 | 应验收结果与层 |
 | --- | --- |
-| 两种图使用相同frame编号、不同颜色/高宽/Idle/Speed；slot0/1重排 | public native/Prepare核各自图帧与hash；Main实际draw随槽，ActorIndex取本动作metadata，TargetIndex取该目标当前高度/坐标，不串图/串位 |
+| 两种图使用相同frame编号、不同颜色/高宽/Idle/Speed；slot0/1重排；单玩家双敌 | public native/Prepare核各自图帧与hash；Main两敌都实际draw，图随槽而非玩家人数，ActorIndex取本动作metadata，TargetIndex取该目标当前高度/坐标，不串图/串位 |
 | `[id7,id7]` 同图、两槽独立被击/行动/一槽死亡 | 重复Id合法；不按Id作为状态/纹理slot主键。命中shift/数字只落目标，死亡边界仅隐藏该槽；不能把已有HP列表断言当可见性证据 |
 | 新形态漏槽、局部行缺字段、重复覆盖、错TargetId/额外slot、错SpriteId/缺帧 | 按已确认策略明确拒绝，不能回退整队图；重复TargetId本身不是重复slot错误；诊断定位team/slot/字段 |
 | 改第二图字节、漏外引frame/Texture/import/opaque依赖、多hash、URI异常 | 复用精确graph/keyset/前后hash拒绝；不清cache、不自动import；hash仅完整性，不认证零售来源 |
