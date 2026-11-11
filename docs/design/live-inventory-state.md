@@ -1,6 +1,6 @@
 # 显式背包所有者（#180 / #132 前置）
 
-`InventoryLiveState` 是纯 .NET 的宿主持有库存，沿用 `RoleLiveState` / `CashLiveState` 的显式所有权方式，不引入通用 GameState。构造必须传入按顺序排列的 `InventorySlot` 列表；空库存也显式传 `[]`。后续消费者共享同一实例，不能每次脚本调用重置或复制数量。当前 Main/trigger 尚未绑定此 owner，**本前置不是 #132 交付**。
+`InventoryLiveState` 是纯 .NET 的宿主持有库存，沿用 `RoleLiveState` / `CashLiveState` 的显式所有权方式，不引入通用 GameState。构造必须传入按顺序排列的 `InventorySlot` 列表；空库存也显式传 `[]`。消费者共享同一实例，不能每次脚本调用重置或复制数量。#181 将显式 owner 接入 Core trigger 的 `addItem` / `itemShortageJump`；Main/native 尚未绑定，**这两张前置不是 #132 交付**。
 
 ## 来源与支持域
 
@@ -26,8 +26,19 @@ API itemId 必须是 WORD。非法参数抛 `ArgumentOutOfRangeException`，在�
 
 `InventoryLiveStateTests.Explicit_inventory_preserves_reference_stock_slots_and_shortage_results` 只经公开 Core 构造、查询、变更及只读槽视图观察独立字面结果，覆盖容量、边界、部分移除、保留槽位、保留 in-use、参数拒绝与 owner 隔离。没有反射私有状态、运行参考或以实现输出生成预期。Core Unit 不证明 trigger 或正常 Main 接线。
 
+## Core trigger 绑定（#181）
+
+`TriggerScriptSession` 的各构造、`ForSharedRoles` 与静态 `ValidateEntry` 末尾追加可选 `InventoryLiveState? inventoryLiveState = null`，只读 `InventoryLiveState` 属性暴露实际绑定。既有源码调用不需迁移；没有隐式库存、重 seed 或 rebind，不承诺二进制 ABI。Main、PalTriggerDialogue 和 native/preview 的旧调用仍不传 owner，选中库存命令时明确拒绝，不能由未来 Game 宿主为绕过预检而创建空库存。
+
+- `addItem`（0x001F）消费现代 `itemId` 与 signed `count`，调用同一 owner 的 `AddItem`；零计数加1、负计数只减库存。参考 `script.c:970–975` 忽略该调用的整数返回，因此满容量/不存在/部分不足不改 `ScriptSuccess`，也不回滚已耗库存或移除装备。
+- `itemShortageJump`（0x0058）经既有具名字段校验消费 `itemId`、signed `count`、必需 `to`。按 `script.c:1859–1868` 比较 `GetAmount(itemId) < count`，不减 in-use、不计装备，不把零/负 count 替换成1。缺货与充足均不写 `ScriptSuccess`；只有实际到达的 `markFailed` 清它。`to` 支持跨文件与地址0；0终止而不执行归档位置0的命令。
+- current/static requirements 与 Start 使用同一显式 owner 能力判断；保守闭包检查两条分支及 add 的后继，不因当前库存或 count 符号剪枝，不读写库存、消耗随机数或改变调用身份。现代语义字段执行，保留的 source WORDs 只作诊断。`removeItem` 仍是 content-only，即使已绑定库存也拒绝整个选中闭包，避免漏做装备回退。
+- 变更在命令执行处立即提交，显示等待保留同一 owner；过早、外来、重复或旧 display ACK 不会重新执行此前的增减。新的显式 Start 是新的脚本调用，不是自动幂等化的请求重放策略。现有 event/role-hook/battle-end 共享解释路径可消费绑定，但不增加 call/goto/auto 或新上下文。
+
+`TriggerScriptInventoryTests.Explicit_inventory_commands_preserve_reference_stock_flow_and_pure_preflight` 经公开 Core 构造/Start/requirements/显示回执验证独立字面数量、符号边界、容量与耗尽、共享/隔离、库存而非装备计数、ScriptSuccess 保留、跨文件/0目标、无 owner/错误内容/任一不支持分支预先拒绝。此证据不证明正常 Main、真实战斗库存消费或 Game 运行。
+
 #132 仍须补齐：
-- 具名命令解析、保守两分支闭包、0x0058 的 signed count / inventory-only 比较、0x0020 分支和 ScriptSuccess 的真实参考行为；
+- 0x0020 的装备计数预检、分支和 ScriptSuccess 的真实参考行为；
 - `PAL_CountItem` 的当前队伍装备计数，以及按角色/槽顺序回退移除装备、同步装备效果；不得用库存返回0/负数直接代表脚本失败或退款；
 - 宿主显式初始库存、同一 owner 的 trigger/战斗连续性、重复/过期请求保护，原生内容兼容与正常 Main/SceneRunner 证据。
 

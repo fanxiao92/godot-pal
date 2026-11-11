@@ -97,8 +97,8 @@ public sealed class TriggerEventCollection
             if (command.TargetReference is not null)
             {
                 int target = collection.Resolve(command.TargetReference, command.Position.FileId,
-                    command.Op == "changeCash" ? $"{command.Position} changeCash.to" : command.Position.ToString());
-                if (command.Op is "randomJump" or "changeCash") command.TargetAddress = target;
+                    command.Op is "changeCash" or "itemShortageJump" ? $"{command.Position} {command.Op}.to" : command.Position.ToString());
+                if (command.Op is "randomJump" or "changeCash" or "itemShortageJump") command.TargetAddress = target;
             }
             foreach (var reference in command.ContentReferences)
             {
@@ -247,8 +247,15 @@ public sealed class TriggerEventCollection
                 case "addItem":
                     // #116: the frozen 0x001F verb is addItem (#100); the v1 placeholder giveItem is rejected.
                     if (opcode != 31) throw new InvalidDataException("Invalid addItem mapping.");
-                    _ = EventJson.Word(node, "itemId");
+                    command.ObjectId = EventJson.Word(node, "itemId");
                     if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("addItem.count must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "count");
+                    break;
+                case "itemShortageJump":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.ObjectId = EventJson.Word(node, "itemId");
+                    command.Amount = EventJson.Number(node, "count");
+                    command.TargetReference = EventJson.Reference(node, "to");
                     break;
                 case "randomJump":
                     // script.c:3301-3312: draw RandomLong(1,100); the jump is taken when draw >= rate.

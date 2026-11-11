@@ -75,9 +75,12 @@ public sealed class TriggerScriptSession
 
     /// <summary>The host may explicitly share a cash owner; null preserves the legacy cash capability rejection.</summary>
     public CashLiveState? CashLiveState { get; }
+    /// <summary>The explicit shared inventory owner; null keeps inventory commands unsupported.</summary>
+    public InventoryLiveState? InventoryLiveState { get; }
 
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
-        int inheritedColor = DialogueTextTokenizer.DefaultColor, CashLiveState? cashLiveState = null)
+        int inheritedColor = DialogueTextTokenizer.DefaultColor, CashLiveState? cashLiveState = null,
+        InventoryLiveState? inventoryLiveState = null)
     {
         ArgumentNullException.ThrowIfNull(events);
         ArgumentNullException.ThrowIfNull(language);
@@ -85,13 +88,14 @@ public sealed class TriggerScriptSession
         _events = events;
         _language = language;
         CashLiveState = cashLiveState;
+        InventoryLiveState = inventoryLiveState;
         Context = new TriggerDialogueContext("upper", 0, inheritedColor, false, 24);
     }
 
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent battleContent, IBattleRandom battleRandom, int inheritedColor = DialogueTextTokenizer.DefaultColor,
-        CashLiveState? cashLiveState = null)
-        : this(events, language, inheritedColor, cashLiveState)
+        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null)
+        : this(events, language, inheritedColor, cashLiveState, inventoryLiveState)
     {
         ArgumentNullException.ThrowIfNull(battleContent);
         ArgumentNullException.ThrowIfNull(battleRandom);
@@ -105,8 +109,9 @@ public sealed class TriggerScriptSession
     /// verbs; both halves use the same executor and the same random source.</summary>
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent battleContent, IBattleRandom battleRandom, DynamicEventWorld world,
-        int inheritedColor = DialogueTextTokenizer.DefaultColor, CashLiveState? cashLiveState = null)
-        : this(events, language, battleContent, battleRandom, inheritedColor, cashLiveState)
+        int inheritedColor = DialogueTextTokenizer.DefaultColor, CashLiveState? cashLiveState = null,
+        InventoryLiveState? inventoryLiveState = null)
+        : this(events, language, battleContent, battleRandom, inheritedColor, cashLiveState, inventoryLiveState)
     {
         ArgumentNullException.ThrowIfNull(world);
         _world = world;
@@ -118,14 +123,14 @@ public sealed class TriggerScriptSession
     public static TriggerScriptSession ForSharedRoles(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent battleContent, IBattleRandom battleRandom, RoleLiveState roleLiveState,
         DynamicEventWorld? world = null, int inheritedColor = DialogueTextTokenizer.DefaultColor,
-        CashLiveState? cashLiveState = null)
+        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null)
     {
         ArgumentNullException.ThrowIfNull(roleLiveState);
         if (world is not null && !ReferenceEquals(world.RoleLiveState, roleLiveState))
             throw new ArgumentException("The trigger and world must share the same live role owner.", nameof(world));
         var session = world is null
-            ? new TriggerScriptSession(events, language, battleContent, battleRandom, inheritedColor, cashLiveState)
-            : new TriggerScriptSession(events, language, battleContent, battleRandom, world, inheritedColor, cashLiveState);
+            ? new TriggerScriptSession(events, language, battleContent, battleRandom, inheritedColor, cashLiveState, inventoryLiveState)
+            : new TriggerScriptSession(events, language, battleContent, battleRandom, world, inheritedColor, cashLiveState, inventoryLiveState);
         session.BindRoleLiveState(roleLiveState);
         return session;
     }
@@ -158,8 +163,9 @@ public sealed class TriggerScriptSession
     /// <summary>Dynamic-scene construction (no battle support): world mutations apply directly to
     /// the supplied world; startBattle stays an unsupported command in this session.</summary>
     public TriggerScriptSession(TriggerEventCollection events, DialogueLanguagePackage language,
-        DynamicEventWorld world, int inheritedColor = DialogueTextTokenizer.DefaultColor, CashLiveState? cashLiveState = null)
-        : this(events, language, inheritedColor, cashLiveState)
+        DynamicEventWorld world, int inheritedColor = DialogueTextTokenizer.DefaultColor, CashLiveState? cashLiveState = null,
+        InventoryLiveState? inventoryLiveState = null)
+        : this(events, language, inheritedColor, cashLiveState, inventoryLiveState)
     {
         ArgumentNullException.ThrowIfNull(world);
         _world = world;
@@ -169,7 +175,7 @@ public sealed class TriggerScriptSession
     /// create a battle or require randomness; later Start calls still validate their current settled role.</summary>
     public static TriggerEntryRequirements ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent battleContent, string fileId, string entryId, int inheritedColor = DialogueTextTokenizer.DefaultColor,
-        CashLiveState? cashLiveState = null)
+        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null)
     {
         ArgumentNullException.ThrowIfNull(events);
         ArgumentNullException.ThrowIfNull(language);
@@ -179,7 +185,7 @@ public sealed class TriggerScriptSession
         if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
         var requirements = new EntryRequirementsCollector();
         ValidateCapabilityClosure(events, language, battleContent, battleContent.InitialRoles, inheritedColor, entry.SourceAddress, requirements,
-            hasCashOwner: cashLiveState is not null);
+            hasCashOwner: cashLiveState is not null, hasInventoryOwner: inventoryLiveState is not null);
         return new(requirements.Displays, requirements.Portraits, requirements.Teams);
     }
 
@@ -347,7 +353,7 @@ public sealed class TriggerScriptSession
         ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, requirements, context,
             rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true,
             currentObjectScripts: _world?.ObjectScripts, rejectObjectScriptWithoutWorld: _world is null,
-            hasCashOwner: CashLiveState is not null);
+            hasCashOwner: CashLiveState is not null, hasInventoryOwner: InventoryLiveState is not null);
 
     private sealed class EntryRequirementsCollector
     {
@@ -361,7 +367,7 @@ public sealed class TriggerScriptSession
         EntryRequirementsCollector? requirements = null, TriggerScriptContext context = TriggerScriptContext.Event,
         bool rejectMappedBattlesWithoutWorld = false, bool validateNameMappings = false,
         IReadOnlyDictionary<(int ObjectId, int SlotIndex), int>? currentObjectScripts = null,
-        bool rejectObjectScriptWithoutWorld = false, bool hasCashOwner = false)
+        bool rejectObjectScriptWithoutWorld = false, bool hasCashOwner = false, bool hasInventoryOwner = false)
     {
         var pending = new Stack<(int Address, TriggerScriptContext Context)>();
         var visited = new HashSet<(int Address, TriggerScriptContext Context)>();
@@ -375,9 +381,11 @@ public sealed class TriggerScriptSession
             address = item.Address;
             if (address == 0 || !visited.Add(item)) continue;
             var command = events.CommandAt(address);
-            if (command.IsContentOnly || (command.Op is "changeCash" or "halveCash" && !hasCashOwner))
+            if (command.IsContentOnly || (command.Op is "changeCash" or "halveCash" && !hasCashOwner)
+                || (command.Op is "addItem" or "itemShortageJump" && !hasInventoryOwner))
                 throw new InvalidDataException($"{command.Position}: content-only command '{command.Op}' is unsupported in trigger context {item.Context}."
-                    + (command.Op is "changeCash" or "halveCash" ? " An explicit cash owner is required." : ""));
+                    + (command.Op is "changeCash" or "halveCash" ? " An explicit cash owner is required." : "")
+                    + (command.Op is "addItem" or "itemShortageJump" ? " An explicit inventory owner is required." : ""));
             if (command.Op == "end" && command.Mode == "keep") continue;
             if (command.Op == "startBattle" && battleContent is not null && item.Context == TriggerScriptContext.Event)
             {
@@ -441,13 +449,14 @@ public sealed class TriggerScriptSession
                 pending.Push((Next(command), item.Context));
                 pending.Push((command.TargetAddress!.Value, item.Context));
             }
-            else if (command.Op == "changeCash")
+            else if (command.Op is "changeCash" or "itemShortageJump")
             {
-                // Check both branches without reading/mutating the balance, even for a positive amount.
+                // Check both branches without reading/mutating cash or inventory, even when
+                // the current balance/count would make one branch unreachable.
                 pending.Push((Next(command), item.Context));
                 pending.Push((command.TargetAddress!.Value, item.Context));
             }
-            else if (command.Op is "setMusic" or "fadeToRed" or "halveCash")
+            else if (command.Op is "setMusic" or "fadeToRed" or "halveCash" or "addItem")
             {
                 pending.Push((Next(command), item.Context));
             }
@@ -633,6 +642,16 @@ public sealed class TriggerScriptSession
                         Next(command), command.LossAddress, command.FleeAddress, lifecycle);
                     Phase = TriggerScriptPhase.WaitingForBattle;
                     return;
+                case "addItem" when InventoryLiveState is not null:
+                    // script.c 0x001F ignores even a shortage/full return; no equipment fallback.
+                    InventoryLiveState.AddItem(command.ObjectId, command.Amount);
+                    _address = Next(command);
+                    break;
+                case "itemShortageJump" when InventoryLiveState is not null:
+                    // script.c 0x0058 compares inventory-only quantity to the literal signed count.
+                    _address = InventoryLiveState.GetAmount(command.ObjectId) < command.Amount
+                        ? command.TargetAddress!.Value : Next(command);
+                    break;
                 case "changeCash" when CashLiveState is not null:
                     // script.c 0x001E: shortage jumps without a debit or a ScriptSuccess write.
                     _address = CashLiveState.TryChange(command.Amount) ? Next(command) : command.TargetAddress!.Value;
