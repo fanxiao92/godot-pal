@@ -9,6 +9,9 @@ using Pal.Game.Profiles;
 using Pal.Game.Resources;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text;
+using System.Security.Cryptography;
+using Pal.Game.Editor;
 using static GdUnit4.Assertions;
 
 namespace Pal.Game.Tests;
@@ -16,6 +19,352 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class NativeBattleContentTests
 {
+    [TestCase]
+    public void ReceiptParserBindsOriginalBytesAndFreezesOneNumericSelection()
+    {
+        var (receipt, numeric) = ReceiptFixture();
+        byte[] receiptBytes = Encoding.UTF8.GetBytes(receipt.ToJsonString()), numericBytes = Encoding.UTF8.GetBytes(numeric.ToJsonString());
+        var (content, source) = ProjectedBattleSource.Parse(receiptBytes, numericBytes);
+        AssertThat(source.ReceiptSha256).IsEqual(Convert.ToHexStringLower(SHA256.HashData(receiptBytes)));
+        AssertThat(source.NumericSha256).IsEqual(Convert.ToHexStringLower(SHA256.HashData(numericBytes)));
+        AssertThat(source.ReceiptByteLength).IsEqual((long)receiptBytes.Length);
+        AssertThat(source.NumericByteLength).IsEqual((long)numericBytes.Length);
+        AssertThat(source.RoleIds.ToArray()).IsEqual(new[] { 4, 0 });
+        AssertThat(source.TeamIds.ToArray()).IsEqual(new[] { 65535, 0 });
+        AssertThat(source.ModernInputs.Count).IsEqual(14);
+        AssertThat(source.EnemySlots.Count).IsEqual(10);
+        AssertThat(source.EnemySlots[0]).IsEqual(new BattleProjectionEnemySlot(65535, 0, 97, "loaded", 0, 0, 1));
+        AssertThat(source.EnemySlots[2]).IsEqual(new BattleProjectionEnemySlot(65535, 2, 97, "loaded", 0, 1, 2));
+        AssertThat(source.EnemySlots[1]).IsEqual(new BattleProjectionEnemySlot(65535, 1, 65535, "skip-FFFF"));
+        AssertThat(content.Players.Select(p => p.RoleId).ToArray()).IsEqual(new[] { 4, 0 });
+        AssertThat(content.Players[0].Attack).IsEqual(40);
+        AssertThat(content.EnemyTeams[65535].Select(e => e.Id).ToArray()).IsEqual(new[] { 1, 2 });
+        string expected = JsonSerializer.Serialize(content), sourceExpected = JsonSerializer.Serialize(source);
+        System.Array.Fill<byte>(numericBytes, 0); System.Array.Fill<byte>(receiptBytes, 0);
+        numeric["players"]![0]!["attack"] = 1; receipt["roles"]![0] = 3;
+        AssertThat(JsonSerializer.Serialize(content)).IsEqual(expected);
+        AssertThat(JsonSerializer.Serialize(source)).IsEqual(sourceExpected);
+        AssertReadOnly(source.RoleIds, 3); AssertReadOnly(source.TeamIds, 3);
+        AssertReadOnly(source.ModernInputs, new BattleProjectionModernInput("bad", "", 0));
+        AssertReadOnly(source.EnemySlots, new BattleProjectionEnemySlot(0, 0, 0, "bad"));
+    }
+
+    [TestCase(" ")]
+    [TestCase("\n")]
+    [TestCase("\r\n")]
+    [TestCase("\uFEFF")]
+    public void ReceiptParserUsesExactNumericAndReceiptBytesIncludingBomAndWhitespace(string decoration)
+    {
+        var (receipt, numeric) = ReceiptFixture();
+        string numericText = decoration == "\uFEFF" ? decoration + numeric.ToJsonString() : numeric.ToJsonString() + decoration;
+        byte[] bytes = Encoding.UTF8.GetBytes(numericText);
+        receipt["output"]!["sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        receipt["output"]!["byteLength"] = bytes.Length;
+        string receiptText = decoration == "\uFEFF" ? decoration + receipt.ToJsonString() : receipt.ToJsonString() + decoration;
+        byte[] originalReceipt = Encoding.UTF8.GetBytes(receiptText);
+        var result = ProjectedBattleSource.Parse(originalReceipt, bytes);
+        AssertThat(result.Source.ReceiptSha256).IsEqual(Convert.ToHexStringLower(SHA256.HashData(originalReceipt)));
+        AssertThat(result.Source.NumericSha256).IsEqual(Convert.ToHexStringLower(SHA256.HashData(bytes)));
+        AssertReceiptRejected(Encoding.UTF8.GetBytes(receipt.ToJsonString()), Encoding.UTF8.GetBytes(numeric.ToJsonString()), "output");
+    }
+
+    [TestCase]
+    public void ReceiptParserRejectsEqualLengthNumericChangesByHashRatherThanReserializing()
+    {
+        var (receipt, numeric) = ReceiptFixture();
+        byte[] original = Encoding.UTF8.GetBytes(numeric.ToJsonString() + "\n");
+        ReceiptOutputBytes(receipt, original);
+        byte[] changed = Encoding.UTF8.GetBytes(numeric.ToJsonString() + "\t");
+        AssertThat(changed.Length).IsEqual(original.Length);
+        AssertReceiptRejected(Encoding.UTF8.GetBytes(receipt.ToJsonString()), changed, "output.sha256");
+    }
+
+    [TestCase("root-missing", "kind")]
+    [TestCase("root-extra", "unknown")]
+    [TestCase("version", "FormatVersion")]
+    [TestCase("kind", "Kind")]
+    [TestCase("snapshot", "SnapshotKind")]
+    [TestCase("trust", "inputTrust")]
+    [TestCase("limits", "limits")]
+    [TestCase("source-missing", "declaredSources")]
+    [TestCase("source-duplicate", "archive")]
+    [TestCase("source-archive", "archive")]
+    [TestCase("source-hash", "sha256")]
+    [TestCase("source-extra", "unknown")]
+    [TestCase("tables-missing", "declaredTables")]
+    [TestCase("tables-duplicate", "file")]
+    [TestCase("table-unknown", "file")]
+    [TestCase("table-archive", "archive/chunk")]
+    [TestCase("table-chunk", "archive/chunk")]
+    [TestCase("table-length", "recordCount/byteLength")]
+    [TestCase("table-zero", "recordCount/byteLength")]
+    [TestCase("table-overflow", "recordCount/byteLength")]
+    [TestCase("table-single", "recordCount/byteLength")]
+    [TestCase("object-dos", "recordCount/byteLength")]
+    [TestCase("object-ambiguous", "ambiguous")]
+    [TestCase("table-hash", "sha256")]
+    [TestCase("table-extra", "unknown")]
+    [TestCase("inputs-missing", "ModernInputs")]
+    [TestCase("inputs-duplicate", "ModernInputs")]
+    [TestCase("inputs-order", "ModernInputs")]
+    [TestCase("input-hash", "sha256")]
+    [TestCase("input-length", "ByteLength")]
+    [TestCase("input-extra", "unknown")]
+    [TestCase("roles-order", "RoleIds")]
+    [TestCase("roles-duplicate", "RoleIds")]
+    [TestCase("role5", "RoleIds")]
+    [TestCase("teams-order", "EnemySlots")]
+    [TestCase("teams-declaration", "teams")]
+    [TestCase("slots-missing", "EnemySlots")]
+    [TestCase("slots-duplicate", "EnemySlots")]
+    [TestCase("slot-zero", "EnemySlots")]
+    [TestCase("slot-compact", "EnemySlots")]
+    [TestCase("slot-battle", "EnemySlots")]
+    [TestCase("slot-mode", "EnemySlots")]
+    [TestCase("slot-skip-extra", "unknown")]
+    [TestCase("slot-loaded-missing", "enemyId")]
+    [TestCase("slot-object-declaration", "enemySlots")]
+    [TestCase("slot-enemy-declaration", "enemySlots")]
+    [TestCase("output-file", "output.file")]
+    [TestCase("output-length", "output.byteLength")]
+    [TestCase("output-hash", "output.sha256")]
+    [TestCase("output-extra", "unknown")]
+    [TestCase("field-missing", "fieldSources")]
+    [TestCase("field-empty-array-missing", "fieldSources")]
+    [TestCase("field-extra", "fieldSources")]
+    [TestCase("field-duplicate", "fieldSources")]
+    [TestCase("field-empty-path", "path")]
+    [TestCase("field-empty-source", "source")]
+    [TestCase("field-unknown", "unknown")]
+    [TestCase("capability", "dyingScript")]
+    public void ReceiptParserRejectsMalformedDeclarationsCoverageSelectionAndCapability(string fault, string cause)
+    {
+        var (receipt, numeric) = ReceiptFixture();
+        var sources = receipt["declaredSources"]!.AsArray(); var tables = receipt["declaredTables"]!.AsArray();
+        var inputs = receipt["modernInputs"]!.AsArray(); var slots = receipt["enemySlots"]!.AsArray();
+        var fields = receipt["fieldSources"]!.AsArray();
+        switch (fault)
+        {
+            case "root-missing": receipt.Remove("kind"); break;
+            case "root-extra": receipt["unknown"] = 1; break;
+            case "version": receipt["formatVersion"] = 2; break;
+            case "kind": receipt["kind"] = "unknown"; break;
+            case "snapshot": receipt["snapshotKind"] = "natural-save"; break;
+            case "trust": receipt["inputTrust"] = "authenticated"; break;
+            case "limits": receipt["limits"] = null; break;
+            case "source-missing": sources.RemoveAt(0); break;
+            case "source-duplicate": sources[1] = sources[0]!.DeepClone(); break;
+            case "source-archive": sources[0]!["archive"] = "sss.mkf"; break;
+            case "source-hash": sources[0]!["sha256"] = "bad"; break;
+            case "source-extra": sources[0]!["unknown"] = 1; break;
+            case "tables-missing": tables.RemoveAt(0); break;
+            case "tables-duplicate": tables.Add(tables[0]!.DeepClone()); break;
+            case "table-unknown": tables[0]!["file"] = "../object.json"; break;
+            case "table-archive": tables[0]!["archive"] = "DATA.MKF"; break;
+            case "table-chunk": tables[0]!["chunk"] = 0; break;
+            case "table-length": tables[0]!["byteLength"] = 1; break;
+            case "table-zero": tables[0]!["recordCount"] = 0; break;
+            case "table-overflow": tables[0]!["recordCount"] = 65537; break;
+            case "table-single": tables[6]!["recordCount"] = 2; tables[6]!["byteLength"] = 1800; break;
+            case "object-dos": tables[0]!["byteLength"] = 65535 * 12; break;
+            case "object-ambiguous": tables[0]!["recordCount"] = 6; tables[0]!["byteLength"] = 84; break;
+            case "table-hash": tables[0]!["sha256"] = new string('g', 64); break;
+            case "table-extra": tables[0]!["unknown"] = 1; break;
+            case "inputs-missing": inputs.RemoveAt(0); break;
+            case "inputs-duplicate": inputs[1] = inputs[0]!.DeepClone(); break;
+            case "inputs-order": var first = inputs[0]!.DeepClone(); inputs[0] = inputs[1]!.DeepClone(); inputs[1] = first; break;
+            case "input-hash": inputs[0]!["sha256"] = new string('A', 64); break;
+            case "input-length": inputs[0]!["byteLength"] = 67108865; break;
+            case "input-extra": inputs[0]!["unknown"] = 1; break;
+            case "roles-order": receipt["roles"] = new JsonArray(0, 4); break;
+            case "roles-duplicate": receipt["roles"] = new JsonArray(4, 4); break;
+            case "role5": receipt["roles"]![0] = 5; break;
+            case "teams-order": receipt["teams"] = new JsonArray(0, 65535); break;
+            case "teams-declaration": tables[5]!["recordCount"] = 65535; tables[5]!["byteLength"] = 655350; break;
+            case "slots-missing": slots.RemoveAt(0); break;
+            case "slots-duplicate": slots[1] = slots[0]!.DeepClone(); break;
+            case "slot-zero": slots[0]!["objectId"] = 0; break;
+            case "slot-compact": slots[2]!["compactSlot"] = 0; break;
+            case "slot-battle": slots[2]!["battleId"] = 1; break;
+            case "slot-mode": slots[1]!["disposition"] = "skip"; break;
+            case "slot-skip-extra": slots[1]!["enemyId"] = -1; break;
+            case "slot-loaded-missing": slots[0]!.AsObject().Remove("enemyId"); break;
+            case "slot-object-declaration": tables[0]!["recordCount"] = 101; tables[0]!["byteLength"] = 1414; break;
+            case "slot-enemy-declaration": tables[4]!["recordCount"] = 1; tables[4]!["byteLength"] = 70; break;
+            case "output-file": receipt["output"]!["file"] = "battle-data.json"; break;
+            case "output-length": receipt["output"]!["byteLength"] = 1; break;
+            case "output-hash": receipt["output"]!["sha256"] = new string('0', 64); break;
+            case "output-extra": receipt["output"]!["unknown"] = 1; break;
+            case "field-missing": fields.RemoveAt(0); break;
+            case "field-empty-array-missing": fields.Remove(fields.Single(row => row!["path"]!.GetValue<string>() == "players[0].poisons")); break;
+            case "field-extra": fields.Add(new JsonObject { ["path"] = "teams[2].teamId", ["source"] = "authored" }); break;
+            case "field-duplicate": fields.Add(fields[0]!.DeepClone()); break;
+            case "field-empty-path": fields[0]!["path"] = ""; break;
+            case "field-empty-source": fields[0]!["source"] = " "; break;
+            case "field-unknown": fields[0]!["unknown"] = 1; break;
+            case "capability": numeric["players"]![0]!["dyingScript"] = 1; ReceiptOutput(receipt, numeric); break;
+            default: throw new ArgumentException(fault);
+        }
+        AssertReceiptRejected(Encoding.UTF8.GetBytes(receipt.ToJsonString()), Encoding.UTF8.GetBytes(numeric.ToJsonString()), cause);
+    }
+
+    [TestCase("1.0")]
+    [TestCase("1e0")]
+    [TestCase("1.5")]
+    [TestCase("true")]
+    [TestCase("null")]
+    [TestCase("\"1\"")]
+    [TestCase("[]")]
+    [TestCase("{}")]
+    [TestCase("9223372036854775808")]
+    public void ReceiptParserRejectsNonIntegerSpellingsAndTypesAtEveryIntegerSection(string raw)
+    {
+        foreach (string section in new[] { "formatVersion", "chunk", "recordCount", "byteLength", "roles", "teams", "sourceSlot", "enemyId", "battleId" })
+        {
+            var (receipt, numeric) = ReceiptFixture();
+            JsonNode? value = JsonNode.Parse(raw);
+            switch (section)
+            {
+                case "formatVersion": receipt[section] = value; break;
+                case "chunk": case "recordCount": receipt["declaredTables"]![0]![section] = value; break;
+                case "byteLength": receipt["output"]![section] = value; break;
+                case "roles": case "teams": receipt[section]![0] = value; break;
+                default: receipt["enemySlots"]![0]![section] = value; break;
+            }
+            AssertReceiptRejected(Encoding.UTF8.GetBytes(receipt.ToJsonString()), Encoding.UTF8.GetBytes(numeric.ToJsonString()), section);
+        }
+    }
+
+    [TestCase("receipt-utf8")]
+    [TestCase("numeric-utf8")]
+    [TestCase("receipt-json")]
+    [TestCase("numeric-json")]
+    [TestCase("receipt-empty")]
+    [TestCase("numeric-empty")]
+    [TestCase("numeric-large")]
+    [TestCase("root-array")]
+    [TestCase("duplicate-root")]
+    [TestCase("duplicate-annotation")]
+    [TestCase("duplicate-numeric")]
+    [TestCase("receipt-depth")]
+    public void ReceiptParserRejectsMalformedRawBytesAndRecursiveDuplicateKeys(string fault)
+    {
+        var (receipt, numeric) = ReceiptFixture();
+        string text = receipt.ToJsonString();
+        byte[] r = Encoding.UTF8.GetBytes(text), n = Encoding.UTF8.GetBytes(numeric.ToJsonString());
+        string cause;
+        switch (fault)
+        {
+            case "receipt-utf8": r = [0xff]; cause = "UTF-8"; break;
+            case "numeric-utf8": n = [0xff]; cause = "UTF-8"; break;
+            case "receipt-json": r = Encoding.UTF8.GetBytes("{\"x\":1,}"); cause = "JSON"; break;
+            case "numeric-json": n = Encoding.UTF8.GetBytes("{"); ReceiptOutputBytes(receipt, n); r = Encoding.UTF8.GetBytes(receipt.ToJsonString()); cause = "JSON"; break;
+            case "receipt-empty": r = []; cause = "JSON"; break;
+            case "numeric-empty": n = []; cause = "1..16777216"; break;
+            case "numeric-large": n = new byte[16777217]; cause = "1..16777216"; break;
+            case "root-array": r = Encoding.UTF8.GetBytes("[]"); cause = "object"; break;
+            case "duplicate-root": r = Encoding.UTF8.GetBytes("{\"formatVersion\":1," + text[1..]); cause = "duplicate"; break;
+            case "duplicate-annotation": receipt["declaredSources"]![0]!["_note"] = JsonNode.Parse("{\"a\":1}"); r = Encoding.UTF8.GetBytes(receipt.ToJsonString().Replace("\"a\":1", "\"a\":1,\"a\":1", StringComparison.Ordinal)); cause = "duplicate"; break;
+            case "duplicate-numeric": n = Encoding.UTF8.GetBytes("{\"formatVersion\":1," + numeric.ToJsonString()[1..]); ReceiptOutputBytes(receipt, n); r = Encoding.UTF8.GetBytes(receipt.ToJsonString()); cause = "duplicate"; break;
+            case "receipt-depth": r = Encoding.UTF8.GetBytes(new string('[', 65) + "0" + new string(']', 65)); cause = "JSON"; break;
+            default: throw new ArgumentException(fault);
+        }
+        AssertReceiptRejected(r, n, cause);
+    }
+
+    [TestCase]
+    public void ReceiptParserAllowsCopiedDeclarationAnnotationsAndTraceabilityProseWithoutAuthenticatingThem()
+    {
+        var (receipt, numeric) = ReceiptFixture();
+        receipt["declaredSources"]![0]!["sha256"] = new string('A', 64);
+        receipt["declaredSources"]![0]!["_note"] = new JsonObject { ["anything"] = new JsonArray(1, "text") };
+        receipt["declaredTables"]![0]!["_note"] = "upstream";
+        foreach (var field in receipt["fieldSources"]!.AsArray()) field!["source"] = "traceability is not authentication";
+        var result = ProjectedBattleSource.Parse(Encoding.UTF8.GetBytes(receipt.ToJsonString()), Encoding.UTF8.GetBytes(numeric.ToJsonString()));
+        AssertThat(result.Content.Players[0].RoleId).IsEqual(4);
+        AssertThat(result.Source.InputTrust).IsEqual("caller-verified-upstream; declarations-and-byte-identities-not-independent-authentication");
+    }
+
+    private static void AssertReceiptRejected(byte[] receipt, byte[] numeric, string cause)
+    {
+        InvalidDataException? failure = null;
+        try { ProjectedBattleSource.Parse(receipt, numeric); }
+        catch (InvalidDataException error) { failure = error; }
+        AssertThat(failure is not null).OverrideFailureMessage("receipt must reject " + cause).IsTrue();
+        AssertThat(failure!.Message.Contains(cause, StringComparison.OrdinalIgnoreCase)).OverrideFailureMessage(failure.Message).IsTrue();
+    }
+
+    private static (JsonObject Receipt, JsonObject Numeric) ReceiptFixture()
+    {
+        // Independently authored numeric JSON, never NativeBattleContent.Write or the projector.
+        var numeric = DataJson();
+        foreach (string group in new[] { "roles", "players", "growth" })
+        {
+            JsonNode row = numeric[group]![0]!.DeepClone(); row["roleId"] = 4;
+            JsonNode second = row.DeepClone(); second["roleId"] = 0;
+            numeric[group] = new JsonArray(row, second);
+        }
+        JsonNode enemy = numeric["teams"]![0]!["enemies"]![0]!.DeepClone(); enemy["id"] = 1;
+        JsonNode secondEnemy = enemy.DeepClone(); secondEnemy["id"] = 2;
+        numeric["teams"] = new JsonArray(new JsonObject { ["teamId"] = 65535, ["enemies"] = new JsonArray(enemy, secondEnemy) },
+            new JsonObject { ["teamId"] = 0, ["enemies"] = new JsonArray(enemy.DeepClone(), secondEnemy.DeepClone()) });
+        foreach (var player in numeric["players"]!.AsArray()) player!["poisons"] = new JsonArray();
+        foreach (var team in numeric["teams"]!.AsArray())
+            foreach (var e in team!["enemies"]!.AsArray()) e!["poisons"] = new JsonArray();
+        var tables = JsonNode.Parse("""
+            [
+              {"file":"object.json","archive":"SSS.MKF","chunk":2,"recordCount":65535,"byteLength":917490},
+              {"file":"event-object.json","archive":"SSS.MKF","chunk":0,"recordCount":1,"byteLength":32},
+              {"file":"scene.json","archive":"SSS.MKF","chunk":1,"recordCount":1,"byteLength":8},
+              {"file":"store.json","archive":"DATA.MKF","chunk":0,"recordCount":1,"byteLength":18},
+              {"file":"enemy.json","archive":"DATA.MKF","chunk":1,"recordCount":65536,"byteLength":4587520},
+              {"file":"enemy-team.json","archive":"DATA.MKF","chunk":2,"recordCount":65536,"byteLength":655360},
+              {"file":"player-roles.json","archive":"DATA.MKF","chunk":3,"recordCount":1,"byteLength":900},
+              {"file":"magic.json","archive":"DATA.MKF","chunk":4,"recordCount":1,"byteLength":32},
+              {"file":"battle-field.json","archive":"DATA.MKF","chunk":5,"recordCount":1,"byteLength":12},
+              {"file":"level-up-magic.json","archive":"DATA.MKF","chunk":6,"recordCount":1,"byteLength":20},
+              {"file":"battle-effect-index.json","archive":"DATA.MKF","chunk":11,"recordCount":1,"byteLength":40},
+              {"file":"enemy-pos.json","archive":"DATA.MKF","chunk":13,"recordCount":1,"byteLength":100},
+              {"file":"level-up-exp.json","archive":"DATA.MKF","chunk":14,"recordCount":1,"byteLength":200}
+            ]
+            """)!.AsArray();
+        foreach (var table in tables) table!["sha256"] = new string('a', 64);
+        var inputs = new JsonArray(ProjectionInputs().Select(row => (JsonNode)new JsonObject { ["file"] = row.File, ["sha256"] = row.Sha256, ["byteLength"] = row.ByteLength }).ToArray());
+        var slots = new JsonArray(ProjectionSlots().Select(row => (JsonNode)Slot(row)).ToArray());
+        var fields = new JsonArray();
+        AddFields(numeric, "");
+        var receipt = new JsonObject {
+            ["formatVersion"] = 1, ["kind"] = "m5-base-table-physical-projection",
+            ["snapshotKind"] = "independent-base-table-context-not-natural-save",
+            ["inputTrust"] = "caller-verified-upstream; declarations-and-byte-identities-not-independent-authentication",
+            ["declaredSources"] = new JsonArray(new JsonObject { ["archive"] = "SSS.MKF", ["sha256"] = new string('b', 64) },
+                new JsonObject { ["archive"] = "DATA.MKF", ["sha256"] = new string('c', 64) }),
+            ["declaredTables"] = tables, ["modernInputs"] = inputs, ["roles"] = new JsonArray(4, 0), ["teams"] = new JsonArray(65535, 0),
+            ["enemySlots"] = slots, ["fieldSources"] = fields, ["limits"] = "independent authored values, not natural save" };
+        ReceiptOutput(receipt, numeric);
+        return (receipt, numeric);
+
+        static JsonObject Slot(BattleProjectionEnemySlot row)
+        {
+            var result = new JsonObject { ["teamId"] = row.TeamId, ["sourceSlot"] = row.SourceSlot, ["objectId"] = row.ObjectId, ["disposition"] = row.Disposition };
+            if (row.Disposition == "loaded") { result["enemyId"] = row.EnemyId; result["compactSlot"] = row.CompactSlot; result["battleId"] = row.BattleId; }
+            return result;
+        }
+        void AddFields(JsonNode? node, string path)
+        {
+            switch (node)
+            {
+                case JsonObject obj: foreach (var field in obj) AddFields(field.Value, path.Length == 0 ? field.Key : path + "." + field.Key); break;
+                case JsonArray array when array.Count > 0: for (int i = 0; i < array.Count; i++) AddFields(array[i], path + $"[{i}]"); break;
+                default: fields.Add(new JsonObject { ["path"] = path, ["source"] = "authored independent fixture" }); break;
+            }
+        }
+    }
+    private static void ReceiptOutput(JsonObject receipt, JsonObject numeric) => ReceiptOutputBytes(receipt, Encoding.UTF8.GetBytes(numeric.ToJsonString()));
+    private static void ReceiptOutputBytes(JsonObject receipt, byte[] bytes) => receipt["output"] = new JsonObject {
+        ["file"] = "numeric/battle-data.json", ["byteLength"] = bytes.Length, ["sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes)) };
+
+
     [TestCase]
     public void ProjectionFieldsWithoutPresenceRejectThroughLegacyCreateCore()
     {

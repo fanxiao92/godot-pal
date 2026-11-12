@@ -45,6 +45,12 @@ game-only 在冷工作树上也须先显式完成现有 CI-style Godot editor im
 
 headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证据，不能相互代替。M3 当前交付状态和历史限制见[M3 验收检查点](../../../docs/milestones/m3/acceptance.md#当前状态)；这不是新的运行结论。
 
+## #199 离线 receipt 原字节核对（路线 A 第二叶）
+
+新增86个 `NativeBattleContentTests.ReceiptParser*` 案例，经公开 `ProjectedBattleSource.Parse` 验证独立人工 numeric/receipt：角色[4,0]、队伍[65535,0]、同object97双实例、完整5槽与14输入；两类实际原字节SHA/长度（独立.NET cryptography预期）、BOM/空白/换行、等长改写拒绝、buffer与公开集合隔离。58种结构/声明/字段覆盖/选择/能力反例、9种非法整数拼写/类型各遍历多个整数section、12种raw UTF8/JSON/depth/递归重复键反例，以及声明注释/非认证文字正例。显式空poisons数组必须有独立fieldSources条目，不能按空缺省忽略。
+
+完整影响集7路径（新增离线静态类及其uid，测试/批次登记/两份文档），不改Core/工具/Prepare/Story/Main或运行时JSON。native-map登记663（577+86）、库存942、full939/committable938 positives，原3控制和私有排除/300000ms/捕获不变。metadata精确方法计数和两scope唯一归属；这些源码计数不是实测，实际运行/数字退出与指定RED原件由本轮冻结收据记录。不重跑旧165/168失败，不代签Prepare/Main/私有/GPU/桌面/CI/fullM6。
+
 ## #198 typed 投影来源（路线 A 首叶）
 
 `NativeBattleContentTests` 新增98例：独立人工来源经 Write→ResourceSaver→LoadChecked 保留分离的receipt/numeric身份、全部14输入、有序[4,0]角色、[65535,0]队伍与全部源槽（含同对象双实例）；构造输入/native后变更、再次Load及公开集合写入均不能污染既有checked结果。另覆盖单role4/0、单敌、长度/SHA/WORD边界、普通旧无来源null、15种未选择非默认字段、76种选中结构/选择/host-free能力拒绝、旧Load/CreateCore不可绕过、writer拒绝错配。预期来自独立字面输入与断言，不从投影器或Write反推。
