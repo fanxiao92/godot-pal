@@ -16,6 +16,19 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class NativeBattleContentTests
 {
+    [TestCase]
+    public void ProjectionFieldsWithoutPresenceRejectThroughLegacyCreateCore()
+    {
+        using var native = NativeBattleContent.Write(Data());
+        native.ProjectionReceiptSha256 = new string('a', 64);
+        InvalidDataException? error = null;
+        try { NativeBattleContent.CreateCore(native, "projection-presence.tres"); }
+        catch (InvalidDataException caught) { error = caught; }
+        AssertThat(error is not null).OverrideFailureMessage("Projection fields without presence must be rejected by CreateCore").IsTrue();
+        AssertThat(error!.Message.Contains("projection-presence.tres", StringComparison.Ordinal)).IsTrue();
+        AssertThat(error.Message.Contains("ProjectionPresent", StringComparison.Ordinal)).IsTrue();
+    }
+
     [TestCase(321, 654)]
     [TestCase(0, 65535)]
     [TestCase(65535, 0)]

@@ -12,4 +12,22 @@ public partial class PalBattleContent : Resource
     [Export] public PalBattleTeam[] Teams { get; set; } = [];
     [Export] public int[] RoleEquipment { get; set; } = [];
     [Export] public PalBattleEquipment[] Equipments { get; set; } = [];
+
+    // Optional projection provenance, not an authentication or a runtime JSON dependency.
+    [Export] public bool ProjectionPresent { get; set; }
+    [Export] public int ProjectionFormatVersion { get; set; } = -1;
+    [Export] public string ProjectionKind { get; set; } = "";
+    [Export] public string ProjectionSnapshotKind { get; set; } = "";
+    [Export] public string ProjectionReceiptSha256 { get; set; } = "";
+    [Export] public long ProjectionReceiptByteLength { get; set; } = -1;
+    [Export] public string ProjectionNumericSha256 { get; set; } = "";
+    [Export] public long ProjectionNumericByteLength { get; set; } = -1;
+    [Export] public string[] ProjectionInputFiles { get; set; } = [];
+    [Export] public string[] ProjectionInputSha256 { get; set; } = [];
+    [Export] public long[] ProjectionInputByteLengths { get; set; } = [];
+    [Export] public int[] ProjectionRoleIds { get; set; } = [];
+    [Export] public int[] ProjectionTeamIds { get; set; } = [];
+    // Seven words per source slot: teamId, sourceSlot, objectId, enemyId, compactSlot, battleId,
+    // disposition (0 = skip-FFFF, 1 = loaded). The three absent loaded values use -1, never 0.
+    [Export] public int[] ProjectionEnemySlots { get; set; } = [];
 }
