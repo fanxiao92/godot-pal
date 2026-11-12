@@ -29,6 +29,402 @@ public class NativeBattleContentTests
         AssertThat(error.Message.Contains("ProjectionPresent", StringComparison.Ordinal)).IsTrue();
     }
 
+    [TestCase]
+    public void ProjectionSourceRoundtripKeepsIndependentIdentitiesOrderSlotsAndFrozenCollections()
+    {
+        BattleProjectionModernInput[] inputs = ProjectionInputs();
+        int[] roles = [4, 0], teams = [65535, 0];
+        BattleProjectionEnemySlot[] slots = ProjectionSlots();
+        var source = ProjectionSource(inputs, roles, teams, slots);
+        inputs[0] = new("wrong", "", 0); roles[0] = 2; teams[0] = 2;
+        slots[0] = new(2, 0, 0, "wrong");
+        using var native = NativeBattleContent.Write(ProjectionContent(), source);
+        var checkedContent = NativeBattleContent.CreateChecked(native, "projection-valid.tres");
+        AssertProjection(checkedContent);
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/Projection.tres";
+            AssertThat(ResourceSaver.Save(native, uri)).IsEqual(Error.Ok);
+            var loaded = NativeBattleContent.LoadChecked(uri);
+            AssertProjection(loaded);
+            AssertThat(NativeBattleContent.Load(uri).Players.Select(p => p.RoleId).ToArray()).IsEqual(new[] { 4, 0 });
+            native.ProjectionInputFiles[0] = "changed"; native.ProjectionInputSha256[0] = "changed";
+            native.ProjectionInputByteLengths[0] = 0; native.ProjectionRoleIds[0] = 3;
+            native.ProjectionTeamIds[0] = 3; native.ProjectionEnemySlots[0] = 3;
+            native.ProjectionReceiptByteLength = 0; native.Players[0].Attack = 1;
+            foreach (var copy in new[] { checkedContent, loaded, NativeBattleContent.LoadChecked(uri) }) AssertProjection(copy);
+            var frozen = loaded.ProjectedSource!;
+            AssertReadOnly(frozen.ModernInputs, new BattleProjectionModernInput("changed", "", 0));
+            AssertReadOnly(frozen.RoleIds, 3); AssertReadOnly(frozen.TeamIds, 3);
+            AssertReadOnly(frozen.EnemySlots, new BattleProjectionEnemySlot(0, 0, 0, "changed"));
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
+    [TestCase(4)]
+    [TestCase(0)]
+    public void ProjectionSingleRoleAndEnemyRemainSupportedWithoutRequiringRoleZero(int roleId)
+    {
+        var data = Data();
+        var content = new TriggerBattleContent(data.InitialRole with { RoleId = roleId }, data.Player with { RoleId = roleId }, data.Growth,
+            new Dictionary<int, ClassicBattleEnemy> { [0] = data.Teams[18] with { Id = 1 } });
+        var source = new BattleProjectionSourceInfo(1, "m5-base-table-physical-projection", "independent-base-table-context-not-natural-save",
+            new string('0', 64), 1, new string('f', 64), 1, ProjectionInputs(), [roleId], [0], [
+            new(0, 0, 65535, "skip-FFFF"), new(0, 1, 1, "loaded", 0, 0, 1),
+            new(0, 2, 65535, "skip-FFFF"), new(0, 3, 65535, "skip-FFFF"), new(0, 4, 65535, "skip-FFFF")]);
+        using var native = NativeBattleContent.Write(content, source);
+        var result = NativeBattleContent.CreateChecked(native);
+        AssertThat(result.ProjectedSource!.RoleIds.ToArray()).IsEqual(new[] { roleId });
+        AssertThat(result.Content.Players.Count).IsEqual(1);
+        AssertThat(result.Content.EnemyTeams[0].Count).IsEqual(1);
+    }
+
+    [TestCase]
+    public void ProjectionAbsentStaysNullAcrossOldAndCheckedSaveLoad()
+    {
+        using var native = NativeBattleContent.Write(Data());
+        AssertThat(NativeBattleContent.CreateChecked(native).ProjectedSource is null).IsTrue();
+        AssertThat(NativeBattleContent.CreateCore(native).Player.RoleId).IsEqual(1);
+        using var explicitNull = NativeBattleContent.Write(Data(), null);
+        AssertThat(explicitNull.ProjectionFormatVersion).IsEqual(-1);
+        AssertThat(explicitNull.ProjectionReceiptByteLength).IsEqual(-1L);
+        AssertThat(explicitNull.ProjectionNumericByteLength).IsEqual(-1L);
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/Legacy.tres";
+            AssertThat(ResourceSaver.Save(native, uri)).IsEqual(Error.Ok);
+            AssertThat(NativeBattleContent.LoadChecked(uri).ProjectedSource is null).IsTrue();
+            AssertThat(NativeBattleContent.Load(uri).Player.RoleId).IsEqual(1);
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
+    [TestCase("version")]
+    [TestCase("kind")]
+    [TestCase("snapshot")]
+    [TestCase("receipt-hash")]
+    [TestCase("receipt-length")]
+    [TestCase("numeric-hash")]
+    [TestCase("numeric-length")]
+    [TestCase("files")]
+    [TestCase("hashes")]
+    [TestCase("lengths")]
+    [TestCase("roles")]
+    [TestCase("teams")]
+    [TestCase("slots")]
+    [TestCase("null-array")]
+    [TestCase("null-string")]
+    public void ProjectionAbsentRejectsEveryNonDefaultField(string field)
+    {
+        using var native = NativeBattleContent.Write(Data());
+        switch (field)
+        {
+            case "version": native.ProjectionFormatVersion = 0; break;
+            case "kind": native.ProjectionKind = "x"; break;
+            case "snapshot": native.ProjectionSnapshotKind = "x"; break;
+            case "receipt-hash": native.ProjectionReceiptSha256 = "x"; break;
+            case "receipt-length": native.ProjectionReceiptByteLength = 0; break;
+            case "numeric-hash": native.ProjectionNumericSha256 = "x"; break;
+            case "numeric-length": native.ProjectionNumericByteLength = 0; break;
+            case "files": native.ProjectionInputFiles = ["x"]; break;
+            case "hashes": native.ProjectionInputSha256 = ["x"]; break;
+            case "lengths": native.ProjectionInputByteLengths = [0]; break;
+            case "roles": native.ProjectionRoleIds = [0]; break;
+            case "teams": native.ProjectionTeamIds = [0]; break;
+            case "slots": native.ProjectionEnemySlots = [0]; break;
+            case "null-array": native.ProjectionInputFiles = null!; break;
+            case "null-string": native.ProjectionKind = null!; break;
+            default: throw new ArgumentException(field);
+        }
+        AssertProjectionRejected(native, "ProjectionPresent");
+    }
+
+    [TestCase("half-declared", "FormatVersion")]
+    [TestCase("version", "FormatVersion")]
+    [TestCase("kind", "Kind")]
+    [TestCase("snapshot", "SnapshotKind")]
+    [TestCase("receipt-empty", "ReceiptSha256")]
+    [TestCase("receipt-short", "ReceiptSha256")]
+    [TestCase("receipt-upper", "ReceiptSha256")]
+    [TestCase("receipt-nonhex", "ReceiptSha256")]
+    [TestCase("receipt-zero", "ReceiptByteLength")]
+    [TestCase("receipt-negative", "ReceiptByteLength")]
+    [TestCase("numeric-empty", "NumericSha256")]
+    [TestCase("numeric-short", "NumericSha256")]
+    [TestCase("numeric-upper", "NumericSha256")]
+    [TestCase("numeric-nonhex", "NumericSha256")]
+    [TestCase("numeric-zero", "NumericByteLength")]
+    [TestCase("numeric-negative", "NumericByteLength")]
+    [TestCase("numeric-large", "NumericByteLength")]
+    [TestCase("inputs-missing", "ModernInputs")]
+    [TestCase("inputs-extra", "ModernInputs")]
+    [TestCase("inputs-duplicate", "ModernInputs")]
+    [TestCase("inputs-unknown", "ModernInputs")]
+    [TestCase("inputs-path", "ModernInputs")]
+    [TestCase("inputs-case", "ModernInputs")]
+    [TestCase("inputs-order", "ModernInputs")]
+    [TestCase("input-hash", "Sha256")]
+    [TestCase("input-zero", "ByteLength")]
+    [TestCase("input-negative", "ByteLength")]
+    [TestCase("input-large", "ByteLength")]
+    [TestCase("inputs-hashes-short", "ModernInputs")]
+    [TestCase("inputs-lengths-short", "ModernInputs")]
+    [TestCase("inputs-null", "ProjectionInputFiles")]
+    [TestCase("input-row-null", "ProjectionInputFiles")]
+    [TestCase("roles-empty", "RoleIds")]
+    [TestCase("roles-many", "RoleIds")]
+    [TestCase("roles-duplicate", "RoleIds")]
+    [TestCase("roles-negative", "RoleIds")]
+    [TestCase("role5", "RoleIds")]
+    [TestCase("roles-order", "RoleIds")]
+    [TestCase("roles-identity", "RoleIds")]
+    [TestCase("teams-empty", "TeamIds")]
+    [TestCase("teams-duplicate", "TeamIds")]
+    [TestCase("teams-negative", "TeamIds")]
+    [TestCase("teams-overflow", "TeamIds")]
+    [TestCase("teams-order", "TeamIds")]
+    [TestCase("teams-identity", "TeamIds")]
+    [TestCase("slot-half", "EnemySlots")]
+    [TestCase("slot-missing", "EnemySlots")]
+    [TestCase("slot-extra", "EnemySlots")]
+    [TestCase("slot-duplicate", "EnemySlots")]
+    [TestCase("slot-negative", "EnemySlots")]
+    [TestCase("slot-overflow", "EnemySlots")]
+    [TestCase("slot-team", "EnemySlots")]
+    [TestCase("slot-disposition", "EnemySlots")]
+    [TestCase("loaded-zero", "EnemySlots")]
+    [TestCase("loaded-FFFF", "EnemySlots")]
+    [TestCase("loaded-negative", "EnemySlots")]
+    [TestCase("loaded-overflow", "EnemySlots")]
+    [TestCase("enemy-missing", "EnemySlots")]
+    [TestCase("enemy-overflow", "EnemySlots")]
+    [TestCase("enemy-negative", "EnemySlots")]
+    [TestCase("compact-gap", "EnemySlots")]
+    [TestCase("compact-missing", "EnemySlots")]
+    [TestCase("battle-id", "EnemySlots")]
+    [TestCase("battle-missing", "EnemySlots")]
+    [TestCase("skip-zero", "EnemySlots")]
+    [TestCase("skip-enemy", "EnemySlots")]
+    [TestCase("skip-compact", "EnemySlots")]
+    [TestCase("skip-battle", "EnemySlots")]
+    [TestCase("all-FFFF", "EnemySlots")]
+    [TestCase("three-loaded", "EnemySlots")]
+    [TestCase("native-enemy-id", "EnemySlots")]
+    [TestCase("native-enemy-count", "EnemySlots")]
+    [TestCase("native-role-coverage", "growth")]
+    [TestCase("native-role-hook", "dyingScript")]
+    [TestCase("native-enemy-hook", "battleEndScript")]
+    [TestCase("native-magic", "magic")]
+    public void ProjectionSelectedRejectsMalformedMetadataOrPhysicalCapabilityThroughBothReads(string defect, string cause)
+    {
+        using var native = NativeBattleContent.Write(ProjectionContent(), ProjectionSource());
+        switch (defect)
+        {
+            case "half-declared": native.ProjectionFormatVersion = -1; break;
+            case "version": native.ProjectionFormatVersion = 2; break;
+            case "kind": native.ProjectionKind = "unknown"; break;
+            case "snapshot": native.ProjectionSnapshotKind = "natural-save"; break;
+            case "receipt-empty": native.ProjectionReceiptSha256 = ""; break;
+            case "receipt-short": native.ProjectionReceiptSha256 = "a"; break;
+            case "receipt-upper": native.ProjectionReceiptSha256 = new string('A', 64); break;
+            case "receipt-nonhex": native.ProjectionReceiptSha256 = new string('g', 64); break;
+            case "receipt-zero": native.ProjectionReceiptByteLength = 0; break;
+            case "receipt-negative": native.ProjectionReceiptByteLength = -2; break;
+            case "numeric-empty": native.ProjectionNumericSha256 = ""; break;
+            case "numeric-short": native.ProjectionNumericSha256 = "a"; break;
+            case "numeric-upper": native.ProjectionNumericSha256 = new string('B', 64); break;
+            case "numeric-nonhex": native.ProjectionNumericSha256 = new string('x', 64); break;
+            case "numeric-zero": native.ProjectionNumericByteLength = 0; break;
+            case "numeric-negative": native.ProjectionNumericByteLength = -1; break;
+            case "numeric-large": native.ProjectionNumericByteLength = 16777217; break;
+            case "inputs-missing": native.ProjectionInputFiles = native.ProjectionInputFiles[..13]; break;
+            case "inputs-extra": native.ProjectionInputFiles = [.. native.ProjectionInputFiles, "extra.json"]; break;
+            case "inputs-duplicate": native.ProjectionInputFiles[1] = native.ProjectionInputFiles[0]; break;
+            case "inputs-unknown": native.ProjectionInputFiles[0] = "extra.json"; break;
+            case "inputs-path": native.ProjectionInputFiles[0] = "../battle-effect-index.json"; break;
+            case "inputs-case": native.ProjectionInputFiles[0] = "Battle-effect-index.json"; break;
+            case "inputs-order": native.ProjectionInputFiles = native.ProjectionInputFiles.Reverse().ToArray(); break;
+            case "input-hash": native.ProjectionInputSha256[13] = new string('Z', 64); break;
+            case "input-zero": native.ProjectionInputByteLengths[13] = 0; break;
+            case "input-negative": native.ProjectionInputByteLengths[13] = -1; break;
+            case "input-large": native.ProjectionInputByteLengths[13] = 67108865; break;
+            case "inputs-hashes-short": native.ProjectionInputSha256 = []; break;
+            case "inputs-lengths-short": native.ProjectionInputByteLengths = []; break;
+            case "inputs-null": native.ProjectionInputFiles = null!; break;
+            case "input-row-null": native.ProjectionInputFiles[0] = null!; break;
+            case "roles-empty": native.ProjectionRoleIds = []; break;
+            case "roles-many": native.ProjectionRoleIds = [4, 0, 1]; break;
+            case "roles-duplicate": native.ProjectionRoleIds = [4, 4]; break;
+            case "roles-negative": native.ProjectionRoleIds = [-1, 0]; break;
+            case "role5": native.ProjectionRoleIds = [5, 0]; break;
+            case "roles-order": native.ProjectionRoleIds = [0, 4]; break;
+            case "roles-identity": native.ProjectionRoleIds = [3, 0]; break;
+            case "teams-empty": native.ProjectionTeamIds = []; break;
+            case "teams-duplicate": native.ProjectionTeamIds = [65535, 65535]; break;
+            case "teams-negative": native.ProjectionTeamIds = [-1, 0]; break;
+            case "teams-overflow": native.ProjectionTeamIds = [65536, 0]; break;
+            case "teams-order": native.Teams = native.Teams.Reverse().ToArray(); break;
+            case "teams-identity": native.Teams[0].TeamId = 65534; break;
+            case "slot-half": native.ProjectionEnemySlots = native.ProjectionEnemySlots[..^1]; break;
+            case "slot-missing": native.ProjectionEnemySlots = native.ProjectionEnemySlots[..^7]; break;
+            case "slot-extra": native.ProjectionEnemySlots = [.. native.ProjectionEnemySlots, 0, 0, 0, -1, -1, -1, 0]; break;
+            case "slot-duplicate": native.ProjectionEnemySlots[8] = 0; break;
+            case "slot-negative": native.ProjectionEnemySlots[1] = -1; break;
+            case "slot-overflow": native.ProjectionEnemySlots[29] = 5; break;
+            case "slot-team": native.ProjectionEnemySlots[0] = 0; break;
+            case "slot-disposition": native.ProjectionEnemySlots[6] = 2; break;
+            case "loaded-zero": native.ProjectionEnemySlots[2] = 0; break;
+            case "loaded-FFFF": native.ProjectionEnemySlots[2] = 65535; break;
+            case "loaded-negative": native.ProjectionEnemySlots[2] = -1; break;
+            case "loaded-overflow": native.ProjectionEnemySlots[2] = 65536; break;
+            case "enemy-missing": native.ProjectionEnemySlots[3] = -1; break;
+            case "enemy-overflow": native.ProjectionEnemySlots[3] = 65536; break;
+            case "enemy-negative": native.ProjectionEnemySlots[3] = -2; break;
+            case "compact-gap": native.ProjectionEnemySlots[18] = 2; break;
+            case "compact-missing": native.ProjectionEnemySlots[4] = -1; break;
+            case "battle-id": native.ProjectionEnemySlots[5] = 2; break;
+            case "battle-missing": native.ProjectionEnemySlots[5] = -1; break;
+            case "skip-zero": native.ProjectionEnemySlots[9] = 0; break;
+            case "skip-enemy": native.ProjectionEnemySlots[10] = 0; break;
+            case "skip-compact": native.ProjectionEnemySlots[11] = 0; break;
+            case "skip-battle": native.ProjectionEnemySlots[12] = 0; break;
+            case "all-FFFF":
+                native.ProjectionEnemySlots[2] = 65535; native.ProjectionEnemySlots[3] = -1;
+                native.ProjectionEnemySlots[4] = -1; native.ProjectionEnemySlots[5] = -1; native.ProjectionEnemySlots[6] = 0;
+                native.ProjectionEnemySlots[16] = 65535; native.ProjectionEnemySlots[17] = -1;
+                native.ProjectionEnemySlots[18] = -1; native.ProjectionEnemySlots[19] = -1; native.ProjectionEnemySlots[20] = 0; break;
+            case "three-loaded":
+                native.ProjectionEnemySlots[30] = 97; native.ProjectionEnemySlots[31] = 0;
+                native.ProjectionEnemySlots[32] = 2; native.ProjectionEnemySlots[33] = 3; native.ProjectionEnemySlots[34] = 1; break;
+            case "native-enemy-id": native.Teams[0].Enemies[0].Id = 7; break;
+            case "native-enemy-count": native.Teams[0].Enemies = [native.Teams[0].Enemies[0]]; break;
+            case "native-role-coverage": native.Growth = native.Growth[..1]; break;
+            case "native-role-hook": native.Players[1].DyingScript = 7; break;
+            case "native-enemy-hook": native.Teams[1].Enemies[1].BattleEndScript = 7; break;
+            case "native-magic": native.Teams[1].Enemies[1].MagicId = 65535; break;
+            default: throw new ArgumentException(defect);
+        }
+        AssertProjectionRejected(native, cause);
+    }
+
+    [TestCase]
+    public void ProjectionWriterRejectsMismatchedSelectionBeforePublishingResource()
+    {
+        InvalidDataException? error = null;
+        try { NativeBattleContent.Write(Data(), ProjectionSource()); }
+        catch (InvalidDataException caught) { error = caught; }
+        AssertThat(error is not null).IsTrue();
+        AssertThat(error!.Message.Contains("RoleIds", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [TestCase]
+    public void ProjectionBadSavedResourceCannotBypassLegacyLoad()
+    {
+        using var native = NativeBattleContent.Write(ProjectionContent(), ProjectionSource());
+        native.ProjectionNumericByteLength = 0;
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/BadProjection.tres";
+            AssertThat(ResourceSaver.Save(native, uri)).IsEqual(Error.Ok);
+            foreach (Action read in new Action[] { () => NativeBattleContent.Load(uri), () => NativeBattleContent.LoadChecked(uri) })
+            {
+                InvalidDataException? error = null;
+                try { read(); } catch (InvalidDataException caught) { error = caught; }
+                AssertThat(error is not null).IsTrue();
+                AssertThat(error!.Message.Contains(uri, StringComparison.Ordinal)).IsTrue();
+                AssertThat(error.Message.Contains("NumericByteLength", StringComparison.Ordinal)).IsTrue();
+            }
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
+    private static void AssertProjectionRejected(PalBattleContent native, string cause)
+    {
+        foreach (Action read in new Action[] { () => NativeBattleContent.CreateCore(native, "selected-projection.tres"),
+            () => NativeBattleContent.CreateChecked(native, "selected-projection.tres") })
+        {
+            InvalidDataException? error = null;
+            try { read(); } catch (InvalidDataException caught) { error = caught; }
+            AssertThat(error is not null).OverrideFailureMessage("Projection must reject " + cause).IsTrue();
+            AssertThat(error!.Message.Contains("selected-projection.tres", StringComparison.Ordinal)).IsTrue();
+            AssertThat(error.Message.Contains(cause, StringComparison.OrdinalIgnoreCase)).OverrideFailureMessage(error.Message).IsTrue();
+        }
+    }
+
+    private static void AssertReadOnly<T>(IReadOnlyList<T> values, T replacement)
+    {
+        AssertThat(values is T[]).IsFalse();
+        var list = (IList<T>)values;
+        AssertThat(list.IsReadOnly).IsTrue();
+        bool rejected = false;
+        try { list[0] = replacement; } catch (NotSupportedException) { rejected = true; }
+        AssertThat(rejected).IsTrue();
+    }
+
+    private static void AssertProjection(CheckedNativeBattleContent result)
+    {
+        var source = result.ProjectedSource!;
+        AssertThat(source is not null).IsTrue();
+        AssertThat(source!.FormatVersion).IsEqual(1);
+        AssertThat(source.Kind).IsEqual("m5-base-table-physical-projection");
+        AssertThat(source.SnapshotKind).IsEqual("independent-base-table-context-not-natural-save");
+        AssertThat(source.InputTrust).IsEqual("caller-verified-upstream; declarations-and-byte-identities-not-independent-authentication");
+        AssertThat(source.ReceiptSha256).IsEqual(new string('a', 64));
+        AssertThat(source.ReceiptByteLength).IsEqual(long.MaxValue);
+        AssertThat(source.NumericSha256).IsEqual(new string('b', 64));
+        AssertThat(source.NumericByteLength).IsEqual(16777216L);
+        AssertThat(source.RoleIds.ToArray()).IsEqual(new[] { 4, 0 });
+        AssertThat(source.TeamIds.ToArray()).IsEqual(new[] { 65535, 0 });
+        AssertThat(string.Join("|", source.ModernInputs.Select(x => x.File))).IsEqual("battle-effect-index.json|battle-field.json|enemy-pos.json|enemy-team.json|enemy.json|event-object.json|index.json|level-up-exp.json|level-up-magic.json|magic.json|object.json|player-roles.json|scene.json|store.json");
+        AssertThat(source.ModernInputs.Select(x => x.Sha256).ToArray()).IsEqual(new[] { new string('c', 64), new string('d', 64), new string('e', 64), new string('f', 64),
+            new string('0', 64), new string('1', 64), new string('2', 64), new string('3', 64), new string('4', 64), new string('5', 64),
+            new string('6', 64), new string('7', 64), new string('8', 64), new string('9', 64) });
+        AssertThat(source.ModernInputs.Select(x => x.ByteLength).ToArray()).IsEqual(new long[] { 1, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 67108864 });
+        AssertThat(string.Join("|", source.EnemySlots.Select(x => $"{x.TeamId},{x.SourceSlot},{x.ObjectId},{x.Disposition},{x.EnemyId},{x.CompactSlot},{x.BattleId}")))
+            .IsEqual("65535,0,97,loaded,0,0,1|65535,1,65535,skip-FFFF,,,|65535,2,97,loaded,0,1,2|65535,3,65535,skip-FFFF,,,|65535,4,65535,skip-FFFF,,,|0,0,65535,skip-FFFF,,,|0,1,65534,loaded,65535,0,1|0,2,1,loaded,0,1,2|0,3,65535,skip-FFFF,,,|0,4,65535,skip-FFFF,,,");
+        AssertThat(result.Content.Players.Select(p => p.RoleId).ToArray()).IsEqual(new[] { 4, 0 });
+        AssertThat(result.Content.Players[0].Attack).IsEqual(40);
+        AssertThat(result.Content.EnemyTeams.Keys.ToArray()).IsEqual(new[] { 65535, 0 });
+        AssertThat(result.Content.EnemyTeams[65535].Select(e => e.Id).ToArray()).IsEqual(new[] { 1, 2 });
+    }
+
+    private static TriggerBattleContent ProjectionContent()
+    {
+        var data = Data();
+        return new([data.InitialRole with { RoleId = 4 }, data.InitialRole with { RoleId = 0 }],
+            [data.Player with { RoleId = 4 }, data.Player with { RoleId = 0 }],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = data.Growth, [0] = data.Growth },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> {
+                [65535] = [data.Teams[18] with { Id = 1 }, data.Teams[18] with { Id = 2 }],
+                [0] = [data.Teams[18] with { Id = 1 }, data.Teams[18] with { Id = 2 }] });
+    }
+
+    private static BattleProjectionModernInput[] ProjectionInputs() => [
+        new("battle-effect-index.json", new string('c', 64), 1), new("battle-field.json", new string('d', 64), 102),
+        new("enemy-pos.json", new string('e', 64), 103), new("enemy-team.json", new string('f', 64), 104),
+        new("enemy.json", new string('0', 64), 105), new("event-object.json", new string('1', 64), 106),
+        new("index.json", new string('2', 64), 107), new("level-up-exp.json", new string('3', 64), 108),
+        new("level-up-magic.json", new string('4', 64), 109), new("magic.json", new string('5', 64), 110),
+        new("object.json", new string('6', 64), 111), new("player-roles.json", new string('7', 64), 112),
+        new("scene.json", new string('8', 64), 113), new("store.json", new string('9', 64), 67108864)];
+
+    private static BattleProjectionEnemySlot[] ProjectionSlots() => [
+        new(65535, 0, 97, "loaded", 0, 0, 1), new(65535, 1, 65535, "skip-FFFF"), new(65535, 2, 97, "loaded", 0, 1, 2),
+        new(65535, 3, 65535, "skip-FFFF"), new(65535, 4, 65535, "skip-FFFF"), new(0, 0, 65535, "skip-FFFF"),
+        new(0, 1, 65534, "loaded", 65535, 0, 1), new(0, 2, 1, "loaded", 0, 1, 2),
+        new(0, 3, 65535, "skip-FFFF"), new(0, 4, 65535, "skip-FFFF")];
+
+    private static BattleProjectionSourceInfo ProjectionSource() => ProjectionSource(ProjectionInputs(), [4, 0], [65535, 0], ProjectionSlots());
+    private static BattleProjectionSourceInfo ProjectionSource(BattleProjectionModernInput[] inputs, int[] roles, int[] teams, BattleProjectionEnemySlot[] slots) =>
+        new(1, "m5-base-table-physical-projection", "independent-base-table-context-not-natural-save", new string('a', 64), long.MaxValue,
+            new string('b', 64), 16777216, inputs, roles, teams, slots);
+
     [TestCase(321, 654)]
     [TestCase(0, 65535)]
     [TestCase(65535, 0)]

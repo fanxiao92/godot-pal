@@ -42,6 +42,35 @@ dotnet run --project tools/Pal.Extract -- project-battle-data `
 
 人工 Unit 固定角色[4,0]、多队顺序、EXP、二维轴、成长重复、HP0、SHORT、引用/能力拒绝与身份反例；Integration用既有CliProcess/正式Test-Range核真实argv/exit、bytes/mtime、确定性、单文档numeric目录、链接和输出保护。运行结果以本票实际收据为准；无真实资产/Godot/Prepare/Main/GPU/桌面/CI/fullM6验收。下文带票号的旧“单角色/暂无作者CLI”等叙述保留历史边界，不覆盖本节与已交付能力门。
 
+## 可选 typed 投影来源与同次 checked 读取（#198，路线 A 首叶）
+
+新增 `NativeBattleContent.LoadChecked(string uri)` / `CreateChecked(PalBattleContent native, string identity = "native battle content")`，返回普通 C# `CheckedNativeBattleContent`：只读 `Content: TriggerBattleContent` 和可空 `ProjectedSource: BattleProjectionSourceInfo`。旧 `Load/CreateCore` 经同一 checked 读取取 Content，不能绕过坏来源拒绝；不递归、不增加缓存、文件 graph、Core/工具依赖或运行时 JSON。原 `Write(content)` 等价于新重载 `Write(content, null)`；`Write(content, projectedSource)` 在创建 Resource 前核来源与数值一致性。非投影旧内容仍只走原数值格式校验，不额外施加 host-free 能力门。
+
+来源是构造时深复制的普通 C# 值，全部公开集合使用不可改写的 read-only 包装，行 `BattleProjectionModernInput` / `BattleProjectionEnemySlot` 为不可变 record 值；不持 Godot Resource alias、不持跨 Main 活状态。来源构造即校结构，读写再对同次 Content 校选择一致性并逐队复用 `ModernBattleContent.ValidatePhysicalBattle`，不是新战斗校验引擎。
+
+### 原生精确布局（PalBattleContent 根格式仍 1）
+
+| 导出字段 | 未选择时的唯一默认 | 选中语义 |
+| --- | --- | --- |
+| `ProjectionPresent` | false | true，显式选择投影来源 |
+| `ProjectionFormatVersion` | -1 | 1 |
+| `ProjectionKind` / `ProjectionSnapshotKind` | 空字符串 | `m5-base-table-physical-projection` / `independent-base-table-context-not-natural-save` |
+| `ProjectionReceiptSha256` / `ProjectionNumericSha256` | 空字符串 | 分别是完整原收据、原 numeric 的64位小写十六进制字节 SHA256 |
+| `ProjectionReceiptByteLength` / `ProjectionNumericByteLength` | -1（long） | 正 Int64 / 1..16MiB；收据长度只运输，不据其分配内存或虚构解析上限 |
+| `ProjectionInputFiles` / `ProjectionInputSha256` / `ProjectionInputByteLengths` | 空数组 | 三个对齐的 string[] / string[] / long[]，恰14项；每项 SHA 同上，长度1..64MiB |
+| `ProjectionRoleIds` / `ProjectionTeamIds` | 空 int[] | 1..2个唯一角色0..4，与 players 顺序、roles/growth覆盖一致；非空唯一 WORD 队伍，与 native teams身份/顺序一致 |
+| `ProjectionEnemySlots` | 空 int[] | 每队5行，每行7词：teamId、sourceSlot、objectId、enemyId、compactSlot、battleId、disposition；0=skip-FFFF，1=loaded |
+
+`ProjectionPresent=false` 时任何非默认字段（包括 null 字符串/数组）都拒绝，不能静默忽略半声明。true 时缺失、未知版本、kind/snapshot、错误身份/形状一律 InvalidDataException；native 读取错误保留选中 URI/identity。所有来源字段缺席的旧 v1 资源依上述默认合法读为 null，无需补收据或迁移 M3/M4。
+
+14项文件名必须恰为 ordinal 顺序：battle-effect-index.json、battle-field.json、enemy-pos.json、enemy-team.json、enemy.json、event-object.json、index.json、level-up-exp.json、level-up-magic.json、magic.json、object.json、player-roles.json、scene.json、store.json。禁止路径、大小写别名、重复、未知、遗漏或乱序；runtime不打开这些文件。
+
+槽行按 TeamIds 顺序、sourceSlot0..4完整排列。skip-FFFF 仅 objectId65535，三个 loaded 字段平铺为 -1（C# 值为 null，绝不当业务0）。loaded 的 objectId1..65534、enemyId0..65535，compactSlot从0连续、battleId=compactSlot+1，并与对应 native enemy.Id顺序/数量一致；每队1..2个loaded，其余FFFF跳过。objectId0不是FFFF，拒绝；重复objectId/enemyId仍是不同槽，不去重。全FFFF、未知disposition、半行、越域、错队/错槽/错ID均拒绝。角色4可单独合法选择，不强迫role0；后续Story最小域不在本叶新增。
+
+InputTrust由版本/kind固定为只读常量 `caller-verified-upstream; declarations-and-byte-identities-not-independent-authentication`，不另持可改任意文本。来源结构只证明声明内部与同次数字选择一致，**不认证 receipt→numeric→M5表或原档真实性**；两类输入字节 SHA 不与 native 文件 SHA 混比。完整 fieldSources/declaredSources/declaredTables只由 receipt 身份供后续离线原件追溯，不运进runtime解释。
+
+这只是批准路线A的 typed 首叶，**尚未接通 receipt解析、数值Prepare可选投影入口、Story期望声明或正常Main来源闭环**，不关闭 #134，不改变上文 #133 信任A、原格式/能力门、#168装备WORD运输缺口或任何旧失败。人工native保存/重载、不可变和拒绝用例及完整native-map的实际结果以本轮冻结收据为准，不签Prepare/Main/私有资源/GPU/桌面/CI/完整M6。
+
 ## 显式角色名字对象声明与 JSON/native 运输（#158 / #159）
 
 `ClassicBattlePlayer.NameObjectId` 是非位置构造参数的可选 `int?` 声明，默认 null 表示旧内容未声明映射；0 与 65535 都是合法对象编号，不把0当作缺省哨兵。参考 `fight.c` 的濒死/友亡检查，角色以名字编号选择全局对象，不能用 RoleId、队伍位置或相等的脚本入口反推对象身份。

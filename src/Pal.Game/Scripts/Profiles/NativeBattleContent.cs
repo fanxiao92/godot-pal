@@ -11,7 +11,9 @@ namespace Pal.Game.Profiles;
 /// <summary>Typed numeric resources only. No provenance authentication or selected-entry capability grant.</summary>
 public static class NativeBattleContent
 {
-    public static TriggerBattleContent Load(string uri)
+    public static TriggerBattleContent Load(string uri) => LoadChecked(uri).Content;
+
+    public static CheckedNativeBattleContent LoadChecked(string uri)
     {
         try
         {
@@ -19,12 +21,15 @@ public static class NativeBattleContent
             if (!ResourceLoader.Exists(uri)) throw new InvalidDataException("native battle content missing; prepare it explicitly");
             var native = ResourceLoader.Load(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep) as PalBattleContent
                 ?? throw new InvalidDataException("expected PalBattleContent");
-            return CreateCore(native, uri);
+            return CreateChecked(native, uri);
         }
         catch (InvalidDataException e) { throw new InvalidDataException(uri + ": " + e.Message, e); }
     }
 
-    public static TriggerBattleContent CreateCore(PalBattleContent native, string identity = "native battle content")
+    public static TriggerBattleContent CreateCore(PalBattleContent native, string identity = "native battle content") =>
+        CreateChecked(native, identity).Content;
+
+    public static CheckedNativeBattleContent CreateChecked(PalBattleContent native, string identity = "native battle content")
     {
         try
         {
@@ -50,18 +55,37 @@ public static class NativeBattleContent
             var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
                 Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray());
             ModernBattleContent.Validate(content);
-            return content;
+            return new(content, ReadProjection(native, content));
         }
         catch (Exception e) when (e is InvalidDataException or ArgumentException or NullReferenceException)
         { throw new InvalidDataException(identity + ": malformed typed native battle content: " + e.Message, e); }
     }
 
-    public static PalBattleContent Write(TriggerBattleContent content)
+    public static PalBattleContent Write(TriggerBattleContent content) => Write(content, null);
+
+    public static PalBattleContent Write(TriggerBattleContent content, BattleProjectionSourceInfo? projectedSource)
     {
         ModernBattleContent.Validate(content);
+        projectedSource?.ValidateFor(content);
         return new()
         {
             FormatVersion = 1,
+            ProjectionPresent = projectedSource is not null,
+            ProjectionFormatVersion = projectedSource?.FormatVersion ?? -1,
+            ProjectionKind = projectedSource?.Kind ?? "",
+            ProjectionSnapshotKind = projectedSource?.SnapshotKind ?? "",
+            ProjectionReceiptSha256 = projectedSource?.ReceiptSha256 ?? "",
+            ProjectionReceiptByteLength = projectedSource?.ReceiptByteLength ?? -1,
+            ProjectionNumericSha256 = projectedSource?.NumericSha256 ?? "",
+            ProjectionNumericByteLength = projectedSource?.NumericByteLength ?? -1,
+            ProjectionInputFiles = projectedSource?.ModernInputs.Select(row => row.File).ToArray() ?? [],
+            ProjectionInputSha256 = projectedSource?.ModernInputs.Select(row => row.Sha256).ToArray() ?? [],
+            ProjectionInputByteLengths = projectedSource?.ModernInputs.Select(row => row.ByteLength).ToArray() ?? [],
+            ProjectionRoleIds = projectedSource?.RoleIds.ToArray() ?? [],
+            ProjectionTeamIds = projectedSource?.TeamIds.ToArray() ?? [],
+            ProjectionEnemySlots = projectedSource?.EnemySlots.SelectMany(row => new[] { row.TeamId, row.SourceSlot,
+                row.ObjectId, row.EnemyId ?? -1, row.CompactSlot ?? -1, row.BattleId ?? -1,
+                row.Disposition == "loaded" ? 1 : 0 }).ToArray() ?? [],
             Roles = content.InitialRoles.Values.Select(role => { PalBattleRole native = NativeBattleRoleAdapter.Write(role);
                 native.PanelDeclared = content.PanelDeclaredRoles.Contains(role.RoleId); return native; }).ToArray(),
             Players = content.Players.Select(WritePlayer).ToArray(),
@@ -74,6 +98,42 @@ public static class NativeBattleContent
                     Dexterity = effect.Dexterity, BattleSprite = effect.BattleSprite, Statuses = effect.Statuses.ToArray(),
                     MagicPower = effect.MagicPower ?? -1, FleeRate = effect.FleeRate ?? -1, PoisonResistance = effect.PoisonResistance ?? -1 }).ToArray() }).ToArray()
         };
+    }
+
+    private static BattleProjectionSourceInfo? ReadProjection(PalBattleContent native, TriggerBattleContent content)
+    {
+        if (!native.ProjectionPresent)
+        {
+            if (native.ProjectionFormatVersion != -1 || native.ProjectionKind != "" || native.ProjectionSnapshotKind != ""
+                || native.ProjectionReceiptSha256 != "" || native.ProjectionReceiptByteLength != -1
+                || native.ProjectionNumericSha256 != "" || native.ProjectionNumericByteLength != -1
+                || native.ProjectionInputFiles is not { Length: 0 } || native.ProjectionInputSha256 is not { Length: 0 }
+                || native.ProjectionInputByteLengths is not { Length: 0 } || native.ProjectionRoleIds is not { Length: 0 }
+                || native.ProjectionTeamIds is not { Length: 0 } || native.ProjectionEnemySlots is not { Length: 0 })
+                throw new InvalidDataException("ProjectionPresent is false but projection fields are not all absent defaults");
+            return null;
+        }
+        string[] files = Items(native.ProjectionInputFiles, "ProjectionInputFiles");
+        string[] hashes = Items(native.ProjectionInputSha256, "ProjectionInputSha256");
+        long[] lengths = native.ProjectionInputByteLengths ?? throw new InvalidDataException("ProjectionInputByteLengths is null");
+        if (files.Length != 14 || hashes.Length != 14 || lengths.Length != 14)
+            throw new InvalidDataException("Projection.ModernInputs requires 14 aligned rows");
+        int[] slots = Copy(native.ProjectionEnemySlots, "ProjectionEnemySlots");
+        if (slots.Length % 7 != 0) throw new InvalidDataException("Projection.EnemySlots requires complete seven-word rows");
+        var rows = new List<BattleProjectionEnemySlot>();
+        for (int i = 0; i < slots.Length; i += 7)
+        {
+            if (slots[i + 6] is not 0 and not 1) throw new InvalidDataException("Projection.EnemySlots unknown disposition");
+            int? Optional(int value) => value == -1 ? null : value;
+            rows.Add(new(slots[i], slots[i + 1], slots[i + 2], slots[i + 6] == 1 ? "loaded" : "skip-FFFF",
+                Optional(slots[i + 3]), Optional(slots[i + 4]), Optional(slots[i + 5])));
+        }
+        var source = new BattleProjectionSourceInfo(native.ProjectionFormatVersion, native.ProjectionKind, native.ProjectionSnapshotKind,
+            native.ProjectionReceiptSha256, native.ProjectionReceiptByteLength, native.ProjectionNumericSha256, native.ProjectionNumericByteLength,
+            files.Select((file, i) => new BattleProjectionModernInput(file, hashes[i], lengths[i])).ToArray(),
+            Copy(native.ProjectionRoleIds, "ProjectionRoleIds"), Copy(native.ProjectionTeamIds, "ProjectionTeamIds"), rows);
+        source.ValidateFor(content);
+        return source;
     }
 
     private static T[] Items<T>(T[]? values, string field) where T : class =>
@@ -141,4 +201,120 @@ public static class NativeBattleContent
         MagicId = x.MagicId, DualMove = x.DualMove, AttackEquivItem = x.AttackEquivItem, AttackEquivItemRate = x.AttackEquivItemRate,
         Experience = x.Experience, Cash = x.Cash
     };
+}
+
+/// <summary>One native read: independent numeric data and optional immutable provenance, not authentication.</summary>
+public sealed class CheckedNativeBattleContent
+{
+    public TriggerBattleContent Content { get; }
+    public BattleProjectionSourceInfo? ProjectedSource { get; }
+    internal CheckedNativeBattleContent(TriggerBattleContent content, BattleProjectionSourceInfo? projectedSource)
+    { Content = content; ProjectedSource = projectedSource; }
+}
+
+public sealed record BattleProjectionModernInput(string File, string Sha256, long ByteLength);
+public sealed record BattleProjectionEnemySlot(int TeamId, int SourceSlot, int ObjectId, string Disposition,
+    int? EnemyId = null, int? CompactSlot = null, int? BattleId = null);
+
+/// <summary>Deep-frozen typed transport. Identities describe bytes; callers must verify upstream input.</summary>
+public sealed class BattleProjectionSourceInfo
+{
+    private static readonly string[] InputFiles = ["battle-effect-index.json", "battle-field.json", "enemy-pos.json", "enemy-team.json",
+        "enemy.json", "event-object.json", "index.json", "level-up-exp.json", "level-up-magic.json", "magic.json",
+        "object.json", "player-roles.json", "scene.json", "store.json"];
+    public int FormatVersion { get; }
+    public string Kind { get; }
+    public string SnapshotKind { get; }
+    public string InputTrust => "caller-verified-upstream; declarations-and-byte-identities-not-independent-authentication";
+    public string ReceiptSha256 { get; }
+    public long ReceiptByteLength { get; }
+    public string NumericSha256 { get; }
+    public long NumericByteLength { get; }
+    public IReadOnlyList<BattleProjectionModernInput> ModernInputs { get; }
+    public IReadOnlyList<int> RoleIds { get; }
+    public IReadOnlyList<int> TeamIds { get; }
+    public IReadOnlyList<BattleProjectionEnemySlot> EnemySlots { get; }
+
+    public BattleProjectionSourceInfo(int formatVersion, string kind, string snapshotKind, string receiptSha256, long receiptByteLength,
+        string numericSha256, long numericByteLength, IReadOnlyList<BattleProjectionModernInput> modernInputs,
+        IReadOnlyList<int> roleIds, IReadOnlyList<int> teamIds, IReadOnlyList<BattleProjectionEnemySlot> enemySlots)
+    {
+        FormatVersion = formatVersion; Kind = kind; SnapshotKind = snapshotKind;
+        ReceiptSha256 = receiptSha256; ReceiptByteLength = receiptByteLength;
+        NumericSha256 = numericSha256; NumericByteLength = numericByteLength;
+        if (modernInputs is null || roleIds is null || teamIds is null || enemySlots is null
+            || modernInputs.Any(row => row is null) || enemySlots.Any(row => row is null))
+            throw Error("collections", "null collection or row");
+        ModernInputs = Array.AsReadOnly(modernInputs.Select(row => row with { }).ToArray());
+        RoleIds = Array.AsReadOnly(roleIds.ToArray()); TeamIds = Array.AsReadOnly(teamIds.ToArray());
+        EnemySlots = Array.AsReadOnly(enemySlots.Select(row => row with { }).ToArray());
+        ValidateStructure();
+    }
+
+    private static InvalidDataException Error(string field, string detail) => new("Projection." + field + ": " + detail);
+    private static void Hash(string? value, string field)
+    {
+        if (value is not { Length: 64 } || value.Any(c => c is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+            throw Error(field, "expected 64 lowercase hexadecimal SHA256 characters");
+    }
+    private void ValidateStructure()
+    {
+        if (FormatVersion != 1) throw Error("FormatVersion", "must be 1");
+        if (Kind != "m5-base-table-physical-projection") throw Error("Kind", "unsupported kind");
+        if (SnapshotKind != "independent-base-table-context-not-natural-save") throw Error("SnapshotKind", "unsupported snapshot");
+        Hash(ReceiptSha256, "ReceiptSha256"); Hash(NumericSha256, "NumericSha256");
+        if (ReceiptByteLength < 1) throw Error("ReceiptByteLength", "must be a positive Int64");
+        if (NumericByteLength is < 1 or > 16 * 1024 * 1024) throw Error("NumericByteLength", "must be 1..16MiB");
+        if (!ModernInputs.Select(row => row.File).SequenceEqual(InputFiles, StringComparer.Ordinal))
+            throw Error("ModernInputs", "requires the exact 14 files in ordinal order");
+        foreach (var row in ModernInputs)
+        {
+            Hash(row.Sha256, "ModernInputs." + row.File + ".Sha256");
+            if (row.ByteLength is < 1 or > 64 * 1024 * 1024) throw Error("ModernInputs." + row.File + ".ByteLength", "must be 1..64MiB");
+        }
+        if (RoleIds.Count is < 1 or > 2 || RoleIds.Any(id => id is < 0 or > 4) || RoleIds.Distinct().Count() != RoleIds.Count)
+            throw Error("RoleIds", "requires 1..2 unique ordered roles in 0..4");
+        if (TeamIds.Count == 0 || TeamIds.Any(id => id is < 0 or > 65535) || TeamIds.Distinct().Count() != TeamIds.Count)
+            throw Error("TeamIds", "requires unique ordered WORD team IDs");
+        if (EnemySlots.Count != (long)TeamIds.Count * 5) throw Error("EnemySlots", "requires exactly five rows per team");
+        for (int t = 0; t < TeamIds.Count; t++)
+        {
+            int compact = 0;
+            for (int slot = 0; slot < 5; slot++)
+            {
+                var row = EnemySlots[t * 5 + slot];
+                if (row.TeamId != TeamIds[t] || row.SourceSlot != slot)
+                    throw Error("EnemySlots", "team selection/sourceSlot order or identity mismatch");
+                if (row.Disposition == "skip-FFFF")
+                {
+                    if (row.ObjectId != 65535 || row.EnemyId.HasValue || row.CompactSlot.HasValue || row.BattleId.HasValue)
+                        throw Error("EnemySlots", "skip-FFFF requires objectId65535 and absent loaded fields");
+                }
+                else if (row.Disposition == "loaded")
+                {
+                    if (row.ObjectId is < 1 or > 65534 || row.EnemyId is not (>= 0 and <= 65535)
+                        || row.CompactSlot != compact || row.BattleId != compact + 1)
+                        throw Error("EnemySlots", "loaded object/enemy/compactSlot/battleId mismatch");
+                    compact++;
+                }
+                else throw Error("EnemySlots", "unknown disposition");
+            }
+            if (compact is < 1 or > 2) throw Error("EnemySlots", "requires 1..2 loaded slots per team");
+        }
+    }
+
+    internal void ValidateFor(TriggerBattleContent content)
+    {
+        if (!RoleIds.SequenceEqual(content.Players.Select(player => player.RoleId))
+            || !RoleIds.ToHashSet().SetEquals(content.InitialRoles.Keys) || !RoleIds.ToHashSet().SetEquals(content.GrowthByRole.Keys))
+            throw Error("RoleIds", "native players order or roles/growth coverage mismatch");
+        if (!TeamIds.SequenceEqual(content.EnemyTeams.Keys)) throw Error("TeamIds", "native team order or identity mismatch");
+        for (int t = 0; t < TeamIds.Count; t++)
+        {
+            var loaded = EnemySlots.Skip(t * 5).Take(5).Where(row => row.Disposition == "loaded").ToArray();
+            if (!loaded.Select(row => row.BattleId!.Value).SequenceEqual(content.EnemyTeams[TeamIds[t]].Select(enemy => enemy.Id)))
+                throw Error("EnemySlots", "native enemy IDs or slot count mismatch");
+            ModernBattleContent.ValidatePhysicalBattle(content, TeamIds[t]);
+        }
+    }
 }

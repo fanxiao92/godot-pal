@@ -45,6 +45,12 @@ game-only 在冷工作树上也须先显式完成现有 CI-style Godot editor im
 
 headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证据，不能相互代替。M3 当前交付状态和历史限制见[M3 验收检查点](../../../docs/milestones/m3/acceptance.md#当前状态)；这不是新的运行结论。
 
+## #198 typed 投影来源（路线 A 首叶）
+
+`NativeBattleContentTests` 新增98例：独立人工来源经 Write→ResourceSaver→LoadChecked 保留分离的receipt/numeric身份、全部14输入、有序[4,0]角色、[65535,0]队伍与全部源槽（含同对象双实例）；构造输入/native后变更、再次Load及公开集合写入均不能污染既有checked结果。另覆盖单role4/0、单敌、长度/SHA/WORD边界、普通旧无来源null、15种未选择非默认字段、76种选中结构/选择/host-free能力拒绝、旧Load/CreateCore不可绕过、writer拒绝错配。预期来自独立字面输入与断言，不从投影器或Write反推。
+
+本叶完整7路径预算含测试/文档/登记，不新增Resource/UID/fixture资产或Core API。源码库存为856，native-map577（原479+98），full853/committable852 positives，原3控制和私有排除不变；离线metadata校验精确方法数量及两scope唯一native-map归属，不削弱guard或过滤完整native-map。本叶不执行receipt解析、Prepare投影接线、Story/Main来源闭环或私有/GPU/桌面/CI/完整门，具体执行/数字退出绑定本轮收据；源码计数不是实测。原165/168停止失败和#168装备WORD运输缺口仍保留。
+
 ## #127 M6-A T01：已声明面板的原生往返
 
 `PalBattlePlayer` 的默认零 `MagicPower` / `FleeRate` 与既有 Core WORD 域对称映射，格式仍为 1。`NativeBattleContentTests` 增 9 例：现代输入经原生保存/重载后保留互异非零及 0/65535，旧资源缺属性仍为零，并经公开 trigger/lifecycle 的 boss 逃跑观察基值；非法 WORD 与重复角色明确拒绝。既有全字段隔离用例也加入非零面板。`PrepareBattleDataTests` 增 12 例，覆盖正式 Prepare 的同类正例、非法 WORD、重复/缺失角色，核对不改源、不发布坏内容。现有 M4 生命周期和装备法力规则用例保留。
