@@ -45,6 +45,12 @@ game-only 在冷工作树上也须先显式完成现有 CI-style Godot editor im
 
 headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证据，不能相互代替。M3 当前交付状态和历史限制见[M3 验收检查点](../../../docs/milestones/m3/acceptance.md#当前状态)；这不是新的运行结论。
 
+## #200 显式投影 Prepare（路线 A 第三叶）
+
+`PrepareBattleDataTests.ProjectionPrepare*` 新增27例：三参数公开入口、独立人工双源原字节/checked回读、BOM与空白、坏hash/长度/角色/覆盖、空值/缺失/目录/输入输出边界/reparse、两种写句柄冲突、释放lease、两参数不发现收据及无覆盖。两个固定人工JSON夹具保留[4,0]角色/[65535,0]队伍、14输入、10源槽（同对象97双实例）及503叶覆盖；预期SHA/字面槽映射不从生产parser/writer反推。`BattleDataPrepareProcessTests` 原18例保留，新增12例负责正常wrapper/Editor投影入口、必要错误argv/exit/无marker及路径预检/错误传播。
+
+完整影响10路径（含两人工JSON、两生产入口、两测试、批次/metadata、两文档），无新Resource/UID或工具依赖。登记native-map699、库存978、full975/committable974 positives、Prepare101；两scope精确方法归属、原3控制/私有排除/会话预算/捕获不变。SOURCE metadata和登记不是runtime通过，实际RED/GREEN/数字退出以本轮冻结收据为准。未做晚期路径替换/磁盘/rename/cleanup故障注入，不补签Story/Main、正式CLI投影、私有/GPU/桌面/CI/完整门或#134；原165/168失败和#168装备WORD缺口保留。
+
 ## #199 离线 receipt 原字节核对（路线 A 第二叶）
 
 新增95个 `NativeBattleContentTests.ReceiptParser*` 案例，经公开 `ProjectedBattleSource.Parse` 验证独立人工 numeric/receipt：角色[4,0]、队伍[65535,0]、同object97双实例、完整5槽与14输入；两类实际原字节SHA/长度（独立.NET cryptography预期）、BOM/空白/换行、等长改写拒绝、buffer与公开集合隔离。58种结构/声明/字段覆盖/选择/能力反例、9种非法整数拼写/类型各遍历多个整数section、21种raw UTF8/JSON/depth/递归重复键、surrogate属性名/文字/注释与两类叶路径碰撞反例，以及声明注释/非认证文字正例。显式空poisons数组必须有独立fieldSources条目，不能按空缺省忽略。

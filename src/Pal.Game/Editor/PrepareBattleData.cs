@@ -20,9 +20,10 @@ public partial class PrepareBattleData : Node
         try
         {
             string[] args = OS.GetCmdlineUserArgs();
-            Require(args.Length == 4 && args[0] == "--battle-input" && args[2] == "--battle-output",
+            Require((args.Length == 4 || args.Length == 6) && args[0] == "--battle-input" && args[2] == "--battle-output"
+                && (args.Length == 4 || args[4] == "--projection-receipt" && !string.IsNullOrWhiteSpace(args[5]) && !args[5].StartsWith("--", StringComparison.Ordinal)),
                 "invalid battle-data prepare arguments");
-            _ = Prepare(args[1], args[3]);
+            _ = args.Length == 4 ? Prepare(args[1], args[3]) : Prepare(args[1], args[3], args[5]);
             GD.Print("PAL_PREPARE_BATTLE_DATA:" + OutputFile);
             GetTree().Quit(0);
         }
@@ -33,7 +34,15 @@ public partial class PrepareBattleData : Node
         }
     }
 
-    public static string Prepare(string inputDirectory, string outputDirectory)
+    public static string Prepare(string inputDirectory, string outputDirectory) => PrepareCore(inputDirectory, outputDirectory, null);
+
+    public static string Prepare(string inputDirectory, string outputDirectory, string projectionReceiptPath)
+    {
+        Require(!string.IsNullOrWhiteSpace(projectionReceiptPath), "projection receipt path must be explicitly provided");
+        return PrepareCore(inputDirectory, outputDirectory, Normalize(projectionReceiptPath));
+    }
+
+    private static string PrepareCore(string inputDirectory, string outputDirectory, string? receipt)
     {
         string input = Normalize(inputDirectory), output = Normalize(outputDirectory);
         string? temporary = null;
@@ -50,32 +59,59 @@ public partial class PrepareBattleData : Node
             string outputUri = "res://Assets" + (relative == "." ? "" : "/" + relative.Replace('\\', '/'));
             CheckOutput(output, null);
             string source = Path.Combine(input, "battle-data.json");
+            if (receipt is not null) ValidateReceiptPath(receipt, input, output);
             using FileStream lease = PreparationPathSafety.OpenStableRead(source);
+            using FileStream? receiptLease = receipt is null ? null : PreparationPathSafety.OpenStableRead(receipt);
+            if (receiptLease is not null)
+                Require(receiptLease.Length > 0 && receiptLease.Length <= int.MaxValue,
+                    "projection receipt must contain 1..2147483647 bytes for the in-memory parser");
+            string? receiptHash = receiptLease is null ? null : PreparationPathSafety.Sha256(receiptLease);
             Require(lease.Length > 0 && lease.Length <= MaximumInputBytes, "battle-data.json must contain 1..16777216 bytes");
             string hash = PreparationPathSafety.Sha256(lease);
             byte[] bytes = new byte[checked((int)lease.Length)];
             lease.ReadExactly(bytes);
             lease.Position = 0;
-            string json;
-            try
+            TriggerBattleContent content;
+            BattleProjectionSourceInfo? projectedSource = null;
+            if (receiptLease is not null)
             {
-                int bom = bytes.AsSpan().StartsWith(new byte[] { 0xef, 0xbb, 0xbf }) ? 3 : 0;
-                json = new UTF8Encoding(false, true).GetString(bytes, bom, bytes.Length - bom);
+                byte[] receiptBytes = new byte[checked((int)receiptLease.Length)];
+                receiptLease.ReadExactly(receiptBytes);
+                receiptLease.Position = 0;
+                (content, projectedSource) = ProjectedBattleSource.Parse(receiptBytes, bytes);
             }
-            catch (DecoderFallbackException error) { throw new InvalidDataException("battle-data.json must be valid UTF-8", error); }
-            var content = ModernBattleContent.Parse(json);
-            Recheck(input, output, source, lease, hash, null);
-            var native = NativeBattleContent.Write(content);
-            Recheck(input, output, source, lease, hash, null);
+            else
+            {
+                string json;
+                try
+                {
+                    int bom = bytes.AsSpan().StartsWith(new byte[] { 0xef, 0xbb, 0xbf }) ? 3 : 0;
+                    json = new UTF8Encoding(false, true).GetString(bytes, bom, bytes.Length - bom);
+                }
+                catch (DecoderFallbackException error) { throw new InvalidDataException("battle-data.json must be valid UTF-8", error); }
+                content = ModernBattleContent.Parse(json);
+            }
+            void RecheckSources(string? ownedTemporary)
+            {
+                Recheck(input, output, source, lease, hash, ownedTemporary);
+                if (receipt is null) return;
+                ValidateReceiptPath(receipt, input, output);
+                Require(PreparationPathSafety.MatchesStableRead(receipt, receiptLease!, receiptHash!),
+                    "projection receipt source changed during preparation");
+            }
+            RecheckSources(null);
+            var native = NativeBattleContent.Write(content, projectedSource);
+            RecheckSources(null);
             CreateOwnedDirectory(output, createdDirectories);
-            Recheck(input, output, source, lease, hash, null);
+            RecheckSources(null);
             string destination = Path.Combine(output, OutputFile);
             temporary = Path.Combine(output, ".battle-data-" + Guid.NewGuid().ToString("N") + ".tmp.tres");
             string temporaryUri = outputUri + "/" + Path.GetFileName(temporary);
             Require(ResourceSaver.Save(native, temporaryUri) == Error.Ok, "could not save native battle data");
-            Recheck(input, output, source, lease, hash, temporary);
-            _ = NativeBattleContent.Load(temporaryUri);
-            Recheck(input, output, source, lease, hash, temporary);
+            RecheckSources(temporary);
+            var readback = NativeBattleContent.LoadChecked(temporaryUri);
+            Require(SameProjection(projectedSource, readback.ProjectedSource), "native battle projection source readback mismatch");
+            RecheckSources(temporary);
             File.Move(temporary, destination, false);
             temporary = null;
             return outputUri + "/" + OutputFile;
@@ -99,6 +135,21 @@ public partial class PrepareBattleData : Node
                 catch { }
             throw;
         }
+    }
+
+    private static bool SameProjection(BattleProjectionSourceInfo? expected, BattleProjectionSourceInfo? actual) =>
+        expected is null ? actual is null : actual is not null
+        && expected.FormatVersion == actual.FormatVersion && expected.Kind == actual.Kind && expected.SnapshotKind == actual.SnapshotKind
+        && expected.ReceiptSha256 == actual.ReceiptSha256 && expected.ReceiptByteLength == actual.ReceiptByteLength
+        && expected.NumericSha256 == actual.NumericSha256 && expected.NumericByteLength == actual.NumericByteLength
+        && expected.RoleIds.SequenceEqual(actual.RoleIds) && expected.TeamIds.SequenceEqual(actual.TeamIds)
+        && expected.ModernInputs.SequenceEqual(actual.ModernInputs) && expected.EnemySlots.SequenceEqual(actual.EnemySlots);
+
+    private static void ValidateReceiptPath(string receipt, string input, string output)
+    {
+        Require(!IsInside(receipt, input) && !IsInside(receipt, output), "projection receipt must be outside numeric input and native output directories");
+        PreparationPathSafety.CheckNoReparse(receipt, allowMissing: true);
+        Require(File.Exists(receipt), "projection receipt must be an existing file");
     }
 
     private static void Recheck(string input, string output, string source, FileStream lease, string hash, string? temporary)

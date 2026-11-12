@@ -3,9 +3,9 @@ $ErrorActionPreference = 'Stop'
 $options = @{}
 for ($i = 0; $i -lt $args.Count; $i += 2) {
     $key = [string]$args[$i]
-    if ($key -notin @('-InputPath','-OutputPath','-GodotPath','-TimeoutSeconds') -or
+    if ($key -notin @('-InputPath','-OutputPath','-GodotPath','-TimeoutSeconds','-ProjectionReceiptPath') -or
         $options.ContainsKey($key) -or $i + 1 -ge $args.Count -or [string]::IsNullOrWhiteSpace([string]$args[$i + 1]) -or ([string]$args[$i + 1]).StartsWith('-')) {
-        [Console]::Error.WriteLine('Prepare-BattleData argument error: expected unique -InputPath/-OutputPath and optional -GodotPath/-TimeoutSeconds, each with a value.')
+        [Console]::Error.WriteLine('Prepare-BattleData argument error: expected unique -InputPath/-OutputPath and optional -GodotPath/-TimeoutSeconds/-ProjectionReceiptPath, each with a value.')
         exit 2
     }
     $options[$key] = [string]$args[$i + 1]
@@ -45,6 +45,13 @@ try {
     if($entries.Count-ne 1-or [IO.Path]::GetFileName($entries[0])-cne 'battle-data.json'-or -not [IO.File]::Exists($entries[0])){throw 'InputPath must contain exactly battle-data.json and no other entries.'}
     if([IO.File]::Exists($outputRoot)){throw 'OutputPath is an existing file.'}
     if([IO.Directory]::Exists($outputRoot)-and @([IO.Directory]::EnumerateFileSystemEntries($outputRoot)).Count-ne 0){throw 'OutputPath must be new or empty; no overwrite is supported.'}
+    $receipt=$null
+    if($options.ContainsKey('-ProjectionReceiptPath')) {
+        $receipt=[IO.Path]::GetFullPath($options['-ProjectionReceiptPath'])
+        if((Test-Inside $receipt $inputRoot)-or(Test-Inside $receipt $outputRoot)){throw 'ProjectionReceiptPath must be outside numeric input and native output directories.'}
+        Assert-NoLink $receipt
+        if(-not [IO.File]::Exists($receipt)){throw 'ProjectionReceiptPath must be an existing file.'}
+    }
     $processes=@(Get-Process -Name 'godot*' -ErrorAction SilentlyContinue | Select-Object Id,ProcessName)
     if($processes.Count){$processes | Format-Table | Out-String | Write-Host; throw 'Godot process already exists; stop and confirm ownership.'}
     $godot=$options['-GodotPath']; if(-not $godot){$godot=$env:GODOT_BIN}; if(-not $godot){$godot=(Get-Command godot -ErrorAction Stop).Source}; $godot=(Get-Command $godot -ErrorAction Stop).Source
@@ -52,7 +59,9 @@ try {
     Invoke-Checked 'dotnet' @('build',(Join-Path $project 'Pal.Game.csproj'),'--nologo','--verbosity','quiet') ''
     # The public Editor API repeats all checks and owns stable source reading/publication.
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot
-    Invoke-Checked $godot @('--headless','--path',$project,'res://Editor/PrepareBattleData.tscn','--','--battle-input',$inputRoot,'--battle-output',$outputRoot) 'PAL_PREPARE_BATTLE_DATA:BattleContent.tres'
+    $editorArguments=@('--headless','--path',$project,'res://Editor/PrepareBattleData.tscn','--','--battle-input',$inputRoot,'--battle-output',$outputRoot)
+    if($null-ne $receipt){Assert-NoLink $receipt; $editorArguments+=@('--projection-receipt',$receipt)}
+    Invoke-Checked $godot $editorArguments 'PAL_PREPARE_BATTLE_DATA:BattleContent.tres'
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot; Assert-TreeNoLink $outputRoot
     Write-Host 'Prepared native Godot battle data: BattleContent.tres'; exit 0
 } catch { [Console]::Error.WriteLine("Prepare-BattleData failed: $($_.Exception.Message)`nNo existing output is overwritten; only owned temporary files and new empty directories are cleaned up."); exit 1 }

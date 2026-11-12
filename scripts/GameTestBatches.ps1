@@ -86,7 +86,7 @@ $script:LocalOnlyRealMatches = @('Pal.Game.Tests.RealFirstBattleFlowTests.')
 # Independently approved Prepare cardinality, shared by Range and the full gate.
 # Keep this lightweight: Prepare-only must not enumerate Game source inventory.
 function Get-PrepareTestCount {
-    $count = 89
+    $count = 101
     if ($count -isnot [int] -or $count -le 0) { throw 'Approved Prepare case count must be a positive Int32.' }
     return $count
 }
@@ -120,7 +120,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
             'Pal.Game.Tests.StoryRoundtripSceneTests.NonterminalActions', 'Pal.Game.Tests.StoryRoundtripSceneTests.NormalStoryArguments',
             'Pal.Game.Tests.StoryRoundtripSceneTests.PlayerPhysical', 'Pal.Game.Tests.StoryRoundtripSceneTests.StoryBattlePoseClock',
             'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects') }
-        @{ name = 'native-map'; count = 672; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
+        @{ name = 'native-map'; count = 699; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
         @{ name = 'scene-realfull'; count = 35; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests', 'TriggerDialogueFixtureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin', 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') }
     )
     $localOnly = if ($Scope -ceq 'committable') {
@@ -166,7 +166,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.class -CNE 'FailureControlTests' -and $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 951) { throw "Game inventory differs: $($inventory.Count)/951." }
+    if ($inventory.Count -ne 978) { throw "Game inventory differs: $($inventory.Count)/978." }
     $spriteFieldsPositive = 'Pal.Game.Tests.NativeBattleVisualProfileTests.StandaloneCheckedSpriteMatchesIndependentFieldsAndSourceBoundaries'
     $spriteFieldsCases = @($inventory | Where-Object name -CEQ $spriteFieldsPositive)
     $spriteFieldsOwners = @($batches | Where-Object { $_.expected -ccontains $spriteFieldsPositive })
@@ -185,8 +185,8 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 535; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 419; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = (Get-PrepareTestCount); skipped = 0 }
-        # 948 full-scope positives; committable scope executes one fewer (#76 local-only split).
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (948 - $localOnly.Count); skipped = 0 }
+        # 975 full-scope positives; committable scope executes one fewer (#76 local-only split).
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (975 - $localOnly.Count); skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {

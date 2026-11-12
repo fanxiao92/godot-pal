@@ -24,6 +24,97 @@ public sealed class BattleDataPrepareProcessTests : IDisposable
         File.Copy(Path.Combine(repo, "tests", "Fixtures", "ModernBattleData", "battle-data.json"), Source);
     }
 
+    [Theory]
+    [InlineData("wrapper")]
+    [InlineData("editor")]
+    public async Task Explicit_projection_entry_publishes_native_bound_to_original_receipt(string entry)
+    {
+        string receipt = UseProjection();
+        byte[] numericBefore = File.ReadAllBytes(Source), receiptBefore = File.ReadAllBytes(receipt);
+        var result = entry == "wrapper"
+            ? await Wrapper("-InputPath", Input, "-OutputPath", output, "-ProjectionReceiptPath", receipt, "-GodotPath", Godot)
+            : await Editor("--battle-input", Input, "--battle-output", output, "--projection-receipt", receipt);
+        Assert.True(result.ExitCode == 0, result.Text);
+        Assert.Contains(Marker, result.Text);
+        string native = File.ReadAllText(Path.Combine(output, "BattleContent.tres"));
+        Assert.Contains("ProjectionPresent = true", native);
+        Assert.Contains("ProjectionReceiptSha256 = \"" + Convert.ToHexStringLower(SHA256.HashData(receiptBefore)) + "\"", native);
+        Assert.Contains("ProjectionNumericSha256 = \"6f72777b683bf68a725973f412f400e2c43a4c419a0b63d1bf4de82f553d4d73\"", native);
+        Assert.Single(Directory.GetFileSystemEntries(output));
+        Assert.Equal(numericBefore, File.ReadAllBytes(Source)); Assert.Equal(receiptBefore, File.ReadAllBytes(receipt));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("reordered")]
+    [InlineData("empty")]
+    public async Task Editor_rejects_malformed_projection_argv_before_publication(string kind)
+    {
+        string receipt = UseProjection();
+        string[] args = kind switch
+        {
+            "missing" => ["--battle-input", Input, "--battle-output", output, "--projection-receipt"],
+            "duplicate" => ["--battle-input", Input, "--battle-output", output, "--projection-receipt", receipt, "--projection-receipt", receipt],
+            "reordered" => ["--projection-receipt", receipt, "--battle-input", Input, "--battle-output", output],
+            _ => ["--battle-input", Input, "--battle-output", output, "--projection-receipt", ""]
+        };
+        var result = await Editor(args);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("invalid battle-data prepare arguments", result.Text);
+        Assert.DoesNotContain(Marker, result.Text); Assert.False(Directory.Exists(output));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    public async Task Wrapper_rejects_malformed_projection_option_before_resolving_tool(string kind)
+    {
+        string receipt = UseProjection();
+        string[] args = kind == "missing"
+            ? ["-InputPath", Input, "-OutputPath", output, "-ProjectionReceiptPath"]
+            : ["-InputPath", Input, "-OutputPath", output, "-ProjectionReceiptPath", receipt, "-ProjectionReceiptPath", receipt];
+        var result = await Wrapper(args);
+        Assert.Equal(2, result.ExitCode); Assert.Contains("argument error", result.Text);
+        Assert.DoesNotContain(Marker, result.Text); Assert.False(Directory.Exists(output));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("directory")]
+    [InlineData("inside-output")]
+    public async Task Wrapper_preflights_projection_path_before_starting_unavailable_tool(string kind)
+    {
+        string receipt = UseProjection();
+        string selected = kind switch { "missing" => receipt + "-missing", "directory" => root, _ => Path.Combine(output, "receipt.json") };
+        string unavailable = Path.Combine(root, "must-not-start.exe");
+        var result = await Wrapper("-InputPath", Input, "-OutputPath", output, "-ProjectionReceiptPath", selected, "-GodotPath", unavailable);
+        Assert.Equal(1, result.ExitCode); Assert.Contains("ProjectionReceiptPath must be", result.Text);
+        Assert.DoesNotContain(unavailable, result.Text); Assert.DoesNotContain(Marker, result.Text);
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public async Task Editor_propagates_projection_error_without_marker_or_partial_publication()
+    {
+        string receipt = UseProjection(); File.WriteAllText(receipt, "{");
+        byte[] numericBefore = File.ReadAllBytes(Source), receiptBefore = File.ReadAllBytes(receipt);
+        Directory.CreateDirectory(output);
+        var result = await Editor("--battle-input", Input, "--battle-output", output, "--projection-receipt", receipt);
+        Assert.Equal(1, result.ExitCode); Assert.Contains("receipt.json", result.Text);
+        Assert.DoesNotContain(Marker, result.Text); Assert.Empty(Directory.GetFileSystemEntries(output));
+        Assert.Equal(numericBefore, File.ReadAllBytes(Source)); Assert.Equal(receiptBefore, File.ReadAllBytes(receipt));
+    }
+
+    private string UseProjection()
+    {
+        string fixture = Path.Combine(repo, "tests", "Fixtures", "ProjectedBattleData");
+        string receipt = Path.Combine(root, "projection receipt.json");
+        File.Copy(Path.Combine(fixture, "numeric", "battle-data.json"), Source, true);
+        File.Copy(Path.Combine(fixture, "receipt.json"), receipt);
+        return receipt;
+    }
+
     [Fact]
     public async Task Normal_wrapper_runs_editor_and_publishes_native_only_without_changing_source_or_overwriting()
     {

@@ -1,0 +1,2293 @@
+{
+  "formatVersion": 1,
+  "kind": "m5-base-table-physical-projection",
+  "snapshotKind": "independent-base-table-context-not-natural-save",
+  "inputTrust": "caller-verified-upstream; declarations-and-byte-identities-not-independent-authentication",
+  "declaredSources": [
+    {
+      "archive": "SSS.MKF",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "archive": "DATA.MKF",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "declaredTables": [
+    {
+      "file": "object.json",
+      "archive": "SSS.MKF",
+      "chunk": 2,
+      "recordCount": 65535,
+      "byteLength": 917490,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "event-object.json",
+      "archive": "SSS.MKF",
+      "chunk": 0,
+      "recordCount": 1,
+      "byteLength": 32,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "scene.json",
+      "archive": "SSS.MKF",
+      "chunk": 1,
+      "recordCount": 1,
+      "byteLength": 8,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "store.json",
+      "archive": "DATA.MKF",
+      "chunk": 0,
+      "recordCount": 1,
+      "byteLength": 18,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "enemy.json",
+      "archive": "DATA.MKF",
+      "chunk": 1,
+      "recordCount": 65536,
+      "byteLength": 4587520,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "enemy-team.json",
+      "archive": "DATA.MKF",
+      "chunk": 2,
+      "recordCount": 65536,
+      "byteLength": 655360,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "player-roles.json",
+      "archive": "DATA.MKF",
+      "chunk": 3,
+      "recordCount": 1,
+      "byteLength": 900,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "magic.json",
+      "archive": "DATA.MKF",
+      "chunk": 4,
+      "recordCount": 1,
+      "byteLength": 32,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "battle-field.json",
+      "archive": "DATA.MKF",
+      "chunk": 5,
+      "recordCount": 1,
+      "byteLength": 12,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "level-up-magic.json",
+      "archive": "DATA.MKF",
+      "chunk": 6,
+      "recordCount": 1,
+      "byteLength": 20,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "battle-effect-index.json",
+      "archive": "DATA.MKF",
+      "chunk": 11,
+      "recordCount": 1,
+      "byteLength": 40,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "enemy-pos.json",
+      "archive": "DATA.MKF",
+      "chunk": 13,
+      "recordCount": 1,
+      "byteLength": 100,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "file": "level-up-exp.json",
+      "archive": "DATA.MKF",
+      "chunk": 14,
+      "recordCount": 1,
+      "byteLength": 200,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "modernInputs": [
+    {
+      "file": "battle-effect-index.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "byteLength": 100
+    },
+    {
+      "file": "battle-field.json",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "byteLength": 101
+    },
+    {
+      "file": "enemy-pos.json",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "byteLength": 102
+    },
+    {
+      "file": "enemy-team.json",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "byteLength": 103
+    },
+    {
+      "file": "enemy.json",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "byteLength": 104
+    },
+    {
+      "file": "event-object.json",
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "byteLength": 105
+    },
+    {
+      "file": "index.json",
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "byteLength": 106
+    },
+    {
+      "file": "level-up-exp.json",
+      "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "byteLength": 107
+    },
+    {
+      "file": "level-up-magic.json",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "byteLength": 108
+    },
+    {
+      "file": "magic.json",
+      "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "byteLength": 109
+    },
+    {
+      "file": "object.json",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byteLength": 110
+    },
+    {
+      "file": "player-roles.json",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "byteLength": 111
+    },
+    {
+      "file": "scene.json",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "byteLength": 112
+    },
+    {
+      "file": "store.json",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "byteLength": 113
+    }
+  ],
+  "roles": [
+    4,
+    0
+  ],
+  "teams": [
+    65535,
+    0
+  ],
+  "enemySlots": [
+    {
+      "teamId": 65535,
+      "sourceSlot": 0,
+      "objectId": 97,
+      "disposition": "loaded",
+      "enemyId": 0,
+      "compactSlot": 0,
+      "battleId": 1
+    },
+    {
+      "teamId": 65535,
+      "sourceSlot": 1,
+      "objectId": 65535,
+      "disposition": "skip-FFFF"
+    },
+    {
+      "teamId": 65535,
+      "sourceSlot": 2,
+      "objectId": 97,
+      "disposition": "loaded",
+      "enemyId": 0,
+      "compactSlot": 1,
+      "battleId": 2
+    },
+    {
+      "teamId": 65535,
+      "sourceSlot": 3,
+      "objectId": 65535,
+      "disposition": "skip-FFFF"
+    },
+    {
+      "teamId": 65535,
+      "sourceSlot": 4,
+      "objectId": 65535,
+      "disposition": "skip-FFFF"
+    },
+    {
+      "teamId": 0,
+      "sourceSlot": 0,
+      "objectId": 65535,
+      "disposition": "skip-FFFF"
+    },
+    {
+      "teamId": 0,
+      "sourceSlot": 1,
+      "objectId": 97,
+      "disposition": "loaded",
+      "enemyId": 0,
+      "compactSlot": 0,
+      "battleId": 1
+    },
+    {
+      "teamId": 0,
+      "sourceSlot": 2,
+      "objectId": 65535,
+      "disposition": "skip-FFFF"
+    },
+    {
+      "teamId": 0,
+      "sourceSlot": 3,
+      "objectId": 65535,
+      "disposition": "skip-FFFF"
+    },
+    {
+      "teamId": 0,
+      "sourceSlot": 4,
+      "objectId": 65535,
+      "disposition": "skip-FFFF"
+    }
+  ],
+  "fieldSources": [
+    {
+      "path": "formatVersion",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].roleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].maxHp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].mp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].maxMp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].primaryExperience.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].primaryExperience.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].primaryExperience.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.health.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.health.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.health.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.magic.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.magic.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.magic.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.attack.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.attack.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.attack.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.magicPower.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.magicPower.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.magicPower.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.defense.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.defense.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.defense.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.dexterity.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.dexterity.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.dexterity.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.flee.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.flee.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].hiddenExperience.flee.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].equipment[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].equipment[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].equipment[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].equipment[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].equipment[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].equipment[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[9]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[10]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[11]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[12]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[13]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[14]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[15]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[16]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[17]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[18]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[19]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[20]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[21]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[22]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[23]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[24]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[25]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[26]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[27]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[28]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[29]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[30]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].magics[31]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].statuses[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[0].coveredByRoleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].roleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].maxHp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].mp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].maxMp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].primaryExperience.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].primaryExperience.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].primaryExperience.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.health.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.health.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.health.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.magic.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.magic.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.magic.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.attack.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.attack.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.attack.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.magicPower.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.magicPower.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.magicPower.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.defense.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.defense.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.defense.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.dexterity.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.dexterity.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.dexterity.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.flee.value",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.flee.level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].hiddenExperience.flee.count",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].equipment[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].equipment[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].equipment[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].equipment[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].equipment[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].equipment[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[9]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[10]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[11]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[12]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[13]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[14]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[15]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[16]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[17]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[18]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[19]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[20]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[21]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[22]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[23]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[24]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[25]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[26]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[27]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[28]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[29]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[30]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].magics[31]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].statuses[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "roles[1].coveredByRoleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].roleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].hp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].maxHp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].attack",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].defense",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].dexterity",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].equipment[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].equipment[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].equipment[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].equipment[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].equipment[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].equipment[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].statuses[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].poisons[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].dyingScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].friendDeathScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].coveredByRoleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].attackAll",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].magicPower",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[0].fleeRate",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].roleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].hp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].maxHp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].attack",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].defense",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].dexterity",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].equipment[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].equipment[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].equipment[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].equipment[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].equipment[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].equipment[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].statuses[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].poisons[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].dyingScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].friendDeathScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].coveredByRoleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].attackAll",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].magicPower",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "players[1].fleeRate",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].roleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[9]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[10]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[11]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[12]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[13]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[14]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[15]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[16]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[17]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[18]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[19]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[20]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[21]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[22]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[23]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[24]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[25]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[26]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[27]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[28]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[29]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[30]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[31]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[32]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[33]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[34]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[35]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[36]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[37]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[38]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[39]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[40]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[41]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[42]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[43]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[44]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[45]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[46]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[47]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[48]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[49]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[50]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[51]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[52]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[53]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[54]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[55]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[56]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[57]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[58]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[59]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[60]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[61]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[62]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[63]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[64]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[65]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[66]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[67]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[68]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[69]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[70]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[71]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[72]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[73]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[74]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[75]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[76]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[77]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[78]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[79]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[80]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[81]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[82]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[83]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[84]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[85]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[86]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[87]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[88]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[89]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[90]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[91]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[92]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[93]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[94]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[95]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[96]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[97]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[98]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpExperience[99]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpMagics[0].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpMagics[0].magicId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpMagics[1].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[0].levelUpMagics[1].magicId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].roleId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[9]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[10]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[11]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[12]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[13]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[14]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[15]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[16]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[17]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[18]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[19]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[20]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[21]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[22]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[23]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[24]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[25]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[26]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[27]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[28]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[29]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[30]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[31]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[32]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[33]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[34]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[35]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[36]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[37]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[38]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[39]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[40]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[41]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[42]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[43]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[44]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[45]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[46]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[47]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[48]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[49]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[50]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[51]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[52]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[53]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[54]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[55]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[56]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[57]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[58]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[59]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[60]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[61]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[62]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[63]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[64]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[65]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[66]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[67]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[68]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[69]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[70]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[71]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[72]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[73]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[74]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[75]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[76]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[77]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[78]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[79]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[80]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[81]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[82]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[83]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[84]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[85]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[86]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[87]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[88]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[89]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[90]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[91]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[92]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[93]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[94]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[95]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[96]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[97]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[98]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpExperience[99]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpMagics[0].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpMagics[0].magicId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpMagics[1].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "growth[1].levelUpMagics[1].magicId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].teamId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].id",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].hp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].attack",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].defense",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].dexterity",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].physicalResistance",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].statuses[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].poisons[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].turnStartScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].readyScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].battleEndScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].magicId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].dualMove",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].attackEquivItem",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].attackEquivItemRate",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].experience",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[0].cash",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].id",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].hp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].attack",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].defense",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].dexterity",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].physicalResistance",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].statuses[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].poisons[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].turnStartScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].readyScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].battleEndScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].magicId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].dualMove",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].attackEquivItem",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].attackEquivItemRate",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].experience",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[0].enemies[1].cash",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].teamId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].id",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].level",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].hp",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].attack",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].defense",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].dexterity",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].physicalResistance",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[1]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[2]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[3]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[4]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[5]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[6]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[7]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].statuses[8]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].poisons[0]",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].turnStartScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].readyScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].battleEndScript",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].magicId",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].dualMove",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].attackEquivItem",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].attackEquivItemRate",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].experience",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    },
+    {
+      "path": "teams[1].enemies[0].cash",
+      "source": "independent artificial Prepare fixture; not upstream authentication"
+    }
+  ],
+  "output": {
+    "file": "numeric/battle-data.json",
+    "byteLength": 9523,
+    "sha256": "6f72777b683bf68a725973f412f400e2c43a4c419a0b63d1bf4de82f553d4d73"
+  },
+  "limits": "Independent artificial Prepare consistency fixture, not natural save or projected CLI acceptance"
+}

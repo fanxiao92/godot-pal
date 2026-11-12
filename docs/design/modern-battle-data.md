@@ -71,6 +71,26 @@ InputTrust由版本/kind固定为只读常量 `caller-verified-upstream; declara
 
 这只是批准路线A的 typed 首叶；后续 #199 离线 receipt 解析见下节，**仍未接通数值Prepare可选投影入口、Story期望声明或正常Main来源闭环**，不关闭 #134，不改变上文 #133 信任A、原格式/能力门、#168装备WORD运输缺口或任何旧失败。人工native保存/重载、不可变和拒绝用例及完整native-map的实际结果以本轮冻结收据为准，不签Prepare/Main/私有资源/GPU/桌面/CI/完整M6。
 
+## 显式投影数值 Prepare（#200，路线 A 第三叶）
+
+新增 `PrepareBattleData.Prepare(string inputDirectory, string outputDirectory, string projectionReceiptPath)`；两参数入口保留且明确不选择投影模式，不发现 sibling receipt。三参数选中后 null/空白/不存在/目录/链接及祖先 reparse 拒绝，不退回非投影。receipt 必须位于 numeric 输入目录和 native 输出目录之外；numeric 仍恰含 `battle-data.json`。receipt 不复制到输出或成为运行时 JSON 依赖；原始离线原件按其字节身份供追溯。
+
+同次持有 numeric+receipt 的 `FileAccess.Read/FileShare.Read` 句柄，调用 #199 `ProjectedBattleSource.Parse` 和 #198 `Write(content, source)`；在解析后、writer后、创建目录后、Save后、checked Load/readback后，逐阶段复核双源路径/原字节SHA和输出集合，保持句柄到无覆盖 `File.Move` 完成。checked readback 必须完整保留 typed source 的版本/kind/snapshot、双身份、14输入、有序角色/队伍及全部源槽。失败沿原 owned 临时文件/新空目录清理，不递归删除他者文件。numeric 保持1..16MiB；receipt格式长度仍为正Int64，当前byte-array parser文件适配器仅支持1..Int32.MaxValue字节，在分配前明确拒绝更大文件，不截断或添加较低格式上限。晚期替换/磁盘/rename/cleanup竞争无确定性故障注入证明，仅有逐阶段复核与代码审阅边界。
+
+Editor 保留原四个 user argv，可仅在末尾追加唯一 `--projection-receipt <file>`；错序/重复/空值/缺值/未知仍 exit1，无成功marker。PowerShell wrapper新增可选唯一 `-ProjectionReceiptPath`，预检存在性/边界/reparse后追加该argv；非法参数仍exit2，原成功marker/exit0、诊断/exit1不变。例如：
+
+```powershell
+pwsh -NoProfile -File ./scripts/Prepare-BattleData.ps1 `
+  -InputPath C:/offline/projected/numeric `
+  -OutputPath ./src/Pal.Game/Assets/LocalProjectedNumbers `
+  -ProjectionReceiptPath C:/offline/projected/receipt.json `
+  -GodotPath $ApprovedGodotConsole
+```
+
+独立人工fixture为 `tests/Fixtures/ProjectedBattleData/{numeric/battle-data.json,receipt.json}`，不是正式CLI输出、真实派生资源或原档认证。字面角色[4,0]、队伍[65535,0]、同对象97重复实例/完整10槽、14输入及503字段叶覆盖，固定fixture SHA；BOM/空白装饰用独立.NET SHA核原字节，经正式Prepare→LoadChecked。新增27个Game direct与12个Prepare process覆盖身份/覆盖/角色拒绝、路径/锁定源、无覆盖、不修改源、不自动发现及必要真实argv/退出；登记不等于实测，实际结果绑定本轮收据。
+
+**Story `battleProjection` 期望与checked native配对、正式人工M5→CLI→Prepare→正常Main的同一RoleLiveState/所属ACK/胜负/返回/再次使用仍未交付。** 本叶不改Core/工具/native v1或M3/M4非投影入口，不关闭#134，不增加工程叶18/story0/fullM6false或私有/GPU/桌面/CI证据。上下文中#198/#199的“未接Prepare”记录各原叶边界，由本节新增能力接续，不转签旧运行证据。
+
 ## 离线 receipt 与原 numeric 字节核对（#199，路线 A 第二叶）
 
 `Pal.Game.Editor.ProjectedBattleSource.Parse(ReadOnlyMemory<byte> receiptBytes, ReadOnlyMemory<byte> numericBytes)` 返回 `(TriggerBattleContent Content, BattleProjectionSourceInfo Source)`。这是离线纯内存边界，不读文件、不创建 Godot 对象或会话、不引用 Pal.Extract，不重新投影基表。实际 numeric 严格 UTF-8（可选 BOM）解码后仅调用一次 `ModernBattleContent.Parse`；来源与同次 Content 的选择/完整槽/能力一致性直接复用 #198。numeric 沿既有 Core typed defensive snapshot 契约，Source 构造时深冻结；两者均不保留输入 buffer alias，返回后改写原数组不能污染结果。本叶不改变 Core `PanelDeclaredRoles` 等既有集合的具体存储或承诺全部 Core 集合无法向下转型修改。
