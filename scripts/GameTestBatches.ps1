@@ -83,6 +83,14 @@ function Get-GameSourceInventory([string]$Directory) {
 $script:LocalOnlyRealMatches = @('Pal.Game.Tests.RealFirstBattleFlowTests.')
 # ---------------------------------------------------------------------------------------
 
+# Independently approved Prepare cardinality, shared by Range and the full gate.
+# Keep this lightweight: Prepare-only must not enumerate Game source inventory.
+function Get-PrepareTestCount {
+    $count = 89
+    if ($count -isnot [int] -or $count -le 0) { throw 'Approved Prepare case count must be a positive Int32.' }
+    return $count
+}
+
 function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committable')][string]$Scope = 'full') {
     $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
     $definitions = @(
@@ -176,7 +184,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 1388; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 535; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 419; skipped = 2 }
-        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
+        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = (Get-PrepareTestCount); skipped = 0 }
         # 948 full-scope positives; committable scope executes one fewer (#76 local-only split).
         [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (948 - $localOnly.Count); skipped = 0 }
     )

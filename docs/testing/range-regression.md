@@ -32,6 +32,8 @@ CLI 集成不触及 Godot、固定包、Game 计划或资源准备。Prepare／G
 3. 测试范围顺序固定 CLI → Prepare → Game。选中 Prepare 时，在 `prepare.build` 前先通过同一 checked executor 记录一次 `prepare.host.build`，显式构建 `src/Pal.Game/Pal.Game.csproj` 的 Debug 宿主；这不是 Game discovery／测试或 Main 预热。该构建使用现有 **Game 警告基线 14**，后续增量 Prepare 构建仍使用 **Prepare 基线 0**，不提高或抑制警告。宿主构建非零、超基线或必需产物身份错误都会在 Prepare 构建／执行前停止。每个选中测试范围完成 build、完整 discovery、选择冻结、执行及验证，再进入下一范围；Prepare 全部成功后才进入常规 `game.build`／discovery／执行。
 4. Game 调用既有 headless `game.runsettings`，先完整发现并用 `Assert-GameDiscovery` 与源库存对照，再取正向批次与过滤交集；执行仅传一个合成 Filter。
 
+Prepare 的严格发现计数与完整门计划共用 `scripts/GameTestBatches.ps1` 内部轻量 `Get-PrepareTestCount`。当前已接受基线仍是 **89**；后续新增案例须在同一源码定义中独立批准更新，不能从本轮 discovery／TRX 反推 expected。该定义必须为正 Int32，缺失／非法时 fail-closed；实际发现必须精确相等，stale 89／actual 101 仍以 `[range:discovery] Prepare must discover exactly the 89 approved cases, got 101.` 拒绝，且不会进入 `prepare.test`。Prepare-only 不为取计数而构造 Game 计划或枚举 Game 库存；CLI-only 不读取 Prepare 计数。没有新增公开选项或 bypass。
+
 Prepare 测试工程本身以 `ReferenceOutputAssembly="false" Private="false"` 的 build-only ProjectReference 声明 Game 宿主依赖：直接构建／测试该工程也会先构建宿主，但不传递 Game 程序集、内容或 GdUnit 运行依赖；自己的 TestSDK／xUnit／adapter 版本保持原配置。它不是纯内存 Unit 入口，实际运行仍需批准引擎、固定包及全局串行条件。不能靠先跑 wrapper／solution／Game 测试或复制缓存来替代冷入口验证。
 
 只运行选中范围及必要构建／包准备，不隐式执行未选的 Prepare，也不运行原生 Main 启动或三轮 Game 重复；后两者属于完整门。Prepare-only 的命令图为 `sdk → prepare.host.build → prepare.build → prepare.discover → prepare.test`，`projects` 仍只记录 Prepare；Game-only 不新增 Prepare 宿主阶段，CLI-only 不引入任何 Game 构建。三个范围均成功时，保留后续常规 `game.build`，因此 SDK 命令根从原 10 个增至 **11 个**，不能沿用旧图冒充新入口证据。入口在包准备／SDK／引擎工作前只查询全局 Godot PID／Name：有进程或无法核实库存即失败，记录结果但不终止任何进程；CLI 范围不查全局进程。这是冲突前检而不是跨入口锁，调用者仍必须维持 Godot／Prepare／GdUnit 全局串行，不能据一次空快照并发启动任务。失败中止、崩溃或未知结果后保留证据停止，不能自动重试。
@@ -75,6 +77,8 @@ pwsh -NoProfile -File ./tests/Test-Range.Tests.ps1 -EvidenceDirectory $NewFixtur
 ```
 
 GameBatches metadata 回归保留 full／committable 源库存与分区检查，并覆盖 Filter 的缺失／坏／旧／匹配记录、UTF-8 诊断、末尾可选 Filter 的旧调用兼容和字节／mtime 保持。其 17 个 AST 接线场景精准抽取实际 `Test-Range.ps1` 中的 guard／bypass／required 拒绝、测试命令至严格 TRX 验证以及末尾源码核对／签发语句，按真实顺序执行，不复制 guard 或签发条件；只在命令边界用合成 TRX 或指定失败代替 SDK 调用。覆盖完整成功／刷新、过滤不签发、命令失败／不完整／源码变化不签发与 Skip 保留。该定点 AST 切片不执行 build／discovery／引擎／产物全链，**不是**真实 native-map、公开 Game 运行或完整门通过证据。
+
+Prepare 另有 **13 个离线 AST 场景**：固定审批 89／actual 89、独立 fixture 审批 101／actual 101、双向 stale mismatch、missing／零／负数／字符串／布尔／小数／越界／数组审批拒绝，以及 CLI 不依赖 Prepare metadata。回归只替换自有 metadata fixture 的审批字面量，不从 actual 生成 expected；同时核对 full／committable 计划复用同一计数。它抽取实际 Range 非 Game discovery 分支及原 catch／finally／exit，断言拒绝前不触及测试边界，保留精确 stderr／failed report／数字 exit 1；匹配才到达合成测试边界。Game 库存／计划被拒绝桩保护。这里没有真实 SDK discovery、测试执行或引擎证据，不替代保留的 89-case 公开 SDK fixture／宿主构建顺序回归。
 
 公开入口 **33 次**回归保留原 23 次：冲突／未知库存阻断工作、空库存进入下一实际前提、CLI 不查询库存、非法选择的准确诊断、完整发现与参数选择、同显示名不同 ID、字面前缀、未选命名空间不执行、缺当前 TRX、原生退出 7／中文原始字节、旧证据不覆盖及失败后恢复。新增 10 次使用真实 SDK 临时宿主／89 个人工 Prepare facts，覆盖显式宿主命令、Game14／Prepare0 警告归属、超额警告、宿主构建非零、缺 runtimeconfig／重复或异名程序集、Prepare 期间产物变动、CLI → 宿主 → Prepare → 常规 Game 的顺序，以及 Game-only 无 Prepare 阶段；顺序控制还核对指定的原始失败消息。显式 EvidenceDirectory 会保留自有临时 fixture 根，路径见 `fixture-root.txt`，以便核对各次有意变异的源码／产物。
 

@@ -56,6 +56,120 @@ function Fixture([string]$Text) {
     return $path
 }
 try {
+    Case 'Prepare approved count is single-source and the real Range discovery branch fails closed offline' {
+        $tokens = $null; $parseErrors = $null
+        $metadataPath = Join-Path $repository 'scripts/GameTestBatches.ps1'
+        $metadataSource = [IO.File]::ReadAllText($metadataPath)
+        $metadataAst = [Management.Automation.Language.Parser]::ParseFile($metadataPath, [ref]$tokens, [ref]$parseErrors)
+        Assert (-not $parseErrors.Count) 'Shared metadata must parse.'
+        $helper = @($metadataAst.FindAll({ param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Get-PrepareTestCount'
+        }, $true))
+        Assert ($helper.Count -eq 1) 'Prepare must expose one lightweight approved-count definition before Range discovery.'
+        $countAssignment = @($helper[0].FindAll({ param($node)
+            $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$count'
+        }, $true))
+        Assert ($countAssignment.Count -eq 1) 'Expected one independently approved Prepare count literal.'
+        $value = $countAssignment[0].Right.Extent
+        function With-PrepareCount([string]$Expression) {
+            # Change only the approval literal in an owned in-memory/offline fixture, never from discovery.
+            $metadataSource.Substring(0, $value.StartOffset) + $Expression + $metadataSource.Substring($value.EndOffset)
+        }
+        Assert ((Get-PrepareTestCount) -ceq 89) 'Accepted base must remain independently approved at 89.'
+        foreach ($approval in @(89, 101)) {
+            & {
+                . ([scriptblock]::Create((With-PrepareCount ([string]$approval))))
+                foreach ($scope in @('full', 'committable')) {
+                    $candidate = Get-GameBatchPlan $repository -Scope $scope
+                    $prepare = @($candidate.projects | Where-Object name -CEQ 'prepare')
+                    Assert ($prepare.Count -eq 1 -and $prepare[0].passed -eq $approval -and $prepare[0].skipped -eq 0) 'Full plan must consume the same approved Prepare count.'
+                }
+            }
+        }
+        $rangeAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repository 'scripts/Test-Range.ps1'), [ref]$tokens, [ref]$parseErrors)
+        Assert (-not $parseErrors.Count) 'Range must parse.'
+        $outerTry = @($rangeAst.EndBlock.Statements | Where-Object {
+            $_ -is [Management.Automation.Language.TryStatementAst] -and
+                @($_.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -ceq 'Read-Version7Discovery' }, $true)).Count -eq 1
+        })
+        Assert ($outerTry.Count -eq 1) 'Expected the actual Range execution try/catch/finally.'
+        $branch = @($outerTry[0].FindAll({ param($node)
+            $node -is [Management.Automation.Language.IfStatementAst] -and $node.ElseClause -and
+                @($node.ElseClause.FindAll({ param($command) $command -is [Management.Automation.Language.CommandAst] -and $command.GetCommandName() -ceq 'Read-Version7Discovery' }, $true)).Count -eq 1
+        }, $true))
+        Assert ($branch.Count -eq 1) 'Expected the actual non-Game discovery/selection branch.'
+        $selection = @($branch[0].ElseClause.Statements | ForEach-Object { $_.Extent.Text }) -join "`n"
+        $definitions = foreach ($name in @('Fail', 'Save-Report', 'Match-Method')) {
+            $definition = @($rangeAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name }, $true))
+            Assert ($definition.Count -eq 1) "Missing actual Range function $name."
+            $definition[0].Extent.Text
+        }
+        # Execute exact production selection plus original catch/finally/exit. Only SDK boundaries are absent.
+        $body = "{`n$selection`n" + 'Invoke-RangeCommand "$s.test" @()' + "`n}"
+        $tryText = $outerTry[0].Extent.Text
+        $relativeStart = $outerTry[0].Body.Extent.StartOffset - $outerTry[0].Extent.StartOffset
+        $tryText = $tryText.Substring(0, $relativeStart) + $body + $tryText.Substring($relativeStart + $outerTry[0].Body.Extent.Text.Length)
+        $exitStatement = $rangeAst.EndBlock.Statements[-1].Extent.Text
+        Assert ($exitStatement -ceq 'exit $exitCode') 'Preserve the original public numeric exit.'
+        $prefix = @'
+param([string]$Metadata, [string]$Output, [int]$Actual, [string]$SelectedScope = 'prepare')
+$ErrorActionPreference = 'Stop'
+. $Metadata
+function Get-GameSourceInventory { throw 'Prepare must not enumerate Game inventory.' }
+function Get-GameBatchPlan { throw 'Prepare must not load a Game plan.' }
+function Read-Version7Discovery {
+    [pscustomobject]@{ total = $Actual; cases = @(1..$Actual | ForEach-Object { [pscustomobject]@{ Id = "independent-case-$_"; FullyQualifiedName = "Fixture.Case$_" } }) }
+}
+function Invoke-RangeCommand([string]$Name, [string[]]$Arguments) {
+    [IO.File]::WriteAllText((Join-Path $out 'test-reached.txt'), $Name)
+    $report.status = 'completed'; $script:exitCode = 0
+}
+$utf8 = [Text.UTF8Encoding]::new($false)
+$commands = [Collections.Generic.List[object]]::new()
+$report = @{ status = 'incomplete'; failure = $null }
+$out = $Output; $ownsOutput = $true; $recordingError = $null; $exitCode = 1
+$clock = [Diagnostics.Stopwatch]::StartNew(); $previous = @{}
+$s = $SelectedScope; $diag = 'offline'; $assembly = 'offline'; $Filter = $null
+'@
+        $fixture = Join-Path $temp 'prepare-count-range-slice.ps1'
+        [IO.File]::WriteAllText($fixture, ($prefix + "`n" + ($definitions -join "`n") + "`n" + $tryText + "`n" + $exitStatement), [Text.UTF8Encoding]::new($false))
+        $pwsh = [Environment]::ProcessPath
+        $syntaxEntry = Join-Path $repository 'scripts/Test-PowerShellSyntax.ps1'
+        & $pwsh -NoProfile -File $syntaxEntry -Path $fixture 1> (Join-Path $temp 'prepare-count-syntax.stdout.log') 2> (Join-Path $temp 'prepare-count-syntax.stderr.log')
+        Assert ($LASTEXITCODE -eq 0) 'Owned Range slice must pass existing syntax entry before execution.'
+        $scenarios = @(
+            @{ name = 'accepted89'; approval = '89'; actual = 89; exit = 0 },
+            @{ name = 'approved101'; approval = '101'; actual = 101; exit = 0 },
+            @{ name = 'stale89'; approval = '89'; actual = 101; exit = 1; diagnostic = '[range:discovery] Prepare must discover exactly the 89 approved cases, got 101.' },
+            @{ name = 'under101'; approval = '101'; actual = 89; exit = 1; diagnostic = '[range:discovery] Prepare must discover exactly the 101 approved cases, got 89.' },
+            @{ name = 'cli-independent'; approval = '$null'; actual = 2; scope = 'cli-integration'; exit = 0 }
+        )
+        foreach ($invalid in @('$null', '0', '-1', "'89'", '$true', '89.0', '2147483648', '@(89, 101)')) {
+            $scenarios += @{ name = 'invalid-' + $scenarios.Count; approval = $invalid; actual = 89; exit = 1; diagnostic = '[range:discovery] Approved Prepare case count must be a positive Int32.' }
+        }
+        foreach ($scenario in $scenarios) {
+            $directory = Join-Path $temp ('prepare-count-' + $scenario.name)
+            [IO.Directory]::CreateDirectory($directory) | Out-Null
+            $metadata = Join-Path $directory 'metadata.ps1'
+            [IO.File]::WriteAllText($metadata, (With-PrepareCount $scenario.approval), [Text.UTF8Encoding]::new($false))
+            & $pwsh -NoProfile -File $syntaxEntry -Path $metadata 1> (Join-Path $directory 'syntax.stdout.log') 2> (Join-Path $directory 'syntax.stderr.log')
+            Assert ($LASTEXITCODE -eq 0) 'Mutated approval fixture must parse before execution.'
+            $scope = if ($scenario.scope) { $scenario.scope } else { 'prepare' }
+            & $pwsh -NoProfile -File $fixture -Metadata $metadata -Output $directory -Actual $scenario.actual -SelectedScope $scope 1> (Join-Path $directory 'stdout.log') 2> (Join-Path $directory 'stderr.log')
+            $code = $LASTEXITCODE
+            [IO.File]::WriteAllText((Join-Path $directory 'exit.txt'), [string]$code)
+            Assert ($code -eq $scenario.exit) "Unexpected original Range exit: $($scenario.name) / $code."
+            $receipt = Get-Content -LiteralPath (Join-Path $directory 'range-run.json') -Raw | ConvertFrom-Json
+            $reached = Test-Path -LiteralPath (Join-Path $directory 'test-reached.txt')
+            Assert ($reached -eq ($scenario.exit -eq 0)) 'Rejected approval/discovery must stop before test execution.'
+            if ($scenario.diagnostic) {
+                Assert ($receipt.status -ceq 'failed' -and $receipt.failure -ceq $scenario.diagnostic) 'Original catch/report lost the specific discovery failure.'
+                Assert ([IO.File]::ReadAllText((Join-Path $directory 'stderr.log')).Contains($scenario.diagnostic)) 'Original public stderr propagation changed.'
+            } else { Assert ($receipt.status -ceq 'completed') 'Matching approval did not reach the test boundary.' }
+            Assert ($receipt.finishedUtc -and $receipt.commands.Count -eq 0) 'Original finally must save an SDK-free receipt.'
+            Write-Host "PASS Prepare AST slice: $($scenario.name) / exit=$code"
+        }
+    }
     Case 'headless GPU environment check is read-only, rejects nonempty values and names only the two opt-ins' {
         $keys = @('PAL_STATIC_GPU_EVIDENCE', 'PAL_EXPLORATION_GPU_EVIDENCE', 'PAL_UNRELATED_FIXTURE')
         $before = @{}
