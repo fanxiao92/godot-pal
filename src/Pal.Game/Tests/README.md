@@ -47,9 +47,9 @@ headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证�
 
 ## #199 离线 receipt 原字节核对（路线 A 第二叶）
 
-新增86个 `NativeBattleContentTests.ReceiptParser*` 案例，经公开 `ProjectedBattleSource.Parse` 验证独立人工 numeric/receipt：角色[4,0]、队伍[65535,0]、同object97双实例、完整5槽与14输入；两类实际原字节SHA/长度（独立.NET cryptography预期）、BOM/空白/换行、等长改写拒绝、buffer与公开集合隔离。58种结构/声明/字段覆盖/选择/能力反例、9种非法整数拼写/类型各遍历多个整数section、12种raw UTF8/JSON/depth/递归重复键反例，以及声明注释/非认证文字正例。显式空poisons数组必须有独立fieldSources条目，不能按空缺省忽略。
+新增95个 `NativeBattleContentTests.ReceiptParser*` 案例，经公开 `ProjectedBattleSource.Parse` 验证独立人工 numeric/receipt：角色[4,0]、队伍[65535,0]、同object97双实例、完整5槽与14输入；两类实际原字节SHA/长度（独立.NET cryptography预期）、BOM/空白/换行、等长改写拒绝、buffer与公开集合隔离。58种结构/声明/字段覆盖/选择/能力反例、9种非法整数拼写/类型各遍历多个整数section、21种raw UTF8/JSON/depth/递归重复键、surrogate属性名/文字/注释与两类叶路径碰撞反例，以及声明注释/非认证文字正例。显式空poisons数组必须有独立fieldSources条目，不能按空缺省忽略。
 
-完整影响集7路径（新增离线静态类及其uid，测试/批次登记/两份文档），不改Core/工具/Prepare/Story/Main或运行时JSON。native-map登记663（577+86）、库存942、full939/committable938 positives，原3控制和私有排除/300000ms/捕获不变。metadata精确方法计数和两scope唯一归属；这些源码计数不是实测，实际运行/数字退出与指定RED原件由本轮冻结收据记录。不重跑旧165/168失败，不代签Prepare/Main/私有/GPU/桌面/CI/fullM6。
+完整影响集7路径（新增离线静态类及其uid，测试/批次登记/两份文档），不改Core/工具/Prepare/Story/Main或运行时JSON。native-map登记672（577+95）、库存951、full948/committable947 positives，原3控制和私有排除/300000ms/捕获不变。metadata精确方法计数和两scope唯一归属；这些源码计数不是实测，实际运行/数字退出与指定RED原件由本轮冻结收据记录。不重跑旧165/168失败，不代签Prepare/Main/私有/GPU/桌面/CI/fullM6。
 
 ## #198 typed 投影来源（路线 A 首叶）
 

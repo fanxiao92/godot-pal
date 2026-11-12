@@ -49,12 +49,13 @@ public class NativeBattleContentTests
         AssertReadOnly(source.EnemySlots, new BattleProjectionEnemySlot(0, 0, 0, "bad"));
     }
 
-    [TestCase(" ")]
-    [TestCase("\n")]
-    [TestCase("\r\n")]
-    [TestCase("\uFEFF")]
-    public void ReceiptParserUsesExactNumericAndReceiptBytesIncludingBomAndWhitespace(string decoration)
+    [TestCase("space")]
+    [TestCase("newline")]
+    [TestCase("crlf")]
+    [TestCase("bom")]
+    public void ReceiptParserUsesExactNumericAndReceiptBytesIncludingBomAndWhitespace(string kind)
     {
+        string decoration = kind switch { "space" => " ", "newline" => "\n", "crlf" => "\r\n", "bom" => "\uFEFF", _ => throw new ArgumentException(kind) };
         var (receipt, numeric) = ReceiptFixture();
         string numericText = decoration == "\uFEFF" ? decoration + numeric.ToJsonString() : numeric.ToJsonString() + decoration;
         byte[] bytes = Encoding.UTF8.GetBytes(numericText);
@@ -208,17 +209,19 @@ public class NativeBattleContentTests
         AssertReceiptRejected(Encoding.UTF8.GetBytes(receipt.ToJsonString()), Encoding.UTF8.GetBytes(numeric.ToJsonString()), cause);
     }
 
-    [TestCase("1.0")]
-    [TestCase("1e0")]
-    [TestCase("1.5")]
-    [TestCase("true")]
+    [TestCase("decimal")]
+    [TestCase("exponent")]
+    [TestCase("fraction")]
+    [TestCase("bool")]
     [TestCase("null")]
-    [TestCase("\"1\"")]
-    [TestCase("[]")]
-    [TestCase("{}")]
-    [TestCase("9223372036854775808")]
-    public void ReceiptParserRejectsNonIntegerSpellingsAndTypesAtEveryIntegerSection(string raw)
+    [TestCase("string")]
+    [TestCase("array")]
+    [TestCase("object")]
+    [TestCase("overflow")]
+    public void ReceiptParserRejectsNonIntegerSpellingsAndTypesAtEveryIntegerSection(string kind)
     {
+        string raw = kind switch { "decimal" => "1.0", "exponent" => "1e0", "fraction" => "1.5", "bool" => "true", "null" => "null",
+            "string" => "\"1\"", "array" => "[]", "object" => "{}", "overflow" => "9223372036854775808", _ => throw new ArgumentException(kind) };
         foreach (string section in new[] { "formatVersion", "chunk", "recordCount", "byteLength", "roles", "teams", "sourceSlot", "enemyId", "battleId" })
         {
             var (receipt, numeric) = ReceiptFixture();
@@ -247,6 +250,15 @@ public class NativeBattleContentTests
     [TestCase("duplicate-annotation")]
     [TestCase("duplicate-numeric")]
     [TestCase("receipt-depth")]
+    [TestCase("surrogate-high-source")]
+    [TestCase("surrogate-low-source")]
+    [TestCase("surrogate-pair-source")]
+    [TestCase("surrogate-high-name")]
+    [TestCase("surrogate-high-annotation")]
+    [TestCase("surrogate-high-limits")]
+    [TestCase("numeric-low-name")]
+    [TestCase("collision-property")]
+    [TestCase("collision-array")]
     public void ReceiptParserRejectsMalformedRawBytesAndRecursiveDuplicateKeys(string fault)
     {
         var (receipt, numeric) = ReceiptFixture();
@@ -267,6 +279,21 @@ public class NativeBattleContentTests
             case "duplicate-annotation": receipt["declaredSources"]![0]!["_note"] = JsonNode.Parse("{\"a\":1}"); r = Encoding.UTF8.GetBytes(receipt.ToJsonString().Replace("\"a\":1", "\"a\":1,\"a\":1", StringComparison.Ordinal)); cause = "duplicate"; break;
             case "duplicate-numeric": n = Encoding.UTF8.GetBytes("{\"formatVersion\":1," + numeric.ToJsonString()[1..]); ReceiptOutputBytes(receipt, n); r = Encoding.UTF8.GetBytes(receipt.ToJsonString()); cause = "duplicate"; break;
             case "receipt-depth": r = Encoding.UTF8.GetBytes(new string('[', 65) + "0" + new string(']', 65)); cause = "JSON"; break;
+            case "surrogate-high-source": case "surrogate-low-source": case "surrogate-pair-source":
+                string escaped = fault == "surrogate-high-source" ? "\\ud800" : fault == "surrogate-low-source" ? "\\udc00" : "\\ud800\\u0041";
+                r = Encoding.UTF8.GetBytes(text.Replace("authored independent fixture", escaped, StringComparison.Ordinal)); cause = "fieldSources"; break;
+            case "surrogate-high-name": r = Encoding.UTF8.GetBytes("{\"\\ud800\":0," + text[1..]); cause = "receipt.json"; break;
+            case "surrogate-high-annotation": r = Encoding.UTF8.GetBytes(text.Replace("\"declaredSources\":[{", "\"declaredSources\":[{\"_note\":\"\\ud800\",", StringComparison.Ordinal)); cause = "declaredSources"; break;
+            case "surrogate-high-limits": r = Encoding.UTF8.GetBytes(text.Replace("independent authored values, not natural save", "\\ud800", StringComparison.Ordinal)); cause = "limits"; break;
+            case "numeric-low-name":
+                n = Encoding.UTF8.GetBytes("{\"_\\udc00\":0," + numeric.ToJsonString()[1..]);
+                ReceiptOutputBytes(receipt, n); r = Encoding.UTF8.GetBytes(receipt.ToJsonString()); cause = "battle-data.json"; break;
+            case "collision-property": case "collision-array":
+                if (fault == "collision-property") { numeric["_a.b"] = 1; numeric["_a"] = new JsonObject { ["b"] = 2 }; }
+                else { numeric["_a[0]"] = 1; numeric["_a"] = new JsonArray(2); }
+                // A single receipt row must not account for two different numeric leaves.
+                receipt["fieldSources"]!.AsArray().Add(new JsonObject { ["path"] = fault == "collision-property" ? "_a.b" : "_a[0]", ["source"] = "authored collision" });
+                n = Encoding.UTF8.GetBytes(numeric.ToJsonString()); ReceiptOutputBytes(receipt, n); r = Encoding.UTF8.GetBytes(receipt.ToJsonString()); cause = "ambiguous numeric leaf"; break;
             default: throw new ArgumentException(fault);
         }
         AssertReceiptRejected(r, n, cause);
@@ -279,7 +306,7 @@ public class NativeBattleContentTests
         receipt["declaredSources"]![0]!["sha256"] = new string('A', 64);
         receipt["declaredSources"]![0]!["_note"] = new JsonObject { ["anything"] = new JsonArray(1, "text") };
         receipt["declaredTables"]![0]!["_note"] = "upstream";
-        foreach (var field in receipt["fieldSources"]!.AsArray()) field!["source"] = "traceability is not authentication";
+        foreach (var field in receipt["fieldSources"]!.AsArray()) field!["source"] = "追溯 😀 is not authentication";
         var result = ProjectedBattleSource.Parse(Encoding.UTF8.GetBytes(receipt.ToJsonString()), Encoding.UTF8.GetBytes(numeric.ToJsonString()));
         AssertThat(result.Content.Players[0].RoleId).IsEqual(4);
         AssertThat(result.Source.InputTrust).IsEqual("caller-verified-upstream; declarations-and-byte-identities-not-independent-authentication");

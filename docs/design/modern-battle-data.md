@@ -73,14 +73,14 @@ InputTrust由版本/kind固定为只读常量 `caller-verified-upstream; declara
 
 ## 离线 receipt 与原 numeric 字节核对（#199，路线 A 第二叶）
 
-`Pal.Game.Editor.ProjectedBattleSource.Parse(ReadOnlyMemory<byte> receiptBytes, ReadOnlyMemory<byte> numericBytes)` 返回 `(TriggerBattleContent Content, BattleProjectionSourceInfo Source)`。这是离线纯内存边界，不读文件、不创建 Godot 对象或会话、不引用 Pal.Extract，不重新投影基表。实际 numeric 严格 UTF-8（可选 BOM）解码后仅调用一次 `ModernBattleContent.Parse`；来源与同次 Content 的选择/完整槽/能力一致性直接复用 #198。两项结果均独立持有深冻结值，调用返回后改写原数组不能污染结果。
+`Pal.Game.Editor.ProjectedBattleSource.Parse(ReadOnlyMemory<byte> receiptBytes, ReadOnlyMemory<byte> numericBytes)` 返回 `(TriggerBattleContent Content, BattleProjectionSourceInfo Source)`。这是离线纯内存边界，不读文件、不创建 Godot 对象或会话、不引用 Pal.Extract，不重新投影基表。实际 numeric 严格 UTF-8（可选 BOM）解码后仅调用一次 `ModernBattleContent.Parse`；来源与同次 Content 的选择/完整槽/能力一致性直接复用 #198。numeric 沿既有 Core typed defensive snapshot 契约，Source 构造时深冻结；两者均不保留输入 buffer alias，返回后改写原数组不能污染结果。本叶不改变 Core `PanelDeclaredRoles` 等既有集合的具体存储或承诺全部 Core 集合无法向下转型修改。
 
-- numeric 原字节必须1..16MiB；receipt 是调用者已拥有的内存，不新增任意文件/分配大小上限。两者 JSON 深度保持64，严格拒绝非法 UTF-8、注释、尾逗号和递归重复键（包括注释对象内）。不接受将小数/指数记法当整数；整数按字段 Int32/Int64 范围读取。
+- numeric 原字节必须1..16MiB；receipt 是调用者已拥有的内存，不新增任意文件/分配大小上限。两者 JSON 深度保持64，严格拒绝非法 UTF-8、注释、尾逗号和递归重复键（包括注释对象内）；属性名与全部字符串也显式完成解码，坏 surrogate 配对以带路径的 `InvalidDataException` 拒绝。不接受将小数/指数记法当整数；整数按字段 Int32/Int64 范围读取。
 - receipt 根恰含 `formatVersion/kind/snapshotKind/inputTrust/declaredSources/declaredTables/modernInputs/roles/teams/enemySlots/fieldSources/output/limits`。前三项及 inputTrust 与 #198 固定值一致，limits 必须非空文字但不是认证规则。其余普通 receipt 对象不忽略未知键。仅复制自 M5 的 declaredSources/declaredTables 行保留上游 `_` 注释扩展，注释内重复键仍拒绝。
 - declaredSources 恰为唯一 SSS.MKF/DATA.MKF 的 archive/sha256；原档声明 hash 可含大写十六进制，与上游兼容。declaredTables 恰13张唯一 file/archive/chunk/recordCount/byteLength/sha256，固定布局依 `data-schema` 的 Windows 宽度（OBJECT14，PLAYERROLES900 等）；recordCount1..65536、四张单记录表恰1、长度=条数×宽度，OBJECT长度兼容12/14的歧义仍拒绝。选中 team、loaded object/enemy ID 必须在对应声明 recordCount 内；这是声明内部一致性，未读取表文件认证记录数或投影值。
 - modernInputs 的精确14项 ordinal 顺序/小写SHA/1..64MiB、有序角色与队伍、每队五源槽以及 loaded/skip 字段 presence、同次数值选择与物理能力均沿 #198，不能默默补齐、排序或去重。skip 行不得携带 loaded 字段（即使是 null/-1）。
 - output 恰为 file=`numeric/battle-data.json`、byteLength、sha256；必须与**实际 numeric 原字节**长度/小写 SHA256 一致，不比较重序列化 JSON。BOM/空白/换行改变即不同身份；等长的语义等价空白改写仍因 SHA 不符拒绝。Source 的 receipt SHA/长度直接来自完整 receipt 原字节，不递归寻找其自身 hash。
-- fieldSources 每行恰含非空 path/source，一次且仅一次覆盖实际 numeric 文档的全部叶（显式空数组也算叶）；使用 `roles[0].hp` 等无根前缀路径。缺失/额外/重复均拒绝。这里只校覆盖与字符串，**不解析来源文字或复制投影算法**，不声称原档认证。
+- fieldSources 每行恰含非空 path/source，一次且仅一次覆盖实际 numeric 文档的全部叶（显式空数组也算叶）；使用 `roles[0].hp` 等无根前缀路径。缺失/额外/重复均拒绝。允许的 numeric 注释键若因点/方括号产生同一叶路径，明确拒绝 ambiguous path，不静默折叠两叶。这里只校覆盖与字符串，**不解析来源文字或复制投影算法**，不声称原档认证。
 
 所有结构、字节、声明/选择/能力拒绝保留字段上下文的 `InvalidDataException`。本叶不改变原 `PrepareBattleData.Prepare`、wrapper/Editor argv、Story/native/Main 的运行入口或旧非投影兼容；receipt 不成为运行时 JSON。后续叶必须稳定持有 receipt+numeric 句柄、使用本 Parse 与 `Write(content, source)`，经严格 checked Load/readback 和既有无覆盖/owned cleanup 发布，再单独交付 Story 期望及正式 Main 闭环。本叶及其人工 native-map 测试不增加工程叶/故事、不关闭 #134，不替代私有资源/GPU/桌面/CI/完整 M6 验收。
 

@@ -92,9 +92,9 @@ public static class ProjectedBattleSource
         foreach (var row in source.EnemySlots.Where(row => row.Disposition == "loaded"))
             if (row.ObjectId >= counts["object.json"] || row.EnemyId >= counts["enemy.json"])
                 throw Error(Root + ".enemySlots", "loaded identity outside declared object/enemy recordCount");
+        using var numeric = Document(numericJson, "battle-data.json.$");
         TriggerBattleContent content = ModernBattleContent.Parse(numericJson);
         source.ValidateFor(content);
-        using var numeric = Document(numericJson, "battle-data.json.$");
         var leaves = new HashSet<string>(StringComparer.Ordinal);
         Leaves(numeric.RootElement, "", leaves);
         var covered = new HashSet<string>(StringComparer.Ordinal);
@@ -156,7 +156,7 @@ public static class ProjectedBattleSource
             int i = 0;
             foreach (var child in value.EnumerateArray()) Leaves(child, path + $"[{i++}]", leaves);
         }
-        else leaves.Add(path);
+        else if (!leaves.Add(path)) throw Error("battle-data.json.$." + path, "ambiguous numeric leaf path");
     }
 
     private static string Decode(ReadOnlySpan<byte> bytes, string path)
@@ -181,8 +181,11 @@ public static class ProjectedBattleSource
             var keys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var property in value.EnumerateObject())
             {
-                if (!keys.Add(property.Name)) throw Error(path, "duplicate JSON key '" + property.Name + "'");
-                Duplicates(property.Value, path + "." + property.Name);
+                string name;
+                try { name = Unicode(property.Name, path + ".<property-name>"); }
+                catch (InvalidOperationException error) { throw new InvalidDataException(path + ": invalid JSON property name", error); }
+                if (!keys.Add(name)) throw Error(path, "duplicate JSON key '" + name + "'");
+                Duplicates(property.Value, path + "." + name);
             }
         }
         else if (value.ValueKind == JsonValueKind.Array)
@@ -190,6 +193,24 @@ public static class ProjectedBattleSource
             int i = 0;
             foreach (var child in value.EnumerateArray()) Duplicates(child, path + $"[{i++}]");
         }
+        else if (value.ValueKind == JsonValueKind.String) _ = StringValue(value, path);
+    }
+    private static string StringValue(JsonElement value, string path)
+    {
+        try { return Unicode(value.GetString()!, path); }
+        catch (InvalidOperationException error) { throw new InvalidDataException(path + ": invalid JSON string", error); }
+    }
+    private static string Unicode(string text, string path)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]))
+            {
+                if (++i >= text.Length || !char.IsLowSurrogate(text[i])) throw Error(path, "invalid JSON string surrogate pair");
+            }
+            else if (char.IsLowSurrogate(text[i])) throw Error(path, "invalid JSON string surrogate pair");
+        }
+        return text;
     }
     private static void Keys(JsonElement value, string path, bool annotations, params string[] keys)
     {
@@ -202,8 +223,12 @@ public static class ProjectedBattleSource
     }
     private static JsonElement.ArrayEnumerator Array(JsonElement value, string key, string path) =>
         value.GetProperty(key).ValueKind == JsonValueKind.Array ? value.GetProperty(key).EnumerateArray() : throw Error(path + "." + key, "expected array");
-    private static string Text(JsonElement value, string path) => value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
-        ? value.GetString()! : throw Error(path, "expected nonempty string");
+    private static string Text(JsonElement value, string path)
+    {
+        if (value.ValueKind != JsonValueKind.String) throw Error(path, "expected nonempty string");
+        string text = StringValue(value, path);
+        return !string.IsNullOrWhiteSpace(text) ? text : throw Error(path, "expected nonempty string");
+    }
     private static int Int(JsonElement value, string path)
     {
         long number = Long(value, path);
