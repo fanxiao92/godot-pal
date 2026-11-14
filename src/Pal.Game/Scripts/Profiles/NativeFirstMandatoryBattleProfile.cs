@@ -142,8 +142,15 @@ public static class NativeFirstMandatoryBattleProfile
         var visual = NativeBattleVisualProfile.Load(native.VisualUri, content.Players[0].RoleId, content.Players.Count,
             content.EnemyTeams, closure.VerifiedBattleTeamIds, palette);
         var team = visual.Teams[closure.VerifiedBattleTeamIds.Single()];
-        Require(team.EnemySprite.SpriteId == native.ImageEnemyId,
-            native.VisualUri + ": enemy sprite must be the declared ABC bitmap " + native.ImageEnemyId);
+        for (int slot = 0; slot < team.EnemySlots.Count; slot++)
+        {
+            var sprite = team.EnemySlots[slot].EnemySprite;
+            Require(sprite.SpriteId == native.ImageEnemyId,
+                native.VisualUri + $": enemy slot {slot} sprite must be the declared ABC bitmap " + native.ImageEnemyId);
+            string sourceIdentity = sprite.Source.TryGetValue("identity", out var value) && value.VariantType == Variant.Type.String ? value.AsString() : "";
+            Require(sourceIdentity == native.ImageEnemyArchiveEntry,
+                native.VisualUri + $": enemy slot {slot} sprite source identity must be " + native.ImageEnemyArchiveEntry);
+        }
         Require(team.Background.SourceIdentity == native.ImageBattlefieldArchiveEntry,
             native.VisualUri + ": battle background source identity must be " + native.ImageBattlefieldArchiveEntry);
         foreach (string path in hashes.Keys) CheckFile(path, hashes);

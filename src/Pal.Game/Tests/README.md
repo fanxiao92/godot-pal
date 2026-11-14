@@ -45,6 +45,35 @@ game-only 在冷工作树上也须先显式完成现有 CI-style Godot editor im
 
 headless/SceneRunner、GPU、物理键盘/桌面人工和远端 CI 是互补证据，不能相互代替。M3 当前交付状态和历史限制见[M3 验收检查点](../../../docs/milestones/m3/acceptance.md#当前状态)；这不是新的运行结论。
 
+## 异种敌槽正式链
+
+`StoryRoundtripSceneTests.PreparedHeterogeneousSlotsUseOwnActionsTargetsAndFreshMain` 属于
+`scene-battle-light`。它从活跃 PartyWin author 的只读副本生成 test-owned 97/98 原生图像，
+经正式 Prepare 后在正常 Main/SceneRunner 的 `UpdateCompleted` 内检查首呈现、
+TargetIndex 的当前帧高度、ActorIndex 的独立物理帧/等待、重复 id7 的死槽隔离，
+并以同 URI 的新 Main 重复首轮及校验输入/产物 hash。它不证明 GPU 像素、fade、可听声音、
+私有原档来源或完整 #136；既有同种/单敌/失败用例仍保留。
+
+`StoryRoundtripSceneTests.FailedStoryPreloadPublishesNoPartialScene` 保留缺文件预加载拒绝，
+并以同一合法异种 fixture 验证真实部分纹理初始化：view 已接管槽0的六张纹理，接管槽1
+首张纹理后由实例观察器精确抛错；在 `Main.Failed` 内记录全部原生实例已释放、离树 view
+已 Free、owner/cache 集合为空、无半初始化战斗发布及原错误传播。finally 仅对失败断言后
+仍存活的自有纹理救援 Dispose。随后相同 URI 的全新 Main 在首个战斗 `UpdateCompleted`
+检查健康初态及资源/输入 hash；成功场景退出也核所有纹理实例释放。不清全局资源缓存。
+
+纹理及逐槽 idle/显示状态属于每个 Main/view，不属于共享 native Resource。初始化成功后由
+正常结束/`ExitTree` 释放；入树前初始化失败由 Main 显式释放 owner 的全部纹理并 Free，
+不能依赖从未入树节点的 `ExitTree`。重复释放幂等。未来持久化只提交业务态，由新 Main
+按显式 URI/业务态重建显示资源，不保存纹理/原生句柄；#148 的 D3/D4 与 v1 schema 不在此冻结。
+
+## 本地组合登记（#200 + #203/#204/#136）
+
+保留 #200 的27个 Game Prepare 与12个 Prepare 进程案例及 #201 严格批准计数入口；
+叠加 #203 单玩家双敌、#136 异种 Main 与三个 native 案例后，native-map702、
+scene-battle-light30、Game库存983、full980/committable979 positives，Prepare仍为101。
+以上为独立批准增量的登记，不是运行通过；各历史章节计数仍只说明原候选。
+范围入口保持 `Test-Range.ps1`，没有采用 #136 来源工作树中的 harness 裁撤或旧 loop。
+
 ## #200 显式投影 Prepare（路线 A 第三叶）
 
 `PrepareBattleDataTests.ProjectionPrepare*` 新增27例：三参数公开入口、独立人工双源原字节/checked回读、BOM与空白、坏hash/长度/角色/覆盖、空值/缺失/目录/输入输出边界/reparse、两种写句柄冲突、释放lease、两参数不发现收据及无覆盖。两个固定人工JSON夹具保留[4,0]角色/[65535,0]队伍、14输入、10源槽（同对象97双实例）及503叶覆盖；预期SHA/字面槽映射不从生产parser/writer反推。`BattleDataPrepareProcessTests` 原18例保留，新增12例负责正常wrapper/Editor投影入口、必要错误argv/exit/无marker及路径预检/错误传播。

@@ -33,6 +33,14 @@ Main alone owns battle input, lifecycle advancement and feedback:
 
 Exit disconnects host subscriptions, releases the overlay/textures and RNG, drops retained session/resource references and leaves no shared battle state. Initialization failure frees owned unpublished nodes; no fallback mode or partial story is exposed.
 
+## Independent actor counts (#203 / #136 runtime leaf)
+
+The existing content contract accepts one or two players independently of one or two enemy slots. The battle view uses per-actor draw arrays whenever **either** side has multiple actors; player count must not hide a second enemy. Scalar snapshot fields still project actor zero, and the one-player/one-enemy path is unchanged. Duplicate enemy definition IDs retain separate slot positions and HP.
+
+`SinglePlayerTwoEnemiesDrawBothDuplicateSlotsOnFirstBattleUpdateAndFreshMain` derives an owned one-player copy of the synthetic PartyWin input, keeping the RoleId sets in `roles`, `players` and `growth` consistent. It passes through formal Prepare and normal Main, checking both id7 slots at (100,120)/(128,104), each HP43, and the player at (240,170) in the first battle `UpdateCompleted`. A second Main reuses the same prepared URIs and checks the same initial state. The snapshot is the one consumed by `_Draw`; this is headless wiring coverage, not GPU pixel verification.
+
+This leaf does **not** complete #136: team-wide sprite/frame metadata, independent per-slot animation and death/fade, complete FirstBattle source proofs and heterogeneous prepared visuals remain separate work. It neither adds a compatibility loader nor migrates the visual schema.
+
 ## UI data and bounded presentation
 
 `PalDialogueLanguage.Words` is an optional typed `Dictionary<int,string>`, default empty for old resources. Format validation accepts the full WORD domain **0..65535**, including unused blank strings, but rejects invalid IDs/null text. `CheckedStoryProfile.SelectedWords` is a copied read-only selected-language projection. Main separately requires nonblank UI words and every visible glyph, plus digits and `:/`; there is no system-font fallback.

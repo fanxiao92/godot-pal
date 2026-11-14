@@ -43,6 +43,22 @@ public sealed class StoryPackagePrepareProcessTests : IDisposable
         var editor = await Editor("--story-input", Input, "--story-output", output + "-editor");
         Assert.True(editor.ExitCode == 0, editor.Text); Assert.Contains(Marker, editor.Text);
         Assert.Equal(before, Snapshot(Input));
+        // Both real process entries preserve the complete one-slot author declaration.
+        foreach (string preparedOutput in new[] { output, output + "-editor" })
+        {
+            string visual = File.ReadAllText(Path.Combine(preparedOutput, "Visual.tres"));
+            string team = Assert.Single(visual.Split("\n["), block => block.Contains("\nEnemySlots = "));
+            Assert.Contains("SubResource(\"", team);
+            Assert.DoesNotContain("TargetId = 7", team);
+            Assert.DoesNotContain("EnemyPosition = Vector2i(100, 120)", team);
+            string slot = Assert.Single(visual.Split("\n["), block => block.Contains("\nTargetId = 7"));
+            Assert.Contains("EnemyPosition = Vector2i(100, 120)", slot);
+            foreach (string field in new[] { "IdleFrames = 1", "IdleAnimSpeed = 0", "MagicFrames = 0", "AttackFrames = 0", "ActWaitFrames = 0" })
+            {
+                Assert.Contains(field, slot);
+                Assert.DoesNotContain(field, team);
+            }
+        }
         // The producer itself strictly reloads both final typed roots, including both story languages.
         Assert.Equal(File.ReadAllBytes(Path.Combine(Input, "events", "story.json")), File.ReadAllBytes(Path.Combine(output, "Events", "story.json")));
     }
@@ -142,8 +158,10 @@ public sealed class StoryPackagePrepareProcessTests : IDisposable
             entryFileId = "story", entryId = "npc", ownerId = 1, entryAddress = 1, battleContentUri = Uri(native) + "/Numbers/BattleContent.tres",
             dialogueDirectory = Uri(native), portraits = Array.Empty<object>(),
             visual = new { roleId = 0, playerSpriteUri = Uri(native) + "/Player.tres", playerPosition = new[] { 240, 170 },
-                paletteUri = Uri(staticOutput) + "/Palettes/Palette.tres", teams = new[] { new { teamId = 18, targetId = 7,
-                    backgroundUri = Uri(native) + "/Background.tres", enemySpriteUri = Uri(native) + "/Enemy.tres", enemyPosition = new[] { 100, 120 }, idleFrames = 1, magicFrames = 0, attackFrames = 0, actWaitFrames = 0 } } }
+                paletteUri = Uri(staticOutput) + "/Palettes/Palette.tres", teams = new[] { new { teamId = 18,
+                    backgroundUri = Uri(native) + "/Background.tres", enemies = new[] { new { targetId = 7,
+                        enemySpriteUri = Uri(native) + "/Enemy.tres", enemyPosition = new[] { 100, 120 },
+                        idleFrames = 1, idleAnimSpeed = 0, magicFrames = 0, attackFrames = 0, actWaitFrames = 0 } } } } }
         }));
     }
     private void WriteNative(string name, string type, string fields) => File.WriteAllText(Path.Combine(native, name),

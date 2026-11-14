@@ -61,7 +61,7 @@ public class AuthoredBattlePackageTests
                 AssertThat(visual.BlueNumberFrames[0].Alpha[1]).IsEqual((byte)255);
                 AssertThat(visual.ResourceSha256.ContainsKey("res://Samples/AuthoredBattle/Visual/Numbers.tres")).IsTrue();
                 AssertThat(visual.AttackEffectIndex).IsEqual(0);
-                AssertThat(visual.Teams[18].IdleAnimSpeed).IsEqual(2);
+                AssertThat(visual.Teams[18].EnemySlots[0].IdleAnimSpeed).IsEqual(2);
                 AssertThat(visual.AttackEffectFrames.Select(x => x.Index).SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
                 AssertThat(visual.AttackEffectFrames[0].Indices[4 * 16 + 6]).IsEqual((byte)5);
                 AssertThat(visual.AttackEffectFrames[1].Indices[6 * 16 + 8]).IsEqual((byte)79);
@@ -104,10 +104,10 @@ public class AuthoredBattlePackageTests
                 AssertThat(visual.PlayerSprite.Frames.Count).IsEqual(12);
                 AssertThat(visual.PlayerSprite.Frames[0].Indices[10 * 16 + 6]).IsEqual((byte)4);
                 AssertThat(visual.PlayerSprite.Frames[0].Texture.GetImage().GetPixel(6, 10)).IsEqual(new Color(64f / 255, 224f / 255, 240f / 255));
-                AssertThat(visual.Teams[18].EnemySprite.Frames[0].Indices[10 * 24 + 6]).IsEqual((byte)6);
+                AssertThat(visual.Teams[18].EnemySlots[0].EnemySprite.Frames[0].Indices[10 * 24 + 6]).IsEqual((byte)6);
                 AssertThat(visual.Teams[18].Background.PaletteIndices[0]).IsEqual((byte)1);
                 AssertThat(visual.Teams[18].Background.PaletteIndices[120 * 320 + 32]).IsEqual((byte)3);
-                AssertThat(visual.Teams[18].ActWaitFrames).IsEqual(0);
+                AssertThat(visual.Teams[18].EnemySlots[0].ActWaitFrames).IsEqual(0);
                 var script = new TriggerScriptSession(story.Events, story.Language, story.BattleContent, new VerificationRandom());
                 script.Start("arena", "challenge", match.ObjectId);
                 FinishDisplay(script, 1);

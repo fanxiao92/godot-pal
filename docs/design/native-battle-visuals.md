@@ -1,6 +1,92 @@
 # Native battle visual binding（#46）
 
+## #136 / #204：checked 逐槽消费边界（中间实现叶）
+
+`CheckedBattleVisualTeam` 只暴露 `TeamId`、`EnemySlots`、`Background`。每个
+`CheckedBattleVisualEnemySlot` 持有 `TargetId`、bottom-center `EnemyPosition`、
+`EnemySprite` 及 `IdleFrames/IdleAnimSpeed/MagicFrames/AttackFrames/ActWaitFrames`；
+没有 team 级敌精灵、帧元数据或单槽身份/位置投影。ordinal 是实例地址，重复 TargetId 不合并。
+标量是独立值快照；sprite 仍是本次加载的原生 Resource，允许共享但须只读消费，不保证深不可变。
+
+Main 为每槽创建独立 idle/current-frame WORD 状态。TRUE gesture/UpdateFighters 推进所有槽，
+FALSE 动作只赋行动槽的帧；行动 metadata 取 ActorIndex，玩家效果的尺寸取 TargetIndex 的
+当前 sprite/frame。renderer 的 enemy texture key 包含 slot，并按该槽实际绘制；同一 slot 的
+自有纹理沿原部分初始化、退出及结束路径释放，不清全局 cache。绘制快照保留逐槽 idle 帧/计数值，
+不持有 live state。非 Story FirstBattle 逐槽核 `ImageEnemyId`，错误定位到具体槽，不能以槽0代全队。
+
+**中间实现的明确限制**：native 逐槽 URI/帧 metadata 叶已迁移原生地址及元数据，但离线 author
+尚为整队输入；Prepare 显式展开至 native 槽，checked 不再读取整队精灵或帧 metadata。此分步施工状态不是
+最终兼容承诺，也不代表异种 author 输入已经可接受。后续 #136 叶仍须补齐逐槽 SpriteId/author 声明，迁移活跃
+输入和正式进程测试并拒绝旧/混写形态，不能把这里的中间状态作为最终兼容承诺。独立命中/死亡
+fade、异种 Prepare→native→Main、完整来源证明和失败释放仍须相应验收；下面 #46 历史 checkpoint
+不覆盖 #126 `m6-no-legacy-compat-20261111` 的最终统一格式决定。当前叶的定点 headless 结果不替代
+完整 native-map、独立 Prepare 进程组、全 Game、真实资源、GPU/桌面、远端 CI 或独立评审。
+
 `PalBattleVisualProfile : Resource` 是独立、显式作者配置；`ResourceSaver.Save` 保存 `.tres`，`NativeBattleVisualProfile.Load(uri, CheckedStoryProfile story)` 返回 `CheckedBattleVisualProfile`。它只绑定已校验 story 所选闭包需要的单角色、单目标队伍视觉，不创建 Node、trigger、battle、RNG，不推进动画或改变数值规则。未选 numeric teams 可以继续保留合法非零数据；这不是对它们的执行能力授权。
+
+## #136 / #205：原生身份与位置必须逐槽（中间实现叶）
+
+所有 native team（包括单敌）必须显式声明非空 `EnemySlots`，按 ordinal 与所选敌位一一对应。
+缺槽不再从 team 的 `TargetId/EnemyPosition` 合成；含槽时混写任一旧标量也拒绝，诊断包含 TeamId。
+旧两个导出字段仅保留默认哨兵（-1 / `(int.MinValue,int.MinValue)`）用于定位拒绝，不是兼容入口。
+当前开发期 `FormatVersion=1` 收紧此要求，未新增双 loader；旧单敌原生资源须显式重新 Prepare。
+Prepare 可读取既有离线 author 来源，但写入的原生身份/位置始终是槽数组，并执行 staging/final 严格回读。
+
+**尚未完成**：离线 author 仍为 team 中间生产契约；native URI/metadata 已在下文逐槽化，逐槽 SpriteId 声明、活跃 author 样例迁移、
+异种正式链与独立命中/死亡/失败释放验收仍属后续叶。本节不是 #136 完成或完整门通过证明。
+
+## #136 / #206：非 Story 首战的敌图来源声明一致性
+
+`NativeFirstMandatoryBattleProfile` 对每个已选 `EnemySlots` 同时核对敌图 `SpriteId == ImageEnemyId`
+和 String `Source["identity"] == ImageEnemyArchiveEntry`（冻结首战为 `97` / `ABC97`，精确区分大小写）。
+缺失、非 String、空值或不同声明即使有正确的新文件 hash 也拒绝；诊断包含 visual URI 与 slot ordinal。
+Prepare 的发布前校验、保存回读与正常 Main 都复用该加载边界；没有新增 author 字段、loader 或证明域。
+这里仅核声明一致性，hash 仅绑定文件 bytes，均不认证原始归档来源；一般 Story 的任意非空 Source
+声明规则不因此收紧。此历史叶当时的 native team 仍共享敌图输入；下面 native 逐槽 URI 叶补充了
+“槽0合法而异源槽1越域”的独立拒绝，不能将本处历史回归或静态循环检查当作该新增用例证据。
+
+## #136：native 逐槽精灵 URI 与第二槽来源证明
+
+`PalBattleVisualEnemySlot.EnemySpriteUri` 现在必填，单敌也不能省略。native team 的旧
+`EnemySpriteUri` 仅保留空字符串拒绝哨兵；旧整队声明/混写明确拒绝，绝不在运行时补槽。
+每个槽的 URI 都参与完整 native dependency/hash 闭包，并独立执行 sprite 结构及所需帧校验；
+checked 保留对应 sprite（含实际 SpriteId），同 TargetId 两槽可以指向不同图，不从槽0投影。
+非 Story 冻结首战对槽1的新文件同样检查 SpriteId/Source；即使槽0合法且新文件hash正确，
+槽1 `Source.identity=ABC98` 仍精确拒绝为 `enemy slot 1`，恢复同URI声明后可重新加载。
+
+正式 Prepare 从当前离线 author 的共享 enemySpriteUri 显式写入每个 native 槽，依赖收集、
+staging/final strict 回读同样只读槽URI。旧 native 产物须显式重新 Prepare；没有双 loader。
+此叶不改离线 author schema，故8个活跃 author 输入继续作为只读生产输入，并非 runtime fallback。
+完整逐槽 author/SpriteId 声明和异种正式 Prepare→Main 仍待后续叶；native 帧 metadata 已由下节迁移，
+不能将本节当作#136完整格式或父票验收。
+直接消费者、synthetic首战生产者及GPU fixture的逐槽取图同步迁移；headless不证明GPU。
+
+## #136：native 逐槽帧 metadata
+
+每个 `PalBattleVisualEnemySlot` 必须显式持有 `IdleFrames/IdleAnimSpeed/MagicFrames/AttackFrames/ActWaitFrames`。
+五字段默认 -1 用于拒绝缺失；IdleFrames 为1..65535，其余为0..65535。speed0/ActWait0保持原值，
+不夹为1。旧 team 五字段只保留 -1 拒绝哨兵；旧格式或混写拒绝，无 runtime 展开/标量回退。
+当前开发期仍为 FormatVersion1；旧 native 产物必须显式重新 Prepare。
+逐槽校验所需帧索引0..Idle+Magic+Attack−1，错误包含TeamId和槽ordinal；checked投影取该槽五字段。
+物理动作仍消费MagicFrames段（固定PAL_CLASSIC/Windows fight.c:4987–5050），不是新增敌方法术。
+Prepare 从现有离线 team author 显式向每槽生产五字段并严格回读；author 的idleAnimSpeed现在必填，
+不为缺失作者值补0。8个活跃author均已有speed2，本叶不改其来源/格式；完整author逐槽化另叶迁移。
+定点覆盖同TargetId/同URI异metadata、槽1独立帧地址拒绝、五字段缺失/混写和WORD边界；
+不新增Resource/DTO或改动Core/Main时序，不将此叶冒签异种正式生产链或父票完成。
+
+## #136：致死反馈结束后的逐槽停止绘制
+
+正常 Main 的绘制快照按槽保留 `Visible`，不从 TargetId 或共享 sprite 推断存亡。
+Core 在反馈前已提交伤害，所以致死攻击的目标仍绘制完整物理反馈；反馈结束后的首次实际更新起，
+仅该死亡槽停止提交 sprite 绘制，其他同 ID 槽继续绘制、行动及参与目标选择。槽数组、HP 面板和
+纹理键不压缩、不重编号；纹理仍由整个 view 的原有退出路径释放，不提前释放共享源资源。
+单敌使用相同可见性规则；新 Main 复用同 URI 从新战斗状态重新计算，不写回 Resource。
+
+依据为 `fight.c` post-action check 清除死亡实例的 `wObjectID`，以及 `battle.c` 仅绘制非零对象。
+本叶只补齐停止绘制的终态；**死亡场景渐隐、死亡音效及异种逐槽生产格式仍未实现/验收**，
+不把 headless 绘制计划断言当作 GPU 像素或完整死亡表现证明。
+现有单玩家双重复敌槽 SceneRunner 用例通过正常 Prepare→Main、真实输入和 `UpdateCompleted`
+检查致死反馈仍可见、首次反馈结束仅死亡槽消失、存活槽下一轮仍可见，以及第二 Main 同 URI 初态。
 
 ## 作者 schema
 
@@ -8,8 +94,8 @@
 - `RoleId` 必须等于 story 的 Core `BattleContent.Player.RoleId`。`PlayerSpriteUri` 指向既有 `PalSprite`；它的 `SpriteId` 是图档索引声明，**不是 roleId**。
 - `PlayerPosition` 是作者显式 bottom-center 坐标，两个分量均为 SHORT；缺省哨兵不合法。参考单角色位置 `(240,170)` 不是强制作者坐标。
 - `PaletteUri` 指向显式准备的 `PalPalette`，要求 RGB768，并逐色等于 story 当前 active palette。当前无 palette-changing VM slice；不推测独立战斗调色板规则，不从 RGB 图片反推索引。
-- `Teams : PalBattleVisualTeam[]` 的 `TeamId` 集合精确等于 story requirements 的 `BattleTeamIds`，无缺失、多余、重复；每项 `TargetId` 必须等于对应 Core enemy 的 `Id`（战斗目标身份，**不是 enemy 定义、对象或图片 ID**）。
-- 每个 team 显式写 `BackgroundUri`（既有 `PalDialogueIndexedImage`，SourceIdentity 非空、320×200、完整 indices/alpha）、`EnemySpriteUri`（既有 `PalSprite`）、SHORT `EnemyPosition`（bottom-center，作者已应用所需 Y offset）、`IdleFrames/MagicFrames/AttackFrames/ActWaitFrames`。这些 metadata 为 WORD，IdleFrames>0，ActWaitFrames=0 合法，不在此推进时间。
+- `Teams : PalBattleVisualTeam[]` 的 `TeamId` 集合精确等于 story requirements 的 `BattleTeamIds`，无缺失、多余、重复；每个 `EnemySlots` 数组按顺序精确覆盖对应 Core enemies，每槽 `TargetId` 等于该敌位的 `Id`（战斗目标身份，**不是 enemy 定义、对象或图片 ID**）。
+- 每槽显式写 SHORT `EnemyPosition`（bottom-center，作者已应用所需 Y offset）。每槽还必须显式写 `EnemySpriteUri`（既有 `PalSprite`）。每个 team 显式写 `BackgroundUri`（既有 `PalDialogueIndexedImage`，SourceIdentity 非空、320×200、完整 indices/alpha）。每槽五个帧 metadata 均必填并按上述 WORD 域校验；不在此推进时间。
 - 两个 sprite 要有非空 `Source` 声明、WORD `SpriteId`、正的受限 decoded length/FrameCount、全部 nominal `0..FrameCount-1`；保留额外合法可寻址 frame aliases。每个 frame 的 WORD Index 唯一、SourceOffset 非负，size 与 indices/alpha 完整匹配。player 必须可寻址0..9，enemy 分段所需每个索引都必须存在，包括 aliases。
 - `PalFrame.Texture` **不要求提供**；后续显示可以用原 indices/alpha 与已校验 active palette 着色。没有新增第二图像 DTO、JSON/blob、registry 或 runtime 准备入口。
 
@@ -56,9 +142,9 @@ checked hash map **包含 sprite root**（区别于完整 visual 的不自 hash 
 
 ## #46 D2-A: optional reference-presentation data, not playback
 
-Version1 remains the base format; the root still defaults to −1 and the writer explicitly writes1. `AttackEffectSpriteUri=""` and `AttackEffectIndex=-1` mean absent, as does team `IdleAnimSpeed=-1`. Old C native resources and author inputs remain loadable; no effect or idle speed is synthesized. Present effect fields must be paired, the group must be WORD0..65535, and all three **int** indices `group*3 + {0,1,2}` must be addressable in the checked `PalSprite`. High groups never wrap to WORD frame0. Existing nominal frame/extra-alias/index-plane validation applies unchanged. Every provided idle speed must be WORD, including legal0; no zero-to-one coercion. Root hashes include the effect's full native dependency graph using the existing exact closure.
+Version1 remains the base format; the root still defaults to −1 and the writer explicitly writes1. `AttackEffectSpriteUri=""` and `AttackEffectIndex=-1` mean absent. Native slot idle speed is now mandatory as described above; old team metadata resources are rejected and must be explicitly prepared again. No effect or idle speed is synthesized. Present effect fields must be paired, the group must be WORD0..65535, and all three **int** indices `group*3 + {0,1,2}` must be addressable in the checked `PalSprite`. High groups never wrap to WORD frame0. Existing nominal frame/extra-alias/index-plane validation applies unchanged. Every provided idle speed must be WORD, including legal0; no zero-to-one coercion. Root hashes include the effect's full native dependency graph using the existing exact closure.
 
-`CheckedBattleVisualProfile.AttackEffectSprite` and read-only `AttackEffectFrames` retain the loaded native instances; `AttackEffectIndex` and team `IdleAnimSpeed` are value projections. `RequireReferencePresentation()` is a pure selected-capability check: missing effect or missing speed for any selected team throws `InvalidDataException`. It does not load a URI, advance a battle, consume randomness or change state. Resources are still mutable and must be consumed read-only. Format-valid unselected numeric teams remain outside these requirements.
+`CheckedBattleVisualProfile.AttackEffectSprite` and read-only `AttackEffectFrames` retain the loaded native instances; `AttackEffectIndex` and slot `IdleAnimSpeed` are value projections. `RequireReferencePresentation()` is a pure selected-capability check: missing effect throws `InvalidDataException`; missing slot speed is already rejected by the native loader. It does not load a URI, advance a battle, consume randomness or change state. Resources are still mutable and must be consumed read-only. Format-valid unselected numeric teams remain outside these requirements.
 
 The group is the resolved **column1** mapping for the actual player battle sprite (`fight.c2055`), not a role, enemy target, equipment object or effect sprite's own ID. `global.c1978` resolves role base battle sprite then nonzero equipment overrides; current no-equipment author content declares sprite41→group0 itself. This is an authored mapping, not authentication of retail tables. `PAL_SpriteGetFrame` takes **INT** (`palcommon.c803`), not WORD. No new layout copy is needed: existing SHORT bottom-center positions and frame dimensions are the inputs to `fight.c2125/2208`'s effect bottom-center `enemy(x,y-height/3+10)`, then `(−16,+16)` per frame. Applying this algorithm remains D2-B.
 

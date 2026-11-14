@@ -46,38 +46,38 @@ public static class NativeBattleVisualProfile
                 "player position must equal the reference party layout origin g_rgPlayerPos[party-1][0] (battle.c:27-31)");
             Require(native.Teams is not null && native.Teams.All(x => x is not null), "visual Teams contains null");
             var teams = new Dictionary<int, PalBattleVisualTeam>();
-            var teamSlots = new Dictionary<int, CheckedBattleVisualEnemySlot[]>();
+            var teamSlots = new Dictionary<int, (int TargetId, Vector2I EnemyPosition)[]>();
             foreach (var team in native.Teams!)
             {
                 Require(teams.TryAdd(team.TeamId, team), "duplicate visual TeamId");
                 Require(enemyTeams.TryGetValue(team.TeamId, out var enemies)
                     && enemies.All(x => x is not null), "visual TeamId does not match a story battle team");
-                if (team.EnemySlots is { Length: > 0 } slots)
+                string teamPath = "visual Teams[TeamId=" + team.TeamId + "]";
+                var slots = team.EnemySlots ?? throw new InvalidDataException(teamPath + " requires visual EnemySlots");
+                Require(slots.Length > 0, teamPath + " requires visual EnemySlots, including a single-enemy team; prepare it explicitly");
+                Require(team.TargetId == -1 && team.EnemyPosition == new Vector2I(int.MinValue, int.MinValue),
+                    teamPath + ": legacy TargetId/EnemyPosition cannot be mixed with EnemySlots");
+                Require(team.EnemySpriteUri == "", teamPath + ": legacy team EnemySpriteUri cannot be mixed with EnemySlots; prepare per-slot sprite URIs explicitly");
+                Require(slots.All(x => x is not null), teamPath + ": visual EnemySlots contains null");
+                Require(slots.Length == enemies!.Count,
+                    teamPath + ": visual EnemySlots must match the story team's enemy slots one-to-one (slot order preserved)");
+                Require(team.IdleFrames == -1 && team.IdleAnimSpeed == -1 && team.MagicFrames == -1
+                    && team.AttackFrames == -1 && team.ActWaitFrames == -1,
+                    teamPath + ": legacy team frame metadata cannot be mixed with EnemySlots; prepare per-slot metadata explicitly");
+                var checkedSlots = new (int TargetId, Vector2I EnemyPosition)[slots.Length];
+                for (int slot = 0; slot < slots.Length; slot++)
                 {
-                    Require(slots.All(x => x is not null), "visual EnemySlots contains null");
-                    Require(slots.Length == enemies!.Count,
-                        "visual EnemySlots must match the story team's enemy slots one-to-one (slot order preserved)");
-                    var checkedSlots = new CheckedBattleVisualEnemySlot[slots.Length];
-                    for (int slot = 0; slot < slots.Length; slot++)
-                    {
-                        Require(slots[slot].TargetId == enemies[slot].Id,
-                            "visual EnemySlots TargetId must match the story enemy slot Id (not sprite ID)");
-                        Position(slots[slot].EnemyPosition);
-                        checkedSlots[slot] = new(slots[slot].TargetId, slots[slot].EnemyPosition);
-                    }
-                    teamSlots.Add(team.TeamId, checkedSlots);
+                    Require(slots[slot].TargetId == enemies[slot].Id,
+                        teamPath + ".EnemySlots[" + slot + "]: visual EnemySlots TargetId must match the story enemy slot Id (not sprite ID)");
+                    Position(slots[slot].EnemyPosition);
+                    Require(!string.IsNullOrWhiteSpace(slots[slot].EnemySpriteUri),
+                        teamPath + ".EnemySlots[" + slot + "]: EnemySpriteUri is required");
+                    Require(slots[slot].IdleFrames is > 0 and <= ushort.MaxValue && Word(slots[slot].IdleAnimSpeed)
+                        && Word(slots[slot].MagicFrames) && Word(slots[slot].AttackFrames) && Word(slots[slot].ActWaitFrames),
+                        teamPath + ".EnemySlots[" + slot + "]: invalid or missing enemy frame metadata WORDs");
+                    checkedSlots[slot] = (slots[slot].TargetId, slots[slot].EnemyPosition);
                 }
-                else
-                {
-                    // Legacy single pair. A multi-enemy story team must not collapse into it:
-                    // slot identities would be merged or silently dropped.
-                    Require(enemies!.Count == 1, "a multi-enemy story team requires visual EnemySlots, not the legacy single pair");
-                    Require(team.TargetId == enemies[0].Id, "visual TeamId/TargetId does not match story battle target (not sprite ID)");
-                    Position(team.EnemyPosition);
-                    teamSlots.Add(team.TeamId, [new(team.TargetId, team.EnemyPosition)]);
-                }
-                Require(team.IdleFrames is > 0 and <= ushort.MaxValue && Word(team.MagicFrames) && Word(team.AttackFrames)
-                    && Word(team.ActWaitFrames) && (team.IdleAnimSpeed == -1 || Word(team.IdleAnimSpeed)), "invalid enemy frame metadata WORDs");
+                teamSlots.Add(team.TeamId, checkedSlots);
             }
             Require(requirementTeamIds.ToHashSet().SetEquals(teams.Keys), "visual Teams must exactly cover selected battle teams");
             Require(native.ResourceSha256 is not null, "visual ResourceSha256 is required");
@@ -89,7 +89,7 @@ public static class NativeBattleVisualProfile
             var seeds = new[] { native.PlayerSpriteUri, native.PaletteUri }
                 .Concat(hasEffect ? new[] { native.AttackEffectSpriteUri } : Array.Empty<string>())
                 .Concat(native.NumberSpriteUri != "" ? new[] { native.NumberSpriteUri } : Array.Empty<string>())
-                .Concat(teams.Values.SelectMany(x => new[] { x.BackgroundUri, x.EnemySpriteUri }))
+                .Concat(teams.Values.SelectMany(x => new[] { x.BackgroundUri }.Concat(x.EnemySlots.Select(slot => slot.EnemySpriteUri))))
                 .Concat(Dependencies(uri)).ToArray();
             Require(!hashes.ContainsKey(uri), "visual root cannot hash itself");
             var dependencies = ContentDependencies(seeds, hashes);
@@ -122,10 +122,23 @@ public static class NativeBattleVisualProfile
                 background.Validate();
                 Require(!string.IsNullOrWhiteSpace(background.SourceIdentity) && background.Width == 320 && background.Height == 200,
                     "battle background requires SourceIdentity and 320x200 indexed planes");
-                var sprite = ReadAndValidateSprite(team.EnemySpriteUri);
-                Require(Enumerable.Range(0, team.IdleFrames + team.MagicFrames + team.AttackFrames)
-                    .All(sprite.Frames.Select(x => x.Index).ToHashSet().Contains), "enemy frame metadata references unaddressable frames");
-                checkedTeams.Add(team.TeamId, new(team, teamSlots[team.TeamId], background, sprite));
+                var slots = teamSlots[team.TeamId].Select((slot, ordinal) =>
+                {
+                    try
+                    {
+                        var metadata = team.EnemySlots[ordinal];
+                        var sprite = ReadAndValidateSprite(metadata.EnemySpriteUri);
+                        Require(Enumerable.Range(0, metadata.IdleFrames + metadata.MagicFrames + metadata.AttackFrames)
+                            .All(sprite.Frames.Select(x => x.Index).ToHashSet().Contains), "enemy frame metadata references unaddressable frames");
+                        return new CheckedBattleVisualEnemySlot(slot.TargetId, slot.EnemyPosition, sprite,
+                            metadata.IdleFrames, metadata.IdleAnimSpeed, metadata.MagicFrames, metadata.AttackFrames, metadata.ActWaitFrames);
+                    }
+                    catch (InvalidDataException error)
+                    {
+                        throw new InvalidDataException("visual Teams[TeamId=" + team.TeamId + "].EnemySlots[" + ordinal + "]: " + error.Message, error);
+                    }
+                }).ToArray();
+                checkedTeams.Add(team.TeamId, new(team.TeamId, slots, background));
             }
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
             return new(native, player, paletteResource, effect, numbers, checkedTeams, hashes);
@@ -407,7 +420,6 @@ public sealed class CheckedBattleVisualProfile
     public void RequireReferencePresentation()
     {
         if (AttackEffectSprite is null) throw new InvalidDataException("reference presentation requires attack effect metadata");
-        if (Teams.Values.Any(t => t.IdleAnimSpeed < 0)) throw new InvalidDataException("reference presentation requires selected enemy IdleAnimSpeed");
     }
     public IReadOnlyDictionary<int, CheckedBattleVisualTeam> Teams { get; }
     public IReadOnlyDictionary<string, string> ResourceSha256 { get; }
@@ -443,25 +455,13 @@ public sealed class CheckedBattleVisualTeam
     public int TeamId { get; }
     /// <summary>Story-slot-ordered bindings; duplicate target IDs stay separate slots.</summary>
     public IReadOnlyList<CheckedBattleVisualEnemySlot> EnemySlots { get; }
-    public int TargetId => SingleSlot().TargetId;
-    public Vector2I EnemyPosition => SingleSlot().EnemyPosition;
-    public int IdleFrames { get; }
-    public int IdleAnimSpeed { get; }
-    public int MagicFrames { get; }
-    public int AttackFrames { get; }
-    public int ActWaitFrames { get; }
     public PalDialogueIndexedImage Background { get; }
-    public PalSprite EnemySprite { get; }
-    private CheckedBattleVisualEnemySlot SingleSlot() => EnemySlots.Count == 1 ? EnemySlots[0]
-        : throw new InvalidOperationException("Single-slot projection cannot address multi-enemy visual slots; use EnemySlots.");
-    internal CheckedBattleVisualTeam(PalBattleVisualTeam native, CheckedBattleVisualEnemySlot[] slots,
-        PalDialogueIndexedImage background, PalSprite enemy)
+    internal CheckedBattleVisualTeam(int teamId, CheckedBattleVisualEnemySlot[] slots, PalDialogueIndexedImage background)
     {
-        TeamId = native.TeamId; EnemySlots = Array.AsReadOnly(slots);
-        IdleAnimSpeed = native.IdleAnimSpeed;
-        IdleFrames = native.IdleFrames; MagicFrames = native.MagicFrames; AttackFrames = native.AttackFrames; ActWaitFrames = native.ActWaitFrames;
-        Background = background; EnemySprite = enemy;
+        TeamId = teamId; EnemySlots = Array.AsReadOnly(slots); Background = background;
     }
 }
 
-public sealed record CheckedBattleVisualEnemySlot(int TargetId, Vector2I EnemyPosition);
+/// <summary>One ordinal binding. Prepared sprite data may be shared; live presentation state may not.</summary>
+public sealed record CheckedBattleVisualEnemySlot(int TargetId, Vector2I EnemyPosition, PalSprite EnemySprite,
+    int IdleFrames, int IdleAnimSpeed, int MagicFrames, int AttackFrames, int ActWaitFrames);

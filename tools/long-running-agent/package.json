@@ -1,0 +1,23 @@
+{
+  "name": "@godot-pal/long-running-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Explicitly authorized, durable ticket execution with the Pi Agent SDK",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test policy.test.ts checks.test.ts host.test.ts github.test.ts",
+    "test:unit": "node --test policy.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "typebox": "1.3.27"
+  }
+}

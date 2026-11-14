@@ -14,6 +14,62 @@ namespace Pal.Game.Tests;
 public class NativeFirstMandatoryBattleProfileTests
 {
     [TestCase]
+    public void NativeVisualRequiresSpriteUriForEveryEnemySlot()
+    {
+        using var fixture = new NativeBattleVisualProfileFixture(party: true);
+        fixture.Team.EnemySlots[1].EnemySpriteUri = "";
+        fixture.Save();
+        InvalidDataException? failure = null;
+        try { fixture.Load(); }
+        catch (InvalidDataException caught) { failure = caught; }
+        AssertThat(failure is not null)
+            .OverrideFailureMessage("Native slot 1 must require its own sprite URI instead of accepting the team's sprite.").IsTrue();
+        AssertThat(failure!.Message.Contains("EnemySlots[1]", StringComparison.Ordinal)).IsTrue();
+        AssertThat(failure.Message.Contains("EnemySpriteUri", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [TestCase]
+    public void NativeVisualLoadsDistinctSlotSpritesAndAuthenticatesBothDependencies()
+    {
+        using var fixture = new NativeBattleVisualProfileFixture(party: true);
+        string secondUri = fixture.Root + "/SecondEnemy.tres";
+        var second = (PalSprite)fixture.Enemy.Duplicate(true);
+        second.SpriteId = 98;
+        second.Source["chunk"] = 98;
+        fixture.Team.EnemySlots[1].EnemySpriteUri = secondUri;
+        NativeProfileFixture.SaveResource(second, secondUri);
+        fixture.Profile.ResourceSha256[secondUri] = Godot.FileAccess.GetSha256(secondUri);
+        fixture.Save();
+        var loaded = fixture.Load();
+        AssertThat(loaded.Teams[18].EnemySlots[0].EnemySprite.SpriteId).IsEqual(97);
+        AssertThat(loaded.Teams[18].EnemySlots[1].EnemySprite.SpriteId).IsEqual(98);
+        AssertThat(loaded.Teams[18].EnemySlots[0].TargetId).IsEqual(7);
+        AssertThat(loaded.Teams[18].EnemySlots[1].TargetId).IsEqual(7);
+        AssertThat(loaded.ResourceSha256.ContainsKey(secondUri)).IsTrue();
+
+        void Reject(string expected)
+        {
+            InvalidDataException? failure = null;
+            try { fixture.Load(); }
+            catch (InvalidDataException caught) { failure = caught; }
+            AssertThat(failure is not null).IsTrue();
+            AssertThat(failure!.Message.Contains(expected, StringComparison.Ordinal)).IsTrue();
+        }
+        fixture.Profile.ResourceSha256.Remove(secondUri); fixture.Save();
+        Reject(secondUri);
+        fixture.Profile.ResourceSha256[secondUri] = new string('0', 64); fixture.Save();
+        Reject(secondUri);
+        fixture.Profile.ResourceSha256[secondUri] = Godot.FileAccess.GetSha256(secondUri);
+        fixture.Team.EnemySpriteUri = fixture.Team.EnemySlots[0].EnemySpriteUri; fixture.Save();
+        Reject("legacy team EnemySpriteUri");
+        fixture.Team.EnemySpriteUri = "";
+        second.FrameCount = 2; second.Frames.RemoveAt(2);
+        NativeProfileFixture.SaveResource(second, secondUri);
+        fixture.Profile.ResourceSha256[secondUri] = Godot.FileAccess.GetSha256(secondUri); fixture.Save();
+        Reject("EnemySlots[1]: enemy frame metadata references unaddressable frames");
+    }
+
+    [TestCase]
     public void StrictNativeProfileLoadsExactCoreIdentityAndCreatesIndependentSessions()
     {
         using var fixture = new NativeBattleProfileFixture();
@@ -27,6 +83,92 @@ public class NativeFirstMandatoryBattleProfileTests
         AssertThat(second.State.Roles[0].Hp).IsEqual(150);
         AssertThat(second.State.World.EventObjects[0].State).IsEqual(2);
         AssertThat(loaded.Profile.ContextSha256).IsEqual(fixture.Core.ContextSha256);
+    }
+
+    [TestCase(Timeout = 280000)]
+    public void BoundEnemySpriteSourceMustMatchFrozenArchiveEvenWithFreshHashes()
+    {
+        using var battleFixture = new NativeBattleProfileFixture();
+        var statics = battleFixture.Static;
+        var palette = ResourceLoader.Load<PalPalette>("res://Samples/AuthoredBattle/Static/Palette.tres",
+            cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+        statics.MapScene.Data.Palette = palette;
+        statics.SavePacked();
+        string staticProfile = statics.ResourceRoot + "/Profile.tres";
+        NativeProfileFixture.SaveResource(statics.Profile, staticProfile);
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(statics.ResourceRoot + "/Palettes"));
+        NativeProfileFixture.SaveResource(palette, statics.ResourceRoot + "/Palettes/Palette.tres");
+        // The production Prepare builds the complete frozen team18/ABC97 binding, not a
+        // partial profile that could reject before reaching the enemy source check.
+        using var fixture = new SyntheticFirstBattleFixture(statics, statics.ResourceRoot, staticProfile, lost: true);
+        var initial = NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri);
+        AssertThat(initial.Visual!.Teams[18].EnemySlots.Count).IsEqual(2);
+        var native = ResourceLoader.Load<PalFirstMandatoryBattleProfile>(fixture.ProfileUri,
+            cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+        var visual = ResourceLoader.Load<PalBattleVisualProfile>(native.VisualUri,
+            cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+        string enemyUri = visual.Teams.Single().EnemySlots[0].EnemySpriteUri;
+        var enemy = ResourceLoader.Load<PalSprite>(enemyUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+        AssertThat(enemy.SpriteId).IsEqual(97);
+        AssertThat(enemy.Source["identity"].AsString()).IsEqual("ABC97");
+        void SaveWithFreshHash()
+        {
+            NativeProfileFixture.SaveResource(enemy, enemyUri);
+            visual.ResourceSha256[enemyUri] = Godot.FileAccess.GetSha256(enemyUri);
+            NativeProfileFixture.SaveResource(visual, native.VisualUri);
+        }
+        foreach (string defect in new[] { "wrong", "missing", "non-string", "empty", "case" })
+        {
+            // All other declaration/plane/frame bytes and SpriteId stay valid. Hashes bind
+            // the new bytes, so rejection must be source consistency, not stale hashes.
+            enemy.Source["identity"] = "ABC97";
+            switch (defect)
+            {
+                case "wrong": enemy.Source["identity"] = "ABC98"; break;
+                case "missing": enemy.Source.Remove("identity"); break;
+                case "non-string": enemy.Source["identity"] = 97; break;
+                case "empty": enemy.Source["identity"] = ""; break;
+                case "case": enemy.Source["identity"] = "abc97"; break;
+            }
+            SaveWithFreshHash();
+            InvalidDataException? failure = null;
+            try { NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri); }
+            catch (InvalidDataException caught) { failure = caught; }
+            AssertThat(failure is not null)
+                .OverrideFailureMessage($"Frozen ABC97 source must reject {defect} despite a fresh visual hash.").IsTrue();
+            AssertThat(failure!.Message.Contains(native.VisualUri, StringComparison.Ordinal)).IsTrue();
+            AssertThat(failure.Message.Contains("enemy slot 0 sprite source identity must be ABC97", StringComparison.Ordinal)).IsTrue();
+        }
+        // Same URI can load again after the independently specified declaration is restored;
+        // the generic Story loader's arbitrary Source declarations are not tightened here.
+        enemy.Source["identity"] = "ABC97";
+        SaveWithFreshHash();
+        var restored = NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri);
+        foreach (var slot in restored.Visual!.Teams[18].EnemySlots)
+        {
+            AssertThat(slot.EnemySprite.SpriteId).IsEqual(97);
+            AssertThat(slot.EnemySprite.Source["identity"].AsString()).IsEqual("ABC97");
+        }
+        // A separate native leaf for slot 1 crosses the frozen proof domain even when
+        // slot 0 and both SpriteIds are valid and the complete new byte hashes match.
+        string secondUri = enemyUri.Replace("Enemy.tres", "SecondEnemy.tres", StringComparison.Ordinal);
+        var second = (PalSprite)enemy.Duplicate(true);
+        second.Source["identity"] = "ABC98";
+        NativeProfileFixture.SaveResource(second, secondUri);
+        visual.Teams.Single().EnemySlots[1].EnemySpriteUri = secondUri;
+        visual.ResourceSha256[secondUri] = Godot.FileAccess.GetSha256(secondUri);
+        NativeProfileFixture.SaveResource(visual, native.VisualUri);
+        InvalidDataException? secondFailure = null;
+        try { NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri); }
+        catch (InvalidDataException caught) { secondFailure = caught; }
+        AssertThat(secondFailure is not null).IsTrue();
+        AssertThat(secondFailure!.Message.Contains("enemy slot 1 sprite source identity must be ABC97", StringComparison.Ordinal)).IsTrue();
+        second.Source["identity"] = "ABC97";
+        NativeProfileFixture.SaveResource(second, secondUri);
+        visual.ResourceSha256[secondUri] = Godot.FileAccess.GetSha256(secondUri);
+        NativeProfileFixture.SaveResource(visual, native.VisualUri);
+        var secondRestored = NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri);
+        AssertThat(secondRestored.Visual!.Teams[18].EnemySlots[1].EnemySprite.Source["identity"].AsString()).IsEqual("ABC97");
     }
 
     [TestCase("version")]

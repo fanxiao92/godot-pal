@@ -16,6 +16,7 @@ public partial class Main
     private CheckedBattleVisualTeam? storyTeam;
     private GodotBattleRandom? storyRandom;
     private PalStoryBattleView? storyView;
+    internal Func<PalStoryBattleView> StoryBattleViewFactory { get; set; } = () => new PalStoryBattleView();
     private TriggerBattleRequest? storyRequest;
     private bool battleConfirm;
     // Enemy-slot highlight while a member picks a target; reference selection has no
@@ -41,7 +42,7 @@ public partial class Main
     private StoryEnemyAttackPresentation? enemyPresentation;
     private StoryPlayerAttackPresentation? playerPresentation;
     private int effectEnemyHeight;
-    private StoryEnemyIdleState? enemyIdle;
+    private StoryEnemyIdleState[]? enemyIdle;
     private List<string>? settlementLines;
     private int settlementStage;
     private uint settlementShownAt;
@@ -140,21 +141,21 @@ public partial class Main
         if (storyRequest is null)
         {
             if (Dialogue?.Session?.PendingBattle is not { } pending) return false;
-            var view = new PalStoryBattleView();
+            var view = StoryBattleViewFactory();
             try { view.Initialize(story, storyVisual!, pending.EnemyTeamId); }
             catch { view.ReleaseTextures(); view.Free(); throw; }
             var team = storyVisual!.Teams[pending.EnemyTeamId];
             storyTeam = team;
-            enemyIdle = new(team.IdleFrames, team.IdleAnimSpeed);
+            enemyIdle = team.EnemySlots.Select(slot => new StoryEnemyIdleState(slot.IdleFrames, slot.IdleAnimSpeed)).ToArray();
             // battle.c1782 startup, then the immediately due first StartFrame (battle.c763–792).
-            enemyIdle.Advance(); enemyIdle.Advance();
+            AdvanceStoryEnemies(); AdvanceStoryEnemies();
             outerClock = StoryBattlePoseClock.Start(now); outerDue = false;
             storyRequest = pending; storyView = view; battleConfirm = false; settlementPresented = false;
             storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
             StoryBattleMode = StoryBattlePresentation.AttackMenu;
             Display!.SetProcess(false);
             mapScene!.Visible = false; AddChild(view);
-            view.Present(pending.Lifecycle.Current.Combat, StoryBattleMode.Value, enemyIdle.Frame, enemyIdle.Counter, highlightedEnemySlot: storyTargetSlot);
+            view.Present(pending.Lifecycle.Current.Combat, StoryBattleMode.Value, enemyIdle, highlightedEnemySlot: storyTargetSlot);
             return true;
         }
         var lifecycle = storyRequest.Lifecycle;
@@ -163,7 +164,7 @@ public partial class Main
             var nextOuter = outerClock.Advance(now);
             if (outerDue || nextOuter != outerClock)
             {
-                enemyIdle!.Advance(); outerDue = false; outerClock = StoryBattlePoseClock.Start(now);
+                AdvanceStoryEnemies(); outerDue = false; outerClock = StoryBattlePoseClock.Start(now);
             }
         }
         bool confirm = battleConfirm; battleConfirm = false;
@@ -260,11 +261,12 @@ public partial class Main
                 feedbackBeforeHp = action.Attacker == ClassicBattleSide.Player ? beforeEnemyHp : beforeHp;
                 var combat = lifecycle.Current.Combat;
                 var playerOrigins = storyVisual!.PlayerOrigins(combat.Players.Count);
-                enemyPresentation = action.Attacker != ClassicBattleSide.Enemy ? null : new(
-                    storyTeam!.IdleFrames, storyTeam.MagicFrames, storyTeam.AttackFrames, storyTeam.ActWaitFrames,
-                    playerOrigins[action.TargetIndex], storyTeam.EnemySlots[action.ActorIndex].EnemyPosition, beforeHp,
+                var actingEnemy = action.Attacker == ClassicBattleSide.Enemy ? storyTeam!.EnemySlots[action.ActorIndex] : null;
+                enemyPresentation = actingEnemy is null ? null : new(
+                    actingEnemy.IdleFrames, actingEnemy.MagicFrames, actingEnemy.AttackFrames, actingEnemy.ActWaitFrames,
+                    playerOrigins[action.TargetIndex], actingEnemy.EnemyPosition, beforeHp,
                     combat.Players[action.TargetIndex].Hp, story.BattleContent.Players[action.TargetIndex].MaxHp,
-                    action, enemyIdle!.Frame);
+                    action, enemyIdle![action.ActorIndex].Frame);
                 playerPresentation = action.Attacker != ClassicBattleSide.Player ? null : new(
                     playerOrigins[action.ActorIndex], storyTeam!.EnemySlots[action.TargetIndex].EnemyPosition,
                     beforeEnemyHp, combat.Enemies[action.TargetIndex].Hp,
@@ -284,7 +286,7 @@ public partial class Main
                 if (poseClock.Pose < poses) AdvanceStoryGesture(poseClock.Pose);
                 if (poseClock.Pose < poses) break;
                 // Enemy action's final UpdateFighters is not another timed pose (fight.c5137).
-                if (enemyPresentation is not null) enemyIdle!.Advance();
+                if (enemyPresentation is not null) AdvanceStoryEnemies();
                 if (fleeOrigin is not null) fleeOrigin = null;
                 if (lifecycle.Completion is not null || lifecycle.VictorySettlement is not null || lifecycle.PendingBattleEndScript is not null)
                 {
@@ -342,7 +344,7 @@ public partial class Main
                 break;
         }
         var shownEnemy = StoryBattleMode == StoryBattlePresentation.Feedback ? enemyPresentation?.At(poseClock.Pose) : null;
-        if (shownEnemy is { } shown) shownEnemy = shown with { EnemyFrame = enemyIdle!.Frame };
+        if (shownEnemy is { } shown) shownEnemy = shown with { EnemyFrame = enemyIdle![lifecycle.Current.Combat.LastAction!.ActorIndex].Frame };
         var fleeSnapshot = StoryBattleMode == StoryBattlePresentation.Feedback && fleeOrigin is { } fleeAt
             ? (StoryPlayerFleeSnapshot?)StoryPlayerFleePresentation.At(poseClock.Pose, fleeAt, fleePartyIndex) : null;
         if (StoryBattleMode == StoryBattlePresentation.Feedback && fleeSnapshot is null)
@@ -366,7 +368,7 @@ public partial class Main
         }
         string? settlementLine = StoryBattleMode == StoryBattlePresentation.Settlement && settlementLines is { } current
             ? current[Math.Clamp(settlementStage, 0, current.Count - 1)] : null;
-        storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, enemyIdle!.Frame, enemyIdle.Counter,
+        storyView!.Present(lifecycle.Current.Combat, StoryBattleMode!.Value, enemyIdle!,
             shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null,
             storyNumbers.At(now), fleeSnapshot is null ? storyNumbers.LabelAt(now)
                 : poseClock.Pose >= StoryPlayerFleePresentation.LabelPose ? PalStoryBattleView.EscapeFailWord : null,
@@ -413,7 +415,7 @@ public partial class Main
         Display!.SetProcess(true);
         Dialogue!.StartBattleHook();
         storyView!.Present(storyRequest!.Lifecycle.Current.Combat, StoryBattleMode.Value,
-            enemyIdle!.Frame, enemyIdle!.Counter, highlightedEnemySlot: storyTargetSlot);
+            enemyIdle!, highlightedEnemySlot: storyTargetSlot);
     }
 
     private void BeginStoryBattleEndScript()
@@ -425,7 +427,7 @@ public partial class Main
         Display!.SetProcess(true);
         Dialogue!.StartBattleEndScript();
         storyView!.Present(storyRequest!.Lifecycle.Current.Combat, StoryBattleMode.Value,
-            enemyIdle!.Frame, enemyIdle!.Counter, highlightedEnemySlot: storyTargetSlot);
+            enemyIdle!, highlightedEnemySlot: storyTargetSlot);
     }
 
     /// <summary>The victory boundary after the final action feedback: the authored settlement boxes
@@ -480,7 +482,7 @@ public partial class Main
     private void PresentStorySettlement()
     {
         storyView!.Present(storyRequest!.Lifecycle.Current.Combat, StoryBattlePresentation.Settlement,
-            enemyIdle!.Frame, enemyIdle!.Counter, highlightedEnemySlot: storyTargetSlot,
+            enemyIdle!, highlightedEnemySlot: storyTargetSlot,
             settlementLine: settlementLines![settlementStage]);
     }
 
@@ -513,6 +515,11 @@ public partial class Main
         CompleteFirstBattleTrigger();
     }
 
+    private void AdvanceStoryEnemies()
+    {
+        foreach (var idle in enemyIdle!) idle.Advance();
+    }
+
     private void AdvanceStoryGesture(int pose)
     {
         if (playerPresentation is not null)
@@ -520,16 +527,18 @@ public partial class Main
             // Four TRUE windup, three TRUE approach, three manual FX, three TRUE recoil,
             // UpdateFighters at13 followed by three TRUE tail frames.
             // ShowPlayerAttackAnim reads target height after windup, before its first TRUE approach delay.
-            if (pose == 4) effectEnemyHeight = storyTeam!.EnemySprite.Frames
-                .Single(f => f.Index == enemyIdle!.Frame).Height;
-            if (pose == 13) enemyIdle!.Advance();
-            enemyIdle!.Advance();
+            int target = storyRequest!.Lifecycle.Current.Combat.LastAction!.TargetIndex;
+            if (pose == 4) effectEnemyHeight = storyTeam!.EnemySlots[target].EnemySprite.Frames
+                .Single(f => f.Index == enemyIdle![target].Frame).Height;
+            if (pose == 13) AdvanceStoryEnemies();
+            AdvanceStoryEnemies();
         }
         else if (enemyPresentation is { } enemy)
         {
             long tail = enemy.Duration - 5;
-            if (pose < tail) enemyIdle!.SetFrame(enemy.At(pose).EnemyFrame);
-            else enemyIdle!.Advance();
+            int actor = storyRequest!.Lifecycle.Current.Combat.LastAction!.ActorIndex;
+            if (pose < tail) enemyIdle![actor].SetFrame(enemy.At(pose).EnemyFrame);
+            else AdvanceStoryEnemies();
         }
         // Flee feedback (authored presentation): the escaper steps while the held scene
         // otherwise freezes; the enemy idle resumes with the outer clock after the label.

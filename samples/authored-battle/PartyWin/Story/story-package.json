@@ -23,28 +23,34 @@
       {
         "teamId": 18,
         "backgroundUri": "res://Samples/AuthoredBattle/Visual/Background.tres",
-        "enemySpriteUri": "res://Samples/AuthoredBattle/Visual/Enemy.tres",
         "enemies": [
           {
             "targetId": 7,
             "enemyPosition": [
               100,
               120
-            ]
+            ],
+            "enemySpriteUri": "res://Samples/AuthoredBattle/Visual/Enemy.tres",
+            "idleFrames": 1,
+            "idleAnimSpeed": 2,
+            "magicFrames": 1,
+            "attackFrames": 1,
+            "actWaitFrames": 0
           },
           {
             "targetId": 7,
             "enemyPosition": [
               128,
               104
-            ]
+            ],
+            "enemySpriteUri": "res://Samples/AuthoredBattle/Visual/Enemy.tres",
+            "idleFrames": 1,
+            "idleAnimSpeed": 2,
+            "magicFrames": 1,
+            "attackFrames": 1,
+            "actWaitFrames": 0
           }
-        ],
-        "idleFrames": 1,
-        "magicFrames": 1,
-        "attackFrames": 1,
-        "actWaitFrames": 0,
-        "idleAnimSpeed": 2
+        ]
       }
     ],
     "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",

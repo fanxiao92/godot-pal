@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
@@ -12,12 +13,18 @@ internal sealed class AuthoredStoryFixture : IDisposable
 {
     private readonly string input = Path.Combine(Path.GetTempPath(), "pal-story-c-" + Guid.NewGuid().ToString("N"));
     internal string Root { get; } = "res://Assets/RuntimeTests/story-c-" + Guid.NewGuid().ToString("N");
+    internal string InputDirectory => input;
     internal string StoryUri { get; }
     internal string VisualUri { get; }
     private string? numericInput;
     internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null,
-        bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null)
+        bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
+        bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false)
     {
+        if (heterogeneousEnemies && scenario != "PartyWin")
+            throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
+        if (singlePlayerTwoEnemies && scenario != "PartyWin")
+            throw new ArgumentException("The single-player/two-enemy derivation requires PartyWin.", nameof(singlePlayerTwoEnemies));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -40,7 +47,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -60,6 +67,12 @@ internal sealed class AuthoredStoryFixture : IDisposable
                     data["roles"]![0]!["hp"] = memberHp;
                     data["players"]![0]!["hp"] = memberHp;
                 }
+                if (singlePlayerTwoEnemies)
+                {
+                    // TriggerBattleContent requires matching RoleId sets in all three sections.
+                    foreach (string section in new[] { "roles", "players", "growth" })
+                        data[section]!.AsArray().RemoveAt(1);
+                }
                 if (removeDualAttack)
                 {
                     foreach (string section in new[] { "roles", "players" })
@@ -73,14 +86,50 @@ internal sealed class AuthoredStoryFixture : IDisposable
             Directory.CreateDirectory(Path.Combine(input, "events"));
             foreach (string path in Directory.GetFiles(Path.Combine(source, "Story/events"))) File.Copy(path, Path.Combine(input, "events", Path.GetFileName(path)));
             var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "Story/story-package.json")))!;
+            if (singlePlayerTwoEnemies)
+            {
+                metadata["visual"]!["playerPosition"] = new JsonArray(240, 170);
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned one-player/two-enemy derivation; both duplicate id7 enemy slots retained, not retail data.";
+            }
+            if (heterogeneousEnemies)
+            {
+                // Owned native leaves are inputs to formal Prepare, never edits of its output.
+                // Match the existing synthetic 97/98 frame construction; Source is not authentication.
+                for (int slot = 0; slot < 2; slot++)
+                {
+                    int id = 97 + slot, count = slot == 0 ? 3 : 4;
+                    var sprite = new Pal.Game.Resources.PalSprite { SpriteId = id, FrameCount = count, DecodedByteLength = 200,
+                        Source = new Godot.Collections.Dictionary { ["archive"] = "test-owned heterogeneous art, not authenticated", ["chunk"] = id } };
+                    for (int frame = 0; frame < count; frame++)
+                    {
+                        int width = slot == 0 ? 2 : 3, height = slot == 0 ? 1 : (frame + 1) * 3;
+                        sprite.Frames.Add(new Pal.Game.Resources.PalFrame { Index = frame, SourceOffset = 2 + frame * 4,
+                            Width = width, Height = height,
+                            Indices = System.Linq.Enumerable.Repeat((byte)(4 + slot), width * height).ToArray(),
+                            Alpha = System.Linq.Enumerable.Repeat((byte)255, width * height).ToArray() });
+                    }
+                    string uri = Root + $"/Enemy{id}.tres";
+                    NativeProfileFixture.SaveResource(sprite, uri);
+                    var enemy = metadata["visual"]!["teams"]![0]!["enemies"]![slot]!;
+                    enemy["enemySpriteUri"] = uri;
+                    enemy["idleFrames"] = slot == 0 ? 1 : 2;
+                    enemy["idleAnimSpeed"] = slot == 0 ? 0 : 3;
+                    enemy["magicFrames"] = slot == 0 ? 1 : 0;
+                    enemy["attackFrames"] = slot == 0 ? 1 : 2;
+                    enemy["actWaitFrames"] = slot == 0 ? 0 : 2;
+                }
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned heterogeneous 97/98 native art and per-slot metadata; not retail data.";
+            }
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")
             {
-                metadata["visual"]!.AsObject().Remove("attackEffectSpriteUri");
-                metadata["visual"]!.AsObject().Remove("attackEffectIndex");
+                RemoveRequired(metadata["visual"]!.AsObject(), "attackEffectSpriteUri");
+                RemoveRequired(metadata["visual"]!.AsObject(), "attackEffectIndex");
             }
-            if (missingPresentation == "number") metadata["visual"]!.AsObject().Remove("numberSpriteUri");
-            if (missingPresentation == "idle") metadata["visual"]!["teams"]![0]!.AsObject().Remove("idleAnimSpeed");
+            if (missingPresentation == "number") RemoveRequired(metadata["visual"]!.AsObject(), "numberSpriteUri");
+            if (missingPresentation == "idle") RemoveRequired(metadata["visual"]!["teams"]![0]!["enemies"]![0]!.AsObject(), "idleAnimSpeed");
             if (enemyHp is { } hp2)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + $" Test-owned numeric copy: team18/enemy7 hp={hp2} only; not retail data.";            metadata["staticResources"] = Root + "/Static";
@@ -91,6 +140,10 @@ internal sealed class AuthoredStoryFixture : IDisposable
             StoryUri = prepared.StoryUri; VisualUri = prepared.VisualUri;
         }
         catch { Dispose(); throw; }
+    }
+    private static void RemoveRequired(JsonObject owner, string field)
+    {
+        if (!owner.Remove(field)) throw new InvalidOperationException($"Fixture mutation requires existing field: {field}");
     }
     private void AddPartyHpMpPrefix(int amount, JsonNode metadata)
     {
@@ -151,6 +204,12 @@ internal sealed class AuthoredStoryFixture : IDisposable
         File.WriteAllText(arenaPath, arena.ToJsonString());
         File.WriteAllText(indexPath, index.ToJsonString());
     }
+
+    internal string[] Snapshot() => System.Linq.Enumerable.Order(
+        Directory.GetFiles(input, "*", SearchOption.AllDirectories)
+            .Concat(Directory.GetFiles(ProjectSettings.GlobalizePath(Root), "*", SearchOption.AllDirectories)), StringComparer.Ordinal)
+        .Select(path => path + ":" + Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))))
+        .ToArray();
 
     public void Dispose()
     {

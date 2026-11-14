@@ -21,7 +21,7 @@
 ## 小票与协调
 
 - 首批 #127–#147 共 21 票，不代表完整 A/B；后续 A/B 71 个规划单元尚待核实实际 Interface、完整文件预算和验收后发布。C 子票待 A/B 实际状态矩阵冻结，空子票列表不代表完成。
-- 每票单一主要行为 seam，完整影响优先 ≤5、最多 10 文件；超限先拆，不按 commit 重新计数。三个批准 seam：公开 Core、正式 Main/SceneRunner、正式 CLI/Prepare/原生加载。
+- 每票单一主要行为 seam，完整影响集以实时 Issue 及[单任务执行](../../agents/task-execution.md)为准；超过10文件是聚焦/完整性风险信号，不按 commit 重置，也不为数量遗漏消费者。显式票级路径/权限边界仍有效。三个批准 seam：公开 Core、正式 Main/SceneRunner、正式 CLI/Prepare/原生加载。
 - 连续模式：每票 fresh goal/session，固定最新已验证 integration tip，串行源码 writer；只读 discovery 可并行。integration 工作区仅协调者写入。每票 TDD 与完整 impact set 后核对实际 HEAD/diff/收据，再本地集成并推进 frontier。
 - Godot、Prepare、GdUnit、包含它们的 solution 全局串行；未知 Godot PID/Name 需确认归属。崩溃、中止、timeout、未知退出或报告不完整时保留现场并停止，不自动重跑、续跑、加时、放宽断言或升级工具链。
 - 阶段与完整 M6 candidate 各留对应独立评审/必要修复证据，普通 checkpoint 不重复 high 双审。Core、平台 I/O、Main、真实资源、GPU、人工及远端 CI 证据分列。
@@ -33,3 +33,10 @@
 持久执行索引：`C:/evidence/m6/execution/current.json`；实时 Issue 快照与评论/原生关系：同目录 `live/`；规划交接仅为派生索引，不替代 GitHub。每票记录固定 base、候选、差异、验证命令/退出/原件、唯一 writer 和未执行项。
 
 尚未授权 push、创建/更新 PR、合入 main、关闭父规格、删除分支/worktree或修改合并保护。Windows 人工验收由用户实际执行。到闸门保存 checkpoint 并请求对应授权，不将本地候选冒称主线交付或整个 M6 完成。
+
+## 本机后续执行入口
+
+既有候选在专用本地集成分支经必要验证和独立 Standards/Spec 后形成干净基线，再使用
+[long-running-agent](../../../tools/long-running-agent/README.md) 按实时 GitHub 队列推进。
+不启用旧 loop；工具没有可执行叶时停止，不通过改标签、接管已分配票或关闭票制造工作。
+本段不授予提交、引擎、远端写或恢复旧 #165/#168 的权限；历史授权按原证据保留，不向新执行自动续租。

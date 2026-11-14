@@ -451,18 +451,18 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
         {
             TeamId = 18, TargetId = -1,
             BackgroundUri = Localize("Leaves/Background.tres"),
-            EnemySpriteUri = Localize("Leaves/Enemy.tres"),
             EnemyPosition = new Vector2I(int.MinValue, int.MinValue),
             EnemySlots =
             [
-                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new Vector2I(70, 130) },
-                new PalBattleVisualEnemySlot { TargetId = 8, EnemyPosition = new Vector2I(140, 106) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new Vector2I(70, 130), EnemySpriteUri = Localize("Leaves/Enemy.tres"),
+                    IdleFrames = 1, IdleAnimSpeed = 2, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 1 },
+                new PalBattleVisualEnemySlot { TargetId = 8, EnemyPosition = new Vector2I(140, 106), EnemySpriteUri = Localize("Leaves/Enemy.tres"),
+                    IdleFrames = 1, IdleAnimSpeed = 2, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 1 },
             ],
-            IdleFrames = 1, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 1, IdleAnimSpeed = 2,
         };
         visual.Teams = [team];
-        foreach (string uri in new[] { visual.PlayerSpriteUri, visual.PaletteUri, team.BackgroundUri, team.EnemySpriteUri,
-            visual.AttackEffectSpriteUri, visual.NumberSpriteUri })
+        foreach (string uri in new[] { visual.PlayerSpriteUri, visual.PaletteUri, team.BackgroundUri,
+            visual.AttackEffectSpriteUri, visual.NumberSpriteUri }.Concat(team.EnemySlots.Select(slot => slot.EnemySpriteUri)).Distinct(StringComparer.Ordinal))
             visual.ResourceSha256[uri] = Godot.FileAccess.GetSha256(uri);
         string path = Localize("Visual.tres");
         NativeProfileFixture.SaveResource(visual, Path.Combine(root, "Visual.tres"));

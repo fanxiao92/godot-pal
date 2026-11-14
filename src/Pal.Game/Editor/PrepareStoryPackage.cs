@@ -64,7 +64,11 @@ public partial class PrepareStoryPackage : Node
             }
             Require(texts.ContainsKey("story-package.json") && texts.ContainsKey("events/index.json"), "story input requires story-package.json and events/index.json");
             using var metadata = JsonDocument.Parse(texts["story-package.json"]);
-            var (story, visual) = ReadMetadata(metadata.RootElement);
+            PalStoryProfile story;
+            PalBattleVisualProfile visual;
+            try { (story, visual) = ReadMetadata(metadata.RootElement); }
+            catch (InvalidDataException error)
+            { throw new InvalidDataException(Path.Combine(input, "story-package.json") + ": " + error.Message, error); }
             using var index = JsonDocument.Parse(texts["events/index.json"]);
             var eventTexts = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var file in index.RootElement.GetProperty("files").EnumerateArray())
@@ -83,7 +87,7 @@ public partial class PrepareStoryPackage : Node
             string[] visualSeeds = new[] { visual.PlayerSpriteUri, visual.PaletteUri }
                 .Concat(visual.AttackEffectSpriteUri != "" ? new[] { visual.AttackEffectSpriteUri } : Array.Empty<string>())
                 .Concat(visual.NumberSpriteUri != "" ? new[] { visual.NumberSpriteUri } : Array.Empty<string>())
-                .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri, t.EnemySpriteUri })).ToArray();
+                .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri }.Concat(t.EnemySlots.Select(slot => slot.EnemySpriteUri)))).ToArray();
             foreach (string root in new[] { story.StaticResources, story.DialogueDirectory })
             {
                 string path = DataPath(root, directory: true);
@@ -251,38 +255,38 @@ public partial class PrepareStoryPackage : Node
         if (v.TryGetProperty("attackEffectIndex", out _)) visual.AttackEffectIndex = Int(v, "attackEffectIndex");
         Require((visual.AttackEffectSpriteUri != "") == v.TryGetProperty("attackEffectIndex", out _), "attack effect fields must be paired");
         Require(v.GetProperty("teams").ValueKind == JsonValueKind.Array, "teams must be an array");
-        visual.Teams = v.GetProperty("teams").EnumerateArray().Select(t =>
+        visual.Teams = v.GetProperty("teams").EnumerateArray().Select((t, teamOrdinal) =>
         {
-            PropertiesWithOptional(t, new[] { "idleAnimSpeed", "enemies", "targetId", "enemyPosition" },
-                "teamId", "backgroundUri", "enemySpriteUri", "idleFrames", "magicFrames", "attackFrames", "actWaitFrames");
-            bool slots = t.TryGetProperty("enemies", out var enemies);
-            bool legacyTarget = t.TryGetProperty("targetId", out _);
-            bool legacyPosition = t.TryGetProperty("enemyPosition", out _);
-            Require(slots ? !(legacyTarget || legacyPosition) : legacyTarget && legacyPosition,
-                "a team declares either enemies slots or the legacy targetId/enemyPosition pair, never both or neither");
-            var team = new PalBattleVisualTeam { TeamId = Int(t, "teamId"), BackgroundUri = Text(t, "backgroundUri"),
-                EnemySpriteUri = Text(t, "enemySpriteUri"), IdleFrames = Int(t, "idleFrames"),
-                IdleAnimSpeed = t.TryGetProperty("idleAnimSpeed", out _) ? Int(t, "idleAnimSpeed") : -1,
-                MagicFrames = Int(t, "magicFrames"), AttackFrames = Int(t, "attackFrames"), ActWaitFrames = Int(t, "actWaitFrames") };
-            if (slots)
+            try
             {
+                Properties(t, "teamId", "backgroundUri", "enemies");
+                var enemies = t.GetProperty("enemies");
                 Require(enemies.ValueKind == JsonValueKind.Array && enemies.GetArrayLength() is >= 1 and <= 2,
                     "enemies requires one or two enemy slots");
-                team.EnemySlots = enemies.EnumerateArray().Select(enemy =>
+                return new PalBattleVisualTeam
                 {
-                    Properties(enemy, "targetId", "enemyPosition");
-                    return new PalBattleVisualEnemySlot { TargetId = Int(enemy, "targetId"), EnemyPosition = Position(enemy, "enemyPosition") };
-                }).ToArray();
+                    TeamId = Int(t, "teamId"), BackgroundUri = Text(t, "backgroundUri"),
+                    EnemySlots = enemies.EnumerateArray().Select((enemy, slotOrdinal) =>
+                    {
+                        try
+                        {
+                            Properties(enemy, "targetId", "enemyPosition", "enemySpriteUri", "idleFrames", "idleAnimSpeed", "magicFrames", "attackFrames", "actWaitFrames");
+                            return new PalBattleVisualEnemySlot
+                            {
+                                TargetId = Int(enemy, "targetId"), EnemyPosition = Position(enemy, "enemyPosition"),
+                                EnemySpriteUri = Text(enemy, "enemySpriteUri"), IdleFrames = Word(enemy, "idleFrames", 1),
+                                IdleAnimSpeed = Word(enemy, "idleAnimSpeed"), MagicFrames = Word(enemy, "magicFrames"),
+                                AttackFrames = Word(enemy, "attackFrames"), ActWaitFrames = Word(enemy, "actWaitFrames")
+                            };
+                        }
+                        catch (InvalidDataException error)
+                        { throw new InvalidDataException("enemies[" + slotOrdinal + "]: " + error.Message, error); }
+                    }).ToArray()
+                };
             }
-            else
-            {
-                team.TargetId = Int(t, "targetId");
-                team.EnemyPosition = Position(t, "enemyPosition");
-            }
-            return team;
+            catch (InvalidDataException error)
+            { throw new InvalidDataException("visual.teams[" + teamOrdinal + "]: " + error.Message, error); }
         }).ToArray();
-        foreach (var t in v.GetProperty("teams").EnumerateArray())
-            if (t.TryGetProperty("idleAnimSpeed", out _)) Require(Int(t, "idleAnimSpeed") is >= 0 and <= ushort.MaxValue, "idleAnimSpeed requires WORD");
         if (v.TryGetProperty("attackEffectIndex", out _)) Require(visual.AttackEffectIndex is >= 0 and <= ushort.MaxValue, "attackEffectIndex requires WORD");
         return (story, visual);
     }
@@ -292,7 +296,10 @@ public partial class PrepareStoryPackage : Node
         Require(value.ValueKind == JsonValueKind.Object, "metadata must contain objects");
         var actual = value.EnumerateObject().Select(p => p.Name).ToArray();
         Require(actual.Distinct(StringComparer.Ordinal).Count() == actual.Length
-            && expected.All(actual.Contains) && actual.All(name => expected.Contains(name) || optional.Contains(name)), "metadata has missing, duplicate or unknown fields; expected " + string.Join(",", expected));
+            && expected.All(actual.Contains) && actual.All(name => expected.Contains(name) || optional.Contains(name)),
+            "metadata has missing, duplicate or unknown fields; missing: " + string.Join(",", expected.Except(actual))
+            + "; unknown: " + string.Join(",", actual.Except(expected.Concat(optional)))
+            + "; duplicate: " + string.Join(",", actual.GroupBy(name => name, StringComparer.Ordinal).Where(group => group.Count() > 1).Select(group => group.Key)));
     }
     private static string Text(JsonElement value, string key)
     {
@@ -301,12 +308,24 @@ public partial class PrepareStoryPackage : Node
         return field.GetString()!;
     }
     private static int Int(JsonElement value, string key)
-    { Require(value.GetProperty(key).TryGetInt32(out int number), key + " requires an integer"); return number; }
+    {
+        var field = value.GetProperty(key);
+        Require(field.ValueKind == JsonValueKind.Number && field.TryGetInt32(out _), key + " requires an integer type");
+        return field.GetInt32();
+    }
+    private static int Word(JsonElement value, string key, int minimum = 0)
+    {
+        int number = Int(value, key);
+        Require(number >= minimum && number <= ushort.MaxValue, key + " requires WORD in " + minimum + "..65535");
+        return number;
+    }
     private static Vector2I Position(JsonElement value, string key)
     {
         var field = value.GetProperty(key);
         Require(field.ValueKind == JsonValueKind.Array && field.GetArrayLength() == 2, key + " requires two SHORT coordinates");
+        Require(field[0].ValueKind == JsonValueKind.Number, key + " requires SHORT x");
         Require(field[0].TryGetInt32(out int x) && x is >= short.MinValue and <= short.MaxValue, key + " requires SHORT x");
+        Require(field[1].ValueKind == JsonValueKind.Number, key + " requires SHORT y");
         Require(field[1].TryGetInt32(out int y) && y is >= short.MinValue and <= short.MaxValue, key + " requires SHORT y");
         return new(x, y);
     }

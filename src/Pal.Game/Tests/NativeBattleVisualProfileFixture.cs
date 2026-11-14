@@ -28,8 +28,7 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
         Party = party;
         Story = new NativeStoryProfileFixture(party);
         CheckedStory = NativeStoryProfile.Load(Story.Uri);
-        var team = new PalBattleVisualTeam { TeamId = 18, BackgroundUri = Root + "/Background.tres",
-            EnemySpriteUri = Root + "/Enemy.tres", IdleFrames = 1, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 0 };
+        var team = new PalBattleVisualTeam { TeamId = 18, BackgroundUri = Root + "/Background.tres" };
         if (party)
         {
             // Two story enemy slots share enemy definition id 7; positions use distinct authored slots.
@@ -39,7 +38,13 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
                 new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(128, 104) }
             ];
         }
-        else { team.TargetId = 7; team.EnemyPosition = new(100, 120); }
+        else { team.EnemySlots = [new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) }]; }
+        foreach (var slot in team.EnemySlots)
+        {
+            slot.EnemySpriteUri = Root + "/Enemy.tres";
+            slot.IdleFrames = 1; slot.IdleAnimSpeed = 0; slot.MagicFrames = 1;
+            slot.AttackFrames = 1; slot.ActWaitFrames = 0;
+        }
         Profile = new PalBattleVisualProfile
         {
             FormatVersion = 1, SourceIdentity = "literal synthetic visuals; no provenance authentication", RoleId = 0,

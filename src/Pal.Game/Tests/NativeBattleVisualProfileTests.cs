@@ -952,11 +952,12 @@ public class NativeBattleVisualProfileTests
         var visual = f.Load();
         AssertThat(visual.RoleId).IsEqual(0);
         AssertThat(visual.PlayerSprite.SpriteId).IsEqual(41);
-        AssertThat(visual.Teams[18].TargetId).IsEqual(7);
-        AssertThat(visual.Teams[18].EnemySprite.SpriteId).IsEqual(97);
+        var slot = visual.Teams[18].EnemySlots.Single();
+        AssertThat(slot.TargetId).IsEqual(7);
+        AssertThat(slot.EnemySprite.SpriteId).IsEqual(97);
         AssertThat(visual.PlayerPosition).IsEqual(new Vector2I(240, 170));
-        AssertThat(visual.Teams[18].EnemyPosition).IsEqual(new Vector2I(100, 120));
-        AssertThat(visual.Teams[18].ActWaitFrames).IsEqual(0);
+        AssertThat(slot.EnemyPosition).IsEqual(new Vector2I(100, 120));
+        AssertThat(slot.ActWaitFrames).IsEqual(0);
         AssertThat(visual.Teams[18].Background.Alpha[319]).IsEqual((byte)255);
         AssertThat(visual.PlayerSprite.Frames[9].Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
         AssertThat(visual.PlayerSprite.Frames[9].Alpha.SequenceEqual(new byte[] { 0, 255 })).IsTrue();
@@ -964,14 +965,70 @@ public class NativeBattleVisualProfileTests
         AssertThat(visual.ResourceSha256.Keys.Order().SequenceEqual(f.ExpectedPaths.Order())).IsTrue();
         AssertThat(((IDictionary<int, CheckedBattleVisualTeam>)visual.Teams).IsReadOnly).IsTrue();
         AssertThat(((IDictionary<string, string>)visual.ResourceSha256).IsReadOnly).IsTrue();
-        f.Player.Frames[9].Indices[0] = 99; f.Team.TargetId = 44; f.Palette.Rgb[0] = 12; f.Profile.ResourceSha256.Clear();
+        f.Player.Frames[9].Indices[0] = 99; f.Team.EnemySlots[0].TargetId = 44; f.Palette.Rgb[0] = 12; f.Profile.ResourceSha256.Clear();
         AssertThat(visual.PlayerSprite.Frames[9].Indices[0]).IsEqual((byte)4);
-        AssertThat(visual.Teams[18].TargetId).IsEqual(7);
+        AssertThat(slot.TargetId).IsEqual(7);
         AssertThat(visual.Palette.Rgb[0]).IsEqual((byte)0);
         AssertThat(visual.ResourceSha256.Count).IsEqual(4);
         // A mutation of this isolated native instance must not poison a later load of the same URI.
         visual.PlayerSprite.Frames[0].Indices[0] = 123;
         AssertThat(f.Load().PlayerSprite.Frames[0].Indices[0]).IsEqual((byte)4);
+    }
+
+    private static void NativeSlotFrameMetadataNeverFallsBackToTeam()
+    {
+        using var f = new NativeBattleVisualProfileFixture(party: true);
+        foreach (var slot in f.Team.EnemySlots)
+        {
+            slot.IdleFrames = 1; slot.IdleAnimSpeed = 0; slot.MagicFrames = 1;
+            slot.AttackFrames = 1; slot.ActWaitFrames = 0;
+        }
+        f.Team.EnemySlots[1].IdleFrames = -1;
+        f.Save();
+        InvalidDataException? failure = null;
+        try { _ = f.Load(); }
+        catch (InvalidDataException error) { failure = error; }
+        AssertThat(failure is not null)
+            .OverrideFailureMessage("Native slot 1 must require its own complete frame metadata instead of accepting team metadata.")
+            .IsTrue();
+        AssertThat(failure!.Message.Contains("EnemySlots[1]")).IsTrue();
+        AssertThat(failure.Message.Contains("metadata WORDs")).IsTrue();
+    }
+
+    private static void NativeSlotFrameMetadataRoundtripsIndependentlyAndChecksSecondSlotFrames()
+    {
+        using var f = new NativeBattleVisualProfileFixture(party: true);
+        f.Team.EnemySlots[0].MagicFrames = 0; f.Team.EnemySlots[0].AttackFrames = 0;
+        f.Team.EnemySlots[1].IdleAnimSpeed = 65535; f.Team.EnemySlots[1].ActWaitFrames = 65535;
+        f.Save();
+        var slots = f.Load().Teams[18].EnemySlots;
+        AssertThat((slots[0].IdleFrames, slots[0].IdleAnimSpeed, slots[0].MagicFrames, slots[0].AttackFrames, slots[0].ActWaitFrames))
+            .IsEqual((1, 0, 0, 0, 0));
+        AssertThat((slots[1].IdleFrames, slots[1].IdleAnimSpeed, slots[1].MagicFrames, slots[1].AttackFrames, slots[1].ActWaitFrames))
+            .IsEqual((1, 65535, 1, 1, 65535));
+        AssertThat(slots[0].TargetId == 7 && slots[1].TargetId == 7).IsTrue();
+        f.Team.EnemySlots[1].AttackFrames = 2; f.Save();
+        string failure = Failure(() => f.Load());
+        AssertThat(failure.Contains("EnemySlots[1]") && failure.Contains("unaddressable frames")).IsTrue();
+        f.Team.EnemySlots[1].AttackFrames = 1; f.Save();
+        AssertThat(f.Load().Teams[18].EnemySlots[1].AttackFrames).IsEqual(1);
+        AssertThat(slots[1].AttackFrames).IsEqual(1);
+    }
+
+    private static void NativeSlotFrameMetadataRejectsMissingAndLegacyMixedDeclarations(string field)
+    {
+        using var f = new NativeBattleVisualProfileFixture(party: true);
+        var slotProperty = typeof(PalBattleVisualEnemySlot).GetProperty(field)!;
+        int original = (int)slotProperty.GetValue(f.Team.EnemySlots[1])!;
+        slotProperty.SetValue(f.Team.EnemySlots[1], -1); f.Save();
+        string missing = Failure(() => f.Load());
+        AssertThat(missing.Contains("EnemySlots[1]") && missing.Contains("metadata WORDs"))
+            .OverrideFailureMessage("EnemySlots[1]." + field + " missing: " + missing).IsTrue();
+        slotProperty.SetValue(f.Team.EnemySlots[1], original);
+        typeof(PalBattleVisualTeam).GetProperty(field)!.SetValue(f.Team, original); f.Save();
+        string mixed = Failure(() => f.Load());
+        AssertThat(mixed.Contains("legacy team frame metadata"))
+            .OverrideFailureMessage("Legacy team " + field + " mixed with EnemySlots: " + mixed).IsTrue();
     }
 
     [TestCase]
@@ -1009,15 +1066,15 @@ public class NativeBattleVisualProfileTests
             case "missing-team": f.Profile.Teams = []; expected = "exactly cover"; break;
             case "extra-team": f.Profile.Teams = [f.Team, new PalBattleVisualTeam { TeamId = 19 }]; expected = "does not match a story battle team"; break;
             case "duplicate-team": f.Profile.Teams = [f.Team, f.Team]; expected = "duplicate"; break;
-            case "target-is-sprite": f.Team.TargetId = 97; expected = "TargetId"; break;
-            case "target-is-team": f.Team.TargetId = 18; expected = "TargetId"; break;
+            case "target-is-sprite": f.Team.EnemySlots[0].TargetId = 97; expected = "TargetId"; break;
+            case "target-is-team": f.Team.EnemySlots[0].TargetId = 18; expected = "TargetId"; break;
             case "player-position": f.Profile.PlayerPosition = new(32768, 0); expected = "SHORT"; break;
-            case "enemy-position": f.Team.EnemyPosition = new(0, -32769); expected = "SHORT"; break;
-            case "idle-zero": f.Team.IdleFrames = 0; expected = "metadata WORDs"; break;
-            case "magic-negative": f.Team.MagicFrames = -1; expected = "metadata WORDs"; break;
-            case "attack-overflow": f.Team.AttackFrames = 65536; expected = "metadata WORDs"; break;
-            case "wait-negative": f.Team.ActWaitFrames = -1; expected = "metadata WORDs"; break;
-            default: f.Team.AttackFrames = 2; expected = "unaddressable frames"; break;
+            case "enemy-position": f.Team.EnemySlots[0].EnemyPosition = new(0, -32769); expected = "SHORT"; break;
+            case "idle-zero": f.Team.EnemySlots[0].IdleFrames = 0; expected = "metadata WORDs"; break;
+            case "magic-negative": f.Team.EnemySlots[0].MagicFrames = -1; expected = "metadata WORDs"; break;
+            case "attack-overflow": f.Team.EnemySlots[0].AttackFrames = 65536; expected = "metadata WORDs"; break;
+            case "wait-negative": f.Team.EnemySlots[0].ActWaitFrames = -1; expected = "metadata WORDs"; break;
+            default: f.Team.EnemySlots[0].AttackFrames = 2; expected = "unaddressable frames"; break;
         }
         f.Save();
         AssertThat(Failure(() => f.Load()).Contains(expected)).IsTrue();
@@ -1072,20 +1129,24 @@ public class NativeBattleVisualProfileTests
         // Addressable aliases may satisfy presentation indices beyond the nominal source frame count.
         f.Player.FrameCount = 9;
         f.Enemy.FrameCount = 1;
-        f.Team.MagicFrames = 0; f.Team.AttackFrames = 0;
-        f.Team.EnemyPosition = new(-32768, 32767);
+        f.Team.EnemySlots[0].MagicFrames = 0; f.Team.EnemySlots[0].AttackFrames = 0;
+        f.Team.EnemySlots[0].EnemyPosition = new(-32768, 32767);
         f.SaveLeaves(); f.RefreshHashes(); f.Save();
         var visual = f.Load();
         AssertThat(visual.PlayerSprite.Frames.Last().Index).IsEqual(65535);
-        AssertThat(visual.Teams[18].AttackFrames).IsEqual(0);
-        AssertThat(visual.Teams[18].EnemyPosition).IsEqual(new Vector2I(-32768, 32767));
-        f.Team.MagicFrames = 1; f.Team.AttackFrames = 1; f.Save();
-        AssertThat(f.Load().Teams[18].AttackFrames).IsEqual(1);
+        AssertThat(visual.Teams[18].EnemySlots[0].AttackFrames).IsEqual(0);
+        AssertThat(visual.Teams[18].EnemySlots[0].EnemyPosition).IsEqual(new Vector2I(-32768, 32767));
+        f.Team.EnemySlots[0].MagicFrames = 1; f.Team.EnemySlots[0].AttackFrames = 1; f.Save();
+        AssertThat(f.Load().Teams[18].EnemySlots[0].AttackFrames).IsEqual(1);
     }
 
     [TestCase]
     public void PartySlotsBindStoryEnemySlotsWithoutMergingDuplicateIds()
     {
+        NativeSlotFrameMetadataNeverFallsBackToTeam();
+        NativeSlotFrameMetadataRoundtripsIndependentlyAndChecksSecondSlotFrames();
+        foreach (string field in new[] { "IdleFrames", "IdleAnimSpeed", "MagicFrames", "AttackFrames", "ActWaitFrames" })
+            NativeSlotFrameMetadataRejectsMissingAndLegacyMixedDeclarations(field);
         using var f = new NativeBattleVisualProfileFixture(party: true);
         var visual = f.Load();
         var team = visual.Teams[18];
@@ -1094,27 +1155,69 @@ public class NativeBattleVisualProfileTests
         AssertThat(team.EnemySlots.Select(s => s.EnemyPosition).SequenceEqual(new[] { new Vector2I(100, 120), new Vector2I(128, 104) })).IsTrue();
         AssertThat(visual.PlayerPosition).IsEqual(new Vector2I(200, 176));
         AssertThat(((IList<CheckedBattleVisualEnemySlot>)team.EnemySlots).IsReadOnly).IsTrue();
-        // The legacy single-pair projection must not silently merge the two duplicate-id slots.
-        bool threw = false;
-        try { _ = team.TargetId; } catch (InvalidOperationException) { threw = true; }
-        AssertThat(threw).IsTrue();
-        threw = false;
-        try { _ = team.EnemyPosition; } catch (InvalidOperationException) { threw = true; }
-        AssertThat(threw).IsTrue();
+        // The public checked contract must force every consumer to address an enemy slot.
+        string[] enemyScalars = ["TargetId", "EnemyPosition", "EnemySprite", "IdleFrames", "IdleAnimSpeed",
+            "MagicFrames", "AttackFrames", "ActWaitFrames"];
+        AssertThat(typeof(CheckedBattleVisualTeam).GetProperties().Any(property => enemyScalars.Contains(property.Name)))
+            .OverrideFailureMessage("Checked enemy visual data must exist only on EnemySlots, not team scalar projections.")
+            .IsFalse();
+        AssertThat(ReferenceEquals(team.EnemySlots[0], team.EnemySlots[1])).IsFalse();
+        foreach (var slot in team.EnemySlots)
+        {
+            AssertThat(slot.EnemySprite.SpriteId).IsEqual(97);
+            AssertThat((slot.IdleFrames, slot.IdleAnimSpeed, slot.MagicFrames, slot.AttackFrames, slot.ActWaitFrames))
+                .IsEqual((1, 0, 1, 1, 0));
+        }
+        f.Team.EnemySlots[1].IdleFrames = 2; f.Team.EnemySlots[1].IdleAnimSpeed = 65535;
+        f.Team.EnemySlots[1].EnemyPosition = new(0, 0);
+        AssertThat(team.EnemySlots[1].EnemyPosition).IsEqual(new Vector2I(128, 104));
+        AssertThat(team.EnemySlots[1].IdleFrames).IsEqual(1);
+        AssertThat(team.EnemySlots[1].IdleAnimSpeed).IsEqual(0);
+        team.EnemySlots[1].EnemySprite.Frames[0].Indices[0] = 123;
+        var fresh = f.Load();
+        AssertThat(fresh.Teams[18].EnemySlots.All(slot => slot.EnemySprite.Frames[0].Indices[0] == 4)).IsTrue();
     }
 
     [TestCase]
-    public void ExplicitSingleSlotRemainsStrictAndLegacyProjectionStillWorks()
+    public void ExplicitSingleSlotRequiresNativeSlotsAndRejectsLegacyMixing()
     {
         using var f = new NativeBattleVisualProfileFixture();
-        // Explicit slots are authoritative when present; the legacy pair keeps its old meaning otherwise.
-        f.Team.EnemySlots = [new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) }];
+        var slot = new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120),
+            EnemySpriteUri = f.Team.EnemySlots[0].EnemySpriteUri,
+            IdleFrames = 1, IdleAnimSpeed = 0, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 0 };
+        f.Team.TargetId = -1;
+        f.Team.EnemyPosition = new(int.MinValue, int.MinValue);
+        f.Team.EnemySlots = [slot];
         f.Save();
         var visual = f.Load();
         AssertThat(visual.Teams[18].EnemySlots.Count).IsEqual(1);
-        AssertThat(visual.Teams[18].TargetId).IsEqual(7);
-        AssertThat(visual.Teams[18].EnemyPosition).IsEqual(new Vector2I(100, 120));
+        AssertThat(visual.Teams[18].EnemySlots[0].TargetId).IsEqual(7);
         AssertThat(visual.Teams[18].EnemySlots[0].EnemyPosition).IsEqual(new Vector2I(100, 120));
+
+        f.Team.EnemySlots = [];
+        f.Team.TargetId = 7;
+        f.Team.EnemyPosition = new(100, 120);
+        f.Save();
+        InvalidDataException? missingSlots = null;
+        try { _ = f.Load(); }
+        catch (InvalidDataException error) { missingSlots = error; }
+        AssertThat(missingSlots is not null)
+            .OverrideFailureMessage("Single-enemy native visuals must reject the legacy pair without EnemySlots.")
+            .IsTrue();
+        AssertThat(missingSlots!.Message.Contains("requires visual EnemySlots")).IsTrue();
+        f.Team.TargetId = -1;
+        f.Team.EnemyPosition = new(int.MinValue, int.MinValue);
+        f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("requires visual EnemySlots")).IsTrue();
+        f.Team.EnemySlots = [slot];
+        foreach (var pair in new[] { (7, new Vector2I(int.MinValue, int.MinValue)),
+            (-1, new Vector2I(100, 120)), (7, new Vector2I(100, 120)) })
+        {
+            f.Team.TargetId = pair.Item1;
+            f.Team.EnemyPosition = pair.Item2;
+            f.Save();
+            AssertThat(Failure(() => f.Load()).Contains("legacy TargetId/EnemyPosition")).IsTrue();
+        }
     }
 
     [TestCase("legacy-pair")]
@@ -1248,10 +1351,10 @@ public class NativeBattleVisualProfileTests
         using var f = new NativeBattleVisualProfileFixture();
         var visual = f.Load();
         AssertThat(visual.AttackEffectSprite is null && visual.AttackEffectIndex == -1 && visual.AttackEffectFrames.Count == 0).IsTrue();
-        AssertThat(visual.Teams[18].IdleAnimSpeed).IsEqual(-1);
+        AssertThat(visual.Teams[18].EnemySlots[0].IdleAnimSpeed).IsEqual(0);
         AssertThat(Failure(visual.RequireReferencePresentation).Contains("attack effect")).IsTrue();
-        AddEffect(f, 0); f.Save();
-        AssertThat(Failure(f.Load().RequireReferencePresentation).Contains("IdleAnimSpeed")).IsTrue();
+        AddEffect(f, 0); f.Team.EnemySlots[0].IdleAnimSpeed = -1; f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("metadata WORDs")).IsTrue();
     }
 
     [TestCase(0)]
@@ -1260,7 +1363,7 @@ public class NativeBattleVisualProfileTests
     public void EffectGroupsUseIntTriplesNotRoleIdsOrWordWrappedFrames(int group)
     {
         using var f = new NativeBattleVisualProfileFixture();
-        AddEffect(f, group); f.Team.IdleAnimSpeed = 0; f.Save();
+        AddEffect(f, group); f.Team.EnemySlots[0].IdleAnimSpeed = 0; f.Save();
         if (group == 65535)
         {
             AssertThat(Failure(() => f.Load()).Contains("unaddressable frames")).IsTrue();
@@ -1269,7 +1372,7 @@ public class NativeBattleVisualProfileTests
         var visual = f.Load(); visual.RequireReferencePresentation();
         AssertThat(visual.AttackEffectIndex == group && visual.AttackEffectSprite!.SpriteId == 97).IsTrue();
         AssertThat(visual.AttackEffectFrames.Select(x => x.Index).SequenceEqual(group == 0 ? new[] { 0, 1, 2 } : new[] { 3, 4, 5 })).IsTrue();
-        AssertThat(visual.Teams[18].IdleAnimSpeed).IsEqual(0);
+        AssertThat(visual.Teams[18].EnemySlots[0].IdleAnimSpeed).IsEqual(0);
         AssertThat(((IList<PalFrame>)visual.AttackEffectFrames).IsReadOnly).IsTrue();
         File.Delete(ProjectSettings.GlobalizePath(f.Root + "/Effect.tres"));
         AssertThat(visual.AttackEffectFrames[0].Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
@@ -1298,8 +1401,8 @@ public class NativeBattleVisualProfileTests
             case "missing-frame": f.Profile.AttackEffectIndex = 1; expected = "unaddressable"; break;
             case "wrong-type": f.Story.Save(f.Palette, "Effect.tres"); f.Profile.ResourceSha256[f.Root + "/Effect.tres"] = Godot.FileAccess.GetSha256(f.Root + "/Effect.tres"); expected = "expected PalSprite"; break;
             case "changed": File.AppendAllText(ProjectSettings.GlobalizePath(f.Root + "/Effect.tres"), "\n; changed"); expected = "SHA-256"; break;
-            case "idle-negative": f.Team.IdleAnimSpeed = -2; expected = "WORD"; break;
-            default: f.Team.IdleAnimSpeed = 65536; expected = "WORD"; break;
+            case "idle-negative": f.Team.EnemySlots[0].IdleAnimSpeed = -2; expected = "WORD"; break;
+            default: f.Team.EnemySlots[0].IdleAnimSpeed = 65536; expected = "WORD"; break;
         }
         f.Save(); AssertThat(Failure(() => f.Load()).Contains(expected)).IsTrue();
     }

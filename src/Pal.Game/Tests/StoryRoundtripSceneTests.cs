@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GdUnit4;
 using Godot;
@@ -13,6 +17,269 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class StoryRoundtripSceneTests
 {
+    [TestCase(Timeout = 20000)]
+    public async Task SinglePlayerTwoEnemiesDrawBothDuplicateSlotsOnFirstBattleUpdateAndFreshMain()
+    {
+        using var fixture = new AuthoredStoryFixture("PartyWin", singlePlayerTwoEnemies: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
+        for (int run = 0; run < 2; run++)
+        {
+            bool observedFirstBattle = false, observedLethalFeedback = false, observedDisappearance = false;
+            void Observe(Main main)
+            {
+                if (main.StoryBattle is null) return;
+                var draw = main.StoryDrawSnapshot!.Value;
+                if (main.StoryBattle.Current.Combat.Enemies[0].Hp == 0 && !observedDisappearance)
+                {
+                    AssertThat(draw.PartyEnemies.Select(enemy => enemy.Hp).SequenceEqual(new[]
+                        { main.StoryBattleMode == StoryBattlePresentation.Feedback && !draw.ResultVisible ? 43 : 0, 43 })).IsTrue();
+                    if (main.StoryBattleMode == StoryBattlePresentation.Feedback)
+                    {
+                        observedLethalFeedback = true;
+                        AssertThat(draw.PartyEnemies.All(enemy => enemy.Visible))
+                            .OverrideFailureMessage("Lethal feedback must keep the struck slot visible until the action finishes.").IsTrue();
+                    }
+                    else
+                    {
+                        observedDisappearance = true;
+                        AssertThat(observedLethalFeedback).IsTrue();
+                        AssertThat(draw.PartyEnemies.Select(enemy => enemy.Visible).SequenceEqual(new[] { false, true }))
+                            .OverrideFailureMessage("Dead enemy slot must stop drawing after lethal feedback without hiding its duplicate-ID neighbour.").IsTrue();
+                    }
+                }
+                // Capture the first battle completion unconditionally, not the first correct draw.
+                if (observedFirstBattle) return;
+                observedFirstBattle = true;
+                AssertThat(draw.PartyEnemies.Count)
+                    .OverrideFailureMessage("One-player/two-enemy Main must draw both enemy slots on its first battle update.")
+                    .IsEqual(2);
+                AssertThat(draw.EnemyIdleCounters.SequenceEqual(new[] { 2, 2 })).IsTrue();
+                AssertThat(draw.EnemyIdleFrames.SequenceEqual(new[] { 0, 0 })).IsTrue();
+                AssertThat(draw.PartyPlayers.Count).IsEqual(1);
+                AssertThat(draw.PartyPlayers[0].Position == new Vector2(240, 170)).IsTrue();
+                AssertThat(draw.PartyEnemies[0].Position == new Vector2(100, 120)).IsTrue();
+                AssertThat(draw.PartyEnemies[1].Position == new Vector2(128, 104)).IsTrue();
+                AssertThat(draw.PartyEnemies.Select(enemy => enemy.Hp).SequenceEqual(new[] { 43, 43 })).IsTrue();
+                AssertThat(draw.PartyEnemies.All(enemy => enemy.Visible)).IsTrue();
+                AssertThat(main.StoryBattle.Current.Combat.Enemies.Select(enemy => enemy.Id)
+                    .SequenceEqual(new[] { 7, 7 })).IsTrue();
+            }
+            using var host = new StoryHost(selection, [new(100, 120), new(128, 104)], [new(240, 170)], Observe);
+            AssertThat(host.Main.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            await host.Wait(() => observedFirstBattle);
+            AssertThat(host.Main.StoryBattleMode).IsEqual(StoryBattlePresentation.AttackMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            await host.Wait(() => observedDisappearance);
+            await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            AssertThat(host.Main.StoryDrawSnapshot!.Value.PartyEnemies.Select(enemy => enemy.Visible)
+                .SequenceEqual(new[] { false, true })).IsTrue();
+        }
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task PreparedHeterogeneousSlotsUseOwnActionsTargetsAndFreshMain()
+    {
+        using var fixture = new AuthoredStoryFixture("PartyWin", heterogeneousEnemies: true);
+        string[] before = fixture.Snapshot();
+        var story = Pal.Game.Profiles.NativeStoryProfile.Load(fixture.StoryUri);
+        var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+        var slots = visual.Teams[18].EnemySlots;
+        AssertThat(slots.Select(s => s.TargetId).SequenceEqual(new[] { 7, 7 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite.SpriteId).SequenceEqual(new[] { 97, 98 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite.FrameCount).SequenceEqual(new[] { 3, 4 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite.Frames[0].Width).SequenceEqual(new[] { 2, 3 })).IsTrue();
+        AssertThat(slots[0].EnemySprite.Frames.Select(f => f.Height).SequenceEqual(new[] { 1, 1, 1 })).IsTrue();
+        AssertThat(slots[1].EnemySprite.Frames.Select(f => f.Height).SequenceEqual(new[] { 3, 6, 9, 12 })).IsTrue();
+        AssertThat((slots[0].IdleFrames, slots[0].IdleAnimSpeed, slots[0].MagicFrames, slots[0].AttackFrames, slots[0].ActWaitFrames))
+            .IsEqual((1, 0, 1, 1, 0));
+        AssertThat((slots[1].IdleFrames, slots[1].IdleAnimSpeed, slots[1].MagicFrames, slots[1].AttackFrames, slots[1].ActWaitFrames))
+            .IsEqual((2, 3, 0, 2, 2));
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
+        for (int run = 0; run < 2; run++)
+        {
+            bool first = false, wrappedZero = false, removed = false;
+            int[] targetHeights = [0, 0];
+            var hitTargets = new HashSet<int>();
+            var enemyPoses = new HashSet<int>();
+            void Observe(Main main)
+            {
+                if (main.StoryBattle is not { } battle) return;
+                var combat = battle.Current.Combat;
+                var draw = main.StoryDrawSnapshot!.Value;
+                if (!first)
+                {
+                    first = true; // First actual completion, not the first matching draw.
+                    // battle.c1782 + first StartFrame: two WORD pre-decrements before first draw.
+                    AssertThat(draw.EnemyIdleCounters.SequenceEqual(new[] { 65534, 1 })).IsTrue();
+                    wrappedZero = true;
+                    AssertThat(draw.EnemyIdleFrames.SequenceEqual(new[] { 0, 0 })).IsTrue();
+                    AssertThat(combat.Enemies.Select(e => e.Id).SequenceEqual(new[] { 7, 7 })).IsTrue();
+                    AssertThat(draw.PartyEnemies.Select(e => e.Position).SequenceEqual(new[] { new Vector2(100, 120), new Vector2(128, 104) })).IsTrue();
+                    AssertThat(draw.PartyEnemies.Select(e => e.Hp).SequenceEqual(new[] { 43, 43 })).IsTrue();
+                    AssertThat(draw.PartyEnemies.All(e => e.Visible)).IsTrue();
+                }
+                var action = combat.LastAction;
+                bool lethalFeedback = main.StoryBattleMode == StoryBattlePresentation.Feedback
+                    && action is { Attacker: ClassicBattleSide.Player, TargetIndex: 0 };
+                if (combat.Enemies[0].Hp == 0)
+                {
+                    AssertThat(draw.PartyEnemies[0].Visible).IsEqual(lethalFeedback);
+                    AssertThat(draw.PartyEnemies[1].Visible).IsTrue();
+                    if (!lethalFeedback) removed = true;
+                }
+                if (main.StoryBattleMode != StoryBattlePresentation.Feedback || main.StoryBattlePose is not { } pose) return;
+                if (action!.Attacker == ClassicBattleSide.Player)
+                {
+                    int target = action.TargetIndex;
+                    // fight.c ShowPlayerAttackAnim samples current target height before approach.
+                    // Pose3 is the last completed windup; literal per-frame art heights above.
+                    if (pose.Pose == 3)
+                        targetHeights[target] = target == 0 ? 1 : new[] { 3, 6 }[draw.EnemyIdleFrames[target]];
+                    if (pose.Pose is >= 7 and <= 9)
+                    {
+                        AssertThat(targetHeights[target] > 0).IsTrue();
+                        int fx = pose.Pose - 7;
+                        Vector2 origin = target == 0 ? new(100, 120) : new(128, 104);
+                        AssertThat(draw.EffectFrame == fx).IsTrue();
+                        AssertThat(draw.EffectPosition == origin + new Vector2(-16 * fx, 10 - targetHeights[target] / 3 + 16 * fx)).IsTrue();
+                        AssertThat(draw.PartyEnemies[1 - target].Position == (target == 0 ? new Vector2(128, 104) : new Vector2(100, 120))).IsTrue();
+                        hitTargets.Add(target);
+                    }
+                }
+                else
+                {
+                    AssertThat(action.ActorIndex).IsEqual(1); // The surviving duplicate id7, not slot0 metadata.
+                    AssertThat(draw.PartyEnemies[0].Visible).IsFalse();
+                    if (pose.Pose is 0 or 1 or 2 or 3)
+                        AssertThat(draw.PartyEnemies[1].Position == new Vector2(128, 104)
+                            - new Vector2(pose.Pose < 3 ? (pose.Pose + 1) * 2 : 6, pose.Pose < 3 ? pose.Pose + 1 : 3)).IsTrue();
+                    if (pose.Pose is >= 4 and <= 9)
+                    {
+                        // fight.c4987–5055: magic0, three pre-moves + hold, inclusive attack2/wait2.
+                        AssertThat(draw.PartyEnemies[1].Frame).IsEqual(1 + (pose.Pose - 4) / 2);
+                        Vector2 player = action.TargetIndex == 0 ? new(200, 176) : new(256, 152);
+                        AssertThat(draw.PartyEnemies[1].Position == player + new Vector2(-44, -16)).IsTrue();
+                    }
+                    AssertThat(action.CovererPartyIndex).IsNull();
+                    Vector2 targetOrigin = action.TargetIndex == 0 ? new(200, 176) : new(256, 152);
+                    if (pose.Pose == 10)
+                    {
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].Frame).IsEqual(action.Evaded ? 3 : 4);
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].ColorShift).IsEqual(action.Evaded ? 0 : 6);
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].Position == targetOrigin).IsTrue();
+                    }
+                    if (pose.Pose is 11 or 12)
+                    {
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].Position == targetOrigin
+                            + (pose.Pose == 11 ? new Vector2(8, 4) : new Vector2(10, 5))).IsTrue();
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].ColorShift).IsEqual(0);
+                    }
+                    AssertThat(draw.PartyPlayers[1 - action.TargetIndex].Position
+                        == (action.TargetIndex == 0 ? new Vector2(256, 152) : new Vector2(200, 176))).IsTrue();
+                    AssertThat(draw.ResultVisible).IsEqual(pose.Pose >= 10);
+                    AssertThat(draw.PartyPlayers[action.TargetIndex].Hp)
+                        .IsEqual(combat.Players[action.TargetIndex].Hp + (pose.Pose < 10 ? action.Damage : 0));
+                    enemyPoses.Add(pose.Pose);
+                }
+            }
+            Main old;
+            using (var host = new StoryHost(selection, [new(100, 120), new(128, 104)],
+                [new(200, 176), new(256, 152)], Observe, enemyImpactPose: 10))
+            {
+                old = host.Main;
+                AssertThat(old.Failure).IsNull();
+                host.Tap(Key.Enter);
+                await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+                await host.FinishDisplay();
+                await host.Wait(() => first && old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                host.Tap(Key.Right);
+                await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+                await host.Wait(() => host.Actions.Count == 3 && old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+                AssertThat(host.Actions.Select(a => (a.Attacker, a.ActorIndex, a.TargetIndex)).Take(2).SequenceEqual(new[]
+                    { (ClassicBattleSide.Player, 1, 1), (ClassicBattleSide.Player, 0, 0) })).IsTrue();
+                AssertThat(host.Actions[0].Damage is >= 33 and <= 38).IsTrue();
+                AssertThat(host.Actions[1].Damage >= 43).IsTrue();
+                AssertThat(wrappedZero && removed).IsTrue();
+                AssertThat(hitTargets.SetEquals(new[] { 0, 1 })).IsTrue();
+                AssertThat(enemyPoses.SetEquals(Enumerable.Range(0, 21))).IsTrue();
+                AssertThat(old.StoryBattle!.Current.Combat.Enemies.Select(e => e.Hp).SequenceEqual(new[] { 0, 43 - host.Actions[0].Damage })).IsTrue();
+            }
+            AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+            AssertThat(Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.Right)).IsFalse();
+            AssertThat(fixture.Snapshot()).IsEqual(before);
+        }
+
+        string output = ProjectSettings.GlobalizePath(fixture.Root);
+        string rejectedOutput = Path.Combine(output, "RejectedStory");
+        string authorPath = Path.Combine(fixture.InputDirectory, "story-package.json");
+        byte[] originalAuthor = File.ReadAllBytes(authorPath);
+        var positiveBytes = Directory.GetFiles(output, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, File.ReadAllBytes);
+        var author = JsonNode.Parse(originalAuthor)!;
+        // Only slot1's URI changes: its unchanged idle2 + magic0 + attack2 requires
+        // indices 0..3, but this same fixture's sprite97 has only indices 0..2.
+        author["visual"]!["teams"]![0]!["enemies"]![1]!["enemySpriteUri"] =
+            author["visual"]!["teams"]![0]!["enemies"]![0]!["enemySpriteUri"]!.GetValue<string>();
+        Dictionary<string, byte[]> SourceBytes() => Directory.GetFiles(fixture.InputDirectory, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, File.ReadAllBytes);
+        try
+        {
+            File.WriteAllText(authorPath, author.ToJsonString());
+            var sourceBefore = SourceBytes();
+            bool outputAbsentBefore = !Directory.Exists(rejectedOutput) && !File.Exists(rejectedOutput);
+            AssertThat(outputAbsentBefore).IsTrue();
+            InvalidDataException? rejection = null;
+            try { Pal.Game.Editor.PrepareStoryPackage.Prepare(fixture.InputDirectory, rejectedOutput); }
+            catch (InvalidDataException error) { rejection = error; }
+            var sourceAfter = SourceBytes();
+            bool sourceUnchanged = sourceBefore.Keys.ToHashSet().SetEquals(sourceAfter.Keys)
+                && sourceBefore.All(pair => pair.Value.SequenceEqual(sourceAfter[pair.Key]));
+            bool outputAbsentAfter = !Directory.Exists(rejectedOutput) && !File.Exists(rejectedOutput);
+            GD.Print("PAL_HETEROGENEOUS_NEGATIVE_CONTROL:" + JsonSerializer.Serialize(new
+            {
+                sourceBefore, sourceAfter, rejectedOutput, outputAbsentBefore, outputAbsentAfter,
+                sourceUnchanged, exception = rejection?.ToString()
+            }));
+            const string missingFrame = "visual Teams[TeamId=18].EnemySlots[1]: enemy frame metadata references unaddressable frames";
+            string expected = "^" + Regex.Escape(fixture.Root + "/RejectedStory/.story-package-")
+                + "[0-9a-f]{32}" + Regex.Escape("/Visual.tres: " + missingFrame) + "$";
+            AssertThat(rejection is not null && Regex.IsMatch(rejection.Message, expected)
+                && rejection.InnerException?.Message == missingFrame).IsTrue();
+            AssertThat(sourceUnchanged).IsTrue();
+            AssertThat(outputAbsentAfter).IsTrue();
+        }
+        finally
+        {
+            File.WriteAllBytes(authorPath, originalAuthor);
+            bool positiveBytesUnchanged = Directory.GetFiles(output, "*", SearchOption.AllDirectories)
+                .ToHashSet().SetEquals(positiveBytes.Keys)
+                && positiveBytes.All(pair => pair.Value.SequenceEqual(File.ReadAllBytes(pair.Key)));
+            string[] restored = fixture.Snapshot();
+            GD.Print("PAL_HETEROGENEOUS_NEGATIVE_RESTORED:" + JsonSerializer.Serialize(new
+            {
+                positiveBytesUnchanged, originalAuthor, restoredAuthor = File.ReadAllBytes(authorPath), before, restored
+            }));
+            AssertThat(positiveBytesUnchanged).IsTrue();
+            AssertThat(File.ReadAllBytes(authorPath).SequenceEqual(originalAuthor)).IsTrue();
+            AssertThat(restored).IsEqual(before);
+        }
+        string ownedInput = fixture.InputDirectory;
+        fixture.Dispose();
+        bool ownedCleaned = !Directory.Exists(ownedInput) && !Directory.Exists(output);
+        GD.Print("PAL_HETEROGENEOUS_NEGATIVE_CLEANUP:" + JsonSerializer.Serialize(new { ownedInput, output, ownedCleaned }));
+        AssertThat(ownedCleaned).IsTrue();
+    }
+
     [TestCase]
     public void FloatingNumbersUseUnsignedWallAgeRightAlignedBlueDigitsAndWrap()
     {
@@ -104,6 +371,21 @@ public class StoryRoundtripSceneTests
         idle.Advance(); AssertThat(idle.Frame).IsEqual(0); AssertThat((int)idle.Counter).IsEqual(1);
         idle.Advance(); AssertThat(idle.Frame).IsEqual(1); AssertThat((int)idle.Counter).IsEqual(2);
         idle.Advance(); AssertThat(idle.Frame).IsEqual(1); AssertThat((int)idle.Counter).IsEqual(1);
+        // Each ordinal owns a state, even with shared prepared metadata. FALSE gestures
+        // assign only the actor; the spectator keeps its frame and WORD counter.
+        var slots = new[] { new StoryEnemyIdleState(3, 2), new StoryEnemyIdleState(2, 3) };
+        int[][] frames = [[0,0], [1,0], [1,1], [2,1], [2,1], [0,0]];
+        int[][] counters = [[1,2], [2,1], [1,3], [2,2], [1,1], [2,3]];
+        for (int tick = 0; tick < frames.Length; tick++)
+        {
+            foreach (var slot in slots) slot.Advance();
+            AssertThat(slots.Select(slot => slot.Frame).SequenceEqual(frames[tick])).IsTrue();
+            AssertThat(slots.Select(slot => (int)slot.Counter).SequenceEqual(counters[tick])).IsTrue();
+        }
+        slots[1].SetFrame(5);
+        AssertThat(slots[0].Frame).IsEqual(0);
+        AssertThat((int)slots[0].Counter).IsEqual(2);
+        AssertThat((int)slots[1].Counter).IsEqual(3);
         var zero = new StoryEnemyIdleState(3, 0);
         zero.Advance(); AssertThat((int)zero.Counter).IsEqual(65535); AssertThat(zero.Frame).IsEqual(0);
         zero.SetFrame(2); zero.Advance(); AssertThat((int)zero.Counter).IsEqual(65534); AssertThat(zero.Frame).IsEqual(2);
@@ -116,13 +398,26 @@ public class StoryRoundtripSceneTests
     [TestCase("number")]
     public void BaseFormatWithoutSelectedPresentationFailsBeforePartialMain(string missing)
     {
+        if (missing == "idle")
+        {
+            // Per-slot idle speed is required author data, not an optional reference capability.
+            // Formal Prepare rejects it during construction; the fixture cleans its failed output.
+            InvalidDataException? rejected = null;
+            try { using var unexpected = new AuthoredStoryFixture("Win", missing); }
+            catch (InvalidDataException error) { rejected = error; }
+            AssertThat(rejected is not null).IsTrue();
+            string diagnostic = rejected!.Message;
+            AssertThat(diagnostic.StartsWith(Path.Combine(Path.GetTempPath(), "pal-story-c-"), StringComparison.Ordinal)).IsTrue();
+            AssertThat(diagnostic.Contains("story-package.json: visual.teams[0]: enemies[0]: metadata has missing, duplicate or unknown fields; missing: idleAnimSpeed", StringComparison.Ordinal)).IsTrue();
+            return;
+        }
         using var fixture = new AuthoredStoryFixture("Win", missing);
         var story = Pal.Game.Profiles.NativeStoryProfile.Load(fixture.StoryUri);
         var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
         AssertThat(visual.Teams.Count).IsEqual(1); // Format remains legal independently of selected capability.
         using var host = new StoryHost(GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1"));
-        AssertThat(host.Main.Failure!.Contains(missing == "effect" ? "attack effect" : missing == "number" ? "NumberSpriteUri" : "IdleAnimSpeed")).IsTrue();
+        AssertThat(host.Main.Failure!.Contains(missing == "effect" ? "attack effect" : "NumberSpriteUri")).IsTrue();
         AssertThat(host.Main.GetChildCount()).IsEqual(0);
         AssertThat(host.Main.Dialogue).IsNull(); AssertThat(host.Main.StoryBattle).IsNull();
     }
@@ -1104,15 +1399,151 @@ public class StoryRoundtripSceneTests
         AssertThat(Godot.FileAccess.GetSha256(fixture.StoryUri)).IsEqual(hash);
     }
 
-    [TestCase]
-    public void FailedStoryPreloadPublishesNoPartialScene()
+    [TestCase(Timeout = 20000)]
+    public async Task FailedStoryPreloadPublishesNoPartialScene()
     {
-        var selection = GameSceneConfiguration.FromArguments("--story-profile", "res://Assets/Missing-Story.tres",
+        var missing = GameSceneConfiguration.FromArguments("--story-profile", "res://Assets/Missing-Story.tres",
             "--battle-visual-profile", "res://Assets/Missing-Visual.tres");
-        using var host = new StoryHost(selection);
-        AssertThat(host.Main.Failure).IsNotNull();
-        AssertThat(host.Main.GetChildCount()).IsEqual(0);
-        AssertThat(host.Main.Exploration).IsNull();
+        using (var host = new StoryHost(missing))
+        {
+            AssertThat(host.Main.Failure).IsNotNull();
+            AssertThat(host.Main.GetChildCount()).IsEqual(0);
+            AssertThat(host.Main.Exploration).IsNull();
+        }
+
+        using var fixture = new AuthoredStoryFixture("PartyWin", heterogeneousEnemies: true);
+        string[] before = fixture.Snapshot();
+        var story = Pal.Game.Profiles.NativeStoryProfile.Load(fixture.StoryUri);
+        var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+        AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemySprite.SpriteId)
+            .SequenceEqual(new[] { 97, 98 })).IsTrue();
+        AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemySprite.FrameCount)
+            .SequenceEqual(new[] { 3, 4 })).IsTrue();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
+        const string marker = "#136 owner-registered enemy slot1 texture failure";
+        var captured = new List<(int? Slot, ImageTexture Texture, ulong Id, bool InitiallyValid)>();
+        PalStoryBattleView? partial = null;
+        bool offTree = false, failedViewValid = true;
+        int referencesAtFailure = -1, partialChildrenAtFailure = -1, failures = 0;
+        bool[] releasedAtFailure = [];
+        Main failedMain;
+        try
+        {
+            using (var host = new StoryHost(selection, configure: main =>
+            {
+                main.StoryBattleViewFactory = () => partial = new PalStoryBattleView
+                {
+                    TextureOwned = (slot, texture) =>
+                    {
+                        captured.Add((slot, texture, texture.GetInstanceId(), GodotObject.IsInstanceValid(texture)));
+                        if (slot != 1) return;
+                        offTree = !partial!.IsInsideTree() && partial.GetParent() is null;
+                        throw new InvalidOperationException(marker);
+                    }
+                };
+                main.Failed += _ =>
+                {
+                    failures++;
+                    // Snapshot at the production failure boundary, before test cleanup.
+                    releasedAtFailure = captured.Select(item => !GodotObject.IsInstanceValid(item.Texture)
+                        && GodotObject.InstanceFromId(item.Id) is null).ToArray();
+                    referencesAtFailure = partial!.TextureReferenceCount;
+                    failedViewValid = GodotObject.IsInstanceValid(partial);
+                    partialChildrenAtFailure = main.GetChildren().OfType<PalStoryBattleView>().Count();
+                };
+            }))
+            {
+                failedMain = host.Main;
+                AssertThat(host.Main.Failure).IsNull();
+                host.Tap(Key.Enter);
+                await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+                var display = host.Main.Dialogue!.Session!.PendingDisplay!.Display;
+                await host.Wait(() => display.Current.Phase == DialogueDisplayPhase.WaitingForAdvance);
+                host.Tap(Key.Enter);
+                await host.WaitForFailure();
+                GD.Print("PAL_136_PARTIAL_FAILURE:" + JsonSerializer.Serialize(new
+                {
+                    offTree, failures, referencesAtFailure, failedViewValid, partialChildrenAtFailure,
+                    textures = captured.Select((item, i) => new { item.Slot, item.Id, item.InitiallyValid, released = releasedAtFailure[i] }),
+                    error = host.Main.Failure
+                }));
+                AssertThat(captured.All(item => item.InitiallyValid && item.Id != 0)).IsTrue();
+                AssertThat(captured.Count(item => item.Slot == 0)).IsEqual(6); // three frames, two shifts
+                AssertThat(captured.Count(item => item.Slot == 1)).IsEqual(1);
+                AssertThat(captured.Where(item => item.Slot is not null).Select(item => item.Slot!.Value)
+                    .SequenceEqual(new[] { 0, 0, 0, 0, 0, 0, 1 })).IsTrue();
+                AssertThat(offTree).IsTrue();
+                AssertThat(failures).IsEqual(1);
+                AssertThat(host.Main.Failure!.Contains(marker, StringComparison.Ordinal)).IsTrue();
+                AssertThat(releasedAtFailure.Length).IsEqual(captured.Count);
+                AssertThat(releasedAtFailure.All(released => released))
+                    .OverrideFailureMessage("Every owner-registered native texture must be released before Main.Failed.").IsTrue();
+                AssertThat(referencesAtFailure).IsEqual(0);
+                AssertThat(failedViewValid).IsFalse();
+                AssertThat(partialChildrenAtFailure).IsEqual(0);
+                AssertThat(host.Main.StoryBattle).IsNull();
+                AssertThat(host.Main.StoryDrawSnapshot.HasValue).IsFalse();
+                partial!.ReleaseTextures(); // repeated cleanup is safe even after off-tree Free
+                AssertThat(partial.TextureReferenceCount).IsEqual(0);
+            }
+            AssertThat(GodotObject.IsInstanceValid(failedMain)).IsFalse();
+        }
+        finally
+        {
+            // A genuine RED must not leave task-owned ObjectDB entries in the shared host.
+            int rescued = 0;
+            foreach (var item in captured)
+                if (GodotObject.IsInstanceValid(item.Texture)) { item.Texture.Dispose(); rescued++; }
+            if (partial is not null && GodotObject.IsInstanceValid(partial)) partial.Free();
+            GD.Print($"PAL_136_PARTIAL_RESCUE:{rescued}");
+        }
+        AssertThat(fixture.Snapshot().SequenceEqual(before)).IsTrue();
+
+        bool first = false;
+        var healthyTextures = new List<(ImageTexture Texture, ulong Id)>();
+        Main healthyMain;
+        using (var fresh = new StoryHost(selection, [new(100, 120), new(128, 104)], [new(200, 176), new(256, 152)],
+            main =>
+            {
+                if (first || main.StoryBattle is null) return;
+                first = true; // first real UpdateCompleted, never wait for a matching state
+                var draw = main.StoryDrawSnapshot!.Value;
+                AssertThat(main.StoryBattleMode).IsEqual(StoryBattlePresentation.AttackMenu);
+                AssertThat(draw.EnemyIdleFrames.SequenceEqual(new[] { 0, 0 })).IsTrue();
+                AssertThat(draw.EnemyIdleCounters.SequenceEqual(new[] { 65534, 1 })).IsTrue();
+                AssertThat(draw.PartyEnemies.Select(e => e.Position)
+                    .SequenceEqual(new[] { new Vector2(100, 120), new Vector2(128, 104) })).IsTrue();
+                AssertThat(draw.PartyEnemies.Select(e => e.Hp).SequenceEqual(new[] { 43, 43 })).IsTrue();
+                AssertThat(draw.PartyEnemies.All(e => e.Visible)).IsTrue();
+                AssertThat(main.StoryBattle.Current.Combat.Enemies.Select(e => e.Id)
+                    .SequenceEqual(new[] { 7, 7 })).IsTrue();
+                AssertThat(healthyTextures.All(t => GodotObject.IsInstanceValid(t.Texture))).IsTrue();
+                AssertThat(healthyTextures.All(t => captured.All(old => old.Id != t.Id))).IsTrue();
+                GD.Print("PAL_136_SAME_URI_HEALTHY:" + JsonSerializer.Serialize(new
+                {
+                    fixture.StoryUri, fixture.VisualUri, draw.EnemyIdleFrames, draw.EnemyIdleCounters,
+                    textures = healthyTextures.Select(t => t.Id)
+                }));
+            }, configure: main => main.StoryBattleViewFactory = () => new PalStoryBattleView
+            {
+                TextureOwned = (_, texture) => healthyTextures.Add((texture, texture.GetInstanceId()))
+            }))
+        {
+            healthyMain = fresh.Main;
+            AssertThat(fresh.Main.Failure).IsNull();
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            await fresh.FinishDisplay();
+            await fresh.Wait(() => first);
+            AssertThat(fresh.Main.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(healthyMain)).IsFalse();
+        AssertThat(healthyTextures.Count > captured.Count).IsTrue();
+        AssertThat(healthyTextures.All(t => !GodotObject.IsInstanceValid(t.Texture)
+            && GodotObject.InstanceFromId(t.Id) is null)).IsTrue();
+        AssertThat(fixture.Snapshot().SequenceEqual(before)).IsTrue();
+        GD.Print($"PAL_136_HEALTHY_RELEASED:{healthyTextures.Count}; source/output hashes unchanged");
     }
 
     private static System.Collections.Generic.HashSet<string> FriendDeathHookFirstDisplaysSet(bool zh) =>
@@ -1779,19 +2210,21 @@ public class StoryRoundtripSceneTests
         private readonly bool party;
         private readonly Vector2[] partyPlayers = [], partyEnemies = [];
         private readonly Action<Main>? updateObserver;
+        private readonly int enemyImpactPose;
         internal StoryHost(GameSceneConfiguration selection, Vector2[]? enemySlots = null, Vector2[]? players = null,
-            Action<Main>? updateObserver = null)
+            Action<Main>? updateObserver = null, int enemyImpactPose = 5, Action<Main>? configure = null)
         {
             // Party hosts reuse the same production scene; only the observer switches to party checks.
             party = enemySlots is not null;
             if (party)
             {
-                if (enemySlots!.Length != 2 || players is not { Length: 2 })
-                    throw new ArgumentException("Party hosts require exactly two enemy slots and two player origins.");
+                if (enemySlots!.Length != 2 || players is not { Length: 1 or 2 })
+                    throw new ArgumentException("Multi-actor hosts require two enemy slots and one or two player origins.");
                 partyEnemies = enemySlots; partyPlayers = players!;
             }
             this.updateObserver = updateObserver;
-            Main.Configure(selection); Main.UpdateCompleted += Updated;
+            this.enemyImpactPose = enemyImpactPose;
+            Main.Configure(selection); configure?.Invoke(Main); Main.UpdateCompleted += Updated;
             // Runner owns the container, so an actual Main removal can be inspected before final Free.
             var container = new Node();
             container.AddChild(Main);
@@ -1812,11 +2245,12 @@ public class StoryRoundtripSceneTests
                 if (party)
                 {
                     if (pose is { Pose: 0 } && previousPose is null) numberBornAt = null;
-                    if (draw is { PartyPlayers: { Count: 2 } members, PartyEnemies: { Count: 2 } slots } partyDraw)
+                    if (draw is { PartyPlayers: { Count: > 0 } members, PartyEnemies: { Count: 2 } slots } partyDraw)
                     {
                         var currentAction = combat?.LastAction;
                         bool feedback = Main.StoryBattleMode == StoryBattlePresentation.Feedback;
-                        for (int i = 0; i < 2; i++)
+                        AssertThat(members.Count).IsEqual(partyPlayers.Length);
+                        for (int i = 0; i < members.Count; i++)
                         {
                             bool animating = feedback && currentAction is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i;
                             // fight.c:5012-5022: a covering member stands at the target's side with frame 3.
@@ -1825,7 +2259,15 @@ public class StoryRoundtripSceneTests
                                 AssertThat(members[i].Position == partyPlayers[currentAction.TargetIndex] + new Vector2(-24, -12)).IsTrue();
                                 AssertThat(members[i].Frame).IsEqual(3);
                             }
-                            else if (!animating) AssertThat(members[i].Position == partyPlayers[i]).IsTrue();
+                            else if (!animating)
+                            {
+                                Vector2 recoil = Vector2.Zero;
+                                if (feedback && currentAction is { Attacker: ClassicBattleSide.Enemy, TargetIndex: var target, CovererPartyIndex: null }
+                                    && target == i && pose is { } incomingPose)
+                                    recoil = incomingPose.Pose <= enemyImpactPose ? Vector2.Zero
+                                        : incomingPose.Pose == enemyImpactPose + 1 ? new(8, 4) : new(10, 5);
+                                AssertThat(members[i].Position == partyPlayers[i] + recoil).IsTrue();
+                            }
                         }
                         for (int slot = 0; slot < 2; slot++)
                         {
@@ -1844,13 +2286,13 @@ public class StoryRoundtripSceneTests
                     if (pose is { } partyPose && draw is { } numberDraw && combat?.LastAction is { } partyAction
                         && numberDraw.PartyEnemies.Count == 2)
                     {
-                        int birthPose = partyAction.Attacker == ClassicBattleSide.Player ? 7 : 4;
+                        int birthPose = partyAction.Attacker == ClassicBattleSide.Player ? 7 : enemyImpactPose - 1;
                         if (partyPose.Pose == birthPose && numberBornAt is null)
                         { numberBornAt = Main.StoryPresentationTicks; NumberBirths++; }
                         if (numberBornAt is { } birth)
                         {
                             uint elapsed = unchecked(Main.StoryPresentationTicks - birth);
-                            bool visible = elapsed < 440 && partyPose.Pose >= (partyAction.Attacker == ClassicBattleSide.Player ? 8 : 5);
+                            bool visible = elapsed < 440 && partyPose.Pose >= (partyAction.Attacker == ClassicBattleSide.Player ? 8 : enemyImpactPose);
                             var currentDigits = numberDraw.NumberDigits.Where(d => d.BornAt == birth).ToArray();
                             bool numeric = visible && !partyAction.Evaded && partyAction.Damage > 0;
                             AssertThat(currentDigits.Length > 0 == numeric).IsTrue();
@@ -1984,7 +2426,7 @@ public class StoryRoundtripSceneTests
                         AssertThat(unchecked(Main.StoryPresentationTicks - beforePose.PoseStartedAt) >= 40).IsTrue();
                         if (beforePose.Pose != StoryPlayerFleePresentation.Duration - 1
                             && previousCombat?.LastAction?.Attacker == ClassicBattleSide.Enemy)
-                            AssertThat(beforePose.Pose).IsEqual(15); // hit tick5 + eleven timed recovery ticks.
+                            AssertThat(beforePose.Pose).IsEqual(enemyImpactPose + 10); // Eleven timed recovery ticks, including impact.
                     }
                 }
                 if (pose is { } firstPose && previousPose is null)
@@ -2071,6 +2513,17 @@ public class StoryRoundtripSceneTests
                 if (observationFailure is not null) throw observationFailure;
                 if (Main.Failure is not null) throw new InvalidOperationException(Main.Failure);
                 if (Time.GetTicksMsec() - start > 5000) throw new TimeoutException("Story production boundary not observed; mode=" + Main.StoryBattleMode);
+                await runner.AwaitIdleFrame();
+            }
+            if (observationFailure is not null) throw observationFailure;
+        }
+        internal async Task WaitForFailure()
+        {
+            ulong start = Time.GetTicksMsec();
+            while (Main.Failure is null)
+            {
+                if (observationFailure is not null) throw observationFailure;
+                if (Time.GetTicksMsec() - start > 5000) throw new TimeoutException("Expected story initialization failure not observed.");
                 await runner.AwaitIdleFrame();
             }
             if (observationFailure is not null) throw observationFailure;
