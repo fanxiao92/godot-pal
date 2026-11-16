@@ -1120,6 +1120,44 @@ public sealed class TriggerScriptBattleBindingTests
         Assert.Equal(new[] { 9, 10 }, second.Lifecycle.Current.Roles[4].Magics.Take(2));
     }
 
+    [Fact]
+    public void Battle_start_normalizes_zero_hp_puppet_participant_without_preflight_or_spectator_side_effects()
+    {
+        // #139 (battle.c 1568-1583): the preflight accepts a zero-HP puppet participant and mutates
+        // nothing; only the real startBattle construction revives it at 1 HP, clears the puppet and
+        // resets its hidden counts; a spectator outside the party never changes.
+        var dead = Role() with { RoleId = 4, Hp = 0, Statuses = [0, 0, 0, 0, 7, 0, 0, 0, 0] };
+        var spectator = Role() with { RoleId = 0, Hp = 0, Statuses = [0, 0, 0, 0, 9, 0, 0, 0, 0] };
+        IReadOnlyList<ClassicBattleEnemy> enemies = [new(7, 0, 43, 0, 0, 0, 1)];
+        var content = new TriggerBattleContent([dead], [new ClassicBattlePlayer(4, 0, 150, 40, 20, 100)],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = Growth() },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = enemies });
+        var owner = new RoleLiveState([dead, spectator]);
+        var random = new BindingRandom();
+        var script = TriggerScriptSession.ForSharedRoles(Fixture().Load(), TriggerScriptSessionTests.Language(),
+            content, random, owner, SharedWorld(owner));
+        var requirements = script.GetCurrentEntryRequirements("shared", "npc", 1);
+        Assert.Contains(18, requirements.BattleTeamIds);
+        Assert.Equal(0, random.Draws);
+        Assert.Equal((0, 7, 55), (owner.Roles[4].Hp, owner.Roles[4].Statuses[4],
+            owner.Roles[4].HiddenExperience["attack"].Count));
+        script.Start("shared", "npc", 1);
+        var entered = script.PendingBattle!.Lifecycle.Current.Roles[4];
+        Assert.Equal(1, entered.Hp);
+        Assert.All(entered.Statuses, value => Assert.Equal(0, value));
+        Assert.All(entered.HiddenExperience.Values, xp => Assert.Equal(0, xp.Count));
+        Assert.Equal(17, entered.PrimaryExperience.Count);
+        // The owner merges only at the owned ack; the battle-entry view never writes it.
+        Assert.Equal((0, 7, 55), (owner.Roles[4].Hp, owner.Roles[4].Statuses[4],
+            owner.Roles[4].HiddenExperience["attack"].Count));
+        Win(script.PendingBattle!);
+        Assert.True(script.AcknowledgeBattle(script.PendingBattle!.Id, script.PendingBattle.Lifecycle.Completion));
+        Assert.Equal(75, owner.Roles[4].Hp); // 1 + (150-1)/2: the settled entry member
+        Assert.All(owner.Roles[4].Statuses, value => Assert.Equal(0, value));
+        Assert.Equal((0, 9, 55), (owner.Roles[0].Hp, owner.Roles[0].Statuses[4],
+            owner.Roles[0].HiddenExperience["attack"].Count));
+    }
+
     [Theory]
     [InlineData("missing")]
     [InlineData("maxHp")]

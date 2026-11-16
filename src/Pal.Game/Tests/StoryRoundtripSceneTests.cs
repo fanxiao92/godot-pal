@@ -1235,6 +1235,87 @@ public class StoryRoundtripSceneTests
     }
 
     [TestCase(Timeout = 120000)]
+    public async Task ZeroHpPuppetMemberEntersAtOneHpStaysDeadAndSettlesByIdentity()
+    {
+        // #139: a PartyLoss-derived author gives member 0 a dead entry carrying the puppet word
+        // (kStatusPuppet, statuses slot 4). PAL_StartBattle's entry loop (battle.c 1568-1583)
+        // revives it at exactly 1 HP and clears the puppet at the real battle start while the
+        // shared owner keeps the authored 0 HP until the owned ack; the dex500 enemies then kill
+        // it for real and the member stays dead through every later round (never revived per
+        // action) until the Lost settlement returns its true 0 HP, zero statuses and identity.
+        using var fixture = new AuthoredStoryFixture("PartyLoss", zeroHpPuppetEntry: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            // Entry normalization: authored 0 HP + puppet becomes exactly 1 HP with the puppet cleared.
+            AssertThat(battle.Current.Combat.Players[0].Hp).IsEqual(1);
+            AssertThat(battle.Current.Roles[0].Hp).IsEqual(1);
+            AssertThat(battle.Current.Roles[0].Statuses.All(value => value == 0)).IsTrue();
+            AssertThat(battle.Current.Roles[1].Hp).IsEqual(20);
+            var world = old.Dialogue!.FirstBattleWorld!;
+            AssertThat(world.RoleLiveState!.Roles[0].Hp).IsEqual(0);
+            AssertThat(world.RoleLiveState.Roles[0].Statuses[4]).IsEqual(1);
+            bool member0Dead = false;
+            while (script.PendingBattle is not null)
+            {
+                if (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                {
+                    var selecting = battle.Current.Combat.SelectingPlayerIndex;
+                    AssertThat(selecting.HasValue).IsTrue();
+                    if (member0Dead)
+                    {
+                        AssertThat(selecting!.Value != 0).IsTrue();
+                        AssertThat(battle.Current.Combat.Players[0].Hp).IsEqual(0);
+                    }
+                    while (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                    {
+                        await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                        await host.ConfirmMemberTarget(battle);
+                    }
+                }
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback
+                    || old.StoryBattleMode == StoryBattlePresentation.AttackMenu || script.PendingBattle is null);
+                if (battle.Current.Combat.Players[0].Hp == 0) member0Dead = true;
+                if (script.PendingBattle is null) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+            }
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Lost);
+            AssertThat(member0Dead).IsTrue();
+            AssertThat(battle.Current.Combat.Players.All(p => p.Hp == 0)).IsTrue();
+            // In-battle death identity: the settled entry member keeps 0 HP (no revive-to-1), zero
+            // statuses and its own RoleId; the Lost settlement performs no recovery.
+            AssertThat(battle.Current.Roles[0].Hp).IsEqual(0);
+            AssertThat(battle.Current.Roles[0].Statuses.All(value => value == 0)).IsTrue();
+            AssertThat(battle.Current.Roles[0].RoleId).IsEqual(0);
+            AssertThat(battle.Current.Roles[1].Hp).IsEqual(0);
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("败");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            // The owned ack merges the settled roles: member 0 stays dead in the shared owner too.
+            AssertThat(world.RoleLiveState.Roles[0].Hp).IsEqual(0);
+            AssertThat(world.RoleLiveState.Roles[0].Statuses.All(value => value == 0)).IsTrue();
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+    }
+
+    [TestCase(Timeout = 120000)]
     public async Task EquipmentDualAttackPresentsTwoStrikesWithOncePerActionCounts()
     {
         // PartyEquip: role1 wears the authored five-object closure (effective 46/52/119, object

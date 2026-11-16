@@ -57,7 +57,15 @@ public sealed class ClassicBattleLifecycleSession
         this.cashLiveState = cashLiveState;
         foreach (var role in this.roles.Values)
         {
-            role.Hp = Math.Max(1, role.Hp);
+            // PAL_StartBattle's entry loop (battle.c 1568-1583): every zero-HP party member
+            // revives at exactly 1 HP and loses its puppet status at the actual battle start,
+            // where the whole party's hidden action counts also reset; validation and preflight
+            // never produce these side effects.
+            if (role.Hp == 0)
+            {
+                role.Hp = 1;
+                role.Statuses[BattleEquipmentState.PuppetStatusIndex] = 0;
+            }
             if (equipment is { Declared: true })
             {
                 // PAL_UpdateEquipments re-runs the equip scripts (global.c:1352): the persistent good
@@ -370,9 +378,12 @@ public sealed class ClassicBattleLifecycleSession
         bool equipmentAgrees = equipment is not { Declared: true }
             ? role.Equipment is { Count: 6 } && role.Equipment.All(x => x == 0)
             : role.Equipment is { Count: 6 } && role.Equipment.SequenceEqual(equipment.Equipment(role.RoleId));
-        bool statusesAgree = equipment is not { Declared: true }
-            ? role.Statuses is { Count: 9 } && role.Statuses.All(x => x == 0)
-            : role.Statuses is { Count: 9 } && SettledStatusesAgree(equipment.StatusOverlay(role.RoleId), role.Statuses);
+        // battle.c 1568-1576: only a zero-HP member's puppet word may enter the settled domain —
+        // the battle start clears it — while a living member's puppet is the unopened mid-battle
+        // puppet action domain and every other non-good status stays rejected in either spelling.
+        bool statusesAgree = role.Statuses is { Count: 9 } && DeadEntryPuppetAgrees(role) && (equipment is not { Declared: true }
+            ? role.Statuses.Where((_, status) => status != BattleEquipmentState.PuppetStatusIndex).All(x => x == 0)
+            : SettledStatusesAgree(equipment.StatusOverlay(role.RoleId), role.Statuses, role.Hp == 0));
         if (role.RoleId != player.RoleId || role.Hp != player.Hp || role.MaxHp != player.MaxHp
             || role.Hp is < 0 or > 32767 || role.MaxHp is < 1 or > 65535 || role.Hp > role.MaxHp
             || !Word(role.Mp) || !Word(role.MaxMp) || role.Mp > role.MaxMp || role.Level is < 0 or > 99
@@ -398,13 +409,21 @@ public sealed class ClassicBattleLifecycleSession
     private static bool Word(int value) => value is >= 0 and <= 65535;
     private static bool ValidExperience(BattleExperienceSnapshot? xp) => xp is not null && Word(xp.Value) && Word(xp.Level) && Word(xp.Count);
 
+    /// <summary>battle.c 1574-1576: the battle start clears a zero-HP member's puppet word, so any
+    /// WORD spelling may enter; a living member's puppet stays outside the supported domain.</summary>
+    private static bool DeadEntryPuppetAgrees(BattleRoleSnapshot role) =>
+        role.Hp == 0 ? Word(role.Statuses[BattleEquipmentState.PuppetStatusIndex])
+            : role.Statuses[BattleEquipmentState.PuppetStatusIndex] == 0;
+
     /// <summary>Timed statuses (1..999) and extra temporary effects are not part of this domain; the settled
     /// state may only carry persistent equipment statuses (global.c:2255 good branch, >999 preserved by
-    /// the battle-end cleanup of global.c:2304) at or below the declared overlay value.</summary>
-    private static bool SettledStatusesAgree(IReadOnlyList<int> overlay, IReadOnlyList<int> statuses)
+    /// the battle-end cleanup of global.c:2304) at or below the declared overlay value. A dead entry's
+    /// puppet slot is exempt: PAL_StartBattle clears it before the battle runs (battle.c:1576).</summary>
+    private static bool SettledStatusesAgree(IReadOnlyList<int> overlay, IReadOnlyList<int> statuses, bool deadEntryPuppet)
     {
         for (int status = 0; status < BattleEquipmentState.StatusCount; status++)
         {
+            if (deadEntryPuppet && status == BattleEquipmentState.PuppetStatusIndex) continue;
             int value = statuses[status];
             if (status < BattleEquipmentState.GoodStatusFirstIndex)
             {

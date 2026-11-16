@@ -19,7 +19,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
     private string? numericInput;
     internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null,
         bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
-        bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false)
+        bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false,
+        bool zeroHpPuppetEntry = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -27,6 +28,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The single-player/two-enemy derivation requires PartyWin.", nameof(singlePlayerTwoEnemies));
         if (threePlayer && scenario != "PartyWin")
             throw new ArgumentException("The three-player derivation requires the two-slot PartyWin author.", nameof(threePlayer));
+        if (zeroHpPuppetEntry && scenario != "PartyLoss")
+            throw new ArgumentException("The zero-HP puppet entry derivation requires PartyLoss.", nameof(zeroHpPuppetEntry));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -49,7 +52,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -85,6 +88,16 @@ internal sealed class AuthoredStoryFixture : IDisposable
                         third["roleId"] = 2;
                         data[section]!.AsArray().Add(third);
                     }
+                }
+                if (zeroHpPuppetEntry)
+                {
+                    // #139 test-owned dead entry: member 0 authors a zero HP word with the puppet
+                    // status (kStatusPuppet, statuses slot 4) in both the role snapshot and its
+                    // matching player; the formal battle start must revive it at 1 HP and clear
+                    // the puppet (battle.c 1568-1583), never the preflight.
+                    data["roles"]![0]!["hp"] = 0;
+                    data["players"]![0]!["hp"] = 0;
+                    data["roles"]![0]!["statuses"]![4] = 1;
                 }
                 if (removeDualAttack)
                 {

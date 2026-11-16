@@ -28,6 +28,7 @@ public sealed class BattleEquipmentState
     public const int StatusCount = 9; // kStatusAll
     internal const int PersistentStatusFloor = 1000; // PAL_RemovePlayerStatus keeps values above 999 (global.c:2297)
     internal const int GoodStatusFirstIndex = 5;     // bravery, protect, haste, dualAttack (global.h tagSTATUS)
+    internal const int PuppetStatusIndex = 4;        // kStatusPuppet: cleared by PAL_StartBattle for dead entrants (battle.c:1576)
 
     private readonly int[,] equipment = new int[RoleCount, SlotCount];
     private readonly int[,] attack = new int[RoleCount, RegisterCount];

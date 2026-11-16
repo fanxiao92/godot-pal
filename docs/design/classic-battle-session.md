@@ -123,7 +123,7 @@ Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 fra
 
 无成长闭包在创建可变角色/抽 RNG 前证明：role level 与七 hidden level 均0..99，所有 XP/level/count 为 WORD，primary XP 严格小于 **role.Level** 对应阈值，七 hidden XP 各严格小于自身 level 对应阈值；阈值完整且正 WORD。七项 hidden 名称按 Ordinal 精确匹配，不因调用方字典使用大小写不敏感比较器而接受别名；规范键配合该比较器仍合法。不是 `reward==0` 就跳过规则：旧 XP 已达阈值、需要 level clamp、任意可新增法术等均拒绝。逐行检查当前等级可学法术，已知/零 ID/未来等级不新增；32槽全满时按 `PAL_AddMagic` 不会新增。非零奖励仍由 combat 预检拒绝。这是合法数据下没有永久成长的封闭子集，不是 #50 通用成长实现。
 
-参考 `PAL_StartBattle` 开场将 HP0 抬至1（零 status 所以 puppet 已为零），七 hidden count 归零而 primary count 保留；不放松底层 combat HP1..32767。每个真实动作后将真实 attack/health counts 写回角色，包括最后 **Lost**；其他五项仍为开场0。Won 在零结束钩子后按 `(max-current)/2` 截断恢复 HP/MP；Lost 不恢复，保留 HP0。清理真实 owned role status（参考 `<=999` 条件），并释放 active combat owner；本子集从不接收/产生 inventory-in-use、毒或 extra-equipment effect，不声称验证这些非零系统的清理，也不删除 hand-slot/dual。
+参考 `PAL_StartBattle` 开场循环（battle.c 1568-1583）将 HP0 参战队员抬至1 并同时清其 puppet 状态（kStatusPuppet，statuses[4]）；任何 WORD 拼写的死入场 puppet 都可被接受，但只在真实开战构造内清零，预检/验证不产生该副作用。活成员携带 puppet（未开放的战中傀儡行动域）及死入场的其它非良好状态仍拒绝；七 hidden count 归零而 primary count 保留；不放松底层 combat HP1..32767。#139 勘误：旧草案 T13 “死亡角色不被自动补成 1HP”与固定参考不符，已按参考执行入场恢复；战中死亡仍按正确身份/目标处理，不在每帧或每个动作中补 1HP，仅 Won 半恢复/下一场入场规范化触碰它。每个真实动作后将真实 attack/health counts 写回角色，包括最后 **Lost**；其他五项仍为开场0。Won 在零结束钩子后按 `(max-current)/2` 截断恢复 HP/MP；Lost 不恢复，保留 HP0。清理真实 owned role status（参考 `<=999` 条件），并释放 active combat owner；本子集从不接收/产生 inventory-in-use、毒或 extra-equipment effect，不声称验证这些非零系统的清理，也不删除 hand-slot/dual。
 
 独立 `ClassicBattleLifecycleSession.CompletionReceipt` 仅在真实 KO、适用结算及清理之后发布，与 raw combat receipt 类型不同，无公开构造或任意结果入口。终态推进返回 false，选令拒绝，快照和 receipt 身份不变；`OwnsCompletion` 只对自身非空 receipt 的对象身份返回 true（两个 null 不匹配）。它不消费 receipt；后续事件请求仍须绑定准确 active lifecycle session，并自行实现一次性继续，不能接受另一 session、枚举或 raw KO。下述 trigger binding 复用此入口，不以 raw combat KO 绕过结算。
 
@@ -171,6 +171,7 @@ Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 fra
 | 敌目标选择 int0..maxPartyIndex；无魔法不请求魔法概率 | fight.c:4521–4547、4576–4581、4656–4659 |
 | 敌攻加 `(level+6)*6` 后截零，int0..16>=10闪避；命中时 strength int0..2，基础伤害/2，再 int0..1；截至HP再最小1 | fight.c:4913–4938、5052–5074 |
 | 命中后即使等效道具概率0，仍请求 int1..10；短路不请求毒抗 int1..100 | fight.c:5139–5146 |
+| 入场规范化：HP0→1 并清 kStatusPuppet（仅死入场队员），全队七 hidden count 归零、primary count 保留；战后恢复另算 | battle.c:1568–1583 |
 | KO、零奖励累计；战内动作计数不等于成长 | fight.c:744–776；battle.c:1228–1262 |
 | 整数/float包含端点、退化区间不抽熵 | util.c:222–278 |
 | 玩家有效攻防身法来自原属性加装备效果（本检查点装备全零） | global.c:1736–1765、1800–1867 |
