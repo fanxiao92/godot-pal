@@ -1,8 +1,8 @@
 # ClassicBattleSession：Core 普攻与整轮选令
 
-## 当前 #207：Core 一至五个实有敌位（#138 的局部能力）
+## 当前 #207/#210：一至五个实有敌位贯通 Core 与外层门（#138）
 
-`ClassicBattleSession` 与 typed `TriggerBattleContent.EnemyTeams` 接受 **1..5 个完整、非 null 的敌位**；玩家接受域仍为1..2。沿用正式 trigger → `ClassicBattleLifecycleSession` → combat 链，不新增接口或第二套战斗引擎。0、6、null 槽和已有不支持能力仍在 RNG/玩法副作用前拒绝，typed team 容量诊断带 teamId。此节更新后文历史检查点的 Core 敌方上限，不覆盖其他能力限制。
+`ClassicBattleSession` 与 typed `TriggerBattleContent.EnemyTeams` 接受 **1..5 个完整、非 null 的敌位**；玩家接受域为 1..3（#137）。沿用正式 trigger → `ClassicBattleLifecycleSession` → combat 链，不新增接口或第二套战斗引擎。0、6、null 槽和已有不支持能力仍在 RNG/玩法副作用前拒绝，typed team 容量诊断带 teamId。此节更新后文历史检查点的 Core 敌方上限，不覆盖其他能力限制。
 
 - `EnemyTeams[teamId][slot]` / `Current.Enemies[slot]` 的 ordinal 是实例地址；重复 ID7 的五槽仍各有独立 HP、队列与目标。typed 内容深拷贝全部槽及嵌套状态/毒数组；调用者替换输入数组或后续推进不改变已发布快照。
 - 不改既有排序与重定向：选齐存活玩家后才按 E0..E4、P0..P1 抽身法；完整13项参考队列作 WORD 截断、SHORT 严格嵌套比较，不替换为稳定排序。死亡队列位置 pass、不消费动作随机；执行时目标死亡，从原 slot 循环找存活目标。最后一敌 KO 才 Won，终态保留唯一回执。
@@ -20,7 +20,7 @@
 
 存量 `ClassicBattleSessionTests.UnsupportedDefinitions` 和 `ModernBattleContentTests` 的解析容量负例原以三敌代表超限，同步改为六敌，并独立覆盖解析后1..5槽的顺序、重复ID及HP。`ModernBattleContent.Parse` 委托 `TriggerBattleContent` 构造并验证，因此该纯Core解析入口也获得1..5容量，不是仍停留在双敌的外层门。这是同一容量契约必要的调用方/测试迁移，不能保留与新接受域矛盾的断言。
 
-**合法中间态与证据边界**：本叶仅交付 Core 规则。外层现代投影、native、Prepare 与 Main 的完整生产链未迁移，原有外层容量门尚未放宽：非投影 native 链在 `NativeBattleContent.CreateChecked`（读回）与 `Write(content, null)`（无 receipt 的 Prepare 写出）处显式拒绝每队非 1..2 的 loaded enemy slots（诊断带 teamId），投影路径继续由投影行强制同一 1..2 loaded 域，Core 1..5 接受域不回退；不宣称五敌正常 Main、布局/视觉/输入或整个 #138 完成，不解除 #140 的父依赖。Core Unit 不替代 Prepare/Game/私有真实资源/GPU/Windows人工/远端CI。空槽、三角色、新动作、敌方法术/双动与旧失败支线不在本叶。敌方 HP/目标/队列仍由 combat 唯一持有，lifecycle 结算角色、trigger 在 owned ACK 后提交；不新增持久化 schema 或另一份真状态。
+**#210 外层迁移与证据边界**：#207 的 Core 1..5 接受域已贯通外层链，这是对 #207 期间按票面边界刻意保留的双敌门的有意迁移，不是回退：`BattleDataProjector` 投影 dense 实有敌位 1..5（源槽仍仅 0..4，零槽、零 objectId 与空队仍拒绝）；非投影 native 链在 `NativeBattleContent.CreateChecked`（读回）与 `Write(content, null)`（无 receipt 的 Prepare 写出）按同一 1..5 loaded 域拒绝 0/>5（诊断带 teamId）；投影槽行 `BattleProjectionSourceInfo` 每队 1..5 loaded；`PrepareStoryPackage` author schema 的 `visual.teams[].enemies` 接受 1..5 逐槽绑定并与数值敌位一一对应。重复敌人定义多槽仍不合并。测试迁移：投影 `three` 拒绝例删除并由五槽正例取代、native `enemies-overcapacity` 与 Prepare `three-slots` 拒绝例迁至六槽，投影 `three-loaded` 缺陷例改经投影/native 槽数不匹配路径拒绝；新增非投影、投影槽行与 Prepare 五槽正例。零空槽/FFFF skip 与数据表零槽语义仍归 T13b（#140）；正式 Main 的五敌目标循环、所选敌队参考布局与 #138 余项未在本叶验收，不解除 #140 的父依赖。Extract Unit 与 native-map headless 证据不替代 Prepare 进程/私有真实资源/GPU/Windows人工/远端CI。空槽、三角色、新动作、敌方法术/双动与旧失败支线不在本叶。敌方 HP/目标/队列仍由 combat 唯一持有，lifecycle 结算角色、trigger 在 owned ACK 后提交；不新增持久化 schema 或另一份真状态。
 
 ## 当前 #160：live Name 角色钩子所有权（Core 窄契约）
 

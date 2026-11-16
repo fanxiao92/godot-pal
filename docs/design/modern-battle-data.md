@@ -58,14 +58,14 @@ dotnet run --project tools/Pal.Extract -- project-battle-data `
 | `ProjectionReceiptSha256` / `ProjectionNumericSha256` | 空字符串 | 分别是完整原收据、原 numeric 的64位小写十六进制字节 SHA256 |
 | `ProjectionReceiptByteLength` / `ProjectionNumericByteLength` | -1（long） | 正 Int64 / 1..16MiB；收据长度只运输，不据其分配内存或虚构解析上限 |
 | `ProjectionInputFiles` / `ProjectionInputSha256` / `ProjectionInputByteLengths` | 空数组 | 三个对齐的 string[] / string[] / long[]，恰14项；每项 SHA 同上，长度1..64MiB |
-| `ProjectionRoleIds` / `ProjectionTeamIds` | 空 int[] | 1..2个唯一角色0..4，与 players 顺序、roles/growth覆盖一致；非空唯一 WORD 队伍，与 native teams身份/顺序一致 |
+| `ProjectionRoleIds` / `ProjectionTeamIds` | 空 int[] | 1..3个唯一角色0..4，与 players 顺序、roles/growth覆盖一致；非空唯一 WORD 队伍，与 native teams身份/顺序一致 |
 | `ProjectionEnemySlots` | 空 int[] | 每队5行，每行7词：teamId、sourceSlot、objectId、enemyId、compactSlot、battleId、disposition；0=skip-FFFF，1=loaded |
 
 `ProjectionPresent=false` 时任何非默认字段（包括 null 字符串/数组）都拒绝，不能静默忽略半声明。true 时缺失、未知版本、kind/snapshot、错误身份/形状一律 InvalidDataException；native 读取错误保留选中 URI/identity。所有来源字段缺席的旧 v1 资源依上述默认合法读为 null，无需补收据或迁移 M3/M4。
 
 14项文件名必须恰为 ordinal 顺序：battle-effect-index.json、battle-field.json、enemy-pos.json、enemy-team.json、enemy.json、event-object.json、index.json、level-up-exp.json、level-up-magic.json、magic.json、object.json、player-roles.json、scene.json、store.json。禁止路径、大小写别名、重复、未知、遗漏或乱序；runtime不打开这些文件。
 
-槽行按 TeamIds 顺序、sourceSlot0..4完整排列。skip-FFFF 仅 objectId65535，三个 loaded 字段平铺为 -1（C# 值为 null，绝不当业务0）。loaded 的 objectId1..65534、enemyId0..65535，compactSlot从0连续、battleId=compactSlot+1，并与对应 native enemy.Id顺序/数量一致；每队1..2个loaded，其余FFFF跳过。objectId0不是FFFF，拒绝；重复objectId/enemyId仍是不同槽，不去重。全FFFF、未知disposition、半行、越域、错队/错槽/错ID均拒绝。角色4可单独合法选择，不强迫role0；后续Story最小域不在本叶新增。
+槽行按 TeamIds 顺序、sourceSlot0..4完整排列。skip-FFFF 仅 objectId65535，三个 loaded 字段平铺为 -1（C# 值为 null，绝不当业务0）。loaded 的 objectId1..65534、enemyId0..65535，compactSlot从0连续、battleId=compactSlot+1，并与对应 native enemy.Id顺序/数量一致；每队1..5个loaded（#210 与 Core 同域），其余FFFF跳过。objectId0不是FFFF，拒绝；重复objectId/enemyId仍是不同槽，不去重。全FFFF、未知disposition、半行、越域、错队/错槽/错ID均拒绝。角色4可单独合法选择，不强迫role0；后续Story最小域不在本叶新增。
 
 InputTrust由版本/kind固定为只读常量 `caller-verified-upstream; declarations-and-byte-identities-not-independent-authentication`，不另持可改任意文本。来源结构只证明声明内部与同次数字选择一致，**不认证 receipt→numeric→M5表或原档真实性**；两类输入字节 SHA 不与 native 文件 SHA 混比。完整 fieldSources/declaredSources/declaredTables只由 receipt 身份供后续离线原件追溯，不运进runtime解释。
 

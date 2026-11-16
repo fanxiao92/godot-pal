@@ -25,13 +25,25 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
     { SourceIdentity = "authored synthetic background", Width = 320, Height = 200, PaletteIndices = new byte[64000], Alpha = Enumerable.Repeat((byte)255, 64000).ToArray() };
     public string[] ExpectedPaths { get; }
 
-    public NativeBattleVisualProfileFixture(bool party = false)
+    public NativeBattleVisualProfileFixture(bool party = false, bool fiveEnemies = false)
     {
         Party = party;
-        Story = new NativeStoryProfileFixture(party);
+        Story = new NativeStoryProfileFixture(party, fiveEnemies: fiveEnemies);
         CheckedStory = NativeStoryProfile.Load(Story.Uri);
         var team = new PalBattleVisualTeam { TeamId = 18, BackgroundUri = Root + "/Background.tres" };
-        if (party)
+        if (fiveEnemies)
+        {
+            // #210 five authored slot positions; resources may be shared, slot identity is not.
+            team.EnemySlots =
+            [
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(128, 104) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(156, 88) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(184, 72) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(212, 56) }
+            ];
+        }
+        else if (party)
         {
             // Two story enemy slots share enemy definition id 7; positions use distinct authored slots.
             team.EnemySlots =

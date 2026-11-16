@@ -54,10 +54,11 @@ public static class NativeBattleContent
                 var enemies = Items(team.Enemies, "Team.Enemies").Select(ReadEnemy).ToArray();
                 if (!teams.TryAdd(team.TeamId, enemies))
                     throw new InvalidDataException("duplicate TeamId");
-                // Non-projected native reads keep the explicit outer 1..2 loaded-slot boundary;
-                // Core's 1..5 capacity is not enabled on this chain until the outer layers migrate.
-                if (enemies.Length is < 1 or > 2)
-                    throw new InvalidDataException($"Team {team.TeamId} requires one or two loaded enemy slots; Core five-slot capacity is not enabled on this native chain");
+                // Non-projected native reads keep an explicit outer loaded-slot boundary aligned
+                // with Core's reference capacity (palcommon.h MAX_ENEMIES_IN_TEAM = 5): 0 and >5
+                // stay rejected before any RNG or gameplay side effects, with teamId diagnostics.
+                if (enemies.Length is < 1 or > 5)
+                    throw new InvalidDataException($"Team {team.TeamId} requires one to five loaded enemy slots");
             }
             var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
                 Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray());
@@ -74,13 +75,12 @@ public static class NativeBattleContent
     {
         ModernBattleContent.Validate(content);
         projectedSource?.ValidateFor(content);
-        // Without a projection receipt this is the non-projected native/Prepare chain: keep its
-        // explicit outer 1..2 loaded-slot boundary (projected sources enforce the same domain
-        // through their own slot rows).
+        // Without a projection receipt this is the non-projected native/Prepare chain: it keeps
+        // the same explicit outer 1..5 loaded-slot boundary the projection slot rows enforce.
         if (projectedSource is null)
             foreach (var team in content.EnemyTeams)
-                if (team.Value.Count is < 1 or > 2)
-                    throw new InvalidDataException($"Team {team.Key} requires one or two loaded enemy slots; Core five-slot capacity is not enabled on this native chain");
+                if (team.Value.Count is < 1 or > 5)
+                    throw new InvalidDataException($"Team {team.Key} requires one to five loaded enemy slots");
         return new()
         {
             FormatVersion = 1,
@@ -313,7 +313,7 @@ public sealed class BattleProjectionSourceInfo
                 }
                 else throw Error("EnemySlots", "unknown disposition");
             }
-            if (compact is < 1 or > 2) throw Error("EnemySlots", "requires 1..2 loaded slots per team");
+            if (compact is < 1 or > 5) throw Error("EnemySlots", "requires 1..5 loaded slots per team");
         }
     }
 

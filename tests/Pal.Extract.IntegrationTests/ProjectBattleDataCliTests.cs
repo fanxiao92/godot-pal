@@ -92,7 +92,7 @@ public sealed class ProjectBattleDataCliTests : IDisposable
     [InlineData("magicFFFF", "magicId")]
     [InlineData("emptySlot", "zero")]
     [InlineData("tailEmptySlot", "zero")]
-    [InlineData("thirdRole", "roles")]
+    [InlineData("fourRoles", "roles")]
     [InlineData("role5", "sixth")]
     [InlineData("missingTeam", "missing referenced")]
     public async Task Invalid_data_exits_one_with_diagnostics_and_leaves_output_untouched(string mutation, string diagnostic)
@@ -103,7 +103,7 @@ public sealed class ProjectBattleDataCliTests : IDisposable
         else if (mutation == "badUtf8") File.WriteAllBytes(Path.Combine(input, "index.json"), [0xff, 0xfe]);
         else if (mutation == "duplicateKey") File.WriteAllText(Path.Combine(input, "index.json"), "{\"formatVersion\":1,\"formatVersion\":1}");
         else if (mutation == "truncated") File.WriteAllText(Path.Combine(input, "index.json"), "{");
-        else if (mutation is not "thirdRole" and not "role5" and not "missingTeam")
+        else if (mutation is not "fourRoles" and not "role5" and not "missingTeam")
         {
             string file = mutation is "nonzeroEquipment" ? "player-roles.json" : mutation is "magicFFFF" ? "enemy.json" : mutation is "emptySlot" or "tailEmptySlot" ? "enemy-team.json" : "index.json";
             BattleProjectionFixture.Mutate(files, file, d =>
@@ -119,7 +119,7 @@ public sealed class ProjectBattleDataCliTests : IDisposable
             Save(files);
         }
         Directory.CreateDirectory(output);
-        var result = await Run(mutation == "thirdRole" ? "4,0,1" : mutation == "role5" ? "5" : "4,0", mutation == "missingTeam" ? "99" : "0");
+        var result = await Run(mutation == "fourRoles" ? "4,0,1,2" : mutation == "role5" ? "5" : "4,0", mutation == "missingTeam" ? "99" : "0");
         Assert.Equal(1, result.ExitCode);
         Assert.Empty(result.Stdout);
         Assert.Contains(diagnostic, result.Stderr, StringComparison.OrdinalIgnoreCase);

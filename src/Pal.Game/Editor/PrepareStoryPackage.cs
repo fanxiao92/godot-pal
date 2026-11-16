@@ -280,8 +280,8 @@ public partial class PrepareStoryPackage : Node
             {
                 Properties(t, "teamId", "backgroundUri", "enemies");
                 var enemies = t.GetProperty("enemies");
-                Require(enemies.ValueKind == JsonValueKind.Array && enemies.GetArrayLength() is >= 1 and <= 2,
-                    "enemies requires one or two enemy slots");
+                Require(enemies.ValueKind == JsonValueKind.Array && enemies.GetArrayLength() is >= 1 and <= 5,
+                    "enemies requires one to five enemy slots");
                 return new PalBattleVisualTeam
                 {
                     TeamId = Int(t, "teamId"), BackgroundUri = Text(t, "backgroundUri"),

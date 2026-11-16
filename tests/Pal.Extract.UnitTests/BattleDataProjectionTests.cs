@@ -75,7 +75,6 @@ public sealed class BattleDataProjectionTests
 
     [Theory]
     [InlineData("0", "zero")]
-    [InlineData("three", "one or two")]
     [InlineData("empty", "no loaded")]
     [InlineData("magic", "magicId")]
     [InlineData("FFFF", "magicId")]
@@ -101,8 +100,8 @@ public sealed class BattleDataProjectionTests
     public void Unsupported_or_dangling_content_is_rejected_with_a_location(string mutation, string message)
     {
         var files = BattleProjectionFixture.Create();
-        if (mutation is "0" or "three" or "empty") BattleProjectionFixture.Mutate(files, "enemy-team.json", d =>
-            d["records"]![0]!["enemies"] = mutation switch { "0" => new JsonArray(6, 0, 7, 65535, 65535), "three" => new JsonArray(6, 7, 6, 65535, 65535), _ => new JsonArray(65535, 65535, 65535, 65535, 65535) });
+        if (mutation is "0" or "empty") BattleProjectionFixture.Mutate(files, "enemy-team.json", d =>
+            d["records"]![0]!["enemies"] = mutation switch { "0" => new JsonArray(6, 0, 7, 65535, 65535), _ => new JsonArray(65535, 65535, 65535, 65535, 65535) });
         else if (mutation is "magic" or "FFFF" or "dual" or "equivalent" or "rate") BattleProjectionFixture.Mutate(files, "enemy.json", d =>
             d["records"]![1]![mutation switch { "magic" or "FFFF" => "magicId", "dual" => "dualMove", "rate" => "attackEquivItemRate", _ => "attackEquivItemId" }] = mutation == "FFFF" ? 65535 : 8);
         else if (mutation is "ready" or "end" or "turn" or "dying" or "friend" or "missingEnemy") BattleProjectionFixture.Mutate(files, "object.json", d =>
@@ -242,6 +241,28 @@ public sealed class BattleDataProjectionTests
         BattleProjectionFixture.Mutate(files, "enemy-team.json", d => d["records"]![0]!["enemies"] = new JsonArray(6, 65535, 6, 65535, 65535));
         var content = ModernBattleContent.Parse(BattleDataProjector.Project(files, [4], [0]).NumericJson);
         Assert.Equal(new[] { 1, 2 }, content.EnemyTeams[0].Select(e => e.Id));
+    }
+
+    [Fact]
+    public void Five_dense_enemy_slots_project_per_slot_identity_without_merging_duplicates()
+    {
+        // #210: the projection migrates with Core to the 1..5 dense-slot domain
+        // (palcommon.h MAX_ENEMIES_IN_TEAM); repeated enemy objects keep distinct
+        // compact slots and per-slot field sources, never merged by objectId.
+        var files = BattleProjectionFixture.Create();
+        BattleProjectionFixture.Mutate(files, "enemy-team.json", d => d["records"]![0]!["enemies"] = new JsonArray(6, 7, 6, 7, 6));
+        var result = BattleDataProjector.Project(files, [4, 0], [0]);
+        var content = ModernBattleContent.Parse(result.NumericJson);
+        ModernBattleContent.ValidatePhysicalBattle(content, 0);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, content.EnemyTeams[0].Select(e => e.Id));
+        var receipt = JsonNode.Parse(result.ReceiptJson)!;
+        var loaded = receipt["enemySlots"]!.AsArray().Where(x => x!["disposition"]!.GetValue<string>() == "loaded").ToArray();
+        Assert.Equal(5, loaded.Length);
+        Assert.Equal(0, receipt["enemySlots"]!.AsArray().Count(x => x!["disposition"]!.GetValue<string>() == "skip-FFFF"));
+        Assert.Equal(new[] { 0, 1, 2, 3, 4 }, loaded.Select(x => x!["sourceSlot"]!.GetValue<int>()));
+        Assert.Equal(new[] { 6, 7, 6, 7, 6 }, loaded.Select(x => x!["objectId"]!.GetValue<int>()));
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, loaded.Select(x => x!["battleId"]!.GetValue<int>()));
+        Assert.Contains(receipt["fieldSources"]!.AsArray(), x => x!["path"]!.GetValue<string>() == "teams[0].enemies[4].hp");
     }
 
     [Fact]

@@ -182,7 +182,8 @@ public static class BattleDataProjector
                     continue;
                 }
                 if (objectId == 0) throw new InvalidDataException($"{from}: zero is a real empty slot, not FFFF; sparse teams unsupported.");
-                if (enemies.Count == 2) throw new InvalidDataException($"{from}: only one or two dense enemy slots supported.");
+                // #210: dense teams migrate with Core to the 1..5 loaded-slot domain
+                // (palcommon.h MAX_ENEMIES_IN_TEAM); the five source rows bound the count.
                 JsonObject obj = View(objectId, "enemy", from);
                 int enemyId = StrictJson.Int(obj, "enemyId");
                 JsonObject definition = Row(docs, "enemy", enemyId);

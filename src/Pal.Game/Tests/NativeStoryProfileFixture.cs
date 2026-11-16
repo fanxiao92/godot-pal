@@ -24,8 +24,12 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     public bool Party { get; }
     public NativeStoryProfileFixture(bool party = false, bool hiddenCurrentGlyph = false, bool currentHookPositive = false,
         bool seedDyingGlyph = false, bool futureDyingWrite = false, bool secondOrderDyingWrite = false,
-        bool randomDyingBranch = false, bool titleDyingGlyph = false, bool forceCurrentFriendDeath = false)
+        bool randomDyingBranch = false, bool titleDyingGlyph = false, bool forceCurrentFriendDeath = false,
+        bool fiveEnemies = false)
     {
+        if (fiveEnemies && (hiddenCurrentGlyph || currentHookPositive || futureDyingWrite || secondOrderDyingWrite
+            || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
+            throw new ArgumentException("The five-enemy-slot variant requires the plain story graph.", nameof(fiveEnemies));
         if (forceCurrentFriendDeath && (!currentHookPositive || !secondOrderDyingWrite || randomDyingBranch || titleDyingGlyph))
             throw new ArgumentException("The controlled FriendDeath variant requires only the second-order current-hook graph.", nameof(forceCurrentFriendDeath));
         if (titleDyingGlyph && (!futureDyingWrite || randomDyingBranch || secondOrderDyingWrite))
@@ -85,6 +89,12 @@ internal sealed class NativeStoryProfileFixture : IDisposable
                 // Optional two real hits: 60 -> 16 (Dying), then 16 -> 0 (coverer's FriendDeath).
                 enemy.Attack = 8; enemy.Dexterity = 500;
             }
+        }
+        if (fiveEnemies)
+        {
+            // #210 five-slot authored team: repeated enemy definition 7 stays five
+            // independent slots with per-slot HP, never merged by definition ID.
+            Numeric.Teams[0].Enemies = [Enemy(43), Enemy(44), Enemy(45), Enemy(46), Enemy(47)];
         }
         Save(Numeric.Roles[0], "Role.tres");
         Numeric.Roles = [ResourceLoader.Load<PalBattleRole>(Root + "/Role.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep), .. Numeric.Roles[1..]];
@@ -197,7 +207,7 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     private static PalBattlePlayer Player(int roleId, int hp, int attack, int defense) => new() { RoleId = roleId, Hp = hp, MaxHp = 150,
         Attack = attack, Defense = defense, Dexterity = 100, Equipment = new int[6], Statuses = new int[9], Poisons = [0] };
     private static PalBattleGrowth Growth(int roleId) => new() { RoleId = roleId, LevelUpExperience = Enumerable.Repeat(100, 100).ToArray(), LevelUpMagics = [] };
-    private static PalBattleEnemy Enemy() => new() { Id = 7, Hp = 43, PhysicalResistance = 1, Statuses = new int[9], Poisons = [0] };
+    private static PalBattleEnemy Enemy(int hp = 43) => new() { Id = 7, Hp = hp, PhysicalResistance = 1, Statuses = new int[9], Poisons = [0] };
     private static PalBattleExperience Experience() => new() { Value = 7, Level = 3, Count = 55 };
 
     public void Dispose()

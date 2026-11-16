@@ -701,7 +701,7 @@ public class NativeBattleContentTests
     public void ProjectionAcceptsThreeOrderedRolesMatchingThreePlayerContent()
     {
         // battle.h MAX_PLAYERS_IN_PARTY: the projection receipt accepts a third ordered role;
-        // the loaded native enemy slots keep their existing 1..2 outer boundary.
+        // enemy slots follow the outer 1..5 loaded-slot domain migrated by #210.
         var data = Data();
         var content = new TriggerBattleContent(
             [data.InitialRole with { RoleId = 4 }, data.InitialRole with { RoleId = 0 }, data.InitialRole with { RoleId = 1 }],
@@ -717,6 +717,50 @@ public class NativeBattleContentTests
         AssertThat(checkedResult.Content.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 0, 1 });
         var coreResult = NativeBattleContent.CreateCore(native, "three-role-projection.tres");
         AssertThat(coreResult.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 0, 1 });
+    }
+
+    [TestCase]
+    public void FiveLoadedSlotsRoundtripOnTheNonProjectedNativeChain()
+    {
+        // #210: the non-projected native chain migrates with Core to the 1..5 loaded-slot
+        // domain; repeated enemy definition 7 stays five independent slots (per-slot HP).
+        var data = Data();
+        var enemies = Enumerable.Range(0, 5).Select(i => data.Teams[18] with { Id = 7, Hp = 43 + i }).ToArray();
+        var content = new TriggerBattleContent([data.InitialRole], [data.Player],
+            new Dictionary<int, ClassicBattleGrowthData> { [data.Player.RoleId] = data.Growth },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = enemies });
+        using var native = NativeBattleContent.Write(content);
+        var checkedResult = NativeBattleContent.CreateChecked(native, "five-slot-native.tres");
+        AssertThat(checkedResult.ProjectedSource is null).IsTrue();
+        AssertThat(checkedResult.Content.EnemyTeams[18].Select(enemy => enemy.Id).ToArray()).IsEqual(new[] { 7, 7, 7, 7, 7 });
+        AssertThat(checkedResult.Content.EnemyTeams[18].Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 43, 44, 45, 46, 47 });
+    }
+
+    [TestCase]
+    public void ProjectionAcceptsFiveLoadedSlotsPerTeam()
+    {
+        // #210: projection slot rows migrate with the native chain to the 1..5 loaded domain;
+        // compact identity stays slot-based, never merged by objectId or enemyId.
+        var data = Data();
+        var enemies = Enumerable.Range(1, 5).Select(i => data.Teams[18] with { Id = i }).ToArray();
+        var content = new TriggerBattleContent(
+            [data.InitialRole with { RoleId = 4 }, data.InitialRole with { RoleId = 0 }],
+            [data.Player with { RoleId = 4 }, data.Player with { RoleId = 0 }],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = data.Growth, [0] = data.Growth },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> {
+                [65535] = enemies,
+                [0] = enemies.Select(enemy => enemy with { }).ToArray() });
+        BattleProjectionEnemySlot[] Slots(int teamId) => Enumerable.Range(0, 5)
+            .Select(slot => new BattleProjectionEnemySlot(teamId, slot, 97, "loaded", 0, slot, slot + 1)).ToArray();
+        using var native = NativeBattleContent.Write(content,
+            ProjectionSource(ProjectionInputs(), [4, 0], [65535, 0], [.. Slots(65535), .. Slots(0)]));
+        var checkedResult = NativeBattleContent.CreateChecked(native, "five-slot-projection.tres");
+        var source = checkedResult.ProjectedSource!;
+        AssertThat(string.Join("|", source.EnemySlots.Select(x => $"{x.TeamId},{x.SourceSlot},{x.ObjectId},{x.Disposition},{x.EnemyId},{x.CompactSlot},{x.BattleId}")))
+            .IsEqual("65535,0,97,loaded,0,0,1|65535,1,97,loaded,0,1,2|65535,2,97,loaded,0,2,3|65535,3,97,loaded,0,3,4|65535,4,97,loaded,0,4,5"
+                + "|0,0,97,loaded,0,0,1|0,1,97,loaded,0,1,2|0,2,97,loaded,0,2,3|0,3,97,loaded,0,3,4|0,4,97,loaded,0,4,5");
+        AssertThat(checkedResult.Content.EnemyTeams[65535].Select(enemy => enemy.Id).ToArray()).IsEqual(new[] { 1, 2, 3, 4, 5 });
+        AssertThat(checkedResult.Content.EnemyTeams[0].Select(enemy => enemy.Id).ToArray()).IsEqual(new[] { 1, 2, 3, 4, 5 });
     }
 
     [TestCase]
@@ -1307,7 +1351,7 @@ public class NativeBattleContentTests
             case "duplicate-team": native.Teams = [native.Teams[0], native.Teams[0]]; break;
             case "team-id": native.Teams[0].TeamId = -1; break;
             case "enemies-empty": native.Teams[0].Enemies = []; break;
-            case "enemies-overcapacity": native.Teams[0].Enemies = [native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0]]; break;
+            case "enemies-overcapacity": native.Teams[0].Enemies = [native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0]]; break;
             case "enemy-null": native.Teams[0].Enemies = [null!]; break;
             case "enemy-statuses-null": native.Teams[0].Enemies[0].Statuses = null!; break;
             case "enemy-attack": native.Teams[0].Enemies[0].Attack = 32768; break;

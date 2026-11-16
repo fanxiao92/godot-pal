@@ -46,6 +46,24 @@ public class PrepareStoryPackageTests
     }
 
     [TestCase]
+    public void AuthoredFiveSlotTeamsPrepareLoadAndKeepPerSlotIdentity()
+    {
+        // #210: the author schema and native chain accept five loaded enemy slots; repeated
+        // enemy definition 7 stays five independent slots with distinct authored positions.
+        using var source = new Preparation(five: true);
+        string[] before = source.Snapshot();
+        var result = PrepareStoryPackage.Prepare(source.Input, source.Output);
+        var story = NativeStoryProfile.Load(result.StoryUri, "en");
+        var visual = NativeBattleVisualProfile.Load(result.VisualUri, story);
+        AssertThat(story.BattleContent.EnemyTeams[18].Select(enemy => enemy.Id).ToArray()).IsEqual(new[] { 7, 7, 7, 7, 7 });
+        AssertThat(story.BattleContent.EnemyTeams[18].Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 43, 44, 45, 46, 47 });
+        AssertThat(visual.Teams[18].EnemySlots.Select(slot => slot.TargetId).ToArray()).IsEqual(new[] { 7, 7, 7, 7, 7 });
+        AssertThat(visual.Teams[18].EnemySlots.Select(slot => slot.EnemyPosition).ToArray()).IsEqual(new[] {
+            new Vector2I(100, 120), new Vector2I(128, 104), new Vector2I(156, 88), new Vector2I(184, 72), new Vector2I(212, 56) });
+        AssertThat(source.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase]
     public void AuthoredPartyPackagesPrepareAndLoadInBothLanguages()
     {
         // Committed #47 two-player authored inputs through the unchanged public prepare chain;
@@ -482,7 +500,7 @@ public class PrepareStoryPackageTests
     [TestCase("mix-legacy")]
     [TestCase("legacy-missing-position")]
     [TestCase("zero-slots")]
-    [TestCase("three-slots")]
+    [TestCase("six-slots")]
     [TestCase("slot-position")]
     public void AuthorEnemiesSlotsAreStrictAndNeverMixWithTheLegacyPair(string fault)
     {
@@ -496,7 +514,7 @@ public class PrepareStoryPackageTests
             case "mix-legacy": team["targetId"] = 7; team["enemyPosition"] = new JsonArray(100, 120); break;
             case "legacy-missing-position": team.Remove("enemies"); team["targetId"] = 7; break;
             case "zero-slots": team["enemies"] = new JsonArray(); break;
-            case "three-slots": team["enemies"] = new JsonArray(slot.DeepClone(), slot.DeepClone(), slot.DeepClone()); break;
+            case "six-slots": team["enemies"] = new JsonArray(slot.DeepClone(), slot.DeepClone(), slot.DeepClone(), slot.DeepClone(), slot.DeepClone(), slot.DeepClone()); break;
             default: slot["enemyPosition"] = new JsonArray(32768, 120); break;
         }
         File.WriteAllText(source.Metadata, metadata.ToJsonString());
@@ -505,7 +523,7 @@ public class PrepareStoryPackageTests
         {
             "unknown-item-field" => "unknown fields",
             "mix-legacy" or "legacy-missing-position" => "fields",
-            "zero-slots" or "three-slots" => "one or two enemy slots",
+            "zero-slots" or "six-slots" => "one to five enemy slots",
             _ => "SHORT",
         });
         AssertThat(source.Snapshot()).IsEqual(before);
@@ -947,9 +965,9 @@ public class PrepareStoryPackageTests
         public string OutputUri { get; } = "res://Assets/PrepareTests/" + Guid.NewGuid().ToString("N");
         public string Output => ProjectSettings.GlobalizePath(OutputUri);
         public string Metadata => Path.Combine(Input, "story-package.json");
-        public Preparation(bool party = false)
+        public Preparation(bool party = false, bool five = false)
         {
-            Native = new NativeBattleVisualProfileFixture(party);
+            Native = new NativeBattleVisualProfileFixture(party, five);
             Directory.CreateDirectory(Path.Combine(Input, "events"));
             foreach (string name in new[] { "index.json", "shared.json", "outcomes.json" })
                 File.Copy(ProjectSettings.GlobalizePath(Native.Root + "/" + name), Path.Combine(Input, "events", name));
