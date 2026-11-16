@@ -5,7 +5,7 @@ import { canonical, changedPaths, hash, parseReport, relativeFile, type ProblemF
 import { acquire, atomicJson, git, inside, json, lockFile, noLinks, QuiescenceUnknownError, recoverLock, snapshot } from './io.ts';
 import { approved, contextHash, contextsFor, loadGraph, type GitHubReader, type IssueContext, type IssueGraph } from './github.ts';
 import type { Selection } from './checks.ts';
-import { approveCorrection, attributeValidation, bindProblemEvidence, maxProblemCorrections, requireUnexhausted, requireChangedAfterFailure, requireWritable, scopeWarningFiles, type Correction, type CorrectionLedger } from './policy.ts';
+import { approveCorrection, attributeValidation, bindEvidenceResolution, bindProblemEvidence, maxProblemCorrections, requireUnexhausted, requireChangedAfterFailure, requireWritable, scopeWarningFiles, type Correction, type CorrectionLedger } from './policy.ts';
 
 export interface UnitEvidence { project: string; directory: string; sourceFingerprint: string; code: number; scope?: string; expectedRed?: boolean; expectedFailure?: { test: string; message: string } }
 export interface RedDeclaration { behavior: string; seam: string; paths: string[]; expectedFailure: { test: string; message: string } }
@@ -24,6 +24,7 @@ export interface CodingRequest {
   beforeCheck?: (source: Source, selection?: Selection) => void;
   recordFailure?: (directory: string, source: Source, summary: string) => void;
   requestCorrection?: (findings: ProblemFinding[], change: string, contract: string) => void;
+  recordEvidenceResolution?: (problemId: string, file: string, sha256: string, note: string) => void;
 }
 export interface CodingExecutor { run(request: CodingRequest): Promise<Report> }
 export interface GitHubServices { reader: GitHubReader; agent: CodingExecutor; source: typeof snapshot }
@@ -364,6 +365,11 @@ export class GitHubHost {
             `File count is advisory (risk signal above ${scopeWarningFiles}), never a stop or a reason to omit consumers/group unrelated tests. Explain atomicity and legal intermediate states; split only independently deliverable behavior.`,
             `Problem-scoped correction ledger: ${JSON.stringify(record.corrections ?? [])}. Per-problem maximum: ${maxProblemCorrections}. Original problem evidence identity: ${original.fingerprint}. Evidence bindings: ${JSON.stringify(record.problemEvidence ?? {})}. Legacy mapping: ${JSON.stringify(record.legacyMigration ?? null)}. Pending failure: ${JSON.stringify(record.pendingFailure ?? null)}. Fresh sessions/attempts never reset identities or rounds.`,
             'Attribute each located root cause/violated contract to its existing stable problemId, not a test/message/role/session name. evidenceKey must be <original problem evidence identity>:<normalized source path>#<stable lowercase-contract-anchor>, shared by both review axes; put role/session original paths in evidence[], not the key. New evidence of the same root cause keeps its ID. Semantic equivalence is the diagnoser/independent reviewers responsibility, not an algorithmic guarantee; uncertain identity or legacy mapping requires operator decision. Exact planned RED/initial failure/read-only diagnosis is not an extra correction. A third repair may validate and succeed; third same-problem failure must preserve all three originals and end execution, no fourth or extra-corrections override. Diagnose each normal failure with request_correction findings before writing/rechecking; never relabel a failed problem for new budget.',
+            ...(role === 'implement' ? [`Recovery protocol facts derived from host state (fresh session; no earlier chat history to rely on):
+- Verified dependency integration proofs so far, as verbatim legal samples (re-verify_dependency with these exact issue/commit/evidence strings is idempotent): ${JSON.stringify(record.attempts.flatMap(item => item.dependencyProofs))}
+- Certified RED so far: ${record.tdd?.red ? `expectedFailure ${JSON.stringify(record.tdd.red.expectedFailure)} already observed natively` : 'none recorded yet'}.
+- A certified expectedRed is planned work, not a correction: do not call request_correction for it; proceed directly to production writes and GREEN.
+- The final report must be pure JSON with no surrounding prose.`] : []),
             `Native evidence (each scope/source is separate, no synthetic full-suite pass):\n${JSON.stringify(checkHistory)}`,
             `Persistent RED workflow (absence means approved legacy record, never inferred from dirty state): ${JSON.stringify(record.tdd ?? null)}`,
             `Prerequisite integration proofs:\n${JSON.stringify(attempt.dependencyProofs)}`,
@@ -424,6 +430,16 @@ export class GitHubHost {
                 for (const finding of unique) approveCorrection(next, { ...finding, change, contract, evidence: [failure.directory, ...finding.evidence].join('\n'), sourceFingerprint: failure.sourceFingerprint, kind: 'check', utc: new Date().toISOString() });
                 record.corrections = next.corrections; record.problemEvidence = next.problemEvidence; delete record.pendingFailure;
               } finally { this.save(state); }
+            },
+            recordEvidenceResolution: (problemId, file, sha256, note) => {
+              if (role !== 'implement') throw new Error('External evidence resolution requires implementation role');
+              const resolved = path.resolve(file);
+              if (!path.isAbsolute(file) || inside(this.cwd, resolved)) throw new Error('External evidence file must be an absolute path outside the repository working tree');
+              noLinks(resolved);
+              if (!fs.statSync(resolved).isFile()) throw new Error('External evidence file must be a regular file');
+              if (hash(fs.readFileSync(resolved)) !== sha256) throw new Error('External evidence sha256 does not match the actual file');
+              bindEvidenceResolution(record, { problemId, file: resolved, sha256, note, utc: new Date().toISOString() });
+              this.save(state);
             },
           }), role);
           atomicJson(path.join(roleDirectory, 'report.json'), report); reports[role] = report;

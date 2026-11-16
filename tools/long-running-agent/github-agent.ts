@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Type, type TSchema } from 'typebox';
 import type * as Pi from '@earendil-works/pi-coding-agent';
 import { canonical, hash, parseReport, type Report } from './contract.ts';
-import { atomicJson, git, inside, isIgnored, noLinks, QuiescenceUnknownError, snapshot } from './io.ts';
+import { atomicJson, git, inside, isIgnored, json, noLinks, QuiescenceUnknownError, snapshot } from './io.ts';
 import { executeCheck, gameBatches, unitProjects, type EngineOptions, type Selection } from './checks.ts';
 import { workspacePath } from './pi.ts';
 import type { CodingExecutor, CodingRequest } from './github-host.ts';
@@ -27,6 +27,18 @@ function sourcePath(request: CodingRequest, input: string, write = false): strin
   return file;
 }
 const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }], details: {} });
+// Agent-side failed-check receipt: the classifier's exact test/message strings are embedded verbatim (raw lines, not JSON-escaped)
+// so a RED re-declaration or correction diagnosis is a copy, never inference from source code. The classifier itself stays unchanged.
+export function failureReceipt(outcome: { code: number; expectedRed: boolean; summary: string }, directory: string): string {
+  const base = JSON.stringify({ status: outcome.expectedRed ? 'expected_red' : 'failed', summary: outcome.summary, directory });
+  const classificationFile = path.join(directory, 'failure-classification.json');
+  let failures = '';
+  if (fs.existsSync(classificationFile)) {
+    const exact = (json(classificationFile) as { failures?: { test: string; message: string }[] }).failures ?? [];
+    if (exact.length) failures = `\nExact classifier failures (verbatim test identity and message for every failed case; copy these exactly into declare_red/expectedFailure or the failure diagnosis instead of inferring them from source):\n${exact.map(failure => `test: ${failure.test}\nmessage: ${failure.message}`).join('\n')}\n`;
+  }
+  return `${base}${failures}stdout (tail):\n${fs.readFileSync(path.join(directory, 'stdout.log'), 'utf8').slice(-4000)}\nstderr (tail):\n${fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8').slice(-2000)}`;
+}
 export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSignal, fatal: (error: Error) => void, engine?: EngineOptions): Pi.ToolDefinition[] {
   const tools: Pi.ToolDefinition[] = [];
   const wrappers = [[sdk.createReadToolDefinition(request.cwd), false], ...(request.role === 'implement' ? [[sdk.createEditToolDefinition(request.cwd), true], [sdk.createWriteToolDefinition(request.cwd), true]] : [])] as [Pi.ToolDefinition, boolean][];
@@ -107,7 +119,8 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
           if (!request.recordFailure) throw new Error('No bounded correction controller is available');
           request.recordFailure(directory, after, outcome.summary);
         }
-        return result({ status: outcome.expectedRed ? 'expected_red' : outcome.code === 0 ? 'passed' : 'failed', summary: outcome.summary, directory, stdout: fs.readFileSync(path.join(directory, 'stdout.log'), 'utf8').slice(-4000), stderr: fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8').slice(-2000) });
+        if (outcome.code !== 0) return result(failureReceipt(outcome, directory));
+        return result({ status: 'passed', summary: outcome.summary, directory, stdout: fs.readFileSync(path.join(directory, 'stdout.log'), 'utf8').slice(-4000), stderr: fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8').slice(-2000) });
       } catch (error) { fatal(error as Error); throw error; }
     };
     tools.push(typedTool({ name: 'declare_red', label: 'Declare test-first stage', description: 'Before writes, freeze the new behavior, public test seam, test/fixture/old-contract migration paths and exact native RED. Stage paths are not a permanent production allowlist. Historical evidence cannot be rewritten.', parameters: Type.Object({ behavior: Type.String({ minLength: 1 }), seam: Type.String({ minLength: 1 }), paths: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), expectedFailure: Type.Object({ test: Type.String({ minLength: 1 }), message: Type.String({ minLength: 1 }) }, { additionalProperties: false }) }, { additionalProperties: false }),
@@ -118,10 +131,17 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
         request.declareRed(params); return result({ declared: true, next: 'Migrate old test contracts, add capability test, run exact native RED before production writes' });
       },
     }));
-    tools.push(typedTool({ name: 'request_correction', label: 'Record problem-scoped correction', description: 'Diagnose a recorded normal failure using stable root-cause problemIds and host original evidence identity:path#contract-anchor. Reuse existing IDs across checks/reviews/sessions; uncertain attribution requires operator decision. At most three repair rounds per problem; no new permissions.', parameters: Type.Object({ findings: Type.Array(Type.Object({ problemId: Type.String({ pattern: '^[a-z0-9][a-z0-9-]*$' }), evidenceKey: Type.String({ minLength: 1 }), cause: Type.String({ minLength: 1 }), evidence: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }, { additionalProperties: false }), { minItems: 1 }), change: Type.String({ minLength: 1 }), contract: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    tools.push(typedTool({ name: 'request_correction', label: 'Record problem-scoped correction', description: 'Diagnose a recorded unexpected complete normal failure (compiler/assertion/fixture) that arose during implementation, using stable root-cause problemIds and host original evidence identity:path#contract-anchor. A certified expectedRed is planned work, not a correction: never call request_correction for it; proceed directly to production writes and GREEN. Reuse existing IDs across checks/reviews/sessions; uncertain attribution requires operator decision. At most three repair rounds per problem; no new permissions.', parameters: Type.Object({ findings: Type.Array(Type.Object({ problemId: Type.String({ pattern: '^[a-z0-9][a-z0-9-]*$' }), evidenceKey: Type.String({ minLength: 1 }), cause: Type.String({ minLength: 1 }), evidence: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }, { additionalProperties: false }), { minItems: 1 }), change: Type.String({ minLength: 1 }), contract: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       execute: async (_id, params) => {
         if (!request.requestCorrection) throw new Error('Correction controller unavailable');
         try { request.requestCorrection(params.findings, params.change, params.contract); return result({ approved: true, scope: 'existing contract/permissions only' }); }
+        catch (error) { fatal(error as Error); throw error; }
+      },
+    }));
+    tools.push(typedTool({ name: 'record_evidence_resolution', label: 'Bind operator external evidence resolution', description: 'Bind operator-provided external evidence resolving the current pending review correction. file must be an absolute path outside the repository whose sha256 matches that exact file; problemId must equal the pending review correction problemId. The binding itself is the substantive change: the source may legitimately stay unchanged. Duplicate, forged or repository-internal inputs stop the session.', parameters: Type.Object({ problemId: Type.String({ pattern: '^[a-z0-9][a-z0-9-]*$' }), file: Type.String({ minLength: 1 }), sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }), note: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+      execute: async (_id, params) => {
+        if (!request.recordEvidenceResolution) throw new Error('Evidence resolution controller unavailable');
+        try { request.recordEvidenceResolution(params.problemId, params.file, params.sha256, params.note); return result({ resolved: true, problemId: params.problemId, file: params.file }); }
         catch (error) { fatal(error as Error); throw error; }
       },
     }));

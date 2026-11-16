@@ -669,7 +669,7 @@ test('codingResourceLoader injects saved host facts and contract into real fresh
     assert.equal(environment.engineChecksAuthorized, false);
     assert.deepEqual(environment.nativeExecution, { shell: false, arguments: 'argv', textEncoding: 'utf8' });
     assert.deepEqual(environment.tools, role === 'implement'
-      ? ['scoped_read', 'scoped_edit', 'scoped_write', 'scoped_list', 'scoped_search', 'inspect_git', 'check_evidence', 'declare_red', 'request_correction', 'verify_dependency', 'unit_test']
+      ? ['scoped_read', 'scoped_edit', 'scoped_write', 'scoped_list', 'scoped_search', 'inspect_git', 'check_evidence', 'declare_red', 'request_correction', 'record_evidence_resolution', 'verify_dependency', 'unit_test']
       : ['scoped_read', 'scoped_list', 'scoped_search', 'inspect_git', 'check_evidence']);
     const contract = fs.readFileSync(path.join(directory, 'environment-contract.txt'), 'utf8');
     assert.equal(environment.contract.sha256, hash(contract));
@@ -684,4 +684,103 @@ test('codingResourceLoader injects saved host facts and contract into real fresh
       fs.writeFileSync(path.join(directory, 'assembled-system-prompt.txt'), session.systemPrompt, 'utf8');
     } finally { await session.abort(); session.dispose(); }
   }
+});
+test('failed check receipts embed verbatim classifier failures for exact re-declaration', async () => {
+  const agentModule = await import('./github-agent.ts');
+  const failureReceipt = (agentModule as Record<string, unknown>).failureReceipt as ((outcome: { code: number; expectedRed: boolean; summary: string }, directory: string) => string) | undefined;
+  assert.ok(typeof failureReceipt === 'function', 'github-agent must compose agent-side failure receipts containing verbatim classifier failures');
+  const directory = fs.mkdtempSync(path.join(suite, 'receipt-'));
+  const exactFailures = [
+    { test: 'Pal.Core.UnitTests.SeamTests.ExactRed identity ("case α")', message: `Expected: exact "verbatim" quote — ${'long diagnostic '.repeat(60)}beyond the summary truncation` },
+    { test: 'Pal.Core.UnitTests.SeamTests.Second', message: 'Expected: 2 Actual: 3' },
+    { test: 'Pal.Core.UnitTests.SeamTests.Third', message: 'Assert.Equal() failure' },
+    { test: 'Pal.Core.UnitTests.SeamTests.FourthBeyondSummaryLimit', message: 'the fourth failure message must survive the summary slice intact' },
+  ];
+  fs.writeFileSync(path.join(directory, 'failure-classification.json'), JSON.stringify({ status: 'classified', nativeExit: 1, scope: 'unit', trx: path.join(directory, 'trx', 'results.trx'), expectedRed: false, failures: exactFailures }));
+  fs.writeFileSync(path.join(directory, 'stdout.log'), 'synthetic stdout tail');
+  fs.writeFileSync(path.join(directory, 'stderr.log'), 'synthetic stderr tail');
+  const failed = failureReceipt({ code: 1, expectedRed: false, summary: 'Normal assertion/fixture failure: truncated by summary. Evidence: failure-classification.json' }, directory);
+  for (const failure of exactFailures) {
+    assert.ok(failed.includes(failure.test), `receipt must embed the exact classifier test identity: ${failure.test}`);
+    assert.ok(failed.includes(failure.message), `receipt must embed the exact classifier message verbatim: ${failure.message.slice(0, 60)}`);
+  }
+  assert.ok(failed.includes('failed'), 'failed receipts keep the status marker');
+  const expectedRed = failureReceipt({ code: 1, expectedRed: true, summary: 'Exact predeclared RED observed' }, directory);
+  assert.ok(expectedRed.includes('expected_red'), 'expected_red receipts keep the status marker');
+  assert.ok(expectedRed.includes(exactFailures[3].message), 'expected_red receipts also embed verbatim failures');
+});
+test('recovered implement prompts carry state-derived protocol facts', async () => {
+  const f = fixture(2); f.issues[3].state = 'closed'; f.blockers[2] = [3];
+  f.issues[3].comments.push({ body: `Accepted integration ${f.head}` } as IssueContext['comments'][number]);
+  const prompts: string[] = []; let implementations = 0;
+  f.setAgent({ run: async request => {
+    prompts.push(request.prompt);
+    if (request.role === 'implement') {
+      implementations++;
+      request.verifyDependency(3, f.head, `Accepted integration ${f.head}`);
+      if (implementations === 1) {
+        certifySyntheticRed(request);
+        return { status: 'blocked', summary: 'Synthetic stop after verified dependency and certified RED', evidence: ['Synthetic pause'] };
+      }
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'issue-2');
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+      return { status: 'candidate', summary: 'Recovered implementation completed', evidence: ['Recovered run'] };
+    }
+    return { status: 'passed', summary: 'Independent synthetic review', evidence: ['Synthetic review'] };
+  } });
+  await f.host().run({}, signal());
+  await f.host().run({ resume: true }, signal());
+  assert.equal(implementations, 2, 'resume must start a fresh implement session');
+  const recovered = prompts[1];
+  assert.ok(recovered.includes('Recovery protocol facts'), 'recovered implement prompt must carry the state-derived protocol facts section');
+  assert.ok(recovered.includes(`Accepted integration ${f.head}`), 'protocol facts must show the stored dependency proof evidence string verbatim');
+  assert.ok(recovered.includes('do not call request_correction'), 'protocol facts must carry the certified-expectedRed rule sentence');
+  assert.ok(recovered.includes('proceed directly to production writes and GREEN'), 'protocol facts must direct certified RED straight to production writes and GREEN');
+  assert.ok(recovered.includes('pure JSON'), 'protocol facts must require a pure JSON report');
+  assert.ok(recovered.includes(syntheticDeclaration.expectedFailure.test) && recovered.includes(syntheticDeclaration.expectedFailure.message), 'protocol facts must restate the certified RED expectedFailure exactly');
+  for (const review of [prompts[2], prompts[3]]) assert.doesNotMatch(review, /Recovery protocol facts/, 'review prompts stay read-only without implement protocol facts');
+  assert.equal(f.host().state()!.records[2].attempts.length, 2);
+});
+test('record_evidence_resolution binds operator external evidence and rejects forged inputs', async () => {
+  const f = fixture(1); const agent = f.getAgent(); let implementations = 0;
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      implementations++;
+      if (implementations === 1) {
+        certifySyntheticRed(request);
+        fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'issue-2');
+        request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+        return { status: 'candidate', summary: 'Initial candidate delivered', evidence: ['a.txt'] };
+      }
+      assert.ok(typeof request.recordEvidenceResolution === 'function', 'host must provide the external evidence resolution controller');
+      const evidence = path.join(f.directory, 'operator-evidence.txt');
+      fs.writeFileSync(evidence, 'operator-reviewed external evidence original');
+      const sha256 = hash(fs.readFileSync(evidence));
+      assert.throws(() => request.recordEvidenceResolution!('consumer-contract', path.join(f.cwd, 'a.txt'), sha256, 'repository-internal path'), /outside the repository/i, 'repository-internal paths rejected');
+      assert.throws(() => request.recordEvidenceResolution!('consumer-contract', evidence, 'f'.repeat(64), 'wrong sha'), /sha256 does not match|mismatch/i, 'wrong sha256 rejected');
+      assert.throws(() => request.recordEvidenceResolution!('unknown-problem', evidence, sha256, 'wrong problemId'), /pending review correction/i, 'unknown problemId rejected');
+      request.recordEvidenceResolution!('consumer-contract', evidence, sha256, 'Operator resolved this finding with external evidence');
+      assert.throws(() => request.recordEvidenceResolution!('consumer-contract', evidence, sha256, 'duplicate binding'), /already/i, 'duplicate binding rejected');
+      const unchanged = snapshot(f.cwd);
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: unchanged.fingerprint, code: 0 });
+      return { status: 'candidate', summary: 'Review correction resolved by operator external evidence; source deliberately unchanged', evidence: [evidence] };
+    }
+    if (request.role === 'standards' && implementations === 1) return { status: 'changes_requested', summary: 'Located consumer repair', evidence: ['a.txt'], findings: [finding(request)] };
+    return agent.run(request);
+  } });
+  const result = await f.host().run({ commit: true }, signal());
+  assert.equal(result.counts.local_completed, 1, 'source-unchanged review repair must pass the gate after binding');
+  const ledger = f.host().state()!.records[2].corrections!;
+  assert.equal(ledger.length, 1);
+  assert.equal(ledger[0].kind, 'review');
+  assert.equal(ledger[0].evidenceResolution?.file, path.join(f.directory, 'operator-evidence.txt'));
+  assert.match(ledger[0].evidenceResolution?.sha256 ?? '', /^[0-9a-f]{64}$/);
+});
+test('request_correction description confines the tool to unexpected normal failures', async () => {
+  const sdk = await import('@earendil-works/pi-coding-agent'); const g = fixture(1);
+  const request: CodingRequest = { cwd: g.cwd, issue: 2, role: 'implement', directory: g.directory, contexts: [], prompt: 'Synthetic', input: snapshot(g.cwd), signal: signal(), emit: () => {}, checks: [], pendingDependencies: new Set(), verifyDependency: () => {}, recordCheck: () => {} };
+  const description = codingTools(sdk, request, signal(), () => {}).find(tool => tool.name === 'request_correction')!.description ?? '';
+  assert.match(description, /unexpected complete normal failure/i, 'description must confine the tool to unexpected complete normal failures');
+  assert.match(description, /certified expectedRed is planned work/i, 'description must state certified expectedRed is planned work');
+  assert.match(description, /proceed directly to production writes and GREEN/i, 'description must direct certified RED straight to production writes and GREEN');
 });

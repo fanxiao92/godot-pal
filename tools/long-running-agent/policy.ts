@@ -14,6 +14,7 @@ export interface Correction {
   sourceFingerprint: string;
   kind: 'check' | 'review';
   utc: string;
+  evidenceResolution?: { file: string; sha256: string; note: string; utc: string };
 }
 export interface CheckFailure {
   directory: string;
@@ -80,6 +81,16 @@ export function approveCorrection(ledger: CorrectionLedger, correction: Correcti
   (ledger.corrections ??= []).push(correction);
   delete ledger.pendingFailure;
 }
+// An operator-provided original artifact outside the repository resolves a pending review correction; the file predates
+// the session (the agent has no write access outside the workspace), so existence plus an exact content hash is operator
+// intent — its sufficiency stays an independent-review judgement, not a host guarantee.
+export function bindEvidenceResolution(ledger: CorrectionLedger, resolution: { problemId: string; file: string; sha256: string; note: string; utc: string }): void {
+  const correction = ledger.corrections?.at(-1);
+  if (!correction || correction.kind !== 'review' || correction.problemId !== resolution.problemId) throw new Error('External evidence resolution must target the current pending review correction problemId');
+  if (correction.evidenceResolution) throw new Error('Review correction already carries an external evidence resolution; a second binding is not allowed');
+  if (!resolution.file.trim() || !/^[0-9a-f]{64}$/.test(resolution.sha256) || !resolution.note.trim()) throw new Error('External evidence resolution needs a file, an exact sha256 and a note');
+  correction.evidenceResolution = { file: resolution.file, sha256: resolution.sha256, note: resolution.note, utc: resolution.utc };
+}
 export function requireWritable(ledger: CorrectionLedger): void {
   requireUnexhausted(ledger);
   if (ledger.pendingFailure) throw new Error('Diagnose original failure and call request_correction before writes or another check');
@@ -88,6 +99,8 @@ export function requireChangedAfterFailure(ledger: CorrectionLedger, current: So
   requireWritable(ledger);
   const correction = ledger.corrections?.at(-1);
   if (correction && correction.sourceFingerprint === current.fingerprint) {
+    // The operator's external evidence binding is itself the substantive change of this correction round.
+    if (correction.evidenceResolution) return;
     throw new Error('No substantive source correction since failure; the same check or review must not be retried');
   }
 }
