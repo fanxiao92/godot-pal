@@ -437,14 +437,18 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
     {
         var visual = new PalBattleVisualProfile
         {
-            FormatVersion = 1,
+            FormatVersion = 2,
             SourceIdentity = "Synthetic first-battle closure visual over authored leaves; not retail data.",
-            RoleId = 0,
-            PlayerSpriteUri = Localize("Leaves/F0.tres"),
-            PlayerPosition = new Vector2I(200, 176),
+            Players =
+            [
+                new PalBattleVisualPlayer { RoleId = 0, PlayerSpriteUri = Localize("Leaves/F0.tres"),
+                    PlayerPosition = new Vector2I(200, 176),
+                    AttackEffectSpriteUri = Localize("Leaves/AttackEffect.tres"), AttackEffectIndex = 0 },
+                new PalBattleVisualPlayer { RoleId = 1, PlayerSpriteUri = Localize("Leaves/F1.tres"),
+                    PlayerPosition = new Vector2I(256, 152),
+                    AttackEffectSpriteUri = Localize("Leaves/AttackEffect.tres"), AttackEffectIndex = 0 }
+            ],
             PaletteUri = Localize("Leaves/Palette.tres"),
-            AttackEffectSpriteUri = Localize("Leaves/AttackEffect.tres"),
-            AttackEffectIndex = 0,
             NumberSpriteUri = Localize("Leaves/Numbers.tres"),
         };
         var team = new PalBattleVisualTeam
@@ -461,8 +465,8 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             ],
         };
         visual.Teams = [team];
-        foreach (string uri in new[] { visual.PlayerSpriteUri, visual.PaletteUri, team.BackgroundUri,
-            visual.AttackEffectSpriteUri, visual.NumberSpriteUri }.Concat(team.EnemySlots.Select(slot => slot.EnemySpriteUri)).Distinct(StringComparer.Ordinal))
+        foreach (string uri in new[] { visual.Players[0].PlayerSpriteUri, visual.Players[1].PlayerSpriteUri, visual.PaletteUri, team.BackgroundUri,
+            visual.Players[0].AttackEffectSpriteUri!, visual.Players[1].AttackEffectSpriteUri!, visual.NumberSpriteUri }.Concat(team.EnemySlots.Select(slot => slot.EnemySpriteUri)).Distinct(StringComparer.Ordinal))
             visual.ResourceSha256[uri] = Godot.FileAccess.GetSha256(uri);
         string path = Localize("Visual.tres");
         NativeProfileFixture.SaveResource(visual, Path.Combine(root, "Visual.tres"));

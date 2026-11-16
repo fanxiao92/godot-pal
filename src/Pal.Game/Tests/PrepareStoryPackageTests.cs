@@ -71,7 +71,9 @@ public class PrepareStoryPackageTests
                 AssertThat(story.BattleContent.Players.Count).IsEqual(2);
                 AssertThat(story.BattleContent.EnemyTeams[18].Count).IsEqual(2);
                 AssertThat(story.BattleContent.EnemyTeams[18].Select(x => x.Id).SequenceEqual(new[] { 7, 7 })).IsTrue();
-                AssertThat(visual.PlayerPosition).IsEqual(new Vector2I(200, 176));
+                AssertThat(visual.Players.Select(p => p.RoleId).SequenceEqual(new[] { 0, 1 })).IsTrue();
+                AssertThat(visual.Players.Select(p => p.PlayerPosition)
+                    .SequenceEqual(new[] { new Vector2I(200, 176), new Vector2I(256, 152) })).IsTrue();
                 AssertThat(visual.Teams[18].EnemySlots.Select(s => s.TargetId).SequenceEqual(new[] { 7, 7 })).IsTrue();
                 AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemyPosition)
                     .SequenceEqual(new[] { new Vector2I(100, 120), new Vector2I(128, 104) })).IsTrue();
@@ -735,15 +737,15 @@ public class PrepareStoryPackageTests
         PublicPrepareRequiresExplicitIdleSpeedInsteadOfSynthesizingIt();
         using var source = new Preparation();
         var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
-        metadata["visual"]!["attackEffectSpriteUri"] = source.Native.Team.EnemySlots[0].EnemySpriteUri;
-        metadata["visual"]!["attackEffectIndex"] = 0;
+        metadata["visual"]!["players"]![0]!["attackEffectSpriteUri"] = source.Native.Team.EnemySlots[0].EnemySpriteUri;
+        metadata["visual"]!["players"]![0]!["attackEffectIndex"] = 0;
         metadata["visual"]!["teams"]![0]!["enemies"]![0]!["idleAnimSpeed"] = 0;
         File.WriteAllText(source.Metadata, metadata.ToJsonString());
         string[] before = source.Snapshot();
         var result = PrepareStoryPackage.Prepare(source.Input, source.Output);
         var visual = NativeBattleVisualProfile.Load(result.VisualUri, NativeStoryProfile.Load(result.StoryUri));
         visual.RequireReferencePresentation();
-        AssertThat(visual.AttackEffectFrames.Select(x => x.Index).SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
+        AssertThat(visual.Players[0].AttackEffectFrames.Select(x => x.Index).SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
         AssertThat(visual.ResourceSha256.ContainsKey(source.Native.Team.EnemySlots[0].EnemySpriteUri)).IsTrue();
         var slot = visual.Teams[18].EnemySlots[0];
         AssertThat((slot.IdleFrames, slot.IdleAnimSpeed, slot.MagicFrames, slot.AttackFrames, slot.ActWaitFrames))
@@ -762,8 +764,9 @@ public class PrepareStoryPackageTests
         using var source = new Preparation();
         var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
         var visual = metadata["visual"]!;
-        visual["attackEffectSpriteUri"] = source.Native.Team.EnemySlots[0].EnemySpriteUri;
-        if (fault != "partial") visual["attackEffectIndex"] = fault == "negative-group" ? -1 : 0;
+        var player = visual["players"]![0]!;
+        player["attackEffectSpriteUri"] = source.Native.Team.EnemySlots[0].EnemySpriteUri;
+        if (fault != "partial") player["attackEffectIndex"] = fault == "negative-group" ? -1 : 0;
         visual["teams"]![0]!["enemies"]![0]!["idleAnimSpeed"] = fault == "idle-sentinel" ? -1 : fault == "idle-overflow" ? 65536 : 0;
         if (fault == "unknown") visual["unknown"] = 0;
         string json = metadata.ToJsonString();
@@ -928,7 +931,8 @@ public class PrepareStoryPackageTests
                 entryFileId = s.EntryFileId, entryId = s.EntryId, ownerId = s.OwnerId, entryAddress = s.EntryAddress,
                 battleContentUri = s.BattleContentUri, dialogueDirectory = s.DialogueDirectory,
                 portraits = s.Portraits.Select(p => new { id = p.Key, uri = p.Value }).ToArray(),
-                visual = new { roleId = v.RoleId, playerSpriteUri = v.PlayerSpriteUri, playerPosition = new[] { v.PlayerPosition.X, v.PlayerPosition.Y }, paletteUri = v.PaletteUri,
+                visual = new { players = v.Players.Select(p => new { roleId = p.RoleId, playerSpriteUri = p.PlayerSpriteUri,
+                        playerPosition = new[] { p.PlayerPosition.X, p.PlayerPosition.Y } }).ToArray(), paletteUri = v.PaletteUri,
                     teams = new[] { new { teamId = t.TeamId, backgroundUri = t.BackgroundUri,
                         enemies = t.EnemySlots.Select(slot => new { targetId = slot.TargetId, enemySpriteUri = slot.EnemySpriteUri,
                             enemyPosition = new[] { slot.EnemyPosition.X, slot.EnemyPosition.Y },

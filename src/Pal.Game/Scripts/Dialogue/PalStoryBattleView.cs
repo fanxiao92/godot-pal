@@ -36,7 +36,7 @@ internal partial class PalStoryBattleView : Node2D
     private StoryPlayerFleeSnapshot? fleePresentation;
     private int[] idleFrames = [];
     private int[] idleCounters = [];
-    private readonly Dictionary<int, ImageTexture> effects = new();
+    private readonly Dictionary<(int Member, int Frame), ImageTexture> effects = new();
     private readonly Dictionary<(StoryNumberColor Color, int Digit), ImageTexture> numbers = new();
     internal StoryEnemyAttackSnapshot? EnemyPresentation { get; private set; }
     internal int DisplayedPlayerHp => DrawSnapshot.DisplayedPlayerHp;
@@ -62,23 +62,27 @@ internal partial class PalStoryBattleView : Node2D
     {
         this.story = story; this.visual = visual; team = visual.Teams[enemyTeamId];
         background = Texture(team.Background.Width, team.Background.Height, team.Background.PaletteIndices, team.Background.Alpha);
-        foreach (var frame in visual.PlayerSprite.Frames)
-        {
-            frames.Add((true, 0, frame.Index, 0), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha));
-            if (frame.Index == 4)
-                frames.Add((true, 0, frame.Index, 6), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha, 6));
-        }
+        // Each member owns a texture set keyed by party position; shared sprites stay distinct bindings.
+        for (int member = 0; member < visual.Players.Count; member++)
+            foreach (var frame in visual.Players[member].PlayerSprite.Frames)
+            {
+                frames.Add((true, member, frame.Index, 0), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha));
+                if (frame.Index == 4)
+                    frames.Add((true, member, frame.Index, 6), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha, 6));
+            }
         for (int slot = 0; slot < team.EnemySlots.Count; slot++)
             foreach (var frame in team.EnemySlots[slot].EnemySprite.Frames)
             {
                 frames.Add((false, slot, frame.Index, 0), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha, enemySlot: slot));
                 frames.Add((false, slot, frame.Index, 6), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha, 6, enemySlot: slot));
             }
-        for (int i = 0; i < visual.AttackEffectFrames.Count; i++)
-        {
-            var frame = visual.AttackEffectFrames[i];
-            effects.Add(i, Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha));
-        }
+        // Per-role effect frames: the acting member's own resolved table group (fight.c:2029).
+        for (int member = 0; member < visual.Players.Count; member++)
+            for (int i = 0; i < visual.Players[member].AttackEffectFrames.Count; i++)
+            {
+                var frame = visual.Players[member].AttackEffectFrames[i];
+                effects.Add((member, i), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha));
+            }
         foreach (var (color, group) in new[] { (StoryNumberColor.Yellow, visual.YellowNumberFrames),
             (StoryNumberColor.Blue, visual.BlueNumberFrames), (StoryNumberColor.Cyan, visual.CyanNumberFrames) })
             for (int digit = 0; digit < group.Count; digit++)
@@ -132,7 +136,7 @@ internal partial class PalStoryBattleView : Node2D
         var action = combat.LastAction;
         var partyPlayers = party ? PlayerDraws(action) : Array.Empty<StoryActorDraw>();
         var partyEnemies = party ? EnemyDraws(action) : Array.Empty<StoryActorDraw>();
-        Vector2 player = visual.PlayerPosition, enemy = team.EnemySlots[0].EnemyPosition, fxPosition = Vector2.Zero;
+        Vector2 player = visual.Players[0].PlayerPosition, enemy = team.EnemySlots[0].EnemyPosition, fxPosition = Vector2.Zero;
         int pf = StoryEnemyAttackPresentation.RestFrame(combat.PlayerHp, story.BattleContent.Players[0].MaxHp), ef = idleFrames[0];
         int playerShift = 0, enemyShift = 0, php = combat.PlayerHp, ehp = combat.EnemyHp;
         int? fx = null;
@@ -142,7 +146,7 @@ internal partial class PalStoryBattleView : Node2D
             // fight.c 4153-4171: the failed escaper steps +4/+2 three times, then stands at
             // frame 1 under the escape-fail label; no strike, effect or result frame shows.
             pf = fleeing.Frame;
-            player = visual.PlayerPosition + fleeing.Offset;
+            player = visual.Players[0].PlayerPosition + fleeing.Offset;
         }
         if (EnemyPresentation is { } shown)
         {
@@ -245,7 +249,11 @@ internal partial class PalStoryBattleView : Node2D
                 var enemyDraw = shown.PartyEnemies[slot];
                 if (enemyDraw.Visible) Sprite(false, enemyDraw.Frame, enemyDraw.Position, enemyDraw.ColorShift, slot);
             }
-            foreach (var memberDraw in shown.PartyPlayers) Sprite(true, memberDraw.Frame, memberDraw.Position, memberDraw.ColorShift);
+            for (int member = 0; member < shown.PartyPlayers.Count; member++)
+            {
+                var memberDraw = shown.PartyPlayers[member];
+                Sprite(true, memberDraw.Frame, memberDraw.Position, memberDraw.ColorShift, member);
+            }
             // Demo selectors: palette caret under the selecting member and highlighted slot.
             if (mode is StoryBattlePresentation.AttackMenu or StoryBattlePresentation.TargetMenu
                 && shown.SelectingPlayer is { } selecting)
@@ -263,7 +271,9 @@ internal partial class PalStoryBattleView : Node2D
         }
         if (shown.EffectFrame is { } effect)
         {
-            var texture = effects[effect];
+            // fight.c:2029: the acting member's own battle sprite resolves the effect group.
+            int actingMember = combat.LastAction is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } ? actor : 0;
+            var texture = effects[(actingMember, effect)];
             DrawTexture(texture, shown.EffectPosition - new Vector2(texture.GetWidth() / 2, texture.GetHeight()));
         }
         DrawRect(new Rect2(0, 174, 320, shown.PartyBoosts.Count > 0 ? 33 : 26), new Color(0, 0, 0, .9f));
@@ -278,8 +288,8 @@ internal partial class PalStoryBattleView : Node2D
         if (shown.PartyBoosts.Count > 0)
             Text(story.SelectedWords[BoostWord] + ":" + string.Join("/", shown.PartyBoosts), new Vector2(4, 191));
         string label = mode == StoryBattlePresentation.AttackMenu
-            ? shown.PartyEnemies.Count > 0 && shown.SelectingPlayer is { } member
-                ? story.SelectedWords[AttackWord] + ":" + (member + 1) : story.SelectedWords[AttackWord]
+            ? shown.PartyEnemies.Count > 0 && shown.SelectingPlayer is { } picker
+                ? story.SelectedWords[AttackWord] + ":" + (picker + 1) : story.SelectedWords[AttackWord]
             : mode == StoryBattlePresentation.TargetMenu
                 ? shown.PartyEnemies.Count > 0 ? story.SelectedWords[TargetWord] + ":" + (Math.Clamp(highlightedSlot, 0, shown.PartyEnemies.Count - 1) + 1)
                     : story.SelectedWords[TargetWord] + ":" + team.EnemySlots[0].TargetId

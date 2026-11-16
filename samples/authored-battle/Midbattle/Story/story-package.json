@@ -25,11 +25,27 @@
     }
   ],
   "visual": {
-    "roleId": 0,
-    "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",
-    "playerPosition": [
-      200,
-      176
+    "players": [
+      {
+        "roleId": 0,
+        "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",
+        "playerPosition": [
+          200,
+          176
+        ],
+        "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
+        "attackEffectIndex": 0
+      },
+      {
+        "roleId": 1,
+        "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",
+        "playerPosition": [
+          256,
+          152
+        ],
+        "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
+        "attackEffectIndex": 0
+      }
     ],
     "paletteUri": "res://Samples/AuthoredBattle/Static/Palette.tres",
     "teams": [
@@ -66,8 +82,6 @@
         ]
       }
     ],
-    "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
-    "attackEffectIndex": 0,
     "numberSpriteUri": "res://Samples/AuthoredBattle/Visual/Numbers.tres"
   }
 }

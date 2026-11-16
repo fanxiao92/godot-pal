@@ -17,6 +17,8 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
     public PalBattleVisualProfile Profile { get; }
     public PalBattleVisualTeam Team => Profile.Teams[0];
     public PalSprite Player { get; } = Sprite(41, 10);
+    // Distinct second member sprite: role1 draws its own frames, never the head's.
+    public PalSprite SecondPlayer { get; } = Sprite(42, 10);
     public PalSprite Enemy { get; } = Sprite(97, 3);
     public PalPalette Palette { get; } = new() { Rgb = new byte[768] };
     public PalDialogueIndexedImage Background { get; } = new()
@@ -47,17 +49,22 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
         }
         Profile = new PalBattleVisualProfile
         {
-            FormatVersion = 1, SourceIdentity = "literal synthetic visuals; no provenance authentication", RoleId = 0,
-            PlayerSpriteUri = Root + "/Player.tres", PaletteUri = Root + "/BattlePalette.tres",
-            PlayerPosition = party ? new(200, 176) : new(240, 170),
+            FormatVersion = 2, SourceIdentity = "literal synthetic visuals; no provenance authentication",
+            Players = party
+                ? [PlayerEntry(0, Root + "/Player.tres", new(200, 176)), PlayerEntry(1, Root + "/Player2.tres", new(256, 152))]
+                : [PlayerEntry(0, Root + "/Player.tres", new(240, 170))],
+            PaletteUri = Root + "/BattlePalette.tres",
             Teams = [team]
         };
-        ExpectedPaths = new[] { "Player.tres", "Enemy.tres", "BattlePalette.tres", "Background.tres" }.Select(x => Root + "/" + x).ToArray();
+        ExpectedPaths = (party ? new[] { "Player.tres", "Player2.tres" } : new[] { "Player.tres" })
+            .Concat(new[] { "Enemy.tres", "BattlePalette.tres", "Background.tres" }).Select(x => Root + "/" + x).ToArray();
         SaveLeaves(); RefreshHashes(); Save();
     }
     public void SaveLeaves()
     {
-        Story.Save(Player, "Player.tres"); Story.Save(Enemy, "Enemy.tres");
+        Story.Save(Player, "Player.tres");
+        if (Party) Story.Save(SecondPlayer, "Player2.tres");
+        Story.Save(Enemy, "Enemy.tres");
         Story.Save(Palette, "BattlePalette.tres"); Story.Save(Background, "Background.tres");
     }
     public void RefreshHashes()
@@ -79,6 +86,8 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
         Save();
     }
 
+    private static PalBattleVisualPlayer PlayerEntry(int roleId, string uri, Vector2I position) =>
+        new() { RoleId = roleId, PlayerSpriteUri = uri, PlayerPosition = position };
     private static PalSprite Sprite(int id, int count)
     {
         var sprite = new PalSprite { SpriteId = id, FrameCount = count, DecodedByteLength = 200,

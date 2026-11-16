@@ -925,8 +925,8 @@ public class NativeBattleVisualProfileTests
     {
         using var f = new NativeBattleVisualProfileFixture();
         f.Story.Save(f.Enemy, "Effect.tres");
-        f.Profile.AttackEffectSpriteUri = f.Root + "/Effect.tres";
-        f.Profile.AttackEffectIndex = 0;
+        f.Profile.Players[0].AttackEffectSpriteUri = f.Root + "/Effect.tres";
+        f.Profile.Players[0].AttackEffectIndex = 0;
         f.Save();
         string serialized = f.Story.Read("Visual.tres");
         AssertThat(serialized.Contains("AttackEffectSpriteUri = \"" + f.Root + "/Effect.tres\"")).IsTrue();
@@ -950,29 +950,30 @@ public class NativeBattleVisualProfileTests
     {
         using var f = new NativeBattleVisualProfileFixture();
         var visual = f.Load();
-        AssertThat(visual.RoleId).IsEqual(0);
-        AssertThat(visual.PlayerSprite.SpriteId).IsEqual(41);
+        AssertThat(visual.Players.Count).IsEqual(1);
+        AssertThat(visual.Players[0].RoleId).IsEqual(0);
+        AssertThat(visual.Players[0].PlayerSprite.SpriteId).IsEqual(41);
         var slot = visual.Teams[18].EnemySlots.Single();
         AssertThat(slot.TargetId).IsEqual(7);
         AssertThat(slot.EnemySprite.SpriteId).IsEqual(97);
-        AssertThat(visual.PlayerPosition).IsEqual(new Vector2I(240, 170));
+        AssertThat(visual.Players[0].PlayerPosition).IsEqual(new Vector2I(240, 170));
         AssertThat(slot.EnemyPosition).IsEqual(new Vector2I(100, 120));
         AssertThat(slot.ActWaitFrames).IsEqual(0);
         AssertThat(visual.Teams[18].Background.Alpha[319]).IsEqual((byte)255);
-        AssertThat(visual.PlayerSprite.Frames[9].Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
-        AssertThat(visual.PlayerSprite.Frames[9].Alpha.SequenceEqual(new byte[] { 0, 255 })).IsTrue();
-        AssertThat(visual.PlayerSprite.Frames[9].Texture is null).IsTrue();
+        AssertThat(visual.Players[0].PlayerSprite.Frames[9].Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
+        AssertThat(visual.Players[0].PlayerSprite.Frames[9].Alpha.SequenceEqual(new byte[] { 0, 255 })).IsTrue();
+        AssertThat(visual.Players[0].PlayerSprite.Frames[9].Texture is null).IsTrue();
         AssertThat(visual.ResourceSha256.Keys.Order().SequenceEqual(f.ExpectedPaths.Order())).IsTrue();
         AssertThat(((IDictionary<int, CheckedBattleVisualTeam>)visual.Teams).IsReadOnly).IsTrue();
         AssertThat(((IDictionary<string, string>)visual.ResourceSha256).IsReadOnly).IsTrue();
         f.Player.Frames[9].Indices[0] = 99; f.Team.EnemySlots[0].TargetId = 44; f.Palette.Rgb[0] = 12; f.Profile.ResourceSha256.Clear();
-        AssertThat(visual.PlayerSprite.Frames[9].Indices[0]).IsEqual((byte)4);
+        AssertThat(visual.Players[0].PlayerSprite.Frames[9].Indices[0]).IsEqual((byte)4);
         AssertThat(slot.TargetId).IsEqual(7);
         AssertThat(visual.Palette.Rgb[0]).IsEqual((byte)0);
         AssertThat(visual.ResourceSha256.Count).IsEqual(4);
         // A mutation of this isolated native instance must not poison a later load of the same URI.
-        visual.PlayerSprite.Frames[0].Indices[0] = 123;
-        AssertThat(f.Load().PlayerSprite.Frames[0].Indices[0]).IsEqual((byte)4);
+        visual.Players[0].PlayerSprite.Frames[0].Indices[0] = 123;
+        AssertThat(f.Load().Players[0].PlayerSprite.Frames[0].Indices[0]).IsEqual((byte)4);
     }
 
     private static void NativeSlotFrameMetadataNeverFallsBackToTeam()
@@ -1032,11 +1033,11 @@ public class NativeBattleVisualProfileTests
     }
 
     [TestCase]
-    public void MissingExplicitVersionIsNotAcceptedAsVersionOne()
+    public void MissingExplicitVersionIsNotAcceptedAsVersionTwo()
     {
         using var f = new NativeBattleVisualProfileFixture();
         NativeProfileFixture.SaveResource(new PalBattleVisualProfile(), f.Uri);
-        AssertThat(Failure(() => f.Load()).Contains("FormatVersion must be 1")).IsTrue();
+        AssertThat(Failure(() => f.Load()).Contains("FormatVersion must be 2")).IsTrue();
     }
 
     [TestCase("version")]
@@ -1060,15 +1061,15 @@ public class NativeBattleVisualProfileTests
         string expected;
         switch (fault)
         {
-            case "version": f.Profile.FormatVersion = 2; expected = "FormatVersion"; break;
+            case "version": f.Profile.FormatVersion = 1; expected = "FormatVersion"; break;
             case "identity": f.Profile.SourceIdentity = " "; expected = "SourceIdentity"; break;
-            case "role": f.Profile.RoleId = 41; expected = "RoleId"; break;
+            case "role": f.Profile.Players[0].RoleId = 41; expected = "Players[0].RoleId must match the battle party role"; break;
             case "missing-team": f.Profile.Teams = []; expected = "exactly cover"; break;
             case "extra-team": f.Profile.Teams = [f.Team, new PalBattleVisualTeam { TeamId = 19 }]; expected = "does not match a story battle team"; break;
             case "duplicate-team": f.Profile.Teams = [f.Team, f.Team]; expected = "duplicate"; break;
             case "target-is-sprite": f.Team.EnemySlots[0].TargetId = 97; expected = "TargetId"; break;
             case "target-is-team": f.Team.EnemySlots[0].TargetId = 18; expected = "TargetId"; break;
-            case "player-position": f.Profile.PlayerPosition = new(32768, 0); expected = "SHORT"; break;
+            case "player-position": f.Profile.Players[0].PlayerPosition = new(32768, 0); expected = "SHORT"; break;
             case "enemy-position": f.Team.EnemySlots[0].EnemyPosition = new(0, -32769); expected = "SHORT"; break;
             case "idle-zero": f.Team.EnemySlots[0].IdleFrames = 0; expected = "metadata WORDs"; break;
             case "magic-negative": f.Team.EnemySlots[0].MagicFrames = -1; expected = "metadata WORDs"; break;
@@ -1133,7 +1134,7 @@ public class NativeBattleVisualProfileTests
         f.Team.EnemySlots[0].EnemyPosition = new(-32768, 32767);
         f.SaveLeaves(); f.RefreshHashes(); f.Save();
         var visual = f.Load();
-        AssertThat(visual.PlayerSprite.Frames.Last().Index).IsEqual(65535);
+        AssertThat(visual.Players[0].PlayerSprite.Frames.Last().Index).IsEqual(65535);
         AssertThat(visual.Teams[18].EnemySlots[0].AttackFrames).IsEqual(0);
         AssertThat(visual.Teams[18].EnemySlots[0].EnemyPosition).IsEqual(new Vector2I(-32768, 32767));
         f.Team.EnemySlots[0].MagicFrames = 1; f.Team.EnemySlots[0].AttackFrames = 1; f.Save();
@@ -1153,7 +1154,9 @@ public class NativeBattleVisualProfileTests
         AssertThat(team.EnemySlots.Count).IsEqual(2);
         AssertThat(team.EnemySlots.Select(s => s.TargetId).SequenceEqual(new[] { 7, 7 })).IsTrue();
         AssertThat(team.EnemySlots.Select(s => s.EnemyPosition).SequenceEqual(new[] { new Vector2I(100, 120), new Vector2I(128, 104) })).IsTrue();
-        AssertThat(visual.PlayerPosition).IsEqual(new Vector2I(200, 176));
+        AssertThat(visual.Players.Count).IsEqual(2);
+        AssertThat(visual.Players[0].PlayerPosition).IsEqual(new Vector2I(200, 176));
+        AssertThat(visual.Players[1].PlayerPosition).IsEqual(new Vector2I(256, 152));
         AssertThat(((IList<CheckedBattleVisualEnemySlot>)team.EnemySlots).IsReadOnly).IsTrue();
         // The public checked contract must force every consumer to address an enemy slot.
         string[] enemyScalars = ["TargetId", "EnemyPosition", "EnemySprite", "IdleFrames", "IdleAnimSpeed",
@@ -1236,8 +1239,8 @@ public class NativeBattleVisualProfileTests
             case "slot-count": f.Profile.Teams[0].EnemySlots = [f.Profile.Teams[0].EnemySlots[0]]; expected = "one-to-one"; break;
             case "slot-target": f.Profile.Teams[0].EnemySlots[1].TargetId = 8; expected = "EnemySlots TargetId"; break;
             case "slot-position": f.Profile.Teams[0].EnemySlots[0].EnemyPosition = new(0, -32769); expected = "SHORT"; break;
-            case "player-origin": f.Profile.PlayerPosition = new(240, 170); expected = "g_rgPlayerPos"; break;
-            default: f.Profile.PlayerPosition = new(200, 176); expected = "g_rgPlayerPos"; break;
+            case "player-origin": f.Profile.Players[0].PlayerPosition = new(240, 170); expected = "g_rgPlayerPos"; break;
+            default: f.Profile.Players[0].PlayerPosition = new(200, 176); expected = "g_rgPlayerPos"; break;
         }
         f.Save();
         AssertThat(Failure(() => f.Load()).Contains(expected)).IsTrue();
@@ -1253,7 +1256,7 @@ public class NativeBattleVisualProfileTests
     public void ExactHashGraphRejectsMissingMixedAndUnclaimedResources(string fault)
     {
         using var f = new NativeBattleVisualProfileFixture();
-        string path = f.Profile.PlayerSpriteUri;
+        string path = f.Profile.Players[0].PlayerSpriteUri;
         string expected;
         switch (fault)
         {
@@ -1262,7 +1265,7 @@ public class NativeBattleVisualProfileTests
             case "changed-bytes": File.AppendAllText(ProjectSettings.GlobalizePath(path), "\n;changed\n"); expected = "SHA-256"; break;
             case "missing-file": File.Delete(ProjectSettings.GlobalizePath(path)); expected = "missing"; break;
             case "wrong-type": f.Story.Save(new PalPalette(), "Player.tres"); f.RefreshHashes(); expected = "expected PalSprite"; break;
-            case "bad-uri": f.Profile.PlayerSpriteUri = f.Root + "/../Player.tres"; expected = "normalized res://"; break;
+            case "bad-uri": f.Profile.Players[0].PlayerSpriteUri = f.Root + "/../Player.tres"; expected = "normalized res://"; break;
             default: f.Profile.ResourceSha256.Add(f.Uri, Godot.FileAccess.GetSha256(f.Uri)); expected = "SHA-256"; break;
         }
         f.Save();
@@ -1282,7 +1285,7 @@ public class NativeBattleVisualProfileTests
         f.Save();
         var visual = f.Load();
         AssertThat(visual.ResourceSha256.Count).IsEqual(6);
-        AssertThat(visual.PlayerSprite.Frames[0].Alpha[1]).IsEqual((byte)255);
+        AssertThat(visual.Players[0].PlayerSprite.Frames[0].Alpha[1]).IsEqual((byte)255);
     }
 
     [TestCase("cycle")]
@@ -1346,13 +1349,25 @@ public class NativeBattleVisualProfileTests
     }
 
     [TestCase]
-    public void OldFormatRemainsLoadableButDoesNotGrantReferencePresentation()
+    public void LegacyScalarProfilesAreRejectedForExplicitRepreparation()
     {
         using var f = new NativeBattleVisualProfileFixture();
         var visual = f.Load();
-        AssertThat(visual.AttackEffectSprite is null && visual.AttackEffectIndex == -1 && visual.AttackEffectFrames.Count == 0).IsTrue();
-        AssertThat(visual.Teams[18].EnemySlots[0].IdleAnimSpeed).IsEqual(0);
+        AssertThat(visual.Players[0].AttackEffectSprite is null && visual.Players[0].AttackEffectIndex == -1
+            && visual.Players[0].AttackEffectFrames.Count == 0).IsTrue();
+        AssertThat(Failure(visual.Players[0].RequireReferencePresentation).Contains("attack effect")).IsTrue();
         AssertThat(Failure(visual.RequireReferencePresentation).Contains("attack effect")).IsTrue();
+        // Legacy scalar FormatVersion=1 declarations are rejected with a re-prepare diagnostic;
+        // the runtime never folds or reinterprets them into the typed per-role form.
+        f.Profile.FormatVersion = 1;
+        f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("FormatVersion must be 2")).IsTrue();
+        f.Profile.FormatVersion = 2;
+        f.Profile.Players = [];
+        f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("Players requires typed per-role bindings")).IsTrue();
+        f.Profile.Players = [new PalBattleVisualPlayer { RoleId = 0, PlayerSpriteUri = f.Root + "/Player.tres",
+            PlayerPosition = new(240, 170) }];
         AddEffect(f, 0); f.Team.EnemySlots[0].IdleAnimSpeed = -1; f.Save();
         AssertThat(Failure(() => f.Load()).Contains("metadata WORDs")).IsTrue();
     }
@@ -1370,13 +1385,13 @@ public class NativeBattleVisualProfileTests
             return;
         }
         var visual = f.Load(); visual.RequireReferencePresentation();
-        AssertThat(visual.AttackEffectIndex == group && visual.AttackEffectSprite!.SpriteId == 97).IsTrue();
-        AssertThat(visual.AttackEffectFrames.Select(x => x.Index).SequenceEqual(group == 0 ? new[] { 0, 1, 2 } : new[] { 3, 4, 5 })).IsTrue();
+        AssertThat(visual.Players[0].AttackEffectIndex == group && visual.Players[0].AttackEffectSprite!.SpriteId == 97).IsTrue();
+        AssertThat(visual.Players[0].AttackEffectFrames.Select(x => x.Index).SequenceEqual(group == 0 ? new[] { 0, 1, 2 } : new[] { 3, 4, 5 })).IsTrue();
         AssertThat(visual.Teams[18].EnemySlots[0].IdleAnimSpeed).IsEqual(0);
-        AssertThat(((IList<PalFrame>)visual.AttackEffectFrames).IsReadOnly).IsTrue();
+        AssertThat(((IList<PalFrame>)visual.Players[0].AttackEffectFrames).IsReadOnly).IsTrue();
         File.Delete(ProjectSettings.GlobalizePath(f.Root + "/Effect.tres"));
-        AssertThat(visual.AttackEffectFrames[0].Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
-        AssertThat(visual.AttackEffectFrames[0].Alpha.SequenceEqual(new byte[] { 0, 255 })).IsTrue();
+        AssertThat(visual.Players[0].AttackEffectFrames[0].Indices.SequenceEqual(new byte[] { 4, 19 })).IsTrue();
+        AssertThat(visual.Players[0].AttackEffectFrames[0].Alpha.SequenceEqual(new byte[] { 0, 255 })).IsTrue();
     }
 
     [TestCase("uri-only")]
@@ -1394,11 +1409,11 @@ public class NativeBattleVisualProfileTests
         string expected;
         switch (fault)
         {
-            case "uri-only": f.Profile.AttackEffectIndex = -1; expected = "paired"; break;
-            case "index-only": f.Profile.AttackEffectSpriteUri = ""; expected = "paired"; break;
-            case "negative": f.Profile.AttackEffectIndex = -2; expected = "WORD"; break;
-            case "overflow": f.Profile.AttackEffectIndex = 65536; expected = "WORD"; break;
-            case "missing-frame": f.Profile.AttackEffectIndex = 1; expected = "unaddressable"; break;
+            case "uri-only": f.Profile.Players[0].AttackEffectIndex = -1; expected = "paired"; break;
+            case "index-only": f.Profile.Players[0].AttackEffectSpriteUri = ""; expected = "paired"; break;
+            case "negative": f.Profile.Players[0].AttackEffectIndex = -2; expected = "WORD"; break;
+            case "overflow": f.Profile.Players[0].AttackEffectIndex = 65536; expected = "WORD"; break;
+            case "missing-frame": f.Profile.Players[0].AttackEffectIndex = 1; expected = "unaddressable"; break;
             case "wrong-type": f.Story.Save(f.Palette, "Effect.tres"); f.Profile.ResourceSha256[f.Root + "/Effect.tres"] = Godot.FileAccess.GetSha256(f.Root + "/Effect.tres"); expected = "expected PalSprite"; break;
             case "changed": File.AppendAllText(ProjectSettings.GlobalizePath(f.Root + "/Effect.tres"), "\n; changed"); expected = "SHA-256"; break;
             case "idle-negative": f.Team.EnemySlots[0].IdleAnimSpeed = -2; expected = "WORD"; break;
@@ -1407,12 +1422,89 @@ public class NativeBattleVisualProfileTests
         f.Save(); AssertThat(Failure(() => f.Load()).Contains(expected)).IsTrue();
     }
 
+    [TestCase]
+    public void TypedPerRolePlayerBindingsFollowPartyOrderWithoutLeaderFallback()
+    {
+        using var f = new NativeBattleVisualProfileFixture(party: true);
+        // Independent second-member literal: role1 draws its own planes, never the head's.
+        var second = new PalSprite { SpriteId = 42, FrameCount = 10, DecodedByteLength = 200,
+            Source = new Godot.Collections.Dictionary { ["archive"] = "synthetic second member frames", ["chunk"] = 42 } };
+        for (int i = 0; i < 10; i++) second.Frames.Add(new PalFrame { Index = i, SourceOffset = 2 + i * 4,
+            Width = 2, Height = 1, Indices = [19, 4], Alpha = [255, 0] });
+        f.Story.Save(second, "Player2.tres");
+        f.Story.Save(f.Enemy, "Effect.tres");
+        f.Profile.FormatVersion = 2;
+        f.Profile.Players =
+        [
+            new PalBattleVisualPlayer { RoleId = 0, PlayerSpriteUri = f.Root + "/Player.tres",
+                PlayerPosition = new(200, 176), AttackEffectSpriteUri = f.Root + "/Effect.tres", AttackEffectIndex = 0 },
+            new PalBattleVisualPlayer { RoleId = 1, PlayerSpriteUri = f.Root + "/Player2.tres",
+                PlayerPosition = new(256, 152), AttackEffectSpriteUri = f.Root + "/Effect.tres", AttackEffectIndex = 0 }
+        ];
+        f.Profile.ResourceSha256[f.Root + "/Player2.tres"] = Godot.FileAccess.GetSha256(f.Root + "/Player2.tres");
+        f.Profile.ResourceSha256[f.Root + "/Effect.tres"] = Godot.FileAccess.GetSha256(f.Root + "/Effect.tres");
+        f.Save();
+        // The new full-party public seam authenticates every party position's RoleId.
+        var visual = NativeBattleVisualProfile.Load(f.Uri, new[] { 0, 1 },
+            f.CheckedStory.BattleContent.EnemyTeams, f.CheckedStory.Requirements.BattleTeamIds, f.CheckedStory.Palette);
+        AssertThat(visual.Players.Count).IsEqual(2);
+        AssertThat(visual.Players[0].RoleId).IsEqual(0);
+        AssertThat(visual.Players[0].PlayerSprite.SpriteId).IsEqual(41);
+        AssertThat(visual.Players[0].PlayerPosition).IsEqual(new Vector2I(200, 176));
+        AssertThat(visual.Players[1].RoleId).IsEqual(1);
+        AssertThat(visual.Players[1].PlayerSprite.SpriteId).IsEqual(42);
+        AssertThat(visual.Players[1].PlayerSprite.Frames[9].Indices.SequenceEqual(new byte[] { 19, 4 })).IsTrue();
+        AssertThat(visual.Players[1].PlayerPosition).IsEqual(new Vector2I(256, 152));
+        AssertThat(visual.PlayerOrigins(2).SequenceEqual(new[] { new Vector2I(200, 176), new Vector2I(256, 152) })).IsTrue();
+        visual.RequireReferencePresentation();
+        AssertThat(visual.Players[0].AttackEffectFrames.Select(x => x.Index).SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
+        AssertThat(visual.Players[1].AttackEffectFrames.Select(x => x.Index).SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
+        // The story overload authenticates the same full party order, not head+count.
+        AssertThat(f.Load().Players[1].PlayerSprite.SpriteId).IsEqual(42);
+        // No leader fallback: swapped roles reject at the first mismatched position.
+        f.Profile.Players[0].RoleId = 1; f.Profile.Players[1].RoleId = 0; f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("Players[0].RoleId must match the battle party role")).IsTrue();
+        f.Profile.Players[0].RoleId = 0; f.Profile.Players[1].RoleId = 1;
+        f.Profile.Players = [f.Profile.Players[0]]; f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("one-to-one")).IsTrue();
+        f.Profile.Players =
+        [
+            new PalBattleVisualPlayer { RoleId = 0, PlayerSpriteUri = f.Root + "/Player.tres",
+                PlayerPosition = new(200, 176), AttackEffectSpriteUri = f.Root + "/Effect.tres", AttackEffectIndex = 0 },
+            new PalBattleVisualPlayer { RoleId = 1, PlayerSpriteUri = f.Root + "/Player2.tres",
+                PlayerPosition = new(256, 152), AttackEffectSpriteUri = f.Root + "/Effect.tres", AttackEffectIndex = 0 }
+        ];
+        f.Profile.Players[1].PlayerPosition = new(256, 151); f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("g_rgPlayerPos")).IsTrue();
+        f.Profile.Players[1].PlayerPosition = new(256, 152); f.Save();
+        // Each member's own frame range is required; a missing role1 frame rejects that entry.
+        second.Frames.RemoveAt(9); second.FrameCount = 9;
+        f.Story.Save(second, "Player2.tres");
+        f.Profile.ResourceSha256[f.Root + "/Player2.tres"] = Godot.FileAccess.GetSha256(f.Root + "/Player2.tres");
+        f.Save();
+        AssertThat(Failure(() => f.Load()).Contains("frames 0..9")).IsTrue();
+        // Sharing one legal sprite between two roles stays two distinct bindings.
+        second.Frames.Add(new PalFrame { Index = 9, SourceOffset = 38, Width = 2, Height = 1, Indices = [19, 4], Alpha = [255, 0] });
+        second.FrameCount = 10;
+        f.Story.Save(second, "Player2.tres");
+        f.Profile.ResourceSha256[f.Root + "/Player2.tres"] = Godot.FileAccess.GetSha256(f.Root + "/Player2.tres");
+        f.Profile.Players[1].PlayerSpriteUri = f.Profile.Players[0].PlayerSpriteUri;
+        // The exact manifest must drop the now-unreferenced member sprite; sharing stays two bindings.
+        f.Profile.ResourceSha256.Remove(f.Root + "/Player2.tres");
+        f.Save();
+        var shared = f.Load();
+        AssertThat(shared.Players.Count).IsEqual(2);
+        AssertThat(shared.Players[0].PlayerSprite.SpriteId).IsEqual(41);
+        AssertThat(shared.Players[1].PlayerSprite.SpriteId).IsEqual(41);
+        AssertThat(ReferenceEquals(shared.Players[0], shared.Players[1])).IsFalse();
+    }
+
     private static void AddEffect(NativeBattleVisualProfileFixture f, int group)
     {
         if (group == 1)
             for (int i = 3; i < 6; i++) f.Enemy.Frames.Add(new PalFrame { Index = i, Width = 2, Height = 1, Indices = [4, 19], Alpha = [0, 255] });
         f.Story.Save(f.Enemy, "Effect.tres");
-        f.Profile.AttackEffectSpriteUri = f.Root + "/Effect.tres"; f.Profile.AttackEffectIndex = group;
+        f.Profile.Players[0].AttackEffectSpriteUri = f.Root + "/Effect.tres"; f.Profile.Players[0].AttackEffectIndex = group;
         f.Profile.ResourceSha256.Add(f.Root + "/Effect.tres", Godot.FileAccess.GetSha256(f.Root + "/Effect.tres"));
     }
 

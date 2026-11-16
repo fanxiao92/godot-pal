@@ -84,8 +84,9 @@ public partial class PrepareStoryPackage : Node
             string[] storySeeds = new[] { story.StaticResources + "/Scenes/Scene.tscn", story.StaticProfile, story.BattleContentUri,
                 story.DialogueDirectory + "/Font.tres", story.DialogueDirectory + "/Language.zh-Hans.tres", story.DialogueDirectory + "/Language.en.tres",
                 story.DialogueDirectory + "/Prompt-00.tres", story.DialogueDirectory + "/Prompt-01.tres", story.DialogueDirectory + "/Prompt-02.tres" }.Concat(story.Portraits.Values).ToArray();
-            string[] visualSeeds = new[] { visual.PlayerSpriteUri, visual.PaletteUri }
-                .Concat(visual.AttackEffectSpriteUri != "" ? new[] { visual.AttackEffectSpriteUri } : Array.Empty<string>())
+            string[] visualSeeds = visual.Players.SelectMany(player => new[] { player.PlayerSpriteUri }
+                    .Concat(player.AttackEffectSpriteUri != "" ? new[] { player.AttackEffectSpriteUri } : Array.Empty<string>()))
+                .Concat(new[] { visual.PaletteUri })
                 .Concat(visual.NumberSpriteUri != "" ? new[] { visual.NumberSpriteUri } : Array.Empty<string>())
                 .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri }.Concat(t.EnemySlots.Select(slot => slot.EnemySpriteUri)))).ToArray();
             foreach (string root in new[] { story.StaticResources, story.DialogueDirectory })
@@ -247,13 +248,31 @@ public partial class PrepareStoryPackage : Node
             story.Portraits.Add(id, Text(portrait, "uri"));
         }
         var v = root.GetProperty("visual");
-        PropertiesWithOptional(v, new[] { "attackEffectSpriteUri", "attackEffectIndex", "numberSpriteUri" }, "roleId", "playerSpriteUri", "playerPosition", "paletteUri", "teams");
-        var visual = new PalBattleVisualProfile { FormatVersion = 1, SourceIdentity = story.SourceIdentity, RoleId = Int(v, "roleId"),
-            PlayerSpriteUri = Text(v, "playerSpriteUri"), PlayerPosition = Position(v, "playerPosition"), PaletteUri = Text(v, "paletteUri") };
+        PropertiesWithOptional(v, new[] { "numberSpriteUri" }, "players", "paletteUri", "teams");
+        var visual = new PalBattleVisualProfile { FormatVersion = 2, SourceIdentity = story.SourceIdentity,
+            PaletteUri = Text(v, "paletteUri") };
         if (v.TryGetProperty("numberSpriteUri", out _)) visual.NumberSpriteUri = Text(v, "numberSpriteUri");
-        if (v.TryGetProperty("attackEffectSpriteUri", out _)) visual.AttackEffectSpriteUri = Text(v, "attackEffectSpriteUri");
-        if (v.TryGetProperty("attackEffectIndex", out _)) visual.AttackEffectIndex = Int(v, "attackEffectIndex");
-        Require((visual.AttackEffectSpriteUri != "") == v.TryGetProperty("attackEffectIndex", out _), "attack effect fields must be paired");
+        // Typed per-role bindings in party order; the legacy scalar player declaration is
+        // rejected here (missing/unknown field), never folded or reinterpreted at runtime.
+        var playersElement = v.GetProperty("players");
+        Require(playersElement.ValueKind == JsonValueKind.Array && playersElement.GetArrayLength() is >= 1 and <= 2,
+            "players requires one or two per-role bindings (party order)");
+        visual.Players = playersElement.EnumerateArray().Select((player, playerOrdinal) =>
+        {
+            try
+            {
+                PropertiesWithOptional(player, new[] { "attackEffectSpriteUri", "attackEffectIndex" }, "roleId", "playerSpriteUri", "playerPosition");
+                var binding = new PalBattleVisualPlayer { RoleId = Word(player, "roleId"),
+                    PlayerSpriteUri = Text(player, "playerSpriteUri"), PlayerPosition = Position(player, "playerPosition") };
+                if (player.TryGetProperty("attackEffectSpriteUri", out _)) binding.AttackEffectSpriteUri = Text(player, "attackEffectSpriteUri");
+                if (player.TryGetProperty("attackEffectIndex", out _)) binding.AttackEffectIndex = Word(player, "attackEffectIndex");
+                Require((binding.AttackEffectSpriteUri != "") == player.TryGetProperty("attackEffectIndex", out _),
+                    "attack effect fields must be paired");
+                return binding;
+            }
+            catch (InvalidDataException error)
+            { throw new InvalidDataException("players[" + playerOrdinal + "]: " + error.Message, error); }
+        }).ToArray();
         Require(v.GetProperty("teams").ValueKind == JsonValueKind.Array, "teams must be an array");
         visual.Teams = v.GetProperty("teams").EnumerateArray().Select((t, teamOrdinal) =>
         {
@@ -287,7 +306,6 @@ public partial class PrepareStoryPackage : Node
             catch (InvalidDataException error)
             { throw new InvalidDataException("visual.teams[" + teamOrdinal + "]: " + error.Message, error); }
         }).ToArray();
-        if (v.TryGetProperty("attackEffectIndex", out _)) Require(visual.AttackEffectIndex is >= 0 and <= ushort.MaxValue, "attackEffectIndex requires WORD");
         return (story, visual);
     }
     private static void Properties(JsonElement value, params string[] expected) => PropertiesWithOptional(value, Array.Empty<string>(), expected);

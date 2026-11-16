@@ -88,7 +88,10 @@ internal sealed class AuthoredStoryFixture : IDisposable
             var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "Story/story-package.json")))!;
             if (singlePlayerTwoEnemies)
             {
-                metadata["visual"]!["playerPosition"] = new JsonArray(240, 170);
+                // The visual binding shrinks with the numeric party: one typed player binding
+                // at the single-player reference column, never a leftover second role.
+                metadata["visual"]!["players"]!.AsArray().RemoveAt(1);
+                metadata["visual"]!["players"]![0]!["playerPosition"] = new JsonArray(240, 170);
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned one-player/two-enemy derivation; both duplicate id7 enemy slots retained, not retail data.";
             }
@@ -124,10 +127,11 @@ internal sealed class AuthoredStoryFixture : IDisposable
             }
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")
-            {
-                RemoveRequired(metadata["visual"]!.AsObject(), "attackEffectSpriteUri");
-                RemoveRequired(metadata["visual"]!.AsObject(), "attackEffectIndex");
-            }
+                foreach (var player in metadata["visual"]!["players"]!.AsArray())
+                {
+                    RemoveRequired(player!.AsObject(), "attackEffectSpriteUri");
+                    RemoveRequired(player.AsObject(), "attackEffectIndex");
+                }
             if (missingPresentation == "number") RemoveRequired(metadata["visual"]!.AsObject(), "numberSpriteUri");
             if (missingPresentation == "idle") RemoveRequired(metadata["visual"]!["teams"]![0]!["enemies"]![0]!.AsObject(), "idleAnimSpeed");
             if (enemyHp is { } hp2)

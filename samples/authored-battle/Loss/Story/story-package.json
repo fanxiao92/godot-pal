@@ -12,11 +12,17 @@
   "dialogueDirectory": "res://Samples/AuthoredBattle/Dialogue",
   "portraits": [],
   "visual": {
-    "roleId": 0,
-    "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",
-    "playerPosition": [
-      240,
-      170
+    "players": [
+      {
+        "roleId": 0,
+        "playerSpriteUri": "res://Samples/AuthoredBattle/Static/Leader.tres",
+        "playerPosition": [
+          240,
+          170
+        ],
+        "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
+        "attackEffectIndex": 0
+      }
     ],
     "paletteUri": "res://Samples/AuthoredBattle/Static/Palette.tres",
     "teams": [
@@ -40,8 +46,6 @@
         ]
       }
     ],
-    "attackEffectSpriteUri": "res://Samples/AuthoredBattle/Visual/AttackEffect.tres",
-    "attackEffectIndex": 0,
     "numberSpriteUri": "res://Samples/AuthoredBattle/Visual/Numbers.tres"
   }
 }

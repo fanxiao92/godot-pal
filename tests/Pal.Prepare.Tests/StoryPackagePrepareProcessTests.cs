@@ -115,6 +115,32 @@ public sealed class StoryPackagePrepareProcessTests : IDisposable
         Assert.True(Directory.Exists(output)); Assert.Empty(Directory.GetFileSystemEntries(output));
     }
 
+    [Fact]
+    public async Task Editor_rejects_legacy_scalar_visual_authoring_for_explicit_repreparation()
+    {
+        Directory.CreateDirectory(Path.Combine(Input, "events"));
+        File.WriteAllText(Path.Combine(Input, "story-package.json"), JsonSerializer.Serialize(new
+        {
+            formatVersion = 1, sourceIdentity = "literal process test, not desktop art", staticResources = "res://Assets/PrepareTests/Static",
+            staticProfile = "res://Assets/PrepareTests/Static/Profiles/Startup.tres", bundleSha256 = new string('a', 64),
+            entryFileId = "story", entryId = "npc", ownerId = 1, entryAddress = 1, battleContentUri = "res://Assets/PrepareTests/Numbers/BattleContent.tres",
+            dialogueDirectory = "res://Assets/PrepareTests", portraits = Array.Empty<object>(),
+            visual = new { roleId = 0, playerSpriteUri = "res://Assets/PrepareTests/Player.tres", playerPosition = new[] { 240, 170 },
+                paletteUri = "res://Assets/PrepareTests/Palette.tres", teams = Array.Empty<object>() }
+        }));
+        File.WriteAllText(Path.Combine(Input, "events", "index.json"), "{}");
+        File.WriteAllText(Path.Combine(Input, "events", "story.json"), "{}");
+        Directory.CreateDirectory(output); string[] before = Snapshot(Input);
+        var result = await Editor("--story-input", Input, "--story-output", output);
+        // The legacy scalar player declaration is rejected for explicit re-preparation, never folded into the unified typed form.
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("metadata has missing, duplicate or unknown fields", result.Text);
+        Assert.Contains("missing: players", result.Text);
+        Assert.Contains("unknown: roleId", result.Text);
+        Assert.DoesNotContain(Marker, result.Text); Assert.Equal(before, Snapshot(Input));
+        Assert.True(Directory.Exists(output)); Assert.Empty(Directory.GetFileSystemEntries(output));
+    }
+
     private async Task WriteInput()
     {
         string staticInput = Path.Combine(root, "static"), staticOutput = Path.Combine(native, "Static");
@@ -157,7 +183,7 @@ public sealed class StoryPackagePrepareProcessTests : IDisposable
             staticProfile = Uri(staticOutput) + "/Profiles/Startup.tres", bundleSha256 = manifest["bundleSha256"]!.GetValue<string>(),
             entryFileId = "story", entryId = "npc", ownerId = 1, entryAddress = 1, battleContentUri = Uri(native) + "/Numbers/BattleContent.tres",
             dialogueDirectory = Uri(native), portraits = Array.Empty<object>(),
-            visual = new { roleId = 0, playerSpriteUri = Uri(native) + "/Player.tres", playerPosition = new[] { 240, 170 },
+            visual = new { players = new[] { new { roleId = 0, playerSpriteUri = Uri(native) + "/Player.tres", playerPosition = new[] { 240, 170 } } },
                 paletteUri = Uri(staticOutput) + "/Palettes/Palette.tres", teams = new[] { new { teamId = 18,
                     backgroundUri = Uri(native) + "/Background.tres", enemies = new[] { new { targetId = 7,
                         enemySpriteUri = Uri(native) + "/Enemy.tres", enemyPosition = new[] { 100, 120 },

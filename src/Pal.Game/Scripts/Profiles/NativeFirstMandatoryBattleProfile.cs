@@ -139,7 +139,7 @@ public static class NativeFirstMandatoryBattleProfile
             Require(resource.Rgb is { Length: 768 }, staticResources + "/Palettes/Palette.tres: requires RGB768"));
         byte[] rgb = paletteResource.Rgb!;
         var palette = Enumerable.Range(0, 256).Select(i => new Color(rgb[i * 3] / 255f, rgb[i * 3 + 1] / 255f, rgb[i * 3 + 2] / 255f)).ToArray();
-        var visual = NativeBattleVisualProfile.Load(native.VisualUri, content.Players[0].RoleId, content.Players.Count,
+        var visual = NativeBattleVisualProfile.Load(native.VisualUri, content.Players.Select(player => player.RoleId).ToArray(),
             content.EnemyTeams, closure.VerifiedBattleTeamIds, palette);
         var team = visual.Teams[closure.VerifiedBattleTeamIds.Single()];
         for (int slot = 0; slot < team.EnemySlots.Count; slot++)

@@ -141,8 +141,11 @@ public partial class M4FirstBattleGpuFixture : Node
             cacheMode: ResourceLoader.CacheMode.IgnoreDeep)
             ?? throw new InvalidDataException("The bound battlefield background could not be loaded.");
         Require(team.EnemySlots is { Length: 2 }, "The team must bind exactly two enemy slots.");
-        Require(visual.PlayerPosition == new Vector2I(200, 176),
+        Require(visual.Players is { Length: 2 }, "The visual binding must bind both party roles.");
+        Require(visual.Players[0].PlayerPosition == new Vector2I(200, 176),
             "Independent battle.c g_rgPlayerPos[1][0] expects player column zero at (200,176).");
+        Require(visual.Players[1].PlayerPosition == new Vector2I(256, 152),
+            "Independent battle.c g_rgPlayerPos[1][1] expects player column one at (256,152).");
         Require(team.EnemySlots[0].EnemyPosition == new Vector2I(70, 130)
             && team.EnemySlots[1].EnemyPosition == new Vector2I(140, 106),
             "Independent team18 slot layout expects (70,130) and (140,106).");
@@ -152,10 +155,12 @@ public partial class M4FirstBattleGpuFixture : Node
                 cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
             return RectFor(slot.EnemyPosition, sprite.Frames.Max(f => f.Width), sprite.Frames.Max(f => f.Height));
         }).ToArray();
-        var playerSprite = ResourceLoader.Load<PalSprite>(visual.PlayerSpriteUri,
-            cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
-        int playerWidth = playerSprite.Frames.Max(f => f.Width), playerHeight = playerSprite.Frames.Max(f => f.Height);
-        playerRects = ReferencePlayerOrigins.Select(o => RectFor(o, playerWidth, playerHeight)).ToArray();
+        playerRects = visual.Players.Select((player, index) =>
+        {
+            var sprite = ResourceLoader.Load<PalSprite>(player.PlayerSpriteUri,
+                cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+            return RectFor(ReferencePlayerOrigins[index], sprite.Frames.Max(f => f.Width), sprite.Frames.Max(f => f.Height));
+        }).ToArray();
     }
 
     private static Rect2I RectFor(Vector2I bottomCenter, int width, int height) =>

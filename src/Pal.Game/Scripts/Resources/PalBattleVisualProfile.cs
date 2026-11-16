@@ -7,13 +7,11 @@ public partial class PalBattleVisualProfile : Resource
 {
     [Export] public int FormatVersion { get; set; } = -1;
     [Export] public string SourceIdentity { get; set; } = "";
-    [Export] public int RoleId { get; set; } = -1;
-    [Export] public string PlayerSpriteUri { get; set; } = "";
-    [Export] public string AttackEffectSpriteUri { get; set; } = "";
+    // #209 unified per-role bindings in party order: party index -> RoleId -> own battle
+    // sprite/effect/position. The legacy scalar single-player declaration is removed with the
+    // FormatVersion bump; old shared-sprite resources are re-prepared, never dual-loaded.
+    [Export] public PalBattleVisualPlayer[] Players { get; set; } = [];
     [Export] public string NumberSpriteUri { get; set; } = "";
-    // Resolved column 1 of the effect table for the actual battle sprite, not RoleId.
-    [Export] public int AttackEffectIndex { get; set; } = -1;
-    [Export] public Vector2I PlayerPosition { get; set; } = new(int.MinValue, int.MinValue);
     [Export] public string PaletteUri { get; set; } = "";
     [Export] public PalBattleVisualTeam[] Teams { get; set; } = [];
     [Export] public Godot.Collections.Dictionary<string, string> ResourceSha256 { get; set; } = new();

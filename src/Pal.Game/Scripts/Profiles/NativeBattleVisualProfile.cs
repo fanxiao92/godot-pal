@@ -13,22 +13,23 @@ namespace Pal.Game.Profiles;
 /// definition IDs stay separate slots); no battle or animation is advanced.</summary>
 public static class NativeBattleVisualProfile
 {
-    // Reference SDLPal battle.c:27-31 g_rgPlayerPos bottom-center origins. This chain
-    // supports parties of one or two; index is party size minus one, column zero is the head.
-    private static readonly Vector2I[] PlayerOrigins = [new(240, 170), new(200, 176)];
-    // g_rgPlayerPos[1][1]: the second party member's reference column (battle.c:27-31).
-    internal static readonly Vector2I TwoPlayerSecondOrigin = new(256, 152);
+    // Reference SDLPal battle.c:27-31 g_rgPlayerPos bottom-center origins, indexed
+    // [party size - 1][party position]; positions follow the party column, never RoleId.
+    // This chain supports parties of one or two players.
+    private static readonly Vector2I[][] PlayerLayout = [[new(240, 170)], [new(200, 176), new(256, 152)]];
 
     public static CheckedBattleVisualProfile Load(string uri, CheckedStoryProfile story)
     {
         ArgumentNullException.ThrowIfNull(story);
-        return Load(uri, story.BattleContent.Players[0].RoleId, story.BattleContent.Players.Count,
+        return Load(uri, story.BattleContent.Players.Select(player => player.RoleId).ToArray(),
             story.BattleContent.EnemyTeams, story.Requirements.BattleTeamIds, story.Palette);
     }
 
-    /// <summary>Same strict binding for non-story hosts (the #53 first battle): validates against
-    /// the party/enemies/teams the caller's verified battle content actually selected.</summary>
-    public static CheckedBattleVisualProfile Load(string uri, int headRoleId, int partyCount,
+    /// <summary>Unified strict binding for story and non-story hosts: validates typed per-role
+    /// player bindings against the ordered party the caller's verified battle content actually
+    /// selected. Every party position is authenticated; there is no head-role fallback and no
+    /// legacy scalar/shared-sprite form (old resources are re-prepared, not dual-loaded).</summary>
+    public static CheckedBattleVisualProfile Load(string uri, IReadOnlyList<int> partyRoleIds,
         IReadOnlyDictionary<int, IReadOnlyList<Pal.Core.ClassicBattleEnemy>> enemyTeams,
         IReadOnlyList<int> requirementTeamIds, IReadOnlyList<Color> palette)
     {
@@ -38,12 +39,28 @@ public static class NativeBattleVisualProfile
             // URI strings defer heavy leaf loading; preflight also protects external metadata references.
             ContentDependencies(new[] { uri });
             var native = LoadResource<PalBattleVisualProfile>(uri);
-            Require(native.FormatVersion == 1, "visual FormatVersion must be 1");
+            Require(native.FormatVersion == 2, "visual FormatVersion must be 2; re-prepare legacy shared-sprite profiles explicitly");
             Require(!string.IsNullOrWhiteSpace(native.SourceIdentity), "visual SourceIdentity is required (declaration only)");
-            Require(native.RoleId == headRoleId, "visual RoleId must match the battle head player role");
-            Position(native.PlayerPosition);
-            Require(native.PlayerPosition == PlayerOrigins[partyCount - 1],
-                "player position must equal the reference party layout origin g_rgPlayerPos[party-1][0] (battle.c:27-31)");
+            Require(partyRoleIds is not null && partyRoleIds.Count is 1 or 2,
+                "visual party requires one or two ordered role bindings (battle.c:27-31)");
+            var declared = native.Players;
+            Require(declared is not null && declared.Length > 0 && declared.All(x => x is not null),
+                "visual Players requires typed per-role bindings (no legacy scalar form)");
+            Require(declared!.Length == partyRoleIds!.Count,
+                "visual Players must match the battle party one-to-one (party order preserved)");
+            for (int member = 0; member < declared.Length; member++)
+            {
+                string memberPath = "visual Players[" + member + "]";
+                var entry = declared[member]!;
+                Require(Word(entry.RoleId) && entry.RoleId == partyRoleIds[member],
+                    memberPath + ".RoleId must match the battle party role at position " + member + " (no leader fallback)");
+                Position(entry.PlayerPosition);
+                Require(entry.PlayerPosition == PlayerLayout[partyRoleIds.Count - 1][member],
+                    memberPath + ".PlayerPosition must equal the reference party layout g_rgPlayerPos[" + (partyRoleIds.Count - 1) + "][" + member + "] (battle.c:27-31)");
+                bool memberEffect = entry.AttackEffectSpriteUri != "" || entry.AttackEffectIndex != -1;
+                Require(!memberEffect || (!string.IsNullOrWhiteSpace(entry.AttackEffectSpriteUri) && Word(entry.AttackEffectIndex)),
+                    memberPath + ": attack effect requires paired SpriteUri and WORD AttackEffectIndex");
+            }
             Require(native.Teams is not null && native.Teams.All(x => x is not null), "visual Teams contains null");
             var teams = new Dictionary<int, PalBattleVisualTeam>();
             var teamSlots = new Dictionary<int, (int TargetId, Vector2I EnemyPosition)[]>();
@@ -83,11 +100,9 @@ public static class NativeBattleVisualProfile
             Require(native.ResourceSha256 is not null, "visual ResourceSha256 is required");
             var hashes = native.ResourceSha256!.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
-            bool hasEffect = native.AttackEffectSpriteUri != "" || native.AttackEffectIndex != -1;
-            Require(!hasEffect || (!string.IsNullOrWhiteSpace(native.AttackEffectSpriteUri) && Word(native.AttackEffectIndex)),
-                "attack effect requires paired SpriteUri and WORD AttackEffectIndex");
-            var seeds = new[] { native.PlayerSpriteUri, native.PaletteUri }
-                .Concat(hasEffect ? new[] { native.AttackEffectSpriteUri } : Array.Empty<string>())
+            var seeds = declared.Select(x => x!.PlayerSpriteUri)
+                .Concat(declared.Where(x => x!.AttackEffectSpriteUri != "").Select(x => x!.AttackEffectSpriteUri))
+                .Concat(new[] { native.PaletteUri })
                 .Concat(native.NumberSpriteUri != "" ? new[] { native.NumberSpriteUri } : Array.Empty<string>())
                 .Concat(teams.Values.SelectMany(x => new[] { x.BackgroundUri }.Concat(x.EnemySlots.Select(slot => slot.EnemySpriteUri))))
                 .Concat(Dependencies(uri)).ToArray();
@@ -101,13 +116,29 @@ public static class NativeBattleVisualProfile
                 var expected = new Color(paletteResource.Rgb[i * 3] / 255f, paletteResource.Rgb[i * 3 + 1] / 255f, paletteResource.Rgb[i * 3 + 2] / 255f);
                 Require(expected == palette[i], "visual palette must match active story palette");
             }
-            var player = ReadAndValidateSprite(native.PlayerSpriteUri);
-            Require(Enumerable.Range(0, 10).All(player.Frames.Select(x => x.Index).ToHashSet().Contains),
-                "player requires addressable frames 0..9");
-            PalSprite? effect = hasEffect ? ReadAndValidateSprite(native.AttackEffectSpriteUri) : null;
-            if (effect is not null)
-                Require(Enumerable.Range(native.AttackEffectIndex * 3, 3).All(effect.Frames.Select(x => x.Index).ToHashSet().Contains),
-                    "attack effect references unaddressable frames");
+            var players = new CheckedBattleVisualProfile.CheckedBattleVisualPlayer[declared.Length];
+            for (int member = 0; member < declared.Length; member++)
+            {
+                string memberPath = "visual Players[" + member + "]";
+                try
+                {
+                    var entry = declared[member]!;
+                    var sprite = ReadAndValidateSprite(entry.PlayerSpriteUri);
+                    Require(Enumerable.Range(0, 10).All(sprite.Frames.Select(x => x.Index).ToHashSet().Contains),
+                        "player requires addressable frames 0..9");
+                    PalSprite? effect = entry.AttackEffectSpriteUri != "" ? ReadAndValidateSprite(entry.AttackEffectSpriteUri) : null;
+                    if (effect is not null)
+                        Require(Enumerable.Range(entry.AttackEffectIndex * 3, 3).All(effect.Frames.Select(x => x.Index).ToHashSet().Contains),
+                            "attack effect references unaddressable frames");
+                    players[member] = new(entry.RoleId, entry.PlayerPosition, sprite, entry.AttackEffectIndex, effect,
+                        Array.AsReadOnly(effect is null ? Array.Empty<PalFrame>() : Enumerable.Range(entry.AttackEffectIndex * 3, 3)
+                            .Select(index => effect.Frames.Single(frame => frame.Index == index)).ToArray()));
+                }
+                catch (InvalidDataException error)
+                {
+                    throw new InvalidDataException(memberPath + ": " + error.Message, error);
+                }
+            }
             PalSprite? numbers = native.NumberSpriteUri != "" ? ReadAndValidateSprite(native.NumberSpriteUri) : null;
             if (numbers is not null)
             {
@@ -141,7 +172,7 @@ public static class NativeBattleVisualProfile
                 checkedTeams.Add(team.TeamId, new(team.TeamId, slots, background));
             }
             foreach (string path in hashes.Keys) CheckFile(path, hashes);
-            return new(native, player, paletteResource, effect, numbers, checkedTeams, hashes);
+            return new(native, paletteResource, numbers, players, checkedTeams, hashes);
         }
         catch (InvalidDataException error) { throw new InvalidDataException(uri + ": " + error.Message, error); }
         catch (Exception error) when (error is ArgumentException or NullReferenceException or InvalidCastException or InvalidOperationException)
@@ -399,18 +430,26 @@ public static class NativeBattleVisualProfile
 public sealed class CheckedBattleVisualProfile
 {
     public string SourceIdentity { get; }
-    public int RoleId { get; }
-    public Vector2I PlayerPosition { get; }
-    public PalSprite PlayerSprite { get; }
     public PalPalette Palette { get; }
-    public int AttackEffectIndex { get; }
-    public PalSprite? AttackEffectSprite { get; }
-    public IReadOnlyList<PalFrame> AttackEffectFrames { get; }
     public PalSprite? NumberSprite { get; }
     // UI digits use top-left coordinates; six pixels is layout advance, not a frame-size constraint.
     public IReadOnlyList<PalFrame> YellowNumberFrames { get; }
     public IReadOnlyList<PalFrame> BlueNumberFrames { get; }
     public IReadOnlyList<PalFrame> CyanNumberFrames { get; }
+    /// <summary>Party-ordered per-role bindings; a single player is one binding, never a head
+    /// projection. Shared sprites remain distinct bindings (identity/poses are not merged).</summary>
+    public IReadOnlyList<CheckedBattleVisualPlayer> Players { get; }
+
+    /// <summary>Per-role checked binding: one party position's RoleId, own sprite, own
+    /// reference-layout column and own attack-effect frames.</summary>
+    public sealed record CheckedBattleVisualPlayer(int RoleId, Vector2I PlayerPosition, PalSprite PlayerSprite,
+        int AttackEffectIndex, PalSprite? AttackEffectSprite, IReadOnlyList<PalFrame> AttackEffectFrames)
+    {
+        public void RequireReferencePresentation()
+        {
+            if (AttackEffectSprite is null) throw new InvalidDataException("reference presentation requires attack effect metadata");
+        }
+    }
 
     public void RequireNumberPresentation()
     {
@@ -419,28 +458,24 @@ public sealed class CheckedBattleVisualProfile
 
     public void RequireReferencePresentation()
     {
-        if (AttackEffectSprite is null) throw new InvalidDataException("reference presentation requires attack effect metadata");
+        for (int member = 0; member < Players.Count; member++) Players[member].RequireReferencePresentation();
     }
     public IReadOnlyDictionary<int, CheckedBattleVisualTeam> Teams { get; }
     public IReadOnlyDictionary<string, string> ResourceSha256 { get; }
 
     /// <summary>Reference bottom-center player origins for the actual party size
-    /// (battle.c:27-31 g_rgPlayerPos). Column zero is the authored PlayerPosition;
-    /// later columns are reference constants, not authored per-member data.</summary>
+    /// (battle.c:27-31 g_rgPlayerPos): the per-role bindings' validated columns.</summary>
     public IReadOnlyList<Vector2I> PlayerOrigins(int partyCount) => partyCount switch
     {
-        1 => [PlayerPosition],
-        2 => [PlayerPosition, NativeBattleVisualProfile.TwoPlayerSecondOrigin],
+        1 => [Players[0].PlayerPosition],
+        2 => [Players[0].PlayerPosition, Players[1].PlayerPosition],
         _ => throw new InvalidOperationException("Unsupported party size " + partyCount + ".")
     };
-    internal CheckedBattleVisualProfile(PalBattleVisualProfile native, PalSprite player, PalPalette palette, PalSprite? effect, PalSprite? numbers,
-        Dictionary<int, CheckedBattleVisualTeam> teams, Dictionary<string, string> hashes)
+    internal CheckedBattleVisualProfile(PalBattleVisualProfile native, PalPalette palette, PalSprite? numbers,
+        CheckedBattleVisualPlayer[] players, Dictionary<int, CheckedBattleVisualTeam> teams, Dictionary<string, string> hashes)
     {
-        SourceIdentity = native.SourceIdentity; RoleId = native.RoleId; PlayerPosition = native.PlayerPosition;
-        PlayerSprite = player; Palette = palette;
-        AttackEffectIndex = native.AttackEffectIndex; AttackEffectSprite = effect;
-        AttackEffectFrames = Array.AsReadOnly(effect is null ? Array.Empty<PalFrame>() : Enumerable.Range(AttackEffectIndex * 3, 3)
-            .Select(index => effect.Frames.Single(frame => frame.Index == index)).ToArray());
+        SourceIdentity = native.SourceIdentity; Palette = palette;
+        Players = Array.AsReadOnly(players);
         NumberSprite = numbers;
         YellowNumberFrames = NumberFrames(19); BlueNumberFrames = NumberFrames(29); CyanNumberFrames = NumberFrames(56);
         IReadOnlyList<PalFrame> NumberFrames(int start) => Array.AsReadOnly(numbers is null ? Array.Empty<PalFrame>() :
