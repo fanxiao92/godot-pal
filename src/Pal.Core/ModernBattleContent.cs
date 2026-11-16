@@ -193,10 +193,15 @@ public static partial class ModernBattleContent
 
     private static ClassicBattleEnemy Enemy(JsonElement value, string path)
     {
-        EventJson.Keys(value, path, "id", "level", "hp", "attack", "defense", "dexterity", "physicalResistance",
-            "statuses", "poisons", "turnStartScript", "readyScript", "battleEndScript", "magicId", "dualMove",
-            "attackEquivItem", "attackEquivItemRate", "experience", "cash");
-        return new(Number(value, "id", path, 1), Number(value, "level", path), Number(value, "hp", path, 1),
+        // #140: optional isEmpty admits PAL_StartBattle's zero source row as a real runtime slot
+        // (battle.c:1617-1717); an absent key keeps the legacy dense non-empty contract unchanged.
+        EventJson.Keys(value, path,
+            ["id", "level", "hp", "attack", "defense", "dexterity", "physicalResistance",
+             "statuses", "poisons", "turnStartScript", "readyScript", "battleEndScript", "magicId", "dualMove",
+             "attackEquivItem", "attackEquivItemRate", "experience", "cash"],
+            ["isEmpty"]);
+        bool empty = value.TryGetProperty("isEmpty", out _) && Boolean(value, "isEmpty", path);
+        ClassicBattleEnemy enemy = new(Number(value, "id", path, empty ? 0 : 1), Number(value, "level", path), Number(value, "hp", path, empty ? 0 : 1),
             Number(value, "attack", path, -32768, 32767), Number(value, "defense", path, -32768, 32767),
             Number(value, "dexterity", path, -32768, 32767), Number(value, "physicalResistance", path))
         {
@@ -205,8 +210,16 @@ public static partial class ModernBattleContent
             BattleEndScript = Number(value, "battleEndScript", path), MagicId = Number(value, "magicId", path),
             DualMove = Number(value, "dualMove", path), AttackEquivItem = Number(value, "attackEquivItem", path),
             AttackEquivItemRate = Number(value, "attackEquivItemRate", path),
-            Experience = Number(value, "experience", path), Cash = Number(value, "cash", path)
+            Experience = Number(value, "experience", path), Cash = Number(value, "cash", path),
+            IsEmpty = empty
         };
+        if (empty && (enemy.Id != 0 || enemy.Level != 0 || enemy.Hp != 0 || enemy.Attack != 0 || enemy.Defense != 0
+            || enemy.Dexterity != 0 || enemy.PhysicalResistance != 0 || enemy.Experience != 0 || enemy.Cash != 0
+            || enemy.TurnStartScript != 0 || enemy.ReadyScript != 0 || enemy.BattleEndScript != 0 || enemy.MagicId != 0
+            || enemy.DualMove != 0 || enemy.AttackEquivItem != 0 || enemy.AttackEquivItemRate != 0
+            || enemy.Statuses.Any(status => status != 0) || enemy.Poisons.Any(poison => poison != 0)))
+            throw Error(path + ".isEmpty", "an empty enemy slot requires canonical id 0, hp 0 and all-zero abilities, hooks and rewards");
+        return enemy;
     }
 
     private static JsonElement Property(JsonElement value, string key, string path) =>

@@ -639,6 +639,109 @@ public sealed class ModernBattleContentTests
         Assert.Equal(100, team[0].Hp);
     }
 
+    [Fact]
+    public void Sparse_zero_slots_parse_as_canonical_empty_runtime_slots_and_enter_the_trigger_chain()
+    {
+        var data = Data();
+        var loaded = data["teams"]![0]!["enemies"]![0]!.DeepClone();
+        var enemies = data["teams"]![0]!["enemies"]!.AsArray();
+        enemies.Clear();
+        enemies.Add(loaded);
+        enemies.Add(EmptyJsonEnemy());
+        enemies.Add(loaded.DeepClone());
+        enemies.Add(EmptyJsonEnemy());
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        ModernBattleContent.Validate(content);
+        ModernBattleContent.ValidatePhysicalBattle(content, 18);
+        Assert.Equal(new[] { (7, 43, false), (0, 0, true), (7, 43, false), (0, 0, true) },
+            content.EnemyTeams[18].Select(e => (e.Id, e.Hp, e.IsEmpty)));
+        var random = new BattleRandom();
+        var script = Script(content, random);
+        script.Start("shared", "npc", 28);
+        Assert.Equal(0, random.Draws);
+        var combat = script.PendingBattle!.Lifecycle.Current.Combat;
+        Assert.Equal(new[] { (0, 7, 43, false), (1, 0, 0, true), (2, 7, 43, false), (3, 0, 0, true) },
+            combat.Enemies.Select(e => (e.Slot, e.Id, e.Hp, e.IsEmpty)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => script.PendingBattle.Lifecycle.SelectAttack(0, 1));
+        script.PendingBattle.Lifecycle.SelectAttack(0, 0);
+        Assert.Equal(0, script.PendingBattle.Lifecycle.Current.Combat.Players[0].SelectedEnemySlot);
+    }
+
+    [Theory]
+    [InlineData("id", 7)]
+    [InlineData("hp", 43)]
+    [InlineData("attack", 1)]
+    [InlineData("experience", 1)]
+    [InlineData("cash", 1)]
+    [InlineData("battleEndScript", 1)]
+    public void JSON_empty_slots_reject_any_nonzero_word(string field, int value)
+    {
+        var data = Data();
+        var empty = (JsonObject)EmptyJsonEnemy();
+        empty[field] = value;
+        data["teams"]![0]!["enemies"]![0] = empty;
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("isEmpty", error.Message);
+        Assert.Contains("canonical", error.Message);
+    }
+
+    [Fact]
+    public void JSON_empty_status_words_follow_the_same_canonical_rule()
+    {
+        var data = Data();
+        var empty = (JsonObject)EmptyJsonEnemy();
+        empty["statuses"] = new JsonArray(1, 0, 0, 0, 0, 0, 0, 0, 0);
+        data["teams"]![0]!["enemies"]![0] = empty;
+        Assert.Contains("isEmpty", Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString())).Message);
+    }
+
+    [Fact]
+    public void JSON_isEmpty_accepts_only_booleans()
+    {
+        var data = Data();
+        data["teams"]![0]!["enemies"]![0]!["isEmpty"] = 1;
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("isEmpty", error.Message);
+        Assert.Contains("expected boolean", error.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void JSON_non_empty_id_zero_keeps_the_legacy_rejection(bool declared)
+    {
+        var data = Data();
+        if (declared) data["teams"]![0]!["enemies"]![0]!["isEmpty"] = false;
+        data["teams"]![0]!["enemies"]![0]!["id"] = 0;
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("enemies[0].id", error.Message);
+        Assert.Contains("expected integer in 1..65535", error.Message);
+    }
+
+    [Fact]
+    public void Typed_empty_slots_require_canonical_zeros_and_all_empty_teams_reject_before_side_effects()
+    {
+        var content = ModernBattleContent.Parse(Data().ToJsonString());
+        var loaded = content.Teams[18];
+        var empty = loaded with { Id = 0, Hp = 0, PhysicalResistance = 0, IsEmpty = true };
+        var growth = new Dictionary<int, ClassicBattleGrowthData> { [1] = content.Growth };
+        var sparse = new TriggerBattleContent([content.InitialRole], [content.Player], growth,
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = [loaded, empty, loaded] });
+        string before = System.Text.Json.JsonSerializer.Serialize(sparse);
+        ModernBattleContent.Validate(sparse);
+        ModernBattleContent.ValidatePhysicalBattle(sparse, 18);
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(sparse));
+        var allEmpty = new TriggerBattleContent([content.InitialRole], [content.Player], growth,
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = [empty, empty] });
+        ModernBattleContent.Validate(allEmpty);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(allEmpty, 18));
+        Assert.Contains("teams[18]", error.Message);
+        Assert.Contains("non-empty enemy", error.Message);
+        var illegal = new TriggerBattleContent([content.InitialRole], [content.Player], growth,
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = [loaded, empty with { Attack = 1 }] });
+        Assert.Contains("isEmpty", Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(illegal)).Message);
+    }
+
     private static JsonObject PartyData()
     {
         var data = Data();
@@ -1288,6 +1391,12 @@ public sealed class ModernBattleContentTests
         data["growth"]![0]!["levelUpExperience"] = new JsonArray(Enumerable.Repeat(100, 100).Select(x => JsonValue.Create(x) as JsonNode).ToArray());
         return data;
     }
+
+    private static JsonNode EmptyJsonEnemy() => JsonNode.Parse("""
+        {"isEmpty":true,"id":0,"level":0,"hp":0,"attack":0,"defense":0,"dexterity":0,"physicalResistance":0,
+         "statuses":[0,0,0,0,0,0,0,0,0],"poisons":[],"turnStartScript":0,"readyScript":0,"battleEndScript":0,
+         "magicId":0,"dualMove":0,"attackEquivItem":0,"attackEquivItemRate":0,"experience":0,"cash":0}
+        """)!;
 
     private static TriggerScriptSession Script(TriggerBattleContent content, IBattleRandom random)
     {

@@ -75,6 +75,13 @@ public static class NativeBattleContent
     {
         ModernBattleContent.Validate(content);
         projectedSource?.ValidateFor(content);
+        // #140: empty slots stay numeric/Core-only until the native chain migrates (T13c).
+        // PalBattleEnemy has no empty flag, so serializing one here would silently drop the
+        // field and publish a dense look-alike; reject it with the team and slot instead.
+        foreach (var team in content.EnemyTeams)
+            for (int slot = 0; slot < team.Value.Count; slot++)
+                if (team.Value[slot].IsEmpty)
+                    throw new InvalidDataException($"Team {team.Key} enemy slot {slot} is an empty enemy slot; native battle content transports only loaded enemy slots");
         // Without a projection receipt this is the non-projected native/Prepare chain: it keeps
         // the same explicit outer 1..5 loaded-slot boundary the projection slot rows enforce.
         if (projectedSource is null)

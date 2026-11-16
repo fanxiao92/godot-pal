@@ -22,6 +22,12 @@
 
 **#210 外层迁移与证据边界**：#207 的 Core 1..5 接受域已贯通外层链，这是对 #207 期间按票面边界刻意保留的双敌门的有意迁移，不是回退：`BattleDataProjector` 投影 dense 实有敌位 1..5（源槽仍仅 0..4，零槽、零 objectId 与空队仍拒绝）；非投影 native 链在 `NativeBattleContent.CreateChecked`（读回）与 `Write(content, null)`（无 receipt 的 Prepare 写出）按同一 1..5 loaded 域拒绝 0/>5（诊断带 teamId）；投影槽行 `BattleProjectionSourceInfo` 每队 1..5 loaded；`PrepareStoryPackage` author schema 的 `visual.teams[].enemies` 接受 1..5 逐槽绑定并与数值敌位一一对应。重复敌人定义多槽仍不合并。测试迁移：投影 `three` 拒绝例删除并由五槽正例取代、native `enemies-overcapacity` 与 Prepare `three-slots` 拒绝例迁至六槽，投影 `three-loaded` 缺陷例改经投影/native 槽数不匹配路径拒绝；新增非投影、投影槽行与 Prepare 五槽正例。零空槽/FFFF skip 与数据表零槽语义仍归 T13b（#140）；正式 Main 的五敌目标循环、所选敌队参考布局与 #138 余项未在本叶验收，不解除 #140 的父依赖。Extract Unit 与 native-map headless 证据不替代 Prepare 进程/私有真实资源/GPU/Windows人工/远端CI。空槽、三角色、新动作、敌方法术/双动与旧失败支线不在本叶。敌方 HP/目标/队列仍由 combat 唯一持有，lifecycle 结算角色、trigger 在 owned ACK 后提交；不新增持久化 schema 或另一份真状态。
 
+## 当前 #140：敌队 0xFFFF 跳过项与 0 空槽的数值/Core 契约（T13b）
+
+本节更新上文 #210 刻意保留的零槽边界，不是回退。`ClassicBattleEnemy` 新增可选 `IsEmpty`（缺省 false，typed/JSON/record-with 均保留）：仅 `IsEmpty=true` 允许 canonical `id=0`、`hp=0` 与全零能力/奖励/钩子/状态/毒，`ClassicBattleSession.ValidateEnemy` 与 `ModernBattleContent.Validate` 在 RNG/玩法副作用前拒绝其它拼写；`ClassicBattleEnemyView.IsEmpty` 发布明确空状态，战中 HP=0 的实有敌保留原战内 id 且 `IsEmpty=false`，两类零值不合并。团队仍要求 1..5 槽且**至少一个非空敌**（全空队拒绝）；空槽不可选为目标、不抽行动随机、不进队列、不运行钩子、不贡献奖励，死亡目标循环重定向与最后一实有敌 KO→Won 沿用既有规则。
+
+投影按 `PAL_StartBattle`（battle.c:1617-1717）：FFFF 不占运行时槽，0 保留 `wObjectID=0` 运行时槽；数值 `id` 仍是战内 target ID = 运行时槽+1，重复对象不合并，收据逐行保留 sourceSlot→运行时槽（`compactSlot`/`battleId`）映射与 `empty-0` disposition（仅四个共享键），dense 队输出与 #210 逐字节一致。外层 native/Main 接线域在 T13c 前仍显式拒绝空槽：`NativeBattleContent.Write` 遇 `IsEmpty` 敌位带 teamId/slot 拒绝（不静默丢字段），`ProjectedBattleSource`/`BattleProjectionSourceInfo` 对 `empty-0` 槽行按 unknown disposition 拒绝，非投影 1..5 loaded 域不变。本票不宣称 native/Prepare/Main 已支持空槽；Core/Extract Unit 证据不替代引擎层验收。
+
 ## 当前 #160：live Name 角色钩子所有权（Core 窄契约）
 
 本节同步 [#160](https://github.com/fanxiao92/godot-pal/issues/160) 的当前 Core 实现；**后文 #47/#48/#49/#46 等是历史检查点**，其中单人、零钩子及静态初始入口等描述不覆盖本节的现行 seam。本票仍未整票验收、未集成，不代表原生资源/Main 或 M6 交付，也不增加故事验收计数。

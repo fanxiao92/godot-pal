@@ -37,6 +37,11 @@ public sealed record ClassicBattleEnemy(int Id, int Level, int Hp, int Attack, i
     public int AttackEquivItemRate { get; init; }
     public int Experience { get; init; }
     public int Cash { get; init; }
+    /// <summary>PAL_StartBattle's zero source row (battle.c:1617-1717): a real runtime slot whose
+    /// wObjectID stays 0. Only an empty slot admits the canonical id 0/hp 0 spelling; it never
+    /// reads the enemy table, draws action random, runs hooks or contributes rewards. A killed
+    /// non-empty enemy keeps its slot identity and stays IsEmpty=false.</summary>
+    public bool IsEmpty { get; init; }
 }
 
 public sealed record ClassicBattleDefinition(IReadOnlyList<ClassicBattlePlayer> Players, IReadOnlyList<ClassicBattleEnemy> Enemies);
@@ -71,7 +76,12 @@ public sealed record ClassicBattlePlayerView(int PartyIndex, int RoleId, int Hp,
     public int BoostDexterity { get; init; }
     public int BoostFlee { get; init; }
 }
-public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp);
+public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp)
+{
+    /// <summary>True only for a source-empty runtime slot (wObjectID 0); a killed real enemy stays
+    /// IsEmpty=false with its original battle id, so the two zero-HP kinds never merge.</summary>
+    public bool IsEmpty { get; init; }
+}
 public sealed record ClassicBattleQueueEntry(ClassicBattleSide Side, int ActorIndex, ushort Dexterity);
 
 /// <summary>One enemy's post-victory script. PAL_BattleWon runs wScriptOnBattleEnd for every enemy

@@ -28,7 +28,7 @@ dotnet run --project tools/Pal.Extract -- project-battle-data `
 - 角色等级、HP/MP、六装备槽、32已知法术槽保真；HP0不改1（归一化属后续正式入战）。采用固定 `global.c PAL_LoadDefaultGame/PAL_InitGameData` 默认初始化：primary和七种hidden的value/count=0、level=原角色level，角色状态和毒为空。这是**独立基表起始上下文**，不是自然剧情save，也不是冻结M4 author。非零装备因缺真实装备脚本闭包拒绝，不捏造零effects；cooperativeMagic/attackAll非零拒绝。
 - 完整100项阈值照level索引，有序升级法术照原RoleId取五列之一；保留零行、重复和顺序。role5没有第六列，明确拒绝本投影的成长来源，而非声称Core不支持role5。level0/threshold[0]=0不因此拒绝；其他成长/最大HP域沿用 #196。已知/升级法术仅保留ID、不承诺施法；非零ID仍须有可证明的OBJECT magic view并指向存在的MAGIC行（undetermined view不能在本入口冒充已证明magic）。
 - coveredBy按原角色身份保留，包括0=role0；player仍保留该身份，不以0映射null或party索引，实际掩护由正式combat按队伍成员/HP/状态判断。不向文档未声明的自然快照推导无毒或装备闭包。
-- ENEMYTEAM存的是OBJECT enemy view编号，再由enemyId查ENEMY；FFFF跳过而不递增compact slot，**0是真空槽、连尾部0也拒绝**，不压缩稀疏队。重复对象仍是两个战内槽；生成非零唯一battleId=compactSlot+1。收据逐个保留全部5个sourceSlot、FFFF skip以及已载objectId/enemyId/compactSlot/battleId映射。enemy attack/defense/dexterity按物理消费点解释为SHORT，不夹零、不预加等级公式；奖励WORD原样。
+- ENEMYTEAM存的是OBJECT enemy view编号，再由enemyId查ENEMY；#140起按 `PAL_StartBattle`（battle.c:1617-1717）投影：**FFFF跳过而不占运行时槽，0保留 `wObjectID=0` 的真空槽并占一个运行时槽**，两类空值不统一压缩，重复对象仍是独立战内槽；非零battleId=运行时槽+1（dense 队与旧输出一致）。空槽输出 canonical `isEmpty:true`、id/hp/能力/奖励全零，不读敌表；全FFFF或全0队按 no loaded enemies 拒绝。收据逐个保留全部5个sourceSlot、FFFF skip、`empty-0`行（仅四个共享键）以及已载objectId/enemyId/compactSlot（=运行时槽）/battleId映射。enemy attack/defense/dexterity按物理消费点解释为SHORT，不夹零、不预加等级公式；奖励WORD原样。
 - enemy magic（含FFFF及rate0）、dualMove、等效物品/率等不可消费能力拒绝，不洗字段为0。FFFF魔法带不同RNG消费的空动作，不等于物理攻击。其余未被数值格式消费的M5元数据保留在输入身份中；不声称已接通偷窃、图像、音效、事件、语言、场景或自然存档闭包。非选中队伍只要求格式，不强求其能力已支持。
 
 生成的数值先经公开 `ModernBattleContent.Parse/Validate`、再逐队经 `ValidatePhysicalBattle`；不是只通过格式就宣称可执行。数值格式仍v1，无额外来源键。数值UTF-8输出限制≤16MiB，与既有Prepare输入上限相容；不改任何Prepare/native/Main能力。
@@ -166,12 +166,13 @@ JSON player 可选精确字段 `nameObjectId`：缺席才表示 legacy null，�
 
 ## Team / Enemy：复用 ClassicBattleEnemy
 
-每队 `{teamId: WORD, enemies: [...]}`。enemy全部必填：
+每队 `{teamId: WORD, enemies: [...]}`。enemy全部必填（`isEmpty` 除外）：
 
 | 字段 | 类型/约束 |
 |---|---|
-| `id` | 非零WORD，**战内target ID**，不是原始敌定义或图片ID；无需与teamId相等 |
-| `level`, `hp` | WORD，hp>0 |
+| `id` | 非零WORD（`isEmpty:true` 空槽例外，见下），**战内target ID**，不是原始敌定义或图片ID；无需与teamId相等 |
+| `isEmpty` | 可选 bool，缺省 false；true 时仅允许 id=0、hp=0 与全零能力/奖励/钩子/状态/毒（#140 空槽） |
+| `level`, `hp` | WORD，hp>0（`isEmpty:true` 时均须为0） |
 | `attack`, `defense`, `dexterity` | signed WORD，原表offset，非有效面板 |
 | `physicalResistance` | WORD |
 | `statuses`, `poisons` | 9项WORD状态、显式WORD毒数组 |
@@ -180,6 +181,8 @@ JSON player 可选精确字段 `nameObjectId`：缺席才表示 legacy null，�
 | `experience`, `cash` | WORD |
 
 战内ID在一场内唯一；当前一场仅一个敌人，所以任何多项都明确拒绝。不同队可使用相同战内ID；未来同原enemy97出现两次时，也不暗含两者必须共享一个target ID。原始定义身份/图片绑定由未来native包决定，此纯数值格式不臆造它们。
+
+**#140 空槽契约**：enemy 可选键 `isEmpty`（缺省 false）表达 ENEMYTEAM 源行 0 的真空槽（`PAL_StartBattle` battle.c:1617-1717：占一个运行时槽、不读敌表）；仅 `isEmpty:true` 允许 id=0、hp=0 与全零能力/奖励/钩子/状态/毒，其余组合在 `Parse`/`Validate` 即以带路径诊断拒绝；团队仍须 1..5 槽且至少一个非空敌（全空队由 combat 能力门在副作用前拒绝）。上段“当前一场仅一个敌人”等历史单敌描述已被 #207/#210 与本节取代。空槽当前仅数值/Core/投影域：native `PalBattleEnemy` 不运输该字段，`NativeBattleContent.Write` 遇空槽带 teamId/slot 显式拒绝（T13c 前不静默丢字段），投影收据 `empty-0` 槽行在 `BattleProjectionSourceInfo` 按 unknown disposition 拒绝。
 
 ## 无事件宿主的纯物理战能力门（#196 / #133 前置）
 

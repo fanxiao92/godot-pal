@@ -307,7 +307,7 @@ public sealed class ClassicBattleSession
             { Attack = EffectivePanel(p.Attack, boostAttack[i]), Defense = EffectivePanel(p.Defense, boostDefense[i]),
                 Dexterity = EffectivePanel(p.Dexterity, boostDexterity[i]), BoostAttack = boostAttack[i], BoostMagicPower = boostMagicPower[i],
                 BoostDefense = boostDefense[i], BoostDexterity = boostDexterity[i], BoostFlee = boostFlee[i] }).ToArray()),
-            Enemies = Array.AsReadOnly(enemies.Select((e, i) => new ClassicBattleEnemyView(i, e.Id, enemyHp[i])).ToArray()),
+            Enemies = Array.AsReadOnly(enemies.Select((e, i) => new ClassicBattleEnemyView(i, e.Id, enemyHp[i]) { IsEmpty = e.IsEmpty }).ToArray()),
             ActionQueue = Array.AsReadOnly(queue.ToArray()),
             SelectingPlayerIndex = Current.Phase == ClassicBattlePhase.Selecting
                 ? Enumerable.Range(0, players.Length).Where(i => playerHp[i] > 0 && targets[i] is null && !fleeing[i]).Select(i => (int?)i).FirstOrDefault() : null
@@ -482,8 +482,9 @@ public sealed class ClassicBattleSession
     {
         if (definition.Players is not { Count: >= 1 and <= 3 } || definition.Enemies is not { Count: >= 1 and <= 5 }
             || definition.Players.Any(p => p is null) || definition.Enemies.Any(e => e is null)
-            || definition.Players.Select(p => p.RoleId).Distinct().Count() != definition.Players.Count)
-            throw new InvalidDataException("Classic combat requires one to three living players with distinct roles and one to five living enemies.");
+            || definition.Players.Select(p => p.RoleId).Distinct().Count() != definition.Players.Count
+            || !definition.Enemies.Any(e => !e.IsEmpty))
+            throw new InvalidDataException("Classic combat requires one to three living players with distinct roles and one to five enemy slots with at least one non-empty enemy.");
         foreach (var p in definition.Players) ValidatePlayer(p, equipment);
         foreach (var e in definition.Enemies) ValidateEnemy(e);
     }
@@ -518,6 +519,18 @@ public sealed class ClassicBattleSession
 
     private static void ValidateEnemy(ClassicBattleEnemy e)
     {
+        // battle.c:1617-1717: a zero source row keeps wObjectID 0 as a real runtime slot; it never
+        // reads the enemy table, so an empty slot admits exactly the canonical all-zero spelling.
+        if (e.IsEmpty)
+        {
+            if (e.Id != 0 || e.Level != 0 || e.Hp != 0 || e.Attack != 0 || e.Defense != 0 || e.Dexterity != 0
+                || e.PhysicalResistance != 0 || !Zero(e.Statuses, 9) || !Zero(e.Poisons)
+                || e.TurnStartScript != 0 || e.ReadyScript != 0 || e.BattleEndScript != 0 || e.MagicId != 0
+                || e.DualMove != 0 || e.AttackEquivItem != 0 || e.AttackEquivItemRate != 0
+                || e.Experience != 0 || e.Cash != 0)
+                throw new InvalidDataException("An empty enemy slot must be canonical: id 0, hp 0 and all-zero abilities, hooks and rewards.");
+            return;
+        }
         if (e.Id is < 1 or > 65535 || !Word(e.Level) || e.Hp is < 1 or > 32767
             || !SignedWord(e.Attack) || !SignedWord(e.Defense) || !SignedWord(e.Dexterity) || !Word(e.PhysicalResistance))
             throw new InvalidDataException("Classic combat has invalid or unsupported numeric data (current HP must be 1..32767).");

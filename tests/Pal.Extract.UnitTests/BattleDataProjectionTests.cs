@@ -74,7 +74,6 @@ public sealed class BattleDataProjectionTests
     }
 
     [Theory]
-    [InlineData("0", "zero")]
     [InlineData("empty", "no loaded")]
     [InlineData("magic", "magicId")]
     [InlineData("FFFF", "magicId")]
@@ -100,8 +99,8 @@ public sealed class BattleDataProjectionTests
     public void Unsupported_or_dangling_content_is_rejected_with_a_location(string mutation, string message)
     {
         var files = BattleProjectionFixture.Create();
-        if (mutation is "0" or "empty") BattleProjectionFixture.Mutate(files, "enemy-team.json", d =>
-            d["records"]![0]!["enemies"] = mutation switch { "0" => new JsonArray(6, 0, 7, 65535, 65535), _ => new JsonArray(65535, 65535, 65535, 65535, 65535) });
+        if (mutation == "empty") BattleProjectionFixture.Mutate(files, "enemy-team.json", d =>
+            d["records"]![0]!["enemies"] = new JsonArray(65535, 65535, 65535, 65535, 65535));
         else if (mutation is "magic" or "FFFF" or "dual" or "equivalent" or "rate") BattleProjectionFixture.Mutate(files, "enemy.json", d =>
             d["records"]![1]![mutation switch { "magic" or "FFFF" => "magicId", "dual" => "dualMove", "rate" => "attackEquivItemRate", _ => "attackEquivItemId" }] = mutation == "FFFF" ? 65535 : 8);
         else if (mutation is "ready" or "end" or "turn" or "dying" or "friend" or "missingEnemy") BattleProjectionFixture.Mutate(files, "object.json", d =>
@@ -203,7 +202,7 @@ public sealed class BattleDataProjectionTests
             d["records"]!.AsArray().Add(d["records"]![0]!.DeepClone());
             d["records"]![1]!["enemies"] = new JsonArray(7, 65535, 65535, 65535, 65535);
             d["records"]!.AsArray().Add(d["records"]![0]!.DeepClone());
-            d["records"]![2]!["enemies"] = new JsonArray(8, 0, 0, 0, 0); // unused unsupported team
+            d["records"]![2]!["enemies"] = new JsonArray(8, 0, 0, 0, 0); // unused sparse team
         });
         BattleProjectionFixture.Mutate(files, "index.json", d =>
         {
@@ -263,6 +262,48 @@ public sealed class BattleDataProjectionTests
         Assert.Equal(new[] { 6, 7, 6, 7, 6 }, loaded.Select(x => x!["objectId"]!.GetValue<int>()));
         Assert.Equal(new[] { 1, 2, 3, 4, 5 }, loaded.Select(x => x!["battleId"]!.GetValue<int>()));
         Assert.Contains(receipt["fieldSources"]!.AsArray(), x => x!["path"]!.GetValue<string>() == "teams[0].enemies[4].hp");
+    }
+
+    [Fact]
+    public void Sparse_source_rows_project_zero_as_runtime_empty_slots_and_FFFF_as_skips()
+    {
+        // battle.c:1617-1717 (PAL_StartBattle): a 0xFFFF row never reaches runtime slot i; a zero
+        // row keeps a wObjectID-0 runtime slot. Source [FFFF,6,0,6,FFFF] loads runtime slots 0
+        // and 2 (battleIds 1 and 3) and keeps slot 1 empty; the two empty kinds never merge.
+        var files = BattleProjectionFixture.Create();
+        BattleProjectionFixture.Mutate(files, "enemy-team.json", d => d["records"]![0]!["enemies"] = new JsonArray(65535, 6, 0, 6, 65535));
+        var result = BattleDataProjector.Project(files, [4, 0], [0]);
+        var content = ModernBattleContent.Parse(result.NumericJson);
+        ModernBattleContent.ValidatePhysicalBattle(content, 0);
+        Assert.Equal(new[] { (1, 70, false), (0, 0, true), (3, 70, false) },
+            content.EnemyTeams[0].Select(e => (e.Id, e.Hp, e.IsEmpty)));
+        var numeric = JsonNode.Parse(result.NumericJson)!;
+        // isEmpty is optional: loaded rows omit it (dense output stays byte-identical), empty rows
+        // declare it true, and the parse-level default spells false.
+        Assert.Equal(new[] { false, true, false }, numeric["teams"]![0]!["enemies"]!.AsArray()
+            .Select(x => x!["isEmpty"]?.GetValue<bool>() ?? false));
+        Assert.Equal(new[] { 1, 0, 3 }, numeric["teams"]![0]!["enemies"]!.AsArray().Select(x => x!["id"]!.GetValue<int>()));
+        var rows = JsonNode.Parse(result.ReceiptJson)!["enemySlots"]!.AsArray();
+        Assert.Equal(new[] { "skip-FFFF", "loaded", "empty-0", "loaded", "skip-FFFF" },
+            rows.Select(x => x!["disposition"]!.GetValue<string>()));
+        Assert.Equal(new[] { 0, 1, 2, 3, 4 }, rows.Select(x => x!["sourceSlot"]!.GetValue<int>()));
+        Assert.Equal(4, rows[2]!.AsObject().Count); // empty-0 keeps the four shared receipt keys
+        Assert.Equal(new[] { 0, 2 }, rows.Where(x => x!["disposition"]!.GetValue<string>() == "loaded")
+            .Select(x => x!["compactSlot"]!.GetValue<int>()).ToArray()); // runtime slots; wMaxEnemyIndex 2
+        Assert.Equal(new[] { 1, 3 }, rows.Where(x => x!["disposition"]!.GetValue<string>() == "loaded")
+            .Select(x => x!["battleId"]!.GetValue<int>()).ToArray());
+        Assert.Contains(JsonNode.Parse(result.ReceiptJson)!["fieldSources"]!.AsArray(),
+            x => x!["path"]!.GetValue<string>() == "teams[0].enemies[1].isEmpty");
+    }
+
+    [Fact]
+    public void An_all_zero_enemy_team_projects_no_loaded_enemies()
+    {
+        var files = BattleProjectionFixture.Create();
+        BattleProjectionFixture.Mutate(files, "enemy-team.json", d => d["records"]![0]!["enemies"] = new JsonArray(0, 0, 0, 0, 0));
+        var error = Assert.Throws<InvalidDataException>(() => BattleDataProjector.Project(files, [4], [0]));
+        Assert.Contains("no loaded enemies", error.Message);
+        Assert.Contains("enemy-team.json.records[0]", error.Message);
     }
 
     [Fact]

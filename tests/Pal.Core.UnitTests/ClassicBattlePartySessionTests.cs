@@ -360,12 +360,20 @@ public sealed class ClassicBattlePartySessionTests
     [InlineData("null-slot")]
     [InlineData("four-players")]
     [InlineData("magic-slot4")]
+    [InlineData("all-empty")]
+    [InlineData("empty-id")]
+    [InlineData("empty-attack")]
+    [InlineData("empty-end-script")]
     public void Expanded_capacity_keeps_invalid_and_unsupported_definitions_out_before_random(string fault)
     {
         var d = FiveEnemyDefinition();
         var enemies = d.Enemies.ToArray();
         if (fault == "null-slot") enemies[4] = null!;
         if (fault == "magic-slot4") enemies[4] = enemies[4] with { MagicId = 1 };
+        if (fault == "all-empty") { for (int i = 0; i < 5; i++) enemies[i] = EmptyEnemy(); }
+        if (fault == "empty-id") enemies[4] = EmptyEnemy() with { Id = 7 };
+        if (fault == "empty-attack") enemies[4] = EmptyEnemy() with { Attack = 1 };
+        if (fault == "empty-end-script") enemies[4] = EmptyEnemy() with { BattleEndScript = 1 };
         d = d with { Enemies = fault == "empty" ? [] : fault == "six" ? [.. enemies, enemies[0]] : enemies };
         if (fault == "four-players") d = d with { Players = [.. d.Players,
             d.Players[0] with { RoleId = 0 }, d.Players[0] with { RoleId = 1 }] };
@@ -535,11 +543,68 @@ public sealed class ClassicBattlePartySessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Empty_source_slots_join_the_runtime_domain_with_explicit_views_and_never_draw()
+    {
+        // battle.c:1617-1717: a zero source row keeps a real runtime slot (wObjectID 0) — it is
+        // never a selectable target and consumes no queue randomness; a dense team stays legal.
+        var d = Definition();
+        d = d with { Enemies = [d.Enemies[0], EmptyEnemy(), d.Enemies[1], EmptyEnemy()] };
+        var random = new ScriptedRandom(QueueDraws(2));
+        var session = new ClassicBattleSession(d, random);
+        Assert.Equal(new[] { (0, 7, 100, false), (1, 0, 0, true), (2, 7, 100, false), (3, 0, 0, true) },
+            session.Current.Enemies.Select(e => (e.Slot, e.Id, e.Hp, e.IsEmpty)));
+        var initial = session.Current;
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(0, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(0, 3));
+        Assert.Same(initial, session.Current);
+        session.SelectAttack(0, 0);
+        session.SelectAttack(1, 2);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        // Only the two real enemies entered the queue; the empty slots drew no speed.
+        Assert.Equal(new[] { 0, 2 }, session.Current.ActionQueue.Where(q => q.Side == ClassicBattleSide.Enemy)
+            .Select(q => q.ActorIndex).OrderBy(actor => actor).ToArray());
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Mixed_slots_retarget_across_empties_settle_only_real_KOs_and_keep_dead_identity()
+    {
+        // Each hit is 43: attack40 against effective defense24, +1, no critical, scale1.
+        // Both players target slot2; P0 kills it, P1 wraps across the empty slot3 to slot0 and
+        // kills the last real enemy. The empty slots never act, redraw or add their zero rewards.
+        var enemy = Definition().Enemies[0] with { Experience = 10, Cash = 5 };
+        var d = Definition();
+        d = d with { Enemies = [enemy with { Hp = 43 }, EmptyEnemy(), enemy with { Hp = 43 }, EmptyEnemy()] };
+        var random = new ScriptedRandom([.. QueueDraws(2), .. PlayerHit(), .. PlayerHit()]);
+        var session = new ClassicBattleSession(d, random);
+        session.SelectAttack(0, 2);
+        session.SelectAttack(1, 2);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(2, session.Current.LastAction!.TargetIndex);
+        Assert.Null(session.Completion);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(0, session.Current.LastAction!.TargetIndex); // wrapped over empty slot 3
+        Assert.Equal(7, session.Current.LastAction.TargetId);
+        Assert.Equal(ClassicBattlePhase.Won, session.Current.Phase);
+        // Killed real enemies keep their battle id (IsEmpty=false); only source-empty slots stay empty.
+        Assert.Equal(new[] { (7, 0, false), (0, 0, true), (7, 0, false), (0, 0, true) },
+            session.Current.Enemies.Select(e => (e.Id, e.Hp, e.IsEmpty)));
+        Assert.Equal(20, session.ExperienceGained);
+        Assert.Equal(10, session.CashGained);
+        var receipt = session.Completion;
+        Assert.False(session.ResolveNextAction());
+        Assert.Same(receipt, session.Completion);
+        random.AssertExhausted();
+    }
+
     private static ClassicBattleDefinition FiveEnemyDefinition()
     {
         var d = Definition();
         return d with { Enemies = Enumerable.Repeat(d.Enemies[0], 5).ToArray() };
     }
+    // battle.c:1617-1717: the zero source row's canonical runtime slot (wObjectID 0).
+    private static ClassicBattleEnemy EmptyEnemy() => new(0, 0, 0, 0, 0, 0, 0) { IsEmpty = true };
     private static ClassicBattleDefinition ThreePlayerDefinition() => new(
         [new(4, 200, 200, 40, 20, 100), new(2, 200, 200, 40, 20, 90), new(1, 200, 200, 40, 20, 80)],
         [new(7, 0, 100, 0, 0, 0, 1), new(7, 0, 100, 0, 0, 0, 1)]);

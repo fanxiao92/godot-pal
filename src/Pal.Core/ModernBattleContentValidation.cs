@@ -101,17 +101,29 @@ public static partial class ModernBattleContent
             Range(id, path + ".teamId");
             foreach (var (e, slot) in enemies.Select((x, i) => (x, i)))
             {
-                Range(e.Id, path + $".enemies[{slot}].id", 1); Range(e.Level, path + $".enemies[{slot}].level"); Range(e.Hp, path + $".enemies[{slot}].hp", 1);
-                Range(e.Attack, path + $".enemies[{slot}].attack", -32768, 32767);
-                Range(e.Defense, path + $".enemies[{slot}].defense", -32768, 32767);
-                Range(e.Dexterity, path + $".enemies[{slot}].dexterity", -32768, 32767);
-                Range(e.PhysicalResistance, path + $".enemies[{slot}].physicalResistance");
-                Words(e.Statuses, path + $".enemies[{slot}].statuses", 9); Words(e.Poisons, path + $".enemies[{slot}].poisons");
-                Range(e.TurnStartScript, path + $".enemies[{slot}].turnStartScript"); Range(e.ReadyScript, path + $".enemies[{slot}].readyScript");
-                Range(e.BattleEndScript, path + $".enemies[{slot}].battleEndScript"); Range(e.MagicId, path + $".enemies[{slot}].magicId");
-                Range(e.DualMove, path + $".enemies[{slot}].dualMove"); Range(e.AttackEquivItem, path + $".enemies[{slot}].attackEquivItem");
-                Range(e.AttackEquivItemRate, path + $".enemies[{slot}].attackEquivItemRate");
-                Range(e.Experience, path + $".enemies[{slot}].experience"); Range(e.Cash, path + $".enemies[{slot}].cash");
+                string ep = path + $".enemies[{slot}]";
+                Words(e.Statuses, ep + ".statuses", 9); Words(e.Poisons, ep + ".poisons");
+                if (e.IsEmpty)
+                {
+                    // #140: the zero source row never reads the enemy table; the numeric contract
+                    // admits exactly the canonical all-zero spelling of an empty runtime slot.
+                    if (e.Id != 0 || e.Level != 0 || e.Hp != 0 || e.Attack != 0 || e.Defense != 0 || e.Dexterity != 0
+                        || e.PhysicalResistance != 0 || e.TurnStartScript != 0 || e.ReadyScript != 0 || e.BattleEndScript != 0
+                        || e.MagicId != 0 || e.DualMove != 0 || e.AttackEquivItem != 0 || e.AttackEquivItemRate != 0
+                        || e.Experience != 0 || e.Cash != 0 || e.Statuses.Any(status => status != 0) || e.Poisons.Any(poison => poison != 0))
+                        throw Error(ep + ".isEmpty", "an empty enemy slot requires canonical id 0, hp 0 and all-zero abilities, hooks and rewards");
+                    continue;
+                }
+                Range(e.Id, ep + ".id", 1); Range(e.Level, ep + ".level"); Range(e.Hp, ep + ".hp", 1);
+                Range(e.Attack, ep + ".attack", -32768, 32767);
+                Range(e.Defense, ep + ".defense", -32768, 32767);
+                Range(e.Dexterity, ep + ".dexterity", -32768, 32767);
+                Range(e.PhysicalResistance, ep + ".physicalResistance");
+                Range(e.TurnStartScript, ep + ".turnStartScript"); Range(e.ReadyScript, ep + ".readyScript");
+                Range(e.BattleEndScript, ep + ".battleEndScript"); Range(e.MagicId, ep + ".magicId");
+                Range(e.DualMove, ep + ".dualMove"); Range(e.AttackEquivItem, ep + ".attackEquivItem");
+                Range(e.AttackEquivItemRate, ep + ".attackEquivItemRate");
+                Range(e.Experience, ep + ".experience"); Range(e.Cash, ep + ".cash");
             }
         }
         if (content.RoleEquipment.Count != 0 || content.EquipmentObjects.Count != 0)

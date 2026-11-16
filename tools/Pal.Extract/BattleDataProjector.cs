@@ -172,6 +172,7 @@ public static class BattleDataProjector
             int id = teams[teamIndex];
             JsonObject sourceTeam = Row(docs, "enemy-team", id);
             var enemies = new JsonArray();
+            int loaded = 0;
             for (int j = 0; j < 5; j++)
             {
                 int objectId = StrictJson.Word(sourceTeam["enemies"]![j]);
@@ -181,16 +182,40 @@ public static class BattleDataProjector
                     slots.Add(new JsonObject { ["teamId"] = id, ["sourceSlot"] = j, ["objectId"] = objectId, ["disposition"] = "skip-FFFF" });
                     continue;
                 }
-                if (objectId == 0) throw new InvalidDataException($"{from}: zero is a real empty slot, not FFFF; sparse teams unsupported.");
+                // #140 (battle.c:1617-1717): a zero source row keeps a real runtime slot with
+                // wObjectID 0 — it never reads the enemy table — while FFFF never reaches i.
+                if (objectId == 0)
+                {
+                    int runtimeSlot = enemies.Count;
+                    string xp = $"teams[{teamIndex}].enemies[{runtimeSlot}]";
+                    string source = $"{from}: zero row keeps runtime slot {runtimeSlot} (PAL_StartBattle wObjectID 0)";
+                    var empty = new JsonObject();
+                    Add(empty, "isEmpty", JsonValue.Create(true), xp, source);
+                    foreach (var (field, note) in new[] { ("id", "canonical empty id 0"), ("level", "empty slot never reads the enemy table"),
+                        ("hp", "canonical empty hp 0"), ("attack", "empty slot never reads the enemy table"),
+                        ("defense", "empty slot never reads the enemy table"), ("dexterity", "empty slot never reads the enemy table"),
+                        ("physicalResistance", "empty slot never reads the enemy table") })
+                        Add(empty, field, JsonValue.Create(0), xp, $"{from}: {note}");
+                    Add(empty, "statuses", Zeros(9), xp, $"{from}: empty slot carries no enemy statuses");
+                    Add(empty, "poisons", new JsonArray(), xp, $"{from}: empty slot carries no poisons");
+                    foreach (string field in new[] { "turnStartScript", "readyScript", "battleEndScript", "magicId", "dualMove", "attackEquivItem", "attackEquivItemRate" })
+                        Add(empty, field, JsonValue.Create(0), xp, $"{from}: empty slot runs no hooks or enemy actions");
+                    Add(empty, "experience", JsonValue.Create(0), xp, $"{from}: empty slot contributes no rewards");
+                    Add(empty, "cash", JsonValue.Create(0), xp, $"{from}: empty slot contributes no rewards");
+                    slots.Add(new JsonObject { ["teamId"] = id, ["sourceSlot"] = j, ["objectId"] = 0, ["disposition"] = "empty-0" });
+                    enemies.Add(empty);
+                    continue;
+                }
                 // #210: dense teams migrate with Core to the 1..5 loaded-slot domain
                 // (palcommon.h MAX_ENEMIES_IN_TEAM); the five source rows bound the count.
                 JsonObject obj = View(objectId, "enemy", from);
                 int enemyId = StrictJson.Int(obj, "enemyId");
                 JsonObject definition = Row(docs, "enemy", enemyId);
+                // Runtime slot i: FFFF never reaches it, a zero row occupies one, duplicates retained.
                 int slot = enemies.Count;
                 string ep = $"teams[{teamIndex}].enemies[{slot}]";
                 var enemy = new JsonObject();
-                Add(enemy, "id", JsonValue.Create(slot + 1), ep, $"{from}: compact slot+1 (FFFF skipped, duplicates retained)");
+                Add(enemy, "id", JsonValue.Create(slot + 1), ep, $"{from}: runtime slot+1 battleId (FFFF skipped, 0 keeps a slot, duplicates retained)");
                 foreach (var (field, to) in new[] { ("level", "level"), ("health", "hp"), ("physicalResistance", "physicalResistance"),
                     ("magicId", "magicId"), ("dualMove", "dualMove"), ("attackEquivItemId", "attackEquivItem"),
                     ("attackEquivItemRate", "attackEquivItemRate"), ("exp", "experience"), ("cash", "cash") })
@@ -213,8 +238,9 @@ public static class BattleDataProjector
                 slots.Add(new JsonObject { ["teamId"] = id, ["sourceSlot"] = j, ["objectId"] = objectId,
                     ["enemyId"] = enemyId, ["compactSlot"] = slot, ["battleId"] = slot + 1, ["disposition"] = "loaded" });
                 enemies.Add(enemy);
+                loaded++;
             }
-            if (enemies.Count == 0) throw new InvalidDataException($"enemy-team.json.records[{id}]: no loaded enemies.");
+            if (loaded == 0) throw new InvalidDataException($"enemy-team.json.records[{id}]: no loaded enemies.");
             var team = new JsonObject { ["enemies"] = enemies };
             Add(team, "teamId", JsonValue.Create(id), $"teams[{teamIndex}]", $"selection.teams[{teamIndex}]");
             outputTeams.Add(team);
