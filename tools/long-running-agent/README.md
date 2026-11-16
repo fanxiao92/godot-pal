@@ -114,7 +114,7 @@ node tools/long-running-agent/cli.ts run --issue 126
 
 已批准的历史记录（例如原 #207）没有这一新增责任字段，保留原候选及原证据，不回滚生产或追补假 RED；这不是新记录的豁免入口。模型没有历史证据写工具，`check_evidence` 只读原件。
 
-事前声明精确测试身份/字面诊断的 RED 命中后可继续实现；其它正常完整的编译/断言/fixture失败，先读原件定位，通过 `request_correction` 记录原因、实质修正和不变契约后才允许写入/必要重验。`request_correction` 仅用于实施中意外出现的完整普通失败；已认证 expectedRed 属计划内工作，勿调用，直接生产写入与 GREEN。没有源码修正不重复原检查或审查，唯一例外是操作者通过 `record_evidence_resolution` 绑定树外原件解除 review 类修正（见工具清单）。
+事前声明精确测试身份/字面诊断的 RED 命中后可继续实现；其它正常完整的编译/断言/fixture失败，先读原件定位，通过 `request_correction` 记录原因、实质修正和不变契约后才允许写入/必要重验。`request_correction` 仅用于实施中意外出现的完整普通失败；已认证 expectedRed 属计划内工作，勿调用，直接生产写入与 GREEN。没有源码修正不重复原检查或审查，唯一例外是操作者通过 `record_evidence_resolution` 绑定树外原件解除待决修正（check 或 review 类，见工具清单）。
 
 工具协议拒绝降级为会话内工具错误：host 回调（`verify_dependency`、`declare_red`、`request_correction`、`record_evidence_resolution`、写入/检查前置与 `unit_test`/`range_test` 的检查记录）抛出的非致命 Error 不再终止 attempt——agent 侧工具包装层把它作为该工具的 `isError` 结果返回原始错误文本，模型在同一会话内改正后重试，一次协议笔误不再消耗冷启动。仍必须向上传播并保全停止的致命类：`QuiescenceUnknownError`、会话时限/取消、provider 错误，以及 commitStarted 之后的任何异常（它们发生在 host 提交路径，不经过工具层）。两轴的同契约 `changes_requested` 须提供结构化 `findings: [{ problemId, evidenceKey, cause, evidence: [...] }]` 才能自动回实施修复，禁止从摘要猜问题身份。`evidenceKey` 使用brief提供的共同original源码身份加 `:规范源码路径#稳定契约锚点`，不使用各review会话目录；同finding两轴合并登记，原件路径保留在 `evidence[]`。`request_correction` 使用同形 `findings` 加 `change/contract`，host绑定证据与ID，按问题持久计数与验证结果。后续证据是否同根因须由诊断/独立审查确认；不确定则停止请求决定，host不声称算法能识别所有语义改名。
 
@@ -153,7 +153,7 @@ SDK `agentsFilesOverride` 保留原有 AGENTS 发现，再把契约全文和当�
 ## 模型工具与权限
 
 - `declare_red` 仅登记当前叶的 behavior、seam、paths、expectedFailure；阶段声明跨 repair / resume 冻结，不授予额外路径或执行权限。先迁移旧契约测试，再新增能力 RED；编译错误、旧断言冲突、未匹配失败、零执行或异常不能冒充该 RED。
-- `record_evidence_resolution` 仅用于操作者树外原件解除当前待决 review 类修正：file 必须是仓库工作树外绝对路径，sha256 可选——提供则必须与实际文件一致，未提供则 host 实测计算并计入绑定（代理无外部文件哈希能力）；problemId 须命中该待决修正；绑定即视为本轮实质变化（源码可未变），重复绑定、仓内路径、错 sha 或错 problemId 直接拒绝并停止会话。外部文件先于会话存在即视为操作者提供，内容是否充分由独立审查判断。
+- `record_evidence_resolution` 仅用于操作者树外原件解除当前待决修正（check 或 review 类）：file 必须是仓库工作树外绝对路径，sha256 可选——提供则必须与实际文件一致，未提供则 host 实测计算并计入绑定（代理无外部文件哈希能力）；problemId 须命中该待决修正；绑定即视为本轮实质变化（源码可未变），重复绑定、仓内路径、错 sha 或错 problemId 直接拒绝并停止会话。外部文件先于会话存在即视为操作者提供，内容是否充分由独立审查判断。
 - 提供受保护的源码 read/list/search/edit/write 和固定的只读 Git 检查；没有任意 shell、MCP、子代理、扩展调度器或远端写工具。
 - 不由人预列每个可改文件，也不设文件数硬上限。超过10文件是聚焦/完整性风险提示：说明为什么属于同一契约及拆分后的中间状态；生产者、消费者、测试、样例、注册与必要文档不能为凑数漏迁。授权路径/行为/权限仍是硬边界。
 - 拒绝工作树外路径、链接、隐藏 index 标志、忽略文件写入、常见凭据路径、`.git`/`.pi`、真实 raw/派生资产及游戏 Assets；不把真实数据发给模型。

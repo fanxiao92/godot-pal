@@ -613,7 +613,7 @@ test('preflight resumability reflects lock ownership, GREEN-at-fingerprint and c
   assert.equal(diagnosed.problems[0].roundsRemaining, 0);
   assert.equal(diagnosed.problems[0].pendingCorrection?.kind, 'check');
   assert.equal(diagnosed.problems[0].pendingCorrection?.sourceChangedSinceFailure, true);
-  assert.equal(diagnosed.problems[0].pendingCorrection?.evidenceBindingAvailable, false);
+  assert.equal(diagnosed.problems[0].pendingCorrection?.evidenceBindingAvailable, true, 'a pending check-kind correction without an evidence resolution must report binding available');
   assert.ok(diagnosed.blockers.some(text => /pending correction for consumer-contract/i.test(text)));
   assert.equal(diagnosed.resumable, true, 'a diagnosed pending correction remains resumable; only lock/exhaustion hard-block');
   state.records[2].corrections = [original, original, original];
@@ -916,7 +916,7 @@ test('record_evidence_resolution binds operator external evidence and rejects fo
       const sha256 = hash(fs.readFileSync(evidence));
       assert.throws(() => request.recordEvidenceResolution!('consumer-contract', path.join(f.cwd, 'a.txt'), sha256, 'repository-internal path'), /outside the repository/i, 'repository-internal paths rejected');
       assert.throws(() => request.recordEvidenceResolution!('consumer-contract', evidence, 'f'.repeat(64), 'wrong sha'), /sha256 does not match|mismatch/i, 'wrong sha256 rejected');
-      assert.throws(() => request.recordEvidenceResolution!('unknown-problem', evidence, sha256, 'wrong problemId'), /pending review correction/i, 'unknown problemId rejected');
+      assert.throws(() => request.recordEvidenceResolution!('unknown-problem', evidence, sha256, 'wrong problemId'), /pending correction/i, 'unknown problemId rejected');
       request.recordEvidenceResolution!('consumer-contract', evidence, sha256, 'Operator resolved this finding with external evidence');
       assert.throws(() => request.recordEvidenceResolution!('consumer-contract', evidence, sha256, 'duplicate binding'), /already/i, 'duplicate binding rejected');
       const unchanged = snapshot(f.cwd);
@@ -967,6 +967,36 @@ test('record_evidence_resolution accepts an omitted sha256 by binding the host-c
   assert.equal(result.counts.local_completed, 1, 'source-unchanged review repair must still pass the gate after a host-computed binding');
   const ledger = f.host().state()!.records[2].corrections!;
   assert.equal(ledger[0].evidenceResolution?.sha256, hash(fs.readFileSync(path.join(f.directory, 'operator-evidence.txt'))));
+});
+test('record_evidence_resolution resolves a pending check-kind correction and delivers the unchanged-source candidate', async () => {
+  const f = fixture(1); const agent = f.getAgent();
+  f.setAgent({ run: async request => {
+    if (request.role !== 'implement') return agent.run(request);
+    certifySyntheticRed(request);
+    // Synthetic #209 shape: source change plus current-fingerprint GREEN already recorded, then an environmental check fails on the same fingerprint.
+    fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'issue-2');
+    const green = snapshot(f.cwd);
+    request.recordCheck({ project: 'synthetic native-map', directory: request.directory, sourceFingerprint: green.fingerprint, code: 0 });
+    request.recordFailure!(path.join(request.directory, 'realfull-check'), green, 'realfull private assets absent in worktree');
+    request.requestCorrection!([finding(request, 'realfull-private-assets-absent-in-worktree')], 'Operator-published out-of-tree credentials resolve the environmental absence', 'Approved M2/M3 runtime boundary contract unchanged');
+    const evidence = path.join(f.directory, 'operator-private-assets.txt');
+    fs.writeFileSync(evidence, 'operator-reviewed external evidence original');
+    const sha256 = hash(fs.readFileSync(evidence));
+    assert.throws(() => request.recordEvidenceResolution!('forged-problem', evidence, sha256, 'wrong problemId'), /pending correction problemId/i, 'wrong problemId rejected');
+    assert.throws(() => request.recordEvidenceResolution!('realfull-private-assets-absent-in-worktree', path.join(f.cwd, 'a.txt'), sha256, 'repository-internal path'), /outside the repository/i, 'repository-internal paths rejected');
+    request.recordEvidenceResolution!('realfull-private-assets-absent-in-worktree', evidence, sha256, 'Operator bound the published external credentials');
+    assert.throws(() => request.recordEvidenceResolution!('realfull-private-assets-absent-in-worktree', evidence, sha256, 'duplicate binding'), /already/i, 'duplicate binding rejected');
+    assert.equal(snapshot(f.cwd).fingerprint, green.fingerprint, 'the binding is the substantive change; the environmental check is not retried');
+    return { status: 'candidate', summary: 'Environmental check correction resolved by operator external evidence; source deliberately unchanged', evidence: [evidence] };
+  } });
+  const result = await f.host().run({ commit: true }, signal());
+  assert.equal(result.counts.local_completed, 1, 'source-unchanged check repair must pass the gate after binding');
+  const ledger = f.host().state()!.records[2].corrections!;
+  assert.equal(ledger.length, 1);
+  assert.equal(ledger[0].kind, 'check');
+  assert.equal(ledger[0].outcome, 'passed');
+  assert.equal(ledger[0].evidenceResolution?.file, path.join(f.directory, 'operator-private-assets.txt'));
+  assert.match(ledger[0].evidenceResolution?.sha256 ?? '', /^[0-9a-f]{64}$/);
 });
 test('parent-only advanceIntegration validates ownership and advances a single field', async () => {
   const f = fixture(1);

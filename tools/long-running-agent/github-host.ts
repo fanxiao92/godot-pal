@@ -140,7 +140,7 @@ export class GitHubHost {
         const rounds = correctionRounds(record, problemId);
         const pending = [...(record.corrections ?? [])].reverse().find(correction => correction.problemId === problemId && !correction.outcome);
         return { problemId, roundsUsed: rounds.length, roundsRemaining: Math.max(0, maxProblemCorrections - rounds.length), lastOutcome: rounds.at(-1)?.outcome,
-          pendingCorrection: pending && { kind: pending.kind, sourceChangedSinceFailure: current.fingerprint !== pending.sourceFingerprint, evidenceBindingAvailable: pending.kind === 'review' && !pending.evidenceResolution } };
+          pendingCorrection: pending && { kind: pending.kind, sourceChangedSinceFailure: current.fingerprint !== pending.sourceFingerprint, evidenceBindingAvailable: !pending.evidenceResolution } };
       });
       const greenCheckAtCurrentFingerprint = checks.some(check => check.code === 0 && check.sourceFingerprint === current.fingerprint);
       const blockers: string[] = [];

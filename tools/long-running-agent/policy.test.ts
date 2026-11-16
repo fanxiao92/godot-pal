@@ -122,7 +122,7 @@ test('planned RED requires an exact test identity and nonempty independent liter
   assert.throws(() => buildCheck('.', '.', { scope: 'unit', project: unitProjects[0], expectedFailure: { test: 'A.B;exit', message: 'expected' } }), /exact test identity/);
   assert.throws(() => buildCheck('.', '.', { scope: 'unit', project: unitProjects[0], expectedFailure: { test: 'A.B', message: ' ' } }), /literal/);
 });
-test('external evidence resolution binds only the pending review correction and unblocks unchanged source', () => {
+test('external evidence resolution binds pending check and review corrections and unblocks unchanged source', () => {
   const bind = (policyModule as Record<string, unknown>).bindEvidenceResolution as ((ledger: CorrectionLedger, resolution: { problemId: string; file: string; sha256: string; note: string; utc: string }) => void) | undefined;
   assert.ok(typeof bind === 'function', 'policy must expose the external evidence resolution guard bindEvidenceResolution');
   const resolution = (problemId: string, sha256 = 'a'.repeat(64)) => ({ problemId, file: 'C:/evidence/m6/operator-original.txt', sha256, note: 'Operator external evidence', utc: '2026-11-14T00:00:00Z' });
@@ -133,12 +133,15 @@ test('external evidence resolution binds only the pending review correction and 
   requireChangedAfterFailure(ledger, { ...source, fingerprint: 'unchanged' });
   requireChangedAfterFailure(ledger, { ...source, fingerprint: 'changed-after-resolution' });
   const fresh = (): CorrectionLedger => { const next: CorrectionLedger = {}; approveCorrection(next, { ...correction('review', 'external-review-problem'), sourceFingerprint: 'x' }); return next; };
-  assert.throws(() => bind(fresh(), resolution('wrong-problem')), /pending review correction problemId/i, 'wrong problemId rejected');
+  assert.throws(() => bind(fresh(), resolution('wrong-problem')), /pending correction problemId/i, 'wrong problemId rejected');
   assert.throws(() => bind(fresh(), resolution('external-review-problem', 'not-hex')), /sha256/i, 'malformed sha256 rejected');
-  assert.throws(() => bind({}, resolution('external-review-problem')), /pending review correction problemId/i, 'missing correction rejected');
+  assert.throws(() => bind({}, resolution('external-review-problem')), /pending correction problemId/i, 'missing correction rejected');
   const checkLedger: CorrectionLedger = {};
-  approveCorrection(checkLedger, correction('check', 'slot-field'));
-  assert.throws(() => bind(checkLedger, resolution('slot-field')), /pending review correction problemId/i, 'check-kind correction is not eligible');
+  approveCorrection(checkLedger, { ...correction('check', 'environmental-absence'), sourceFingerprint: 'unchanged' });
+  assert.throws(() => requireChangedAfterFailure(checkLedger, { ...source, fingerprint: 'unchanged' }), /No substantive source correction/, 'unresolved check correction with unchanged source stays blocked (the #209 stuck point)');
+  bind(checkLedger, resolution('environmental-absence'));
+  requireChangedAfterFailure(checkLedger, { ...source, fingerprint: 'unchanged' });
+  assert.throws(() => bind(checkLedger, resolution('environmental-absence')), /already/i, 'duplicate check-kind binding rejected');
   const duplicated = fresh();
   bind(duplicated, resolution('external-review-problem'));
   assert.throws(() => bind(duplicated, resolution('external-review-problem')), /already/i, 'duplicate binding rejected');
