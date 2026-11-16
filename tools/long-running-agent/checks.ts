@@ -45,6 +45,10 @@ export function rangeCompleted(directory: string, scope: string): void {
 }
 // Evidence/adapter failures stop the attempt, but do not assert that a normally exited process is alive.
 export class CheckEvidenceError extends Error {}
+// Range quality-gate failure prefixes that a real complete, deterministic, clean-exit attempt has proven to
+// be an ordinary failure. Add each prefix one by one from that real-attempt evidence only; every other
+// prefix keeps unknown quiescence.
+const gateFailurePrefixes = ['warning-delta', 'discovery'] as const;
 export function classifyFailure(cwd: string, directory: string, selection: Selection, code: number): CheckOutcome {
   if (code !== 1) throw new QuiescenceUnknownError('Unclassified native exit; not eligible for automatic correction');
   let trx = path.join(directory, 'trx', 'results.trx');
@@ -53,10 +57,10 @@ export function classifyFailure(cwd: string, directory: string, selection: Selec
     const report = json(path.join(directory, 'range', 'range-run.json')) as { status: string; failure: string; commands: { exitKnown: boolean; rootExited: boolean; outputComplete: boolean; cleanupComplete: boolean; exitCode: number; failureKind: string; stdout: string; stderr: string }[] };
     const last = report.commands.at(-1);
     if (report.status !== 'failed' || !last || !last.exitKnown || !last.rootExited || !last.outputComplete || !last.cleanupComplete) throw new QuiescenceUnknownError('Range failure is not a completed normal native check');
-    // A warning-baseline gate verdict is deterministic: the build command finished with a clean process-tree
+    // A whitelisted gate-verdict prefix is deterministic: the last command finished with a clean process-tree
     // exit and the range wrapper stopped on its own quality verdict. That is a complete normal failure, not
     // unknown quiescence: it enters the recordFailure/request_correction loop without any TRX evidence.
-    if (/^\[range:warning-delta\]/.test(report.failure)) {
+    if (typeof report.failure === 'string' && gateFailurePrefixes.some(prefix => report.failure.startsWith(`[range:${prefix}]`))) {
       atomicJson(path.join(directory, 'failure-classification.json'), { status: 'classified', classification: 'gate_failure', nativeExit: code, scope: selection.scope, expectedRed: false, failed: 0, failures: [] });
       return { code, expectedRed: false, summary: report.failure };
     }

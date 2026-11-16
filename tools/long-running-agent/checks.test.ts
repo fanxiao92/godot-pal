@@ -175,6 +175,45 @@ test('range warning-delta gate verdicts classify as complete normal failures ins
     return true;
   });
 });
+test('range discovery gate verdicts classify as complete normal failures instead of unknown quiescence', () => {
+  const output = fs.mkdtempSync(path.join(directory, 'discovery-'));
+  fs.mkdirSync(path.join(output, 'range', 'prepare'), { recursive: true });
+  fs.writeFileSync(path.join(output, 'stdout.log'), 'range wrapper stdout');
+  fs.writeFileSync(path.join(output, 'stderr.log'), '');
+  // Mirrors the real #209 attempt 0264f751 repair-1 prepare shape: the discover command itself exited
+  // cleanly and Test-Range.ps1 threw its own [range:discovery] count gate after the command.
+  const complete = { exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'prepare.discover.stdout.log', stderr: 'prepare.discover.stderr.log' };
+  const failure = '[range:discovery] Prepare must discover exactly the 101 approved cases, got 102.';
+  const writeReport = (failureText: string, command: object) => fs.writeFileSync(path.join(output, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure: failureText, projects: [], commands: [command] }), 'utf8');
+  const selection = { scope: 'prepare' as const };
+  // A malformed TRX proves the gate verdict never consults the TRX classifier path.
+  fs.writeFileSync(path.join(output, 'range', 'prepare', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
+  writeReport(failure, complete);
+  const outcome = classifyFailure(repository, output, selection, 1);
+  assert.equal(outcome.code, 1);
+  assert.equal(outcome.expectedRed, false);
+  assert.equal(outcome.summary, failure);
+  const evidence = JSON.parse(fs.readFileSync(path.join(output, 'failure-classification.json'), 'utf8'));
+  assert.equal(evidence.status, 'classified');
+  assert.equal(evidence.classification, 'gate_failure');
+  assert.deepEqual(evidence.failures, []);
+  assert.equal(classifyFailure(repository, output, { ...selection, expectedFailure: { test: 'Synthetic.Capability', message: 'Expected new capability' } }, 1).expectedRed, false, 'A gate verdict has no expectedFailure RED semantics');
+  writeReport(failure, { ...complete, cleanupComplete: false });
+  assert.throws(() => classifyFailure(repository, output, selection, 1), QuiescenceUnknownError);
+  for (const usage of ['[range:selection] Unknown Game batch', '[range:filter-syntax] Explicit Filter must not be empty.', '[range:batch-scope] Game requires explicit positive GameBatch selection; other scopes do not accept batches.', '[range:prerequisite] Prepare/Game require explicit existing GodotPath.', '[range:output-exists] Use a new output directory', '[range:evidence] Cannot record a new command.']) {
+    writeReport(usage, complete);
+    assert.throws(() => classifyFailure(repository, output, selection, 1), QuiescenceUnknownError, `Usage prefix must keep unknown quiescence: ${usage}`);
+  }
+  fs.writeFileSync(path.join(output, 'range', 'prepare.discover.stdout.log'), 'prepare discovery stdout without diagnostics');
+  fs.writeFileSync(path.join(output, 'range', 'prepare.discover.stderr.log'), '');
+  fs.rmSync(path.join(output, 'range', 'prepare', 'results.trx'), { force: true });
+  writeReport('[range:command-exit] prepare exited 1', { ...complete, exitCode: 1 });
+  assert.throws(() => classifyFailure(repository, output, selection, 1), (error: unknown) => {
+    assert.ok(error instanceof CheckEvidenceError, 'command-exit still walks the TRX classifier path unchanged');
+    assert.match(error.message, /Missing test result after native exit 1/);
+    return true;
+  });
+});
 test('range completion must come from the selected existing contract, never a wrapper exit alone', () => {
   const output = path.join(directory, 'range'); fs.mkdirSync(output);
   const file = path.join(output, 'range-run.json');

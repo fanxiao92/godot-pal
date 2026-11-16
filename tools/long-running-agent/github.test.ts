@@ -407,6 +407,41 @@ test('warning-delta failure feeds the normal repair loop: receipt, pendingFailur
   assert.equal(record.corrections!.at(-1)!.problemId, 'warning-baseline-delta');
   assert.ok(record.corrections!.at(-1)!.evidence.startsWith(directory), 'the correction binds the original failure evidence directory');
 });
+test('discovery failure feeds the normal repair loop: receipt, pendingFailure and request_correction', async () => {
+  const f = fixture(1); const agent = f.getAgent(); let receipt = '';
+  const failure = '[range:discovery] Prepare must discover exactly the 101 approved cases, got 102.';
+  // Synthetic #209 attempt shape: a certified RED, then the prepare range check fails on the discovery-count gate.
+  const directory = fs.mkdtempSync(path.join(f.directory, 'discovery-'));
+  fs.mkdirSync(path.join(directory, 'range', 'prepare'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'stdout.log'), 'range wrapper stdout tail');
+  fs.writeFileSync(path.join(directory, 'stderr.log'), '');
+  fs.writeFileSync(path.join(directory, 'range', 'prepare', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
+  fs.writeFileSync(path.join(directory, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure, projects: [], commands: [{ exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'prepare.discover.stdout.log', stderr: 'prepare.discover.stderr.log' }] }), 'utf8');
+  const outcome = classifyFailure(f.cwd, directory, { scope: 'prepare' }, 1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      certifySyntheticRed(request);
+      receipt = failureReceipt(outcome, directory);
+      request.recordCheck({ project: 'prepare:all:all', scope: 'prepare', directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: outcome.code, expectedRed: outcome.expectedRed });
+      request.recordFailure!(directory, snapshot(f.cwd), outcome.summary);
+      assert.equal(f.host().state()!.records[2].pendingFailure!.summary, failure, 'recordFailure must store the gate failure summary as pendingFailure');
+      assert.throws(() => request.beforeWrite!(), /request_correction/);
+      request.requestCorrection!([finding(request, 'prepare-discovery-count')], 'Fix the discovery-count regression so Prepare discovers exactly the approved cases', 'Approved range gate and prepare discovery contract unchanged');
+      return { status: 'blocked', summary: 'Discovery diagnosis recorded through the normal repair loop', evidence: [directory] };
+    }
+    return agent.run(request);
+  } });
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.blocked, 1);
+  assert.match(receipt, /"status":"failed"/, 'the failed check receipt keeps the failure status marker');
+  assert.ok(receipt.includes(failure), 'the tool failure receipt must carry the gate failure summary verbatim');
+  assert.doesNotMatch(receipt, /Exact classifier failures/, 'no test case ran; the receipt must not invent classifier failures');
+  const record = f.host().state()!.records[2];
+  assert.equal(record.pendingFailure, undefined, 'request_correction consumed the pendingFailure');
+  assert.equal(record.corrections!.at(-1)!.kind, 'check');
+  assert.equal(record.corrections!.at(-1)!.problemId, 'prepare-discovery-count');
+  assert.ok(record.corrections!.at(-1)!.evidence.startsWith(directory), 'the correction binds the original failure evidence directory');
+});
 test('review exhaustion stays blocked across fresh attempts and extras cannot bypass three rounds', async () => {
   const f = fixture(1); const agent = f.getAgent(); let fail = true, revisions = 0;
   f.setAgent({ run: async request => {
