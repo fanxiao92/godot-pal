@@ -120,7 +120,7 @@ node tools/long-running-agent/cli.ts run --issue 126
 
 崩溃、中止、超时、未知退出/副作用、结果不完整、provider失败、额度耗尽或新业务决定仍保全停止。恢复不等于重置额度，不能事后把已观察的失败改签为RED。
 
-普通 Unit 的失败分类沿用原生会话结果和计数，不套用 Prepare/Game 的逐案例 TRX 身份图：xUnit theory 可能用同一 testId/definition 记录多个 execution。正常断言失败反馈包含具体测试、原始断言及 `failure-classification.json`。分类器/报告校验失败仍 blocked，并保留原生退出码、底层错误、TRX/日志路径；它本身不等于进程静默未知，不单因分类失败设置 unknownQuiescence。真实中止/崩溃/timeout/未知退出仍维持原硬停止和锁恢复要求；Prepare/Game 的强身份检查不变。
+普通 Unit 的失败分类沿用原生会话结果和计数，不套用 Prepare/Game 的逐案例 TRX 身份图：xUnit theory 可能用同一 testId/definition 记录多个 execution。正常断言失败反馈包含具体测试、原始断言及 `failure-classification.json`。分类器/报告校验失败仍 blocked，并保留原生退出码、底层错误、TRX/日志路径；它本身不等于进程静默未知，不单因分类失败设置 unknownQuiescence。真实中止/崩溃/timeout/未知退出仍维持原硬停止和锁恢复要求；Prepare/Game 的强身份检查不变。带完整命令收尾（exitKnown/rootExited/outputComplete/cleanupComplete 全真）的 `[range:warning-delta]` 警告基线门禁失败是确定性普通失败：按 `gate_failure` 入账（code=1、summary 为该 failure 原文、无 TRX 与无测试失败清单、expectedRed 恒为 false），进入 recordFailure→request_correction 修复环；其余前缀（如 selection/filter/prerequisite 等 usage 类）仍按静默未知保全停止。
 
 先 `status`，检查相应 session、检查日志和 Git 副作用。已知失败处理完成后，显式批准新会话：
 

@@ -138,6 +138,43 @@ test('TRX-only abnormal markers take precedence over incomplete normal evidence'
   fs.writeFileSync(file, trx('assertion').replace('outcome="Passed"', 'outcome="Unrecognized"'));
   assert.throws(() => classifyFailure(repository, output, { scope: 'unit' }, 1), CheckEvidenceError);
 });
+test('range warning-delta gate verdicts classify as complete normal failures instead of unknown quiescence', () => {
+  const output = fs.mkdtempSync(path.join(directory, 'warning-delta-'));
+  fs.mkdirSync(path.join(output, 'range', 'game'), { recursive: true });
+  fs.writeFileSync(path.join(output, 'stdout.log'), 'range wrapper stdout');
+  fs.writeFileSync(path.join(output, 'stderr.log'), '');
+  // Mirrors the real #209 attempt shape: the build command itself exited cleanly (compiler warnings are
+  // non-fatal) and Test-Range.ps1 threw its own [range:warning-delta] gate verdict after the command.
+  const complete = { exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'build.stdout.log', stderr: 'build.stderr.log' };
+  const failure = '[range:warning-delta] game build emitted 16 compiler warnings (baseline 14). Fix the new warning or intentionally update scripts/warning-baseline.json in its own commit.';
+  const writeReport = (failureText: string, command: object) => fs.writeFileSync(path.join(output, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure: failureText, projects: [], commands: [command] }), 'utf8');
+  const selection = { scope: 'game' as const, batch: 'native-map' as const };
+  // A malformed TRX proves the gate verdict never consults the TRX classifier path.
+  fs.writeFileSync(path.join(output, 'range', 'game', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
+  writeReport(failure, complete);
+  const outcome = classifyFailure(repository, output, selection, 1);
+  assert.equal(outcome.code, 1);
+  assert.equal(outcome.expectedRed, false);
+  assert.equal(outcome.summary, failure);
+  const evidence = JSON.parse(fs.readFileSync(path.join(output, 'failure-classification.json'), 'utf8'));
+  assert.equal(evidence.status, 'classified');
+  assert.equal(evidence.classification, 'gate_failure');
+  assert.deepEqual(evidence.failures, []);
+  assert.equal(classifyFailure(repository, output, { ...selection, expectedFailure: { test: 'Synthetic.Capability', message: 'Expected new capability' } }, 1).expectedRed, false, 'A gate verdict has no expectedFailure RED semantics');
+  writeReport(failure, { ...complete, cleanupComplete: false });
+  assert.throws(() => classifyFailure(repository, output, selection, 1), QuiescenceUnknownError);
+  writeReport('[range:selection] Unknown Game batch', complete);
+  assert.throws(() => classifyFailure(repository, output, selection, 1), QuiescenceUnknownError);
+  fs.writeFileSync(path.join(output, 'range', 'build.stdout.log'), 'game build stdout without diagnostics');
+  fs.writeFileSync(path.join(output, 'range', 'build.stderr.log'), '');
+  fs.rmSync(path.join(output, 'range', 'game', 'results.trx'), { force: true });
+  writeReport('[range:command-exit] game exited 1', { ...complete, exitCode: 1 });
+  assert.throws(() => classifyFailure(repository, output, selection, 1), (error: unknown) => {
+    assert.ok(error instanceof CheckEvidenceError, 'command-exit still walks the TRX classifier path unchanged');
+    assert.match(error.message, /Missing test result after native exit 1/);
+    return true;
+  });
+});
 test('range completion must come from the selected existing contract, never a wrapper exit alone', () => {
   const output = path.join(directory, 'range'); fs.mkdirSync(output);
   const file = path.join(output, 'range-run.json');

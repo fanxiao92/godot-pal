@@ -8,9 +8,9 @@ import type * as Pi from '@earendil-works/pi-coding-agent';
 import { hash } from './contract.ts';
 import { acquire, atomicJson, git, json, lockFile, QuiescenceUnknownError, snapshot } from './io.ts';
 import { checklistChildren, loadGraph, stateDirectory, type GitHubReader, type IssueContext } from './github.ts';
-import { unitProjects } from './checks.ts';
+import { unitProjects, classifyFailure } from './checks.ts';
 import { GitHubHost, type CodingEvent, type CodingExecutor, type CodingRequest } from './github-host.ts';
-import { codingResourceLoader, codingTools, GitHubPiExecutor } from './github-agent.ts';
+import { codingResourceLoader, codingTools, failureReceipt, GitHubPiExecutor } from './github-agent.ts';
 import { approveCorrection, requireWritable } from './policy.ts';
 import { formatStatus, githubMain, issueNumber } from './github-cli.ts';
 
@@ -371,6 +371,41 @@ test('third normal check failure requires attribution then stops writes without 
   assert.equal(record.corrections!.length, 3);
   assert.deepEqual(record.corrections!.map(item => item.outcome), ['failed', 'failed', 'failed']);
   await assert.rejects(f.host().run({ resume: true }, signal()), /three repair rounds failed/);
+});
+test('warning-delta failure feeds the normal repair loop: receipt, pendingFailure and request_correction', async () => {
+  const f = fixture(1); const agent = f.getAgent(); let receipt = '';
+  const failure = '[range:warning-delta] game build emitted 16 compiler warnings (baseline 14). Fix the new warning or intentionally update scripts/warning-baseline.json in its own commit.';
+  // Synthetic #209 attempt shape: a certified RED, then the game range check fails on the warning-baseline gate.
+  const directory = fs.mkdtempSync(path.join(f.directory, 'warning-delta-'));
+  fs.mkdirSync(path.join(directory, 'range', 'game'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'stdout.log'), 'range wrapper stdout tail');
+  fs.writeFileSync(path.join(directory, 'stderr.log'), '');
+  fs.writeFileSync(path.join(directory, 'range', 'game', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
+  fs.writeFileSync(path.join(directory, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure, projects: [], commands: [{ exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'build.stdout.log', stderr: 'build.stderr.log' }] }), 'utf8');
+  const outcome = classifyFailure(f.cwd, directory, { scope: 'game', batch: 'native-map' }, 1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      certifySyntheticRed(request);
+      receipt = failureReceipt(outcome, directory);
+      request.recordCheck({ project: 'game:native-map:all', scope: 'game', directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: outcome.code, expectedRed: outcome.expectedRed });
+      request.recordFailure!(directory, snapshot(f.cwd), outcome.summary);
+      assert.equal(f.host().state()!.records[2].pendingFailure!.summary, failure, 'recordFailure must store the gate failure summary as pendingFailure');
+      assert.throws(() => request.beforeWrite!(), /request_correction/);
+      request.requestCorrection!([finding(request, 'warning-baseline-delta')], 'Fix the new compiler warning or intentionally update scripts/warning-baseline.json in its own commit', 'Approved range gate and warning baseline contract unchanged');
+      return { status: 'blocked', summary: 'Warning-delta diagnosis recorded through the normal repair loop', evidence: [directory] };
+    }
+    return agent.run(request);
+  } });
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.blocked, 1);
+  assert.match(receipt, /"status":"failed"/, 'the failed check receipt keeps the failure status marker');
+  assert.ok(receipt.includes(failure), 'the tool failure receipt must carry the gate failure summary verbatim');
+  assert.doesNotMatch(receipt, /Exact classifier failures/, 'no test case ran; the receipt must not invent classifier failures');
+  const record = f.host().state()!.records[2];
+  assert.equal(record.pendingFailure, undefined, 'request_correction consumed the pendingFailure');
+  assert.equal(record.corrections!.at(-1)!.kind, 'check');
+  assert.equal(record.corrections!.at(-1)!.problemId, 'warning-baseline-delta');
+  assert.ok(record.corrections!.at(-1)!.evidence.startsWith(directory), 'the correction binds the original failure evidence directory');
 });
 test('review exhaustion stays blocked across fresh attempts and extras cannot bypass three rounds', async () => {
   const f = fixture(1); const agent = f.getAgent(); let fail = true, revisions = 0;

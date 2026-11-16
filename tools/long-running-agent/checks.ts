@@ -52,7 +52,15 @@ export function classifyFailure(cwd: string, directory: string, selection: Selec
   if (selection.scope !== 'unit') {
     const report = json(path.join(directory, 'range', 'range-run.json')) as { status: string; failure: string; commands: { exitKnown: boolean; rootExited: boolean; outputComplete: boolean; cleanupComplete: boolean; exitCode: number; failureKind: string; stdout: string; stderr: string }[] };
     const last = report.commands.at(-1);
-    if (report.status !== 'failed' || !last || !last.exitKnown || !last.rootExited || !last.outputComplete || !last.cleanupComplete || last.exitCode !== 1 || !/^\[range:command-exit\]/.test(report.failure)) throw new QuiescenceUnknownError('Range failure is not a completed normal native check');
+    if (report.status !== 'failed' || !last || !last.exitKnown || !last.rootExited || !last.outputComplete || !last.cleanupComplete) throw new QuiescenceUnknownError('Range failure is not a completed normal native check');
+    // A warning-baseline gate verdict is deterministic: the build command finished with a clean process-tree
+    // exit and the range wrapper stopped on its own quality verdict. That is a complete normal failure, not
+    // unknown quiescence: it enters the recordFailure/request_correction loop without any TRX evidence.
+    if (/^\[range:warning-delta\]/.test(report.failure)) {
+      atomicJson(path.join(directory, 'failure-classification.json'), { status: 'classified', classification: 'gate_failure', nativeExit: code, scope: selection.scope, expectedRed: false, failed: 0, failures: [] });
+      return { code, expectedRed: false, summary: report.failure };
+    }
+    if (last.exitCode !== 1 || !/^\[range:command-exit\]/.test(report.failure)) throw new QuiescenceUnknownError('Range failure is not a completed normal native check');
     for (const name of [last.stdout, last.stderr]) {
       const file = path.resolve(directory, 'range', name);
       if (!file.startsWith(path.resolve(directory, 'range') + path.sep)) throw new Error('Invalid range evidence path');
