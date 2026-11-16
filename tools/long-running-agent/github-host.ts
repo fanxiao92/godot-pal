@@ -377,7 +377,7 @@ export class GitHubHost {
               const previous = record.attempts.flatMap(item => item.dependencyProofs).find(proof => proof.issue === dependency);
               const accepted = context && [{ body: context.body, url: context.html_url }, ...context.comments.map(comment => ({ body: comment.body, url: comment.html_url }))].some(item =>
                 (item.body.includes(commit) || item.body.includes(commit.slice(0, 7))) && (item.url === evidence || item.body.includes(evidence)));
-              if (!graph.nodes[issue].blockers.some(blocker => blocker.number === dependency) || !context || !/^[0-9a-f]{40}$/.test(commit) || !evidence.trim() || !accepted || !ancestor(this.cwd, commit) || (previous && previous.commit !== commit)) throw new Error('Dependency needs GitHub acceptance evidence and an actual ancestor commit; repeated proof must retain its commit');
+              if (!graph.nodes[issue].blockers.some(blocker => blocker.number === dependency) || !context || !/^[0-9a-f]{40}$/.test(commit) || !evidence.trim() || !accepted || !ancestor(this.cwd, commit) || (previous && previous.commit !== commit)) throw new Error('Dependency evidence must exactly equal the acceptance comment/issue URL or be a verbatim excerpt of that comment body; that comment must contain the dependency integration commit (full 40-hex SHA or 7-hex short form) and the commit must be an actual ancestor. Repeated proof must retain its commit');
               if (!attempt.dependencyProofs.some(proof => proof.issue === dependency)) attempt.dependencyProofs.push({ issue: dependency, commit, evidence });
               pending.delete(dependency); this.save(state);
             },

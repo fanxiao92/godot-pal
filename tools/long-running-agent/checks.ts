@@ -7,6 +7,7 @@ import { acquire, atomicJson, json, native, NativeCheckFailure, QuiescenceUnknow
 
 export const unitProjects = ['tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'] as const;
 export const gameBatches = ['process', 'scene-dialogue', 'native-map', 'scene-realfull'] as const;
+const fqnFilter = /^FullyQualifiedName[=~][A-Za-z_][\w.]*(?:\.)?$/;
 export interface ExpectedFailure { test: string; message: string }
 export interface EngineOptions { godotPath: string; fixedPackageDirectory: string }
 export interface Selection { scope: 'unit' | 'prepare' | 'game'; project?: string; batch?: string; filter?: string; expectedFailure?: ExpectedFailure }
@@ -21,12 +22,17 @@ export function assertEngineIdle(): void {
 export function buildCheck(cwd: string, directory: string, selection: Selection, engine?: EngineOptions): Check {
   if (selection.expectedFailure && ((!/^[A-Za-z_][\w.]+(?:[:(\[].*)?$/.test(selection.expectedFailure.test) || /[\x00-\x1f]/.test(selection.expectedFailure.test)) || !selection.expectedFailure.message.trim())) throw new Error('Expected failure needs an exact test identity/FQN and a literal message');
   if (selection.scope === 'unit') {
-    if (!unitProjects.includes(selection.project as typeof unitProjects[number]) || selection.batch || selection.filter) throw new Error('Unit requires a whole approved project; no filters');
-    return { kind: 'non_engine', executable: 'dotnet', args: ['test', selection.project!, '--configuration', 'Debug', '--settings', 'tests/unit.runsettings', '--logger', 'trx;LogFileName=results.trx', '--results-directory', path.join(directory, 'trx')], timeoutMs: 300_000 };
+    if (!unitProjects.includes(selection.project as typeof unitProjects[number]) || selection.batch) throw new Error('Unit requires one whole approved project; no batch narrowing');
+    const args = ['test', selection.project!, '--configuration', 'Debug', '--settings', 'tests/unit.runsettings', '--logger', 'trx;LogFileName=results.trx', '--results-directory', path.join(directory, 'trx')];
+    if (selection.filter) {
+      if (!fqnFilter.test(selection.filter)) throw new Error('Use one existing FQN method/class-prefix filter, not DisplayName or Boolean narrowing');
+      args.push('--filter', selection.filter);
+    }
+    return { kind: 'non_engine', executable: 'dotnet', args, timeoutMs: 300_000 };
   }
   if (!engine || !path.isAbsolute(engine.godotPath) || !path.isAbsolute(engine.fixedPackageDirectory)) throw new Error('Prepare/Game requires explicit --engine-checks, --godot-path and --fixed-package-directory authority');
   if (selection.project || (selection.scope === 'prepare' && (selection.batch || selection.filter)) || (selection.scope === 'game' && !gameBatches.includes(selection.batch as typeof gameBatches[number]))) throw new Error('Use the existing Prepare whole scope or an explicit positive Game batch');
-  if (selection.filter && !/^FullyQualifiedName[=~][A-Za-z_][\w.]*(?:\.)?$/.test(selection.filter)) throw new Error('Use one existing FQN method/class-prefix filter, not DisplayName or Boolean narrowing');
+  if (selection.filter && !fqnFilter.test(selection.filter)) throw new Error('Use one existing FQN method/class-prefix filter, not DisplayName or Boolean narrowing');
   const args = ['-NoProfile', '-NonInteractive', '-File', path.join(cwd, 'scripts/Test-Range.ps1'), '-RepositoryRoot', cwd, '-Scope', selection.scope, '-OutputDirectory', path.join(directory, 'range'), '-GodotPath', engine.godotPath, '-FixedPackageDirectory', engine.fixedPackageDirectory];
   if (selection.batch) args.push('-GameBatch', selection.batch);
   if (selection.filter) args.push('-Filter', selection.filter);

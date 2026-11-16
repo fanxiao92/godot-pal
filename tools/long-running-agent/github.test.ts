@@ -91,6 +91,32 @@ test('dependency proofs are idempotent across fresh review repair and resume wit
   assert.equal(result.counts.awaiting_commit, 1);
   assert.equal(f.host().state()!.records[2].attempts[1].dependencyProofs.length, 1);
 });
+test('dependency evidence contract stays discoverable in the tool description and the host rejection', async () => {
+  const f = fixture(2); f.issues[3].state = 'closed'; f.blockers[2] = [3];
+  f.issues[3].comments.push({ body: `Accepted integration ${f.head}` } as IssueContext['comments'][number]);
+  const agent = f.getAgent();
+  let rejectionMessage = '';
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      try { request.verifyDependency(3, f.head, 'fabricated acceptance excerpt'); } catch (error) { rejectionMessage = (error as Error).message; }
+      request.verifyDependency(3, f.head, `Accepted integration ${f.head}`);
+    }
+    return agent.run(request);
+  } });
+  const status = await f.host().run({}, signal());
+  assert.equal(status.rows.find(row => row.number === 2)?.status, 'awaiting_commit');
+  assert.ok(rejectionMessage, 'verifyDependency must reject fabricated evidence');
+  assert.match(rejectionMessage, /exactly equal the acceptance comment\/issue URL/);
+  assert.match(rejectionMessage, /verbatim excerpt of that comment body/);
+  assert.match(rejectionMessage, /full 40-hex SHA or 7-hex short form/);
+  const sdk = await import('@earendil-works/pi-coding-agent'); const g = fixture(1);
+  const request: CodingRequest = { cwd: g.cwd, issue: 2, role: 'implement', directory: g.directory, contexts: [], prompt: 'Synthetic', input: snapshot(g.cwd), signal: signal(), emit: () => {}, checks: [], pendingDependencies: new Set(), verifyDependency: () => {}, recordCheck: () => {} };
+  const description = codingTools(sdk, request, signal(), () => {}).find(tool => tool.name === 'verify_dependency')!.description ?? '';
+  assert.match(description, /exactly equal to the acceptance comment\/issue URL/);
+  assert.match(description, /verbatim excerpt of that comment\/issue body/);
+  assert.match(description, /URL equality or body inclusion/);
+  assert.match(description, /full 40-hex SHA or its 7-hex short form/);
+});
 test('TDD rejects undeclared production writes at the codingTools boundary', async () => {
   const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1);
   f.setAgent({ run: async request => {
@@ -603,6 +629,7 @@ test('real SDK tools allow normal source work, deny shell/private assets/unverif
   const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1);
   const request: CodingRequest = { cwd: f.cwd, issue: 2, role: 'implement', directory: f.directory, contexts: [], prompt: 'Synthetic', input: snapshot(f.cwd), signal: signal(), emit: () => {}, checks: [], pendingDependencies: new Set([99]), verifyDependency: () => {}, recordCheck: () => {} };
   const tools = codingTools(sdk, request, signal(), error => { throw error; });
+  assert.ok((tools.find(tool => tool.name === 'unit_test')!.parameters as { properties: { filter?: unknown } }).properties.filter, 'unit_test must expose the FQN filter');
   const execute = (name: string, params: unknown) => tools.find(tool => tool.name === name)!.execute('synthetic', params, undefined, undefined, {} as Pi.ExtensionToolContext);
   assert.equal(tools.some(tool => ['bash', 'powershell'].includes(tool.name)), false);
   await assert.rejects(execute('scoped_write', { path: 'a.txt', content: 'denied' }), /verified dependency/);

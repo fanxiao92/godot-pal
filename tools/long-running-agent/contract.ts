@@ -135,7 +135,39 @@ export function parsePlan(input: unknown): Plan {
   tasks.forEach(t => visit(t.issue));
   return input as unknown as Plan;
 }
+// Assistant text may wrap the JSON report in prose or a fenced block; the last complete object is the final answer.
+function lastBalancedObject(text: string): string | undefined {
+  let depth = 0, start = -1, last: string | undefined, inString = false, escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === '{') { if (depth === 0) start = index; depth++; }
+    else if (character === '}') { depth--; if (depth === 0 && start >= 0) { last = text.slice(start, index + 1); start = -1; } else if (depth < 0) depth = 0; }
+  }
+  return last;
+}
+function extractReportJson(text: string): unknown {
+  try { return JSON.parse(text); }
+  catch (original) {
+    const candidates = [...text.matchAll(/```json[^\S\n]*\n([\s\S]*?)```/g)].map(match => match[1]).slice(-1);
+    const balanced = lastBalancedObject(text);
+    if (balanced) candidates.push(balanced);
+    for (const candidate of candidates) {
+      try { return JSON.parse(candidate); } catch { /* Keep the original parse failure unless one extraction is valid JSON. */ }
+    }
+    throw original;
+  }
+}
 export function parseReport(input: unknown, role: Role): Report {
+  return validateReport(typeof input === 'string' ? extractReportJson(input) : input, role);
+}
+function validateReport(input: unknown, role: Role): Report {
   object(input, ['status', 'summary', 'evidence', 'findings'], 'agent result');
   if (!(role === 'implement' ? ['candidate', 'blocked'] : ['passed', 'blocked', 'changes_requested']).includes(String(input.status))) throw new Error(`Invalid ${role} result status`);
   text(input.summary, 'summary');

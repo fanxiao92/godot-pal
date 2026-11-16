@@ -17,11 +17,10 @@ $summary = $doc.SelectSingleNode('/t:TestRun/t:ResultSummary', $ns)
 $rows = @($doc.SelectNodes('/t:TestRun/t:Results/t:UnitTestResult', $ns))
 $runInfos = @($doc.SelectNodes('/t:TestRun/t:ResultSummary/t:RunInfos/t:RunInfo', $ns))
 $abnormalCounters = @($doc.SelectNodes('/t:TestRun/t:ResultSummary/t:Counters/@aborted | /t:TestRun/t:ResultSummary/t:Counters/@timeout', $ns) | Where-Object { $_.Value -match '^\d+$' -and [long]$_.Value -gt 0 })
-# xUnit's ordinary assertion [FAIL] RunInfo Error is not an abnormal Unit session.
+# Ordinary assertion RunInfo Error (xUnit [FAIL], GdUnit "Expecting") is not an abnormal session in any scope.
 if (($summary -and $summary.outcome -in @('Aborted', 'Timeout')) -or
     @($rows | Where-Object outcome -In @('Aborted', 'Timeout')).Count -or $abnormalCounters.Count -or
     @($runInfos | Where-Object { $_.outcome -in @('Aborted', 'Timeout') -or
-        ($Scope -ne 'unit' -and $_.outcome -eq 'Error') -or
         $_.InnerText -match '(?i)abort|crash|timed out|Unhandled exception|WindowsStdOutHook' }).Count -or
     @($rows | Where-Object { $_.InnerText -match '(?i)TimeoutException|timed out|test host.*crash|WindowsStdOutHook' }).Count) { throw '[check:abnormal] Abnormal or liveness failure requires operator review.' }
 if ($Scope -eq 'unit') {

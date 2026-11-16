@@ -138,7 +138,7 @@ export class PiExecutor implements AgentExecutor {
       if (failure || request.signal.aborted) throw new Error(failure ?? 'Attempt cancelled');
       const last = session.messages.filter(m => m.role === 'assistant').at(-1);
       if (!last || last.stopReason !== 'stop') throw new Error('No normally completed assistant response');
-      return parseReport(JSON.parse(session.getLastAssistantText() ?? ''), request.role);
+      return parseReport(session.getLastAssistantText() ?? '', request.role);
     } finally {
       request.signal.removeEventListener('abort', cancel); unsubscribe();
       try { await session.abort(); } finally { session.dispose(); }

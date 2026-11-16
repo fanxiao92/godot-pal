@@ -48,6 +48,17 @@ test('structured problem findings survive reports while explicit legacy reports 
   assert.equal(parseReport({ status: 'changes_requested', summary: 'Legacy read-only finding', evidence: ['source'] }, 'spec').findings, undefined);
   assert.throws(() => parseReport({ ...parsed, findings: [{ ...findings[0], problemId: '' }] }, 'spec'), /problemId/);
 });
+test('report parsing accepts prose-wrapped fenced or last balanced JSON while rejecting arrays and garbage', () => {
+  const report = { status: 'blocked', summary: 'Blocked pending {dependency} acceptance', evidence: ['#3 acceptance comment'] };
+  assert.equal(parseReport(JSON.stringify(report), 'implement').status, 'blocked');
+  assert.equal(parseReport(`Progress prose before the answer.\n\n\`\`\`json\n${JSON.stringify(report)}\n\`\`\`\nTrailing notes.`, 'implement').status, 'blocked');
+  assert.equal(parseReport(`Prose ${JSON.stringify({ unrelated: 'ignored' })} middle ${JSON.stringify(report)} tail.`, 'implement').status, 'blocked');
+  assert.throws(() => parseReport('[{"status":"blocked"}]', 'implement'), /Invalid agent result fields/);
+  assert.throws(() => parseReport('Prose with no report object at all.', 'implement'), SyntaxError);
+  assert.throws(() => parseReport(`${JSON.stringify(report)} trailing ${JSON.stringify({ unrelated: true })}`, 'implement'), /Invalid agent result fields/);
+  assert.throws(() => parseReport('Fence only.\n\n\`\`\`json\n[1, 2]\n\`\`\`', 'implement'), /Invalid agent result fields/);
+  assert.throws(() => parseReport('{"status":"blocked","summary":"s","evidence":["e"]} trailing {"unrelated":true}', 'spec'), /Invalid agent result fields/);
+});
 test('third validation attributes a new root cause independently instead of declaring the repaired problem exhausted', () => {
   const ledger: CorrectionLedger = {};
   const same = { problemId: 'slot-field', evidenceKey: correction().evidenceKey!, cause: 'Same located root cause', evidence: ['/owned/validation'] };
@@ -75,12 +86,17 @@ test('third same-problem failure ends writes immediately and keeps all original 
   assert.equal(ledger.corrections!.length, 3);
   assert.throws(() => approveCorrection(ledger, { ...correction(), problemId: 'renamed' }), /Same evidence/);
 });
-test('Unit remains complete-project feedback and rejects model narrowing', () => {
+test('Unit remains complete-project feedback and accepts only one FQN filter', () => {
   const check = buildCheck(process.cwd(), '/owned/check', { scope: 'unit', project: unitProjects[0] });
   assert.equal(check.executable, 'dotnet');
   assert.ok(check.args.includes('tests/unit.runsettings'));
   assert.ok(!check.args.some(arg => /--no-build|--no-restore|--filter/.test(arg)));
-  assert.throws(() => buildCheck('.', '.', { scope: 'unit', project: unitProjects[0], filter: 'FullyQualifiedName=X.Y' }), /no filters/);
+  const filtered = buildCheck(process.cwd(), '/owned/check', { scope: 'unit', project: unitProjects[0], filter: 'FullyQualifiedName~Pal.Core.UnitTests.' });
+  assert.ok(filtered.args.includes('--filter'));
+  assert.ok(filtered.args.includes('FullyQualifiedName~Pal.Core.UnitTests.'));
+  for (const filter of ['DisplayName=X', 'FullyQualifiedName=X.Y|FullyQualifiedName=A.B', 'FullyQualifiedName~X;exit']) {
+    assert.throws(() => buildCheck('.', '.', { scope: 'unit', project: unitProjects[0], filter }), /FQN/);
+  }
 });
 test('engine capability is explicit and uses only existing bounded Prepare/Game range commands', () => {
   const engine = { godotPath: path.resolve('approved-godot.exe'), fixedPackageDirectory: path.resolve('verified-bundle') };

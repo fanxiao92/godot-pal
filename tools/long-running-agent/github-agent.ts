@@ -125,10 +125,10 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
         catch (error) { fatal(error as Error); throw error; }
       },
     }));
-    tools.push(typedTool({ name: 'verify_dependency', label: 'Verify prerequisite integration', description: 'Bind a direct prerequisite to its GitHub acceptance comment/issue URL or exact excerpt and an actual ancestor commit, before edits/tests. Repeating the same valid issue/commit is idempotent across repair/resume; changed commits require operator reconciliation.', parameters: Type.Object({ issue: Type.Integer({ minimum: 1 }), commit: Type.String({ pattern: '^[0-9a-f]{40}$' }), evidence: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    tools.push(typedTool({ name: 'verify_dependency', label: 'Verify prerequisite integration', description: 'Bind a direct prerequisite to its GitHub acceptance evidence before edits/tests. evidence must be exactly equal to the acceptance comment/issue URL, or be a verbatim excerpt of that comment/issue body (the host matches URL equality or body inclusion); that comment must contain the dependency integration commit as the full 40-hex SHA or its 7-hex short form. Repeating the same valid issue/commit is idempotent across repair/resume; changed commits require operator reconciliation.', parameters: Type.Object({ issue: Type.Integer({ minimum: 1 }), commit: Type.String({ pattern: '^[0-9a-f]{40}$' }), evidence: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       execute: async (_id, params) => { request.verifyDependency(params.issue, params.commit, params.evidence); return result({ verified: params.issue, commit: params.commit }); },
     }));
-    tools.push(typedTool({ name: 'unit_test', label: 'Run native Unit project', description: 'Run a complete approved Core/CLI Unit project. Optional exact RED declaration is frozen before launch; abnormal results stop.', parameters: Type.Object({ project: Type.Union([Type.Literal(unitProjects[0]), Type.Literal(unitProjects[1])]), expectedFailure }, { additionalProperties: false }),
+    tools.push(typedTool({ name: 'unit_test', label: 'Run native Unit project', description: 'Run a complete approved Core/CLI Unit project, optionally narrowed by one FullyQualifiedName= or ~ method/class-prefix filter. Optional exact RED declaration is frozen before launch; abnormal results stop.', parameters: Type.Object({ project: Type.Union([Type.Literal(unitProjects[0]), Type.Literal(unitProjects[1])]), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
       execute: async (_id, params) => perform({ scope: 'unit', ...params }),
     }));
     if (engine) tools.push(typedTool({ name: 'range_test', label: 'Run approved Prepare/Game range', description: 'Existing Test-Range.ps1 only; Prepare whole scope, Game explicit positive batch and optional one FQN method/class-prefix. Global engine lock and PID/Name guard. No full gate, private data, GPU, arbitrary commands or timeout overrides.', parameters: Type.Object({ scope: Type.Union([Type.Literal('prepare'), Type.Literal('game')]), batch: Type.Optional(Type.Union(gameBatches.map(batch => Type.Literal(batch)))), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
@@ -218,7 +218,7 @@ export class GitHubPiExecutor implements CodingExecutor {
       if (failure || signal.aborted) throw failure ?? new Error('Run cancelled');
       const last = session.messages.filter(message => message.role === 'assistant').at(-1);
       if (last?.stopReason !== 'stop') throw new Error('No normally completed assistant response');
-      return parseReport(JSON.parse(session.getLastAssistantText() ?? ''), request.role);
+      return parseReport(session.getLastAssistantText() ?? '', request.role);
     } finally {
       clearTimeout(timer); request.signal.removeEventListener('abort', cancel); unsubscribe();
       if (session) {

@@ -56,14 +56,35 @@ test('Unit failures allow xUnit theory executions sharing a definition; Game ret
   fs.writeFileSync(file, repeated.replace('outcome="Passed"', 'outcome="NotExecuted"'), 'utf8');
   assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'unit']), /complete normal assertion/);
 });
-test('Unit distinguishes an ordinary xUnit FAIL RunInfo from host abort while Game keeps its strict diagnostics', () => {
+test('ordinary assertion RunInfo Error stays a normal failure in every scope; abnormal markers still stop every scope', () => {
   const file = path.join(directory, 'unit-runinfo.trx');
   const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'check-failure.ps1'), '-RepositoryRoot', repository, '-TrxPath', file];
   fs.writeFileSync(file, trx('Expected six-enemy rejection', '<RunInfos><RunInfo outcome="Error">[xUnit.net] Synthetic.FailureTests.One [FAIL]</RunInfo></RunInfos>'));
   assert.equal(JSON.parse(native(repository, 'pwsh', [...args, '-Scope', 'unit'])).classification, 'normal_test_failure');
-  assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'game']), /check:abnormal/);
+  assert.equal(JSON.parse(native(repository, 'pwsh', [...args, '-Scope', 'game'])).classification, 'normal_test_failure');
   fs.writeFileSync(file, trx('Expected six-enemy rejection', '<RunInfos><RunInfo outcome="Error">Test Run Aborted</RunInfo></RunInfos>'));
   assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'unit']), /check:abnormal/);
+  assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'game']), /check:abnormal/);
+});
+test('GdUnit ordinary assertion RunInfo Error reports the failed case instead of abnormal across scopes', () => {
+  // Mirrors the real #207 Game TRX: complete counters, one failed case and GdUnit's routine RunInfo
+  // outcome="Error" echoing the plain assertion text; see classifier-round/real-trx-facts.txt.
+  const file = path.join(directory, 'gdunit-assertion-runinfo.trx');
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="11111111-1111-1111-1111-111111111111" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+<Results><UnitTestResult testId="a" executionId="e1" testName="Pal.Game.Tests.NativeBattleContentTests.Synthetic.SyntheticCase:33 (&quot;enemies-overcapacity&quot;)" outcome="Failed"><Output><ErrorInfo><Message>Expecting: 'True' but is 'False'</Message></ErrorInfo></Output></UnitTestResult><UnitTestResult testId="b" executionId="e2" testName="Pal.Game.Tests.NativeBattleContentTests.Synthetic.SyntheticOther" outcome="Passed"/></Results>
+<TestDefinitions><UnitTest id="a" name="SyntheticCase:33 (&quot;enemies-overcapacity&quot;)"><Execution id="e1"/><TestMethod adapterTypeName="executor://gdunit4.testadapter/" className="Pal.Game.Tests.NativeBattleContentTests.Synthetic" name="SyntheticCase:33 (&quot;enemies-overcapacity&quot;)"/></UnitTest><UnitTest id="b" name="SyntheticOther"><Execution id="e2"/><TestMethod adapterTypeName="executor://gdunit4.testadapter/" className="Pal.Game.Tests.NativeBattleContentTests.Synthetic" name="SyntheticOther"/></UnitTest></TestDefinitions>
+<TestEntries><TestEntry testId="a" executionId="e1"/><TestEntry testId="b" executionId="e2"/></TestEntries>
+<ResultSummary outcome="Failed"><Counters total="2" executed="2" passed="1" failed="1" error="0" timeout="0" aborted="0" notExecuted="0"/><RunInfos><RunInfo outcome="Error">Expecting: 'True' but is 'False'</RunInfo></RunInfos></ResultSummary></TestRun>`;
+  fs.writeFileSync(file, xml, 'utf8');
+  const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'check-failure.ps1'), '-RepositoryRoot', repository, '-TrxPath', file];
+  for (const scope of ['unit', 'game'] as const) {
+    const result = JSON.parse(native(repository, 'pwsh', [...args, '-Scope', scope]));
+    assert.equal(result.classification, 'normal_test_failure');
+    assert.equal(result.failed, 1);
+    assert.match(result.failures[0].test, /enemies-overcapacity/);
+    assert.match(result.failures[0].message, /Expecting: 'True' but is 'False'/);
+  }
 });
 test('failure feedback preserves the failed case, classifier cause, native exit and evidence without inventing unknown quiescence', () => {
   const output = fs.mkdtempSync(path.join(directory, 'feedback-'));
