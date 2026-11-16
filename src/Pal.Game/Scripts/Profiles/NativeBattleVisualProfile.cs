@@ -15,8 +15,9 @@ public static class NativeBattleVisualProfile
 {
     // Reference SDLPal battle.c:27-31 g_rgPlayerPos bottom-center origins, indexed
     // [party size - 1][party position]; positions follow the party column, never RoleId.
-    // This chain supports parties of one or two players.
-    private static readonly Vector2I[][] PlayerLayout = [[new(240, 170)], [new(200, 176), new(256, 152)]];
+    // This chain supports parties of one to three players.
+    private static readonly Vector2I[][] PlayerLayout =
+        [[new(240, 170)], [new(200, 176), new(256, 152)], [new(180, 180), new(234, 170), new(270, 146)]];
 
     public static CheckedBattleVisualProfile Load(string uri, CheckedStoryProfile story)
     {
@@ -41,8 +42,8 @@ public static class NativeBattleVisualProfile
             var native = LoadResource<PalBattleVisualProfile>(uri);
             Require(native.FormatVersion == 2, "visual FormatVersion must be 2; re-prepare legacy shared-sprite profiles explicitly");
             Require(!string.IsNullOrWhiteSpace(native.SourceIdentity), "visual SourceIdentity is required (declaration only)");
-            Require(partyRoleIds is not null && partyRoleIds.Count is 1 or 2,
-                "visual party requires one or two ordered role bindings (battle.c:27-31)");
+            Require(partyRoleIds is not null && partyRoleIds.Count is 1 or 2 or 3,
+                "visual party requires one to three ordered role bindings (battle.c:27-31)");
             var declared = native.Players;
             Require(declared is not null && declared.Length > 0 && declared.All(x => x is not null),
                 "visual Players requires typed per-role bindings (no legacy scalar form)");
@@ -469,6 +470,7 @@ public sealed class CheckedBattleVisualProfile
     {
         1 => [Players[0].PlayerPosition],
         2 => [Players[0].PlayerPosition, Players[1].PlayerPosition],
+        3 => [Players[0].PlayerPosition, Players[1].PlayerPosition, Players[2].PlayerPosition],
         _ => throw new InvalidOperationException("Unsupported party size " + partyCount + ".")
     };
     internal CheckedBattleVisualProfile(PalBattleVisualProfile native, PalPalette palette, PalSprite? numbers,

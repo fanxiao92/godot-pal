@@ -233,7 +233,7 @@ Console.WriteLine("""
                   All 13 frozen tables are registered (data-schema v1); this command never re-encodes tables.
 
       project-battle-data Project caller-verified M5 Windows base tables to host-free physical numeric content.
-                          IDs are unique decimal comma-lists; roles retain party order (currently one or two).
+                          IDs are unique decimal comma-lists; roles retain party order (one to three).
                           Writes numeric/battle-data.json and separate receipt.json; no scripts or RNG.
                           Source declarations and modern byte identities are not independent authentication.
                           Input/output must be disjoint; links and nonempty outputs are rejected.

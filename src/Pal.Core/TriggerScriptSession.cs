@@ -422,12 +422,14 @@ public sealed class TriggerScriptSession
                     foreach (var player in players)
                         if (player.NameObjectId is < 0 or > 65535)
                             throw new InvalidDataException($"{command.Position}: nameObjectId must be a WORD (0..65535).");
-                    // TriggerBattleContent admits one or two players; equal Names own both slots.
-                    if (players.Count == 2 && players[0].NameObjectId == players[1].NameObjectId)
+                    // TriggerBattleContent admits one to three players; equal Names own every
+                    // shared slot, so all same-name members must declare identical hook seeds.
+                    foreach (var group in players.Where(p => p.NameObjectId.HasValue)
+                        .GroupBy(p => p.NameObjectId!.Value))
                     {
-                        if (players[0].DyingScript != players[1].DyingScript)
+                        if (group.Any(p => p.DyingScript != group.First().DyingScript))
                             throw new InvalidDataException($"{command.Position}: players with the same nameObjectId must declare identical dyingScript seeds.");
-                        if (players[0].FriendDeathScript != players[1].FriendDeathScript)
+                        if (group.Any(p => p.FriendDeathScript != group.First().FriendDeathScript))
                             throw new InvalidDataException($"{command.Position}: players with the same nameObjectId must declare identical friendDeathScript seeds.");
                     }
                 }

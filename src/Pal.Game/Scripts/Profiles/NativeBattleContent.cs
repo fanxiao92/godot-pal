@@ -286,8 +286,8 @@ public sealed class BattleProjectionSourceInfo
             Hash(row.Sha256, "ModernInputs." + row.File + ".Sha256");
             if (row.ByteLength is < 1 or > 64 * 1024 * 1024) throw Error("ModernInputs." + row.File + ".ByteLength", "must be 1..64MiB");
         }
-        if (RoleIds.Count is < 1 or > 2 || RoleIds.Any(id => id is < 0 or > 4) || RoleIds.Distinct().Count() != RoleIds.Count)
-            throw Error("RoleIds", "requires 1..2 unique ordered roles in 0..4");
+        if (RoleIds.Count is < 1 or > 3 || RoleIds.Any(id => id is < 0 or > 4) || RoleIds.Distinct().Count() != RoleIds.Count)
+            throw Error("RoleIds", "requires 1..3 unique ordered roles in 0..4");
         if (TeamIds.Count == 0 || TeamIds.Any(id => id is < 0 or > 65535) || TeamIds.Distinct().Count() != TeamIds.Count)
             throw Error("TeamIds", "requires unique ordered WORD team IDs");
         if (EnemySlots.Count != (long)TeamIds.Count * 5) throw Error("EnemySlots", "requires exactly five rows per team");

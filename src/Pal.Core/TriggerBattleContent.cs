@@ -41,12 +41,12 @@ public sealed class TriggerBattleContent
     {
         ArgumentNullException.ThrowIfNull(roles); ArgumentNullException.ThrowIfNull(players);
         ArgumentNullException.ThrowIfNull(growth); ArgumentNullException.ThrowIfNull(teams);
-        if (roles.Count is < 1 or > 2 || players.Count != roles.Count || roles.Any(x => x is null)
+        if (roles.Count is < 1 or > 3 || players.Count != roles.Count || roles.Any(x => x is null)
             || players.Any(x => x is null) || roles.Select(x => x.RoleId).Distinct().Count() != roles.Count
             || players.Select(x => x.RoleId).Distinct().Count() != players.Count
             || !roles.Select(x => x.RoleId).ToHashSet().SetEquals(players.Select(x => x.RoleId))
             || !growth.Keys.ToHashSet().SetEquals(players.Select(x => x.RoleId)) || growth.Values.Any(x => x is null))
-            throw new InvalidDataException("roles[0], players[0] and growth[0] require unique matching RoleId keys and one or two roles.");
+            throw new InvalidDataException("roles[0], players[0] and growth[0] require unique matching RoleId keys and one to three roles.");
         var byId = roles.ToDictionary(x => x.RoleId);
         foreach (var (player, index) in players.Select((x, i) => (x, i)))
             if (byId[player.RoleId].Hp != player.Hp || byId[player.RoleId].MaxHp != player.MaxHp)

@@ -139,6 +139,16 @@ internal sealed class NativeStoryProfileFixture : IDisposable
 
     public void Save(Resource resource, string name) => NativeProfileFixture.SaveResource(resource, Root + "/" + name);
     public void SaveProfile() => NativeProfileFixture.SaveResource(Profile, Uri);
+
+    /// <summary>#137 test-owned third party member: role2 mirrors the authored role1 numeric row
+    /// and re-saves the story numeric/profile in place so 1..3-member hosts share one fixture.</summary>
+    public void AddThirdPartyRole()
+    {
+        Numeric.Roles = [.. Numeric.Roles, Role(2, 95)];
+        Numeric.Players = [.. Numeric.Players, Player(2, hp: 95, attack: 35, defense: 18)];
+        Numeric.Growth = [.. Numeric.Growth, Growth(2)];
+        Save(Numeric, "Numeric.tres"); RefreshHashes(); SaveProfile();
+    }
     public void Write(string name, string text) => File.WriteAllText(ProjectSettings.GlobalizePath(Root + "/" + name), text);
     public string Read(string name) => File.ReadAllText(ProjectSettings.GlobalizePath(Root + "/" + name));
     public void Edit(string name, string before, string after)

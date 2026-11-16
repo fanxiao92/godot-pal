@@ -255,8 +255,8 @@ public partial class PrepareStoryPackage : Node
         // Typed per-role bindings in party order; the legacy scalar player declaration is
         // rejected here (missing/unknown field), never folded or reinterpreted at runtime.
         var playersElement = v.GetProperty("players");
-        Require(playersElement.ValueKind == JsonValueKind.Array && playersElement.GetArrayLength() is >= 1 and <= 2,
-            "players requires one or two per-role bindings (party order)");
+        Require(playersElement.ValueKind == JsonValueKind.Array && playersElement.GetArrayLength() is >= 1 and <= 3,
+            "players requires one to three per-role bindings (party order)");
         visual.Players = playersElement.EnumerateArray().Select((player, playerOrdinal) =>
         {
             try

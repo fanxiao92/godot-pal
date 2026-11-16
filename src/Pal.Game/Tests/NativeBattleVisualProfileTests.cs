@@ -1499,6 +1499,49 @@ public class NativeBattleVisualProfileTests
         AssertThat(ReferenceEquals(shared.Players[0], shared.Players[1])).IsFalse();
     }
 
+    [TestCase]
+    public void ThreePlayerBindingsUseTheReferenceThreePlayerLayoutColumns()
+    {
+        using var f = new NativeBattleVisualProfileFixture(party: true);
+        // A third declared role extends the party; every member's column switches to the
+        // reference g_rgPlayerPos[2] three-player layout (battle.c:27-31), never a two-player guess.
+        f.Story.AddThirdPartyRole();
+        var story = NativeStoryProfile.Load(f.Story.Uri);
+        f.Profile.Players =
+        [
+            new PalBattleVisualPlayer { RoleId = 0, PlayerSpriteUri = f.Root + "/Player.tres",
+                PlayerPosition = new(180, 180) },
+            new PalBattleVisualPlayer { RoleId = 1, PlayerSpriteUri = f.Root + "/Player2.tres",
+                PlayerPosition = new(234, 170) },
+            new PalBattleVisualPlayer { RoleId = 2, PlayerSpriteUri = f.Root + "/Player.tres",
+                PlayerPosition = new(270, 146) }
+        ];
+        f.Save();
+        var visual = NativeBattleVisualProfile.Load(f.Uri, new[] { 0, 1, 2 },
+            story.BattleContent.EnemyTeams, story.Requirements.BattleTeamIds, story.Palette);
+        AssertThat(visual.Players.Count).IsEqual(3);
+        AssertThat(visual.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 0, 1, 2 });
+        AssertThat(visual.Players.Select(player => player.PlayerPosition).ToArray())
+            .IsEqual(new[] { new Vector2I(180, 180), new Vector2I(234, 170), new Vector2I(270, 146) });
+        AssertThat(visual.PlayerOrigins(3).SequenceEqual(new[] { new Vector2I(180, 180), new Vector2I(234, 170), new Vector2I(270, 146) })).IsTrue();
+        // Sharing one legal sprite between two of the three members stays distinct bindings.
+        AssertThat(visual.Players[0].PlayerSprite.SpriteId).IsEqual(41);
+        AssertThat(visual.Players[2].PlayerSprite.SpriteId).IsEqual(41);
+        AssertThat(ReferenceEquals(visual.Players[0], visual.Players[2])).IsFalse();
+        AssertThat(visual.Players[1].PlayerSprite.SpriteId).IsEqual(42);
+        // The story overload authenticates the full three-member party order, not head+count.
+        var byStory = NativeBattleVisualProfile.Load(f.Uri, story);
+        AssertThat(byStory.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 0, 1, 2 });
+        // A two-player column at party size three is a wrong layout, not an accepted offset.
+        f.Profile.Players[1].PlayerPosition = new(256, 152); f.Save();
+        AssertThat(Failure(() => NativeBattleVisualProfile.Load(f.Uri, story)).Contains("g_rgPlayerPos[2][1]")).IsTrue();
+        f.Profile.Players[1].PlayerPosition = new(234, 170); f.Save();
+        // Four ordered bindings exceed the reference party capacity (battle.h MAX_PLAYERS_IN_PARTY).
+        AssertThat(Failure(() => NativeBattleVisualProfile.Load(f.Uri, new[] { 0, 1, 2, 3 },
+            story.BattleContent.EnemyTeams, story.Requirements.BattleTeamIds, story.Palette))
+            .Contains("one to three ordered role bindings")).IsTrue();
+    }
+
     private static void AddEffect(NativeBattleVisualProfileFixture f, int group)
     {
         if (group == 1)

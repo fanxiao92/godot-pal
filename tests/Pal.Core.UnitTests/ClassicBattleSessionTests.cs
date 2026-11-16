@@ -208,7 +208,7 @@ public sealed class ClassicBattleSessionTests
     {
         var d = Definition();
         yield return [d with { Players = [] }];
-        yield return [d with { Players = [d.Players[0], d.Players[0] with { RoleId = 0 }, d.Players[0] with { RoleId = 2 }] }];
+        yield return [d with { Players = [d.Players[0], d.Players[0] with { RoleId = 0 }, d.Players[0] with { RoleId = 2 }, d.Players[0] with { RoleId = 1 }] }];
         yield return [d with { Enemies = [] }];
         yield return [d with { Enemies = Enumerable.Repeat(d.Enemies[0], 6).ToArray() }];
         foreach (var player in new[] {

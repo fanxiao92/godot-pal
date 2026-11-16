@@ -65,7 +65,7 @@ public static class NativeStoryProfile
             var content = NativeBattleContent.Load(native.BattleContentUri);
             // Party/multi-enemy capability is bounded by the actually selected closure: the
             // language loop below runs TriggerScriptSession.ValidateEntry, which validates every
-            // startBattle team of the selected entry (one or two players and enemy slots) and
+            // startBattle team of the selected entry (one to three players and enemy slots) and
             // ignores unselected teams as plain data. Only the party head is bound to the static leader.
             var font = LoadResource<PalDialogueFont>(dialogue + "/Font.tres");
             Require(!string.IsNullOrWhiteSpace(font.SourceIdentity) && font.FormatVersion == 1 && font.LineHeight == 16,

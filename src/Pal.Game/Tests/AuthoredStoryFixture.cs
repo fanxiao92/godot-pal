@@ -19,12 +19,14 @@ internal sealed class AuthoredStoryFixture : IDisposable
     private string? numericInput;
     internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null,
         bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
-        bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false)
+        bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
         if (singlePlayerTwoEnemies && scenario != "PartyWin")
             throw new ArgumentException("The single-player/two-enemy derivation requires PartyWin.", nameof(singlePlayerTwoEnemies));
+        if (threePlayer && scenario != "PartyWin")
+            throw new ArgumentException("The three-player derivation requires the two-slot PartyWin author.", nameof(threePlayer));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -47,7 +49,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -73,6 +75,17 @@ internal sealed class AuthoredStoryFixture : IDisposable
                     foreach (string section in new[] { "roles", "players", "growth" })
                         data[section]!.AsArray().RemoveAt(1);
                 }
+                if (threePlayer)
+                {
+                    // #137 test-owned third member: role2 clones role1's authored numeric row so
+                    // roles/players/growth keep matching RoleId sets in party order.
+                    foreach (string section in new[] { "roles", "players", "growth" })
+                    {
+                        var third = data[section]![1]!.DeepClone();
+                        third["roleId"] = 2;
+                        data[section]!.AsArray().Add(third);
+                    }
+                }
                 if (removeDualAttack)
                 {
                     foreach (string section in new[] { "roles", "players" })
@@ -94,6 +107,20 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 metadata["visual"]!["players"]![0]!["playerPosition"] = new JsonArray(240, 170);
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned one-player/two-enemy derivation; both duplicate id7 enemy slots retained, not retail data.";
+            }
+            if (threePlayer)
+            {
+                // The whole party switches to the reference g_rgPlayerPos[2] columns (battle.c:27-31);
+                // role2 shares the authored player sprite by authored design, like the base pair.
+                var players = metadata["visual"]!["players"]!.AsArray();
+                players[0]!["playerPosition"] = new JsonArray(180, 180);
+                players[1]!["playerPosition"] = new JsonArray(234, 170);
+                var third = players[1]!.DeepClone();
+                third["roleId"] = 2;
+                third["playerPosition"] = new JsonArray(270, 146);
+                players.Add(third);
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned three-player/two-enemy derivation; role2 clones role1's authored numeric row and shares the player sprite; not retail data.";
             }
             if (heterogeneousEnemies)
             {

@@ -26,7 +26,7 @@ public static class BattleDataProjector
     public static Projection Project(IReadOnlyDictionary<string, byte[]> files, IReadOnlyList<int> roles, IReadOnlyList<int> teams)
     {
         ArgumentNullException.ThrowIfNull(files);
-        ValidateSelection(roles, "roles", 5, 2);
+        ValidateSelection(roles, "roles", 5, 3);
         ValidateSelection(teams, "teams", 65535, 65536);
         if (!files.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(FileNames))
             throw new InvalidDataException("M5 input requires exactly index.json and all 13 registered table files.");

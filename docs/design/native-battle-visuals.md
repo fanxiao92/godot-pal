@@ -92,14 +92,14 @@ Core 在反馈前已提交伤害，所以致死攻击的目标仍绘制完整物
 
 承自 #135 与 [m6-no-legacy-compat-20261111](role-battle-visual-readiness.md)：`PalBattleVisualProfile` 的玩家侧不再有标量 `RoleId/PlayerSpriteUri/AttackEffectSpriteUri/AttackEffectIndex/PlayerPosition`，只保留 `Players : PalBattleVisualPlayer[]`（typed Resource，party 顺序），root `FormatVersion=2`。旧 FormatVersion=1 共享精灵产物显式拒绝并须重新 Prepare；没有双 loader、headRoleId+人数折叠加载或领队回退，单角色也是一项完整绑定。
 
-公开入口统一为 `Load(uri, IReadOnlyList<int> partyRoleIds, enemyTeams, requirementTeamIds, palette)`；Story 重载按 `CheckedStoryProfile.BattleContent.Players` 传完整 party，非 Story 首战按已核 `content.Players` 逐位传入。加载器逐一认证 `Players[i].RoleId == partyRoleIds[i]` 与 `PlayerPosition == g_rgPlayerPos[party-1][i]`（battle.c:27-31 布局列：单角色 `(240,170)`，双人 `(200,176)`/`(256,152)`），数量与 party 一一对应；换位/缺员/错位精确拒绝，不以队伍位置、图号或领队身份推断第二角色。攻击效果组仍是 `rgwBattleEffectIndex[实际战斗精灵][1]×3`（fight.c:2029）的作者声明：每成员可选、必须配对、帧 `Index*3+{0,1,2}` 必须可寻址。
+公开入口统一为 `Load(uri, IReadOnlyList<int> partyRoleIds, enemyTeams, requirementTeamIds, palette)`；Story 重载按 `CheckedStoryProfile.BattleContent.Players` 传完整 party，非 Story 首战按已核 `content.Players` 逐位传入。加载器逐一认证 `Players[i].RoleId == partyRoleIds[i]` 与 `PlayerPosition == g_rgPlayerPos[party-1][i]`（battle.c:27-31 布局列：单角色 `(240,170)`，双人 `(200,176)`/`(256,152)`，三人 `(180,180)`/`(234,170)`/`(270,146)`；#137 起人数 1..3），数量与 party 一一对应；换位/缺员/错位精确拒绝，不以队伍位置、图号或领队身份推断第二角色。攻击效果组仍是 `rgwBattleEffectIndex[实际战斗精灵][1]×3`（fight.c:2029）的作者声明：每成员可选、必须配对、帧 `Index*3+{0,1,2}` 必须可寻址。
 
 checked `Players`（`CheckedBattleVisualPlayer`）逐成员持有自己的 sprite/位置/效果帧；共享同一合法图仍是两个独立绑定（身份、姿势、受击、死亡不合并）。renderer 的玩家纹理键与效果键含 party 成员下标，普攻效果取行动成员自己的效果组；`PlayerOrigins` 返回各成员已校验的布局列。Prepare 的 author schema 迁移为 `visual.players[]`（严格配对/拒绝混写，见 [story package preparation](story-package-preparation.md)），staging/final 读回走同一公开加载链；9 份活跃样例已迁移。旧共享精灵 profile 不被运行时重解释，equipment 覆盖门与 #135 剩余验收不因本节放行。
 
 ## 作者 schema
 
 - 根 `FormatVersion` 默认 **-1**，作者必须显式写1；`SourceIdentity` 必须非空，仅为声明，不是素材来源认证或人工/真实模式开关。native Visual root 为上文 #209 的 `FormatVersion=2`。
-- `visual.players` 按 party 顺序逐角色声明（1..2 项）；每项 `roleId` 必须等于该位置 story 的 Core `BattleContent.Players[i].RoleId`，单角色也是一项绑定。`playerSpriteUri` 指向既有 `PalSprite`；它的 `SpriteId` 是图档索引声明，**不是 roleId**，不同角色可共享同一合法图。
+- `visual.players` 按 party 顺序逐角色声明（1..3 项）；每项 `roleId` 必须等于该位置 story 的 Core `BattleContent.Players[i].RoleId`，单角色也是一项绑定。`playerSpriteUri` 指向既有 `PalSprite`；它的 `SpriteId` 是图档索引声明，**不是 roleId**，不同角色可共享同一合法图。
 - 每项 `playerPosition` 是作者显式 bottom-center 坐标，两个分量均为 SHORT，且必须等于参考布局 `g_rgPlayerPos[party-1][i]` 列（battle.c:27-31）；缺省哨兵不合法。旧 visual 级标量 player 字段拒绝，须重新准备。
 - `PaletteUri` 指向显式准备的 `PalPalette`，要求 RGB768，并逐色等于 story 当前 active palette。当前无 palette-changing VM slice；不推测独立战斗调色板规则，不从 RGB 图片反推索引。
 - `Teams : PalBattleVisualTeam[]` 的 `TeamId` 集合精确等于 story requirements 的 `BattleTeamIds`，无缺失、多余、重复；每个 `EnemySlots` 数组按顺序精确覆盖对应 Core enemies，每槽 `TargetId` 等于该敌位的 `Id`（战斗目标身份，**不是 enemy 定义、对象或图片 ID**）。

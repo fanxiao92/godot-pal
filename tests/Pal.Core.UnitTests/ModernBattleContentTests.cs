@@ -457,6 +457,33 @@ public sealed class ModernBattleContentTests
         Assert.Equal(new[] { 7, 7 }, script.PendingBattle.Lifecycle.Current.Combat.Enemies.Select(x => x.Id));
     }
 
+    [Fact]
+    public void Three_roles_enter_the_same_owned_lifecycle_and_four_roles_are_rejected()
+    {
+        var data = PartyData();
+        foreach (string key in new[] { "roles", "players", "growth" })
+        {
+            var third = data[key]![1]!.DeepClone();
+            third["roleId"] = 0;
+            data[key]!.AsArray().Add(third);
+        }
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        var random = new BattleRandom();
+        var script = Script(content, random);
+        script.Start("shared", "npc", 28);
+        Assert.Equal(0, random.Draws);
+        Assert.Equal(new[] { 4, 1, 0 }, script.PendingBattle!.Lifecycle.Current.Combat.Players.Select(x => x.RoleId));
+        Assert.Equal(new[] { 7, 7 }, script.PendingBattle.Lifecycle.Current.Combat.Enemies.Select(x => x.Id));
+        foreach (string key in new[] { "roles", "players", "growth" })
+        {
+            var fourth = data[key]![2]!.DeepClone();
+            fourth["roleId"] = 3;
+            data[key]!.AsArray().Add(fourth);
+        }
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("unique matching RoleId keys", error.Message);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

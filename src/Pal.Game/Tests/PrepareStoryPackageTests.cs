@@ -753,6 +753,36 @@ public class PrepareStoryPackageTests
         AssertThat(source.Snapshot()).IsEqual(before);
     }
 
+    [TestCase]
+    public void AuthorPlayerSchemaAcceptsThreeReferenceColumnsAndRejectsAFourth()
+    {
+        using var source = new Preparation(party: true);
+        source.Native.Story.AddThirdPartyRole();
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
+        // The author columns follow the numeric party: three bindings at g_rgPlayerPos[2]
+        // (battle.c:27-31), sharing the second member's authored sprite for role2.
+        var players = metadata["visual"]!["players"]!.AsArray();
+        players[0]!["playerPosition"] = new JsonArray(180, 180);
+        players[1]!["playerPosition"] = new JsonArray(234, 170);
+        var third = players[1]!.DeepClone();
+        third["roleId"] = 2;
+        third["playerPosition"] = new JsonArray(270, 146);
+        players.Add(third);
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        string[] before = source.Snapshot();
+        var result = PrepareStoryPackage.Prepare(source.Input, source.Output);
+        var visual = NativeBattleVisualProfile.Load(result.VisualUri, NativeStoryProfile.Load(result.StoryUri));
+        AssertThat(visual.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 0, 1, 2 });
+        AssertThat(visual.Players.Select(player => player.PlayerPosition).ToArray())
+            .IsEqual(new[] { new Vector2I(180, 180), new Vector2I(234, 170), new Vector2I(270, 146) });
+        AssertThat(visual.PlayerOrigins(3).SequenceEqual(new[] { new Vector2I(180, 180), new Vector2I(234, 170), new Vector2I(270, 146) })).IsTrue();
+        AssertThat(source.Snapshot()).IsEqual(before);
+        players.Add(players[2]!.DeepClone());
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        Reject(source.Input, source.Output + "-four", "one to three per-role bindings");
+        AssertThat(Directory.Exists(source.Output + "-four")).IsFalse();
+    }
+
     [TestCase("partial")]
     [TestCase("negative-group")]
     [TestCase("idle-sentinel")]

@@ -480,10 +480,10 @@ public sealed class ClassicBattleSession
 
     internal static void Validate(ClassicBattleDefinition definition, BattleEquipmentState? equipment)
     {
-        if (definition.Players is not { Count: >= 1 and <= 2 } || definition.Enemies is not { Count: >= 1 and <= 5 }
+        if (definition.Players is not { Count: >= 1 and <= 3 } || definition.Enemies is not { Count: >= 1 and <= 5 }
             || definition.Players.Any(p => p is null) || definition.Enemies.Any(e => e is null)
             || definition.Players.Select(p => p.RoleId).Distinct().Count() != definition.Players.Count)
-            throw new InvalidDataException("Classic combat requires one or two living players with distinct roles and one to five living enemies.");
+            throw new InvalidDataException("Classic combat requires one to three living players with distinct roles and one to five living enemies.");
         foreach (var p in definition.Players) ValidatePlayer(p, equipment);
         foreach (var e in definition.Enemies) ValidateEnemy(e);
     }

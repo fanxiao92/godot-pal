@@ -37,6 +37,64 @@ public sealed class ClassicBattlePartySessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Three_players_pick_targets_in_party_order_execute_queue_and_win()
+    {
+        // battle.c:27-31 g_rgPlayerPos[2] and battle.h MAX_PLAYERS_IN_PARTY: the combat domain
+        // admits three living players; fight.c's queue keeps its 3+5*2 reference capacity.
+        var random = new ScriptedRandom([.. QueueDraws3(), .. PlayerHit(), .. PlayerHit(), .. PlayerHit()]);
+        var d = ThreePlayerDefinition();
+        d = d with { Enemies = [d.Enemies[0] with { Hp = 86 }, d.Enemies[1] with { Hp = 43 }] };
+        var session = new ClassicBattleSession(d, random);
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Equal(0, session.Current.SelectingPlayerIndex);
+        session.SelectAttack(0, 0);
+        Assert.Equal(1, session.Current.SelectingPlayerIndex);
+        Assert.Equal(0, session.Current.Players[0].SelectedEnemySlot);
+        session.SelectAttack(1, 1);
+        Assert.Equal(2, session.Current.SelectingPlayerIndex);
+        Assert.Equal(1, session.Current.Players[1].SelectedEnemySlot);
+        session.SelectAttack(2, 0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.Null(session.Current.SelectingPlayerIndex);
+        Assert.Equal(1, session.Current.Round);
+        Assert.Equal(5, session.Current.ActionQueue.Count);
+        Assert.Equal(new[] { 4, 2, 1 }, session.Current.Players.Select(p => p.RoleId));
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal((0, 0, 7, 43), (session.Current.LastAction!.ActorIndex, session.Current.LastAction.TargetIndex,
+            session.Current.LastAction.TargetId, session.Current.LastAction.Damage));
+        Assert.Equal(43, session.Current.Enemies[0].Hp);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal((1, 1, 7, 43), (session.Current.LastAction!.ActorIndex, session.Current.LastAction.TargetIndex,
+            session.Current.LastAction.TargetId, session.Current.LastAction.Damage));
+        Assert.Equal(0, session.Current.Enemies[1].Hp);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal((2, 0, 7, 43), (session.Current.LastAction!.ActorIndex, session.Current.LastAction.TargetIndex,
+            session.Current.LastAction.TargetId, session.Current.LastAction.Damage));
+        Assert.Equal(ClassicBattlePhase.Won, session.Current.Phase);
+        Assert.All(session.Current.Enemies, e => Assert.Equal(0, e.Hp));
+        Assert.All(session.Current.Players, p => Assert.Equal(new ClassicBattleCounts(1, 2), p.Counts));
+        var receipt = session.Completion;
+        Assert.Equal(ClassicBattlePhase.Won, receipt!.Outcome);
+        Assert.False(session.ResolveNextAction());
+        Assert.Same(receipt, session.Completion);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Party_domain_still_rejects_empty_four_and_duplicate_player_sets()
+    {
+        // The expanded 1..3 domain keeps the reference bounds; this is not a deleted count check.
+        var random = new ScriptedRandom([]);
+        var d = ThreePlayerDefinition();
+        Assert.Throws<InvalidDataException>(() => new ClassicBattleSession(d with { Players = [] }, random));
+        Assert.Throws<InvalidDataException>(() => new ClassicBattleSession(d with
+            { Players = [.. d.Players, new(3, 200, 200, 40, 20, 70)] }, random));
+        Assert.Throws<InvalidDataException>(() => new ClassicBattleSession(d with
+            { Players = [d.Players[0], d.Players[1] with { RoleId = 4 }, d.Players[2]] }, random));
+        random.AssertExhausted();
+    }
+
     [Theory]
     [InlineData(18, 18, 0, 0, 1f, 1f, 1f, 1f, "E0:18,E1:18,P0:18,P1:18")]
     [InlineData(1, 100, 0, 0, 1f, 1f, 1f, 1f, "P1:100,E1:18,E0:18,P0:1")]
@@ -276,15 +334,15 @@ public sealed class ClassicBattlePartySessionTests
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
-    public void One_to_five_complete_enemy_slots_accept_one_or_two_players_without_random(int enemyCount)
+    public void One_to_five_complete_enemy_slots_accept_one_to_three_players_without_random(int enemyCount)
     {
-        foreach (int playerCount in new[] { 1, 2 })
+        foreach (int playerCount in new[] { 1, 2, 3 })
         {
-            var d = FiveEnemyDefinition();
+            var base_ = ThreePlayerDefinition() with { Enemies = Enumerable.Repeat(ThreePlayerDefinition().Enemies[0], 5).ToArray() };
             var random = new ScriptedRandom([]);
-            var session = new ClassicBattleSession(d with
+            var session = new ClassicBattleSession(base_ with
             {
-                Players = d.Players.Take(playerCount).ToArray(), Enemies = d.Enemies.Take(enemyCount).ToArray()
+                Players = base_.Players.Take(playerCount).ToArray(), Enemies = base_.Enemies.Take(enemyCount).ToArray()
             }, random);
             Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
             Assert.Equal(playerCount, session.Current.Players.Count);
@@ -300,7 +358,7 @@ public sealed class ClassicBattlePartySessionTests
     [InlineData("empty")]
     [InlineData("six")]
     [InlineData("null-slot")]
-    [InlineData("three-players")]
+    [InlineData("four-players")]
     [InlineData("magic-slot4")]
     public void Expanded_capacity_keeps_invalid_and_unsupported_definitions_out_before_random(string fault)
     {
@@ -309,7 +367,8 @@ public sealed class ClassicBattlePartySessionTests
         if (fault == "null-slot") enemies[4] = null!;
         if (fault == "magic-slot4") enemies[4] = enemies[4] with { MagicId = 1 };
         d = d with { Enemies = fault == "empty" ? [] : fault == "six" ? [.. enemies, enemies[0]] : enemies };
-        if (fault == "three-players") d = d with { Players = [.. d.Players, d.Players[0] with { RoleId = 0 }] };
+        if (fault == "four-players") d = d with { Players = [.. d.Players,
+            d.Players[0] with { RoleId = 0 }, d.Players[0] with { RoleId = 1 }] };
         var random = new ScriptedRandom([]);
         Assert.Throws<InvalidDataException>(() => new ClassicBattleSession(d, random));
         random.AssertExhausted();
@@ -481,6 +540,10 @@ public sealed class ClassicBattlePartySessionTests
         var d = Definition();
         return d with { Enemies = Enumerable.Repeat(d.Enemies[0], 5).ToArray() };
     }
+    private static ClassicBattleDefinition ThreePlayerDefinition() => new(
+        [new(4, 200, 200, 40, 20, 100), new(2, 200, 200, 40, 20, 90), new(1, 200, 200, 40, 20, 80)],
+        [new(7, 0, 100, 0, 0, 0, 1), new(7, 0, 100, 0, 0, 0, 1)]);
+    private static Draw[] QueueDraws3() => Enumerable.Repeat(F(.9f, 1.1f, 1), 5).ToArray();
     private static Draw[] QueueDraws(int livingEnemies) => Enumerable.Repeat(F(.9f, 1.1f, 1), livingEnemies + 2).ToArray();
     private static Draw[] QueueDraws() => [F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1)];
     private static Draw[] PlayerHit() => [I(1, 2, 1), I(0, 5, 1), F(1, 1.125f, 1), I(2, 3, 2)];

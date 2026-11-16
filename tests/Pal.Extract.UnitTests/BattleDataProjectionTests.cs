@@ -168,15 +168,31 @@ public sealed class BattleDataProjectionTests
 
     [Theory]
     [InlineData("role5", "sixth")]
-    [InlineData("threeRoles", "roles")]
+    [InlineData("fourRoles", "roles")]
     [InlineData("duplicateRoles", "roles")]
     [InlineData("missingTeam", "enemy-team")]
     [InlineData("duplicateTeams", "teams")]
     public void Selection_domain_has_explicit_refusals(string selection, string diagnostic)
     {
-        int[] roles = selection switch { "role5" => [5], "threeRoles" => [0, 1, 4], "duplicateRoles" => [4, 4], _ => [4] };
+        int[] roles = selection switch { "role5" => [5], "fourRoles" => [0, 1, 2, 4], "duplicateRoles" => [4, 4], _ => [4] };
         int[] teams = selection switch { "missingTeam" => [99], "duplicateTeams" => [0, 0], _ => [0] };
         Assert.Contains(diagnostic, Assert.Throws<InvalidDataException>(() => BattleDataProjector.Project(BattleProjectionFixture.Create(), roles, teams)).Message);
+    }
+
+    [Fact]
+    public void Three_ordered_roles_project_party_order_into_three_player_content()
+    {
+        // battle.h MAX_PLAYERS_IN_PARTY: the projection selection accepts the third ordered role
+        // and keeps roles/players/growth party order; four selections stay refused above.
+        var result = BattleDataProjector.Project(BattleProjectionFixture.Create(), [0, 1, 4], [0]);
+        var json = JsonNode.Parse(result.NumericJson)!;
+        foreach (string section in new[] { "roles", "players", "growth" })
+            Assert.Equal(new[] { 0, 1, 4 }, json[section]!.AsArray().Select(x => x!["roleId"]!.GetValue<int>()));
+        var content = ModernBattleContent.Parse(result.NumericJson);
+        Assert.Equal(new[] { 0, 1, 4 }, content.Players.Select(x => x.RoleId));
+        Assert.Equal(new[] { 0, 1, 4 }, JsonNode.Parse(result.ReceiptJson)!["roles"]!.AsArray().Select(x => x!.GetValue<int>()));
+        Assert.Contains(JsonNode.Parse(result.ReceiptJson)!["fieldSources"]!.AsArray(),
+            x => x!["path"]!.GetValue<string>() == "players[2].hp");
     }
 
     [Fact]

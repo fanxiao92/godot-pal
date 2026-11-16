@@ -633,7 +633,7 @@ public class NativeBattleContentTests
             case "inputs-null": native.ProjectionInputFiles = null!; break;
             case "input-row-null": native.ProjectionInputFiles[0] = null!; break;
             case "roles-empty": native.ProjectionRoleIds = []; break;
-            case "roles-many": native.ProjectionRoleIds = [4, 0, 1]; break;
+            case "roles-many": native.ProjectionRoleIds = [4, 0, 1, 2]; break;
             case "roles-duplicate": native.ProjectionRoleIds = [4, 4]; break;
             case "roles-negative": native.ProjectionRoleIds = [-1, 0]; break;
             case "role5": native.ProjectionRoleIds = [5, 0]; break;
@@ -695,6 +695,28 @@ public class NativeBattleContentTests
         catch (InvalidDataException caught) { error = caught; }
         AssertThat(error is not null).IsTrue();
         AssertThat(error!.Message.Contains("RoleIds", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [TestCase]
+    public void ProjectionAcceptsThreeOrderedRolesMatchingThreePlayerContent()
+    {
+        // battle.h MAX_PLAYERS_IN_PARTY: the projection receipt accepts a third ordered role;
+        // the loaded native enemy slots keep their existing 1..2 outer boundary.
+        var data = Data();
+        var content = new TriggerBattleContent(
+            [data.InitialRole with { RoleId = 4 }, data.InitialRole with { RoleId = 0 }, data.InitialRole with { RoleId = 1 }],
+            [data.Player with { RoleId = 4 }, data.Player with { RoleId = 0 }, data.Player with { RoleId = 1 }],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = data.Growth, [0] = data.Growth, [1] = data.Growth },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> {
+                [65535] = [data.Teams[18] with { Id = 1 }, data.Teams[18] with { Id = 2 }],
+                [0] = [data.Teams[18] with { Id = 1 }, data.Teams[18] with { Id = 2 }] });
+        var native = NativeBattleContent.Write(content,
+            ProjectionSource(ProjectionInputs(), [4, 0, 1], [65535, 0], ProjectionSlots()));
+        var checkedResult = NativeBattleContent.CreateChecked(native, "three-role-projection.tres");
+        AssertThat(checkedResult.ProjectedSource!.RoleIds.ToArray()).IsEqual(new[] { 4, 0, 1 });
+        AssertThat(checkedResult.Content.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 0, 1 });
+        var coreResult = NativeBattleContent.CreateCore(native, "three-role-projection.tres");
+        AssertThat(coreResult.Players.Select(player => player.RoleId).ToArray()).IsEqual(new[] { 4, 0, 1 });
     }
 
     [TestCase]
