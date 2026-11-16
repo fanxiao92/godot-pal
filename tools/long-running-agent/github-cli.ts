@@ -17,7 +17,8 @@ Stopped attempts require --resume; interrupted/unknown owners also require --con
 Optional: --cwd <checkout>, --state <directory>, --max-iterations <count>, --provider/--model,
           --max-turns <count>, --session-timeout-ms <ms>, --json.
 Prepare/Game: --engine-checks --godot-path <approved-console> --fixed-package-directory <verified-bundle>.
-Corrections: two shared rounds per leaf; explicit --resume --extra-corrections <count> adds authority.
+Corrections: at most three repairs per stable root-cause problem across check/review/resume.
+--extra-corrections cannot extend this cap; unmapped legacy ledgers require parent-only migration.
 Exit 0 requires the final read-only parent-spec audit, not just leaf queue exhaustion.
 Legacy explicit-plan commands with --state remain available; no JSON plan is needed here.`;
 export function issueNumber(value: string | undefined): number {
@@ -68,7 +69,7 @@ export async function githubMain(argv: string[]): Promise<number> {
   };
   const maxIterations = positive(values['max-iterations']), maxTurns = positive(values['max-turns']), timeoutMs = positive(values['session-timeout-ms']);
   const extraCorrections = positive(values['extra-corrections']);
-  if (extraCorrections && !values.resume) throw new Error('--extra-corrections requires --resume');
+  if (extraCorrections) throw new Error('--extra-corrections cannot extend the per-problem three-round cap');
   if (Boolean(values['engine-checks']) !== Boolean(values['godot-path'] && values['fixed-package-directory']) || (!values['engine-checks'] && (values['godot-path'] || values['fixed-package-directory']))) throw new Error('Engine checks require all of --engine-checks, --godot-path and --fixed-package-directory');
   const engine = values['engine-checks'] ? { godotPath: fs.realpathSync(path.resolve(values['godot-path']!)), fixedPackageDirectory: fs.realpathSync(path.resolve(values['fixed-package-directory']!)) } : undefined;
   const root = issueNumber(values.issue);

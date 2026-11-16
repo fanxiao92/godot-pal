@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { native } from './io.ts';
-import { rangeCompleted } from './checks.ts';
+import { rangeCompleted, classifyFailure, CheckEvidenceError } from './checks.ts';
+import { QuiescenceUnknownError } from './io.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, '../..');
@@ -34,6 +35,87 @@ test('existing identity reader distinguishes exact UTF8 RED, wrong failure and a
   assert.throws(() => native(repository, 'pwsh', args), /Abnormal/);
   fs.writeFileSync(file, trx('缺少 slot0 idleAnimSpeed').replace('<TestEntry testId="b" executionId="e2"/>', ''), 'utf8');
   assert.throws(() => native(repository, 'pwsh', args), /Incomplete TRX identity/);
+});
+test('Unit failures allow xUnit theory executions sharing a definition; Game retains strict identity validation', () => {
+  const file = path.join(directory, 'theory.trx');
+  const repeated = trx('Expected six-enemy rejection')
+    .replace('testId="b" executionId="e2" testName="Synthetic.FailureTests.Two"', 'testId="a" executionId="e2" testName="Synthetic.FailureTests.One(data: 2)"')
+    .replace('<UnitTest id="b" name="Synthetic.FailureTests.Two"><Execution id="e2"/><TestMethod className="Synthetic.FailureTests" name="Two"/></UnitTest>', '')
+    .replace('<TestEntry testId="b" executionId="e2"/>', '<TestEntry testId="a" executionId="e2"/>');
+  fs.writeFileSync(file, repeated, 'utf8');
+  const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'check-failure.ps1'), '-RepositoryRoot', repository, '-TrxPath', file];
+  const result = JSON.parse(native(repository, 'pwsh', [...args, '-Scope', 'unit']));
+  assert.equal(result.classification, 'normal_test_failure');
+  assert.equal(result.failed, 1);
+  assert.equal(result.failures[0].test, 'Synthetic.FailureTests.One');
+  assert.match(result.failures[0].message, /six-enemy/);
+  assert.equal(JSON.parse(native(repository, 'pwsh', [...args, '-Scope', 'unit', '-ExpectedTest', 'Synthetic.FailureTests.One', '-ExpectedMessage', 'Expected six-enemy rejection'])).expectedRed, true);
+  assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'game']), /Incomplete TRX identity/);
+  fs.writeFileSync(file, repeated.replace('total="2"', 'total="3"'), 'utf8');
+  assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'unit']), /Incomplete counter: total/);
+  fs.writeFileSync(file, repeated.replace('outcome="Passed"', 'outcome="NotExecuted"'), 'utf8');
+  assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'unit']), /complete normal assertion/);
+});
+test('Unit distinguishes an ordinary xUnit FAIL RunInfo from host abort while Game keeps its strict diagnostics', () => {
+  const file = path.join(directory, 'unit-runinfo.trx');
+  const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'check-failure.ps1'), '-RepositoryRoot', repository, '-TrxPath', file];
+  fs.writeFileSync(file, trx('Expected six-enemy rejection', '<RunInfos><RunInfo outcome="Error">[xUnit.net] Synthetic.FailureTests.One [FAIL]</RunInfo></RunInfos>'));
+  assert.equal(JSON.parse(native(repository, 'pwsh', [...args, '-Scope', 'unit'])).classification, 'normal_test_failure');
+  assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'game']), /check:abnormal/);
+  fs.writeFileSync(file, trx('Expected six-enemy rejection', '<RunInfos><RunInfo outcome="Error">Test Run Aborted</RunInfo></RunInfos>'));
+  assert.throws(() => native(repository, 'pwsh', [...args, '-Scope', 'unit']), /check:abnormal/);
+});
+test('failure feedback preserves the failed case, classifier cause, native exit and evidence without inventing unknown quiescence', () => {
+  const output = fs.mkdtempSync(path.join(directory, 'feedback-'));
+  fs.mkdirSync(path.join(output, 'trx'));
+  const file = path.join(output, 'trx/results.trx');
+  fs.writeFileSync(path.join(output, 'stdout.log'), 'Failed: 1, Passed: 1, Total: 2');
+  fs.writeFileSync(path.join(output, 'stderr.log'), '');
+  const selection = { scope: 'unit' as const, project: 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' };
+  fs.writeFileSync(file, trx('Expected six-enemy rejection'));
+  assert.match(classifyFailure(repository, output, selection, 1).summary, /Synthetic\.FailureTests\.One.*six-enemy/);
+  fs.writeFileSync(file, trx('Expected six-enemy rejection').replace('total="2"', 'total="3"'));
+  assert.throws(() => classifyFailure(repository, output, selection, 1), (error: unknown) => {
+    assert.ok(error instanceof CheckEvidenceError);
+    assert.equal(error instanceof QuiescenceUnknownError, false);
+    assert.match(error.message, /native exit 1/i);
+    assert.match(error.message, /Incomplete counter: total/);
+    assert.ok(error.message.includes(output));
+    return true;
+  });
+  const evidence = JSON.parse(fs.readFileSync(path.join(output, 'failure-classification.json'), 'utf8'));
+  assert.equal(evidence.nativeExit, 1);
+  assert.match(evidence.cause, /Incomplete counter: total/);
+  fs.writeFileSync(file, trx('Different assertion'));
+  assert.throws(() => classifyFailure(repository, output, { ...selection, expectedFailure: { test: 'Synthetic.FailureTests.One', message: 'Expected six-enemy rejection' } }, 1), /declared test and literal/);
+  fs.writeFileSync(file, trx('Different assertion', '<RunInfos><RunInfo outcome="Error">Test Run Aborted</RunInfo></RunInfos>'));
+  assert.throws(() => classifyFailure(repository, output, selection, 1), QuiescenceUnknownError);
+  fs.writeFileSync(path.join(output, 'stdout.log'), 'Test Run Aborted');
+  assert.throws(() => classifyFailure(repository, output, selection, 1), QuiescenceUnknownError);
+});
+test('TRX-only abnormal markers take precedence over incomplete normal evidence', () => {
+  const output = fs.mkdtempSync(path.join(directory, 'trx-only-'));
+  fs.mkdirSync(path.join(output, 'trx'));
+  fs.writeFileSync(path.join(output, 'stdout.log'), 'Failed: 1');
+  fs.writeFileSync(path.join(output, 'stderr.log'), '');
+  const file = path.join(output, 'trx/results.trx');
+  const cases = [
+    trx('assertion').replace('outcome="Failed"><Counters', 'outcome="Aborted"><Counters'),
+    trx('assertion').replace('outcome="Passed"', 'outcome="Timeout"'),
+    trx('assertion').replace('aborted="0"', 'aborted="1"'),
+    trx('assertion', '<RunInfos><RunInfo outcome="Timeout">expired</RunInfo></RunInfos>').replace('total="2"', 'total="9"'),
+    trx('TimeoutException').replace('outcome="Passed"', 'outcome="NotExecuted"'),
+  ];
+  for (const xml of cases) {
+    fs.writeFileSync(file, xml);
+    assert.throws(() => classifyFailure(repository, output, { scope: 'unit' }, 1), (error: unknown) => {
+      assert.ok(error instanceof QuiescenceUnknownError, 'TRX abnormal must retain unknown quiescence');
+      assert.match(error.message, /check:abnormal/);
+      return true;
+    });
+  }
+  fs.writeFileSync(file, trx('assertion').replace('outcome="Passed"', 'outcome="Unrecognized"'));
+  assert.throws(() => classifyFailure(repository, output, { scope: 'unit' }, 1), CheckEvidenceError);
 });
 test('range completion must come from the selected existing contract, never a wrapper exit alone', () => {
   const output = path.join(directory, 'range'); fs.mkdirSync(output);

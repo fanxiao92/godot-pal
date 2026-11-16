@@ -32,7 +32,8 @@ export interface Issue {
   comments: { body: string; url: string }[];
 }
 export interface Source { head: string; files: Record<string, string>; modes: Record<string, number>; indexFingerprint: string; fingerprint: string; dirty: boolean }
-export interface Report { status: 'candidate' | 'passed' | 'blocked' | 'changes_requested'; summary: string; evidence: string[] }
+export interface ProblemFinding { problemId: string; evidenceKey: string; cause: string; evidence: string[] }
+export interface Report { status: 'candidate' | 'passed' | 'blocked' | 'changes_requested'; summary: string; evidence: string[]; findings?: ProblemFinding[] }
 export interface Attempt {
   id: string; startedUtc: string; endedUtc?: string;
   input: Source; issueHash: string; directory: string;
@@ -135,10 +136,20 @@ export function parsePlan(input: unknown): Plan {
   return input as unknown as Plan;
 }
 export function parseReport(input: unknown, role: Role): Report {
-  object(input, ['status', 'summary', 'evidence'], 'agent result');
+  object(input, ['status', 'summary', 'evidence', 'findings'], 'agent result');
   if (!(role === 'implement' ? ['candidate', 'blocked'] : ['passed', 'blocked', 'changes_requested']).includes(String(input.status))) throw new Error(`Invalid ${role} result status`);
   text(input.summary, 'summary');
   if (!Array.isArray(input.evidence) || !input.evidence.length || input.evidence.some(e => typeof e !== 'string' || !e.trim())) throw new Error('Result must include evidence references');
+  if (input.findings !== undefined) {
+    if (!Array.isArray(input.findings)) throw new Error('findings must be an array');
+    for (const finding of input.findings) {
+      object(finding, ['problemId', 'evidenceKey', 'cause', 'evidence'], 'problem finding');
+      text(finding.problemId, 'problemId');
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(finding.problemId)) throw new Error('Invalid stable problemId');
+      text(finding.evidenceKey, 'evidenceKey'); text(finding.cause, 'cause');
+      if (!Array.isArray(finding.evidence) || !finding.evidence.length || finding.evidence.some(item => typeof item !== 'string' || !item.trim())) throw new Error('Problem finding requires original evidence references');
+    }
+  }
   return input as unknown as Report;
 }
 export function changedPaths(before: Source, after: Source): string[] {

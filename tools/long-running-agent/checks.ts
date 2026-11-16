@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Check } from './contract.ts';
-import { acquire, json, native, NativeCheckFailure, QuiescenceUnknownError, runCheck } from './io.ts';
+import { acquire, atomicJson, json, native, NativeCheckFailure, QuiescenceUnknownError, runCheck } from './io.ts';
 
 export const unitProjects = ['tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'] as const;
 export const gameBatches = ['process', 'scene-dialogue', 'native-map', 'scene-realfull'] as const;
@@ -37,7 +37,9 @@ export function rangeCompleted(directory: string, scope: string): void {
   const report = json(path.join(directory, 'range', 'range-run.json')) as { status: string; projects: { scope: string }[] };
   if (report.status !== 'completed' || !report.projects.some(project => project.scope === scope)) throw new QuiescenceUnknownError('Range did not certify a complete selected test session; preserve original evidence');
 }
-function classifyFailure(cwd: string, directory: string, selection: Selection, code: number): CheckOutcome {
+// Evidence/adapter failures stop the attempt, but do not assert that a normally exited process is alive.
+export class CheckEvidenceError extends Error {}
+export function classifyFailure(cwd: string, directory: string, selection: Selection, code: number): CheckOutcome {
   if (code !== 1) throw new QuiescenceUnknownError('Unclassified native exit; not eligible for automatic correction');
   let trx = path.join(directory, 'trx', 'results.trx');
   let raw = fs.readFileSync(path.join(directory, 'stdout.log'), 'utf8') + '\n' + fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8');
@@ -55,14 +57,23 @@ function classifyFailure(cwd: string, directory: string, selection: Selection, c
   if (/Aborting test run|Test Run Aborted|test host.*crash|Unhandled exception|WindowsStdOutHook|test run timeout/i.test(raw)) throw new QuiescenceUnknownError('Abnormal test session; preserve evidence and stop');
   if (!fs.existsSync(trx)) {
     if (!selection.expectedFailure && /\berror (?:CS|CA|IDE)\d+\b/.test(raw)) return { code, expectedRed: false, summary: 'Located compiler/analyzer error; inspect original diagnostic before requesting correction' };
-    throw new QuiescenceUnknownError('Missing test result; cannot certify a normal failure or an expected RED');
+    throw new CheckEvidenceError(`Missing test result after native exit ${code}; cannot classify failure or declared RED. Inspect ${trx}, ${path.join(directory, 'stdout.log')} and ${path.join(directory, 'stderr.log')}; do not retry automatically.`);
   }
-  const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'check-failure.ps1'), '-RepositoryRoot', cwd, '-TrxPath', trx];
+  const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'check-failure.ps1'), '-RepositoryRoot', cwd, '-TrxPath', trx, '-Scope', selection.scope];
   if (selection.expectedFailure) args.push('-ExpectedTest', selection.expectedFailure.test, '-ExpectedMessage', selection.expectedFailure.message);
-  let classification: { expectedRed: boolean };
+  let classification: { expectedRed: boolean; failures: { test: string; message: string }[] };
+  const evidenceFile = path.join(directory, 'failure-classification.json');
   try { classification = JSON.parse(native(cwd, 'pwsh', args)); }
-  catch { throw new QuiescenceUnknownError('Failure did not certify a complete normal result and the declared RED; inspect original logs/TRX'); }
-  return { code, expectedRed: classification.expectedRed, summary: classification.expectedRed ? 'Exact predeclared RED observed; not a passing candidate' : 'Normal assertion/fixture failure; diagnose before requesting bounded correction' };
+  catch (error) {
+    const cause = error instanceof Error ? error.message : String(error);
+    atomicJson(evidenceFile, { status: 'classification_failed', nativeExit: code, scope: selection.scope, trx, cause });
+    const diagnostic = `Failure classification failed after native exit ${code}: ${cause}\nEvidence: ${evidenceFile}; original TRX: ${trx}. No automatic retry; inspect the classifier separately from process quiescence.`;
+    if (cause.includes('[check:abnormal]')) throw new QuiescenceUnknownError(diagnostic, { cause: error });
+    throw new CheckEvidenceError(diagnostic, { cause: error });
+  }
+  atomicJson(evidenceFile, { status: 'classified', nativeExit: code, scope: selection.scope, trx, ...classification });
+  const failures = classification.failures.slice(0, 3).map(failure => `${failure.test}: ${failure.message.slice(0, 500)}`).join('; ');
+  return { code, expectedRed: classification.expectedRed, summary: classification.expectedRed ? `Exact predeclared RED observed; not a passing candidate. ${failures}. Evidence: ${evidenceFile}` : `Normal assertion/fixture failure: ${failures}. Evidence: ${evidenceFile}; diagnose before requesting bounded correction` };
 }
 export async function executeCheck(cwd: string, directory: string, stateDirectory: string, selection: Selection, signal: AbortSignal, engine?: EngineOptions): Promise<CheckOutcome> {
   const check = buildCheck(cwd, directory, selection, engine);

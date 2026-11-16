@@ -10,13 +10,21 @@ import { atomicJson, git, json, lockFile, QuiescenceUnknownError, snapshot } fro
 import { checklistChildren, loadGraph, stateDirectory, type GitHubReader, type IssueContext } from './github.ts';
 import { GitHubHost, type CodingEvent, type CodingExecutor, type CodingRequest } from './github-host.ts';
 import { codingResourceLoader, codingTools, GitHubPiExecutor } from './github-agent.ts';
+import { approveCorrection, requireWritable } from './policy.ts';
 import { formatStatus, githubMain, issueNumber } from './github-cli.ts';
 
 const suite = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-github-coding-'));
 console.log(`Synthetic GitHub workflow evidence retained at ${suite}`);
 let sequence = 0;
 const signal = () => new AbortController().signal;
-function fixture(count = 2) {
+const finding = (request: CodingRequest, problemId = 'consumer-contract', anchor = problemId) => ({ problemId, evidenceKey: `${request.input.fingerprint}:a.txt#${anchor}`, cause: 'Located omitted consumer contract', evidence: [path.join(request.directory, 'review-source.txt')] });
+const syntheticDeclaration = { behavior: 'Approved synthetic behavior', seam: 'Synthetic public consumer', paths: ['contract-fixture.txt'], expectedFailure: { test: 'Synthetic.Capability', message: 'Expected new capability' } };
+function certifySyntheticRed(request: CodingRequest) {
+  if (request.checks.some(check => check.expectedRed) || request.pendingDependencies.size) return;
+  request.declareRed!(syntheticDeclaration);
+  request.recordCheck({ project: 'synthetic native', directory: path.join(request.directory, 'red'), sourceFingerprint: snapshot(request.cwd).fingerprint, code: 1, expectedRed: true, expectedFailure: syntheticDeclaration.expectedFailure });
+}
+function fixture(count = 2, testFirst = true) {
   const directory = path.join(suite, String(++sequence)); fs.mkdirSync(directory);
   const cwd = path.join(directory, 'repo'); fs.mkdirSync(cwd);
   git(cwd, 'init', '--quiet'); git(cwd, 'config', 'user.name', 'Synthetic GitHub Test'); git(cwd, 'config', 'user.email', 'test@example.invalid');
@@ -41,6 +49,7 @@ function fixture(count = 2) {
   let agent: CodingExecutor = { run: async request => {
     calls.push(`${request.issue}:${request.role}`);
     if (request.role === 'implement') {
+      if (testFirst) certifySyntheticRed(request);
       fs.writeFileSync(path.join(cwd, request.issue === 2 ? 'a.txt' : 'b.txt'), `issue-${request.issue}`);
       request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(cwd).fingerprint, code: 0 });
     } else assert.doesNotMatch(request.prompt, /UNTRUSTED_IMPLEMENTER_VERDICT/);
@@ -52,22 +61,191 @@ function fixture(count = 2) {
   const host = () => new GitHubHost(fs.realpathSync(cwd), 1, state, { reader, source: snapshot, agent: { run: request => agent.run(request) } }, event => events.push(event));
   return { directory, cwd: fs.realpathSync(cwd), state, head, issues, children, blockers, reader, calls, events, host, setAgent: (next: CodingExecutor) => { agent = next; }, getAgent: () => agent };
 }
+test('dependency proofs are idempotent across fresh review repair and resume without weakening validation', async () => {
+  const f = fixture(2); f.issues[3].state = 'closed'; f.blockers[2] = [3];
+  f.issues[3].comments.push({ body: `Accepted integration ${f.head}` } as IssueContext['comments'][number]);
+  const agent = f.getAgent(); let implementations = 0, reviews = 0;
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      implementations++;
+      request.verifyDependency(3, f.head, `Accepted integration ${f.head}`);
+      request.verifyDependency(3, f.head, `Accepted integration ${f.head}`);
+      assert.throws(() => request.verifyDependency(1, f.head, f.head), /Dependency/);
+      assert.throws(() => request.verifyDependency(3, 'b'.repeat(40), 'fabricated'), /Dependency/);
+      assert.throws(() => request.verifyDependency(3, f.head, 'fabricated acceptance'), /Dependency/);
+      if (implementations === 2) return { status: 'blocked', summary: 'Synthetic explicit pause for resume', evidence: ['Original dependency proof'] };
+    } else if (request.role === 'standards' && ++reviews === 1) {
+      return { status: 'changes_requested', summary: 'Located consumer repair', evidence: ['a.txt'], findings: [finding(request)] };
+    }
+    const report = await agent.run(request);
+    if (request.role === 'implement' && implementations > 1) {
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), `repair-${implementations}`);
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+    }
+    return report;
+  } });
+  await f.host().run({}, signal());
+  assert.equal(implementations, 2, 'Repeated valid dependency proof must allow repair');
+  assert.equal(f.host().state()!.records[2].attempts[0].dependencyProofs.length, 1);
+  const result = await f.host().run({ resume: true }, signal());
+  assert.equal(result.counts.awaiting_commit, 1);
+  assert.equal(f.host().state()!.records[2].attempts[1].dependencyProofs.length, 1);
+});
+test('TDD rejects undeclared production writes at the codingTools boundary', async () => {
+  const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      const write = codingTools(sdk, request, signal(), error => { throw error; }).find(tool => tool.name === 'scoped_write')!;
+      await assert.rejects(write.execute('undeclared', { path: 'a.txt', content: 'production before RED' }, undefined, undefined, {} as Pi.ExtensionToolContext), /RED declaration/, 'Production writes must wait for a declared and certified RED');
+      assert.equal(fs.readFileSync(path.join(f.cwd, 'a.txt'), 'utf8'), 'baseline');
+    }
+    return { status: 'blocked', summary: 'Boundary probe completed', evidence: ['SDK scoped_write'] };
+  } });
+  await f.host().run({}, signal());
+  assert.match(f.host().state()!.records[2].attempts[0].error!, /Boundary probe completed/);
+});
+test('TDD rejects changed candidates without RED at the GitHubHost boundary', async () => {
+  const f = fixture(1, false);
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.blocked, 1, 'Changed candidates without RED must be blocked');
+  assert.match(f.host().state()!.records[2].attempts[0].error!, /RED/);
+  assert.deepEqual(f.calls, ['2:implement']);
+});
+test('TDD stage paths permit migration only, exact RED unlocks production and stays frozen', async () => {
+  const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      const tools = codingTools(sdk, request, signal(), error => { throw error; });
+      const execute = (name: string, params: unknown) => tools.find(tool => tool.name === name)!.execute('tdd-stage', params, undefined, undefined, {} as Pi.ExtensionToolContext);
+      await execute('declare_red', syntheticDeclaration);
+      await execute('scoped_write', { path: 'contract-fixture.txt', content: 'Migrated old rejection; independent new capability expectation' });
+      await assert.rejects(execute('scoped_write', { path: 'a.txt', content: 'too early' }), /certified RED/);
+      assert.throws(() => request.beforeCheck!(snapshot(f.cwd), { scope: 'unit', expectedFailure: { test: 'Wrong.Test', message: 'Wrong diagnostic' } }), /frozen declaration/);
+      assert.throws(() => request.recordCheck({ project: 'synthetic', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1, expectedRed: true, expectedFailure: { test: 'Wrong.Test', message: 'Wrong diagnostic' } }), /frozen declaration/);
+      request.beforeCheck!(snapshot(f.cwd), { scope: 'unit', expectedFailure: syntheticDeclaration.expectedFailure });
+      request.recordCheck({ project: 'synthetic native', directory: path.join(request.directory, 'red'), sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1, expectedRed: true, expectedFailure: syntheticDeclaration.expectedFailure });
+      await assert.rejects(execute('declare_red', { ...syntheticDeclaration, paths: ['a.txt'] }), /frozen/);
+      await execute('scoped_write', { path: 'a.txt', content: 'production after exact RED' });
+      request.recordCheck({ project: 'synthetic native', directory: path.join(request.directory, 'green'), sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+    } else assert.ok(request.prompt.includes('Synthetic.Capability'));
+    return { status: request.role === 'implement' ? 'candidate' : 'passed', summary: 'Test-first migration verified', evidence: ['Public tool and host boundaries'] };
+  } });
+  assert.equal((await f.host().run({}, signal())).counts.awaiting_commit, 1);
+  const record = f.host().state()!.records[2];
+  assert.equal(record.tdd!.required, true); assert.equal(record.tdd!.red!.code, 1);
+  assert.deepEqual(record.corrections ?? [], [], 'Certified RED consumes no correction');
+});
+test('TDD rejects GREEN before RED even for the same source fingerprint', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async request => {
+    request.declareRed!(syntheticDeclaration);
+    fs.writeFileSync(path.join(f.cwd, 'contract-fixture.txt'), 'New test contract');
+    const sourceFingerprint = snapshot(f.cwd).fingerprint;
+    request.recordCheck({ project: 'synthetic', directory: path.join(request.directory, 'early-green'), sourceFingerprint, code: 0 });
+    request.recordCheck({ project: 'synthetic', directory: path.join(request.directory, 'red'), sourceFingerprint, code: 1, expectedRed: true, expectedFailure: syntheticDeclaration.expectedFailure });
+    return { status: 'candidate', summary: 'GREEN was too early', evidence: ['Synthetic ordering'] };
+  } });
+  assert.equal((await f.host().run({}, signal())).counts.blocked, 1);
+  assert.match(f.host().state()!.records[2].attempts[0].error!, /after RED/);
+});
+test('TDD obligation survives dirty resume and cannot relabel a recorded failure', async () => {
+  const f = fixture(1, false);
+  assert.equal((await f.host().run({}, signal())).counts.blocked, 1);
+  f.setAgent({ run: async request => {
+    assert.throws(() => request.beforeWrite!('a.txt'), /RED declaration/);
+    assert.throws(() => request.beforeCheck!(snapshot(f.cwd)), /Production changed/);
+    request.recordCheck({ project: 'synthetic normal failure', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1 });
+    assert.throws(() => request.declareRed!(syntheticDeclaration), /retroactively/);
+    return { status: 'candidate', summary: 'Must still be blocked', evidence: ['Retained dirty source'] };
+  } });
+  assert.equal((await f.host().run({ resume: true }, signal())).counts.blocked, 1);
+  const record = f.host().state()!.records[2];
+  assert.equal(record.attempts.length, 2); assert.deepEqual(record.tdd, { required: true });
+});
+test('TDD certified RED survives a stopped review and fresh resume without replay', async () => {
+  const f = fixture(1); const agent = f.getAgent();
+  f.setAgent({ run: async request => {
+    if (request.role === 'standards') throw new Error('Located review blocker requires explicit resume');
+    return agent.run(request);
+  } });
+  assert.equal((await f.host().run({}, signal())).counts.blocked, 1);
+  const originalRed = f.host().state()!.records[2].tdd!.red;
+  f.setAgent(agent);
+  assert.equal((await f.host().run({ resume: true }, signal())).counts.awaiting_commit, 1);
+  const record = f.host().state()!.records[2];
+  assert.equal(record.attempts.length, 2);
+  assert.deepEqual(record.tdd!.red, originalRed);
+  assert.equal(record.attempts.flatMap(attempt => attempt.checks).filter(check => check.expectedRed).length, 1);
+});
+test('TDD legacy records retain historical candidates without backfilling RED', async () => {
+  const f = fixture(1, false);
+  f.setAgent({ run: async () => { throw new Error('Historical stopped attempt'); } });
+  await f.host().run({}, signal());
+  const state = f.host().state()!;
+  delete state.records[2].tdd; // Recreate the pre-enforcement persisted record schema, not a dirty/new-attempt exemption.
+  atomicJson(path.join(f.state, 'github-state.json'), state);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      assert.throws(() => request.declareRed!(syntheticDeclaration), /Legacy/);
+      request.beforeWrite!('a.txt');
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'Retained historical candidate');
+      request.recordCheck({ project: 'synthetic legacy', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+    }
+    return { status: request.role === 'implement' ? 'candidate' : 'passed', summary: 'Historical contract retained', evidence: ['Original record'] };
+  } });
+  assert.equal((await f.host().run({ resume: true }, signal())).counts.awaiting_commit, 1);
+  assert.equal(f.host().state()!.records[2].tdd, undefined);
+});
+test('structured review axes deduplicate one problem repair and persist the shared original identity', async () => {
+  const f = fixture(1); const agent = f.getAgent(); let implementations = 0;
+  f.setAgent({ run: async request => {
+    if (request.role !== 'implement' && request.issue === 2 && implementations === 1) return { status: 'changes_requested', summary: `${request.role} located the same root cause`, evidence: ['a.txt'], findings: [finding(request)] };
+    const report = await agent.run(request);
+    if (request.role === 'implement') {
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), `revision-${++implementations}`);
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+    }
+    return report;
+  } });
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.awaiting_commit, 1, 'Structured findings must permit a single deduplicated repair');
+  const record = f.host().state()!.records[2];
+  assert.equal(record.corrections!.length, 1, 'Same finding from both axes is one repair');
+  assert.equal(record.corrections![0].problemId, 'consumer-contract');
+  assert.equal(implementations, 2);
+});
+test('automatic review repair rejects summary-only legacy findings and conflicting identities before charging rounds', async () => {
+  for (const conflict of [false, true]) {
+    const f = fixture(1); const agent = f.getAgent();
+    f.setAgent({ run: async request => {
+      if (request.role !== 'implement' && request.issue === 2) return { status: 'changes_requested', summary: 'Located consumer', evidence: ['a.txt'],
+        ...(conflict ? { findings: [{ ...finding(request), problemId: request.role === 'spec' ? 'renamed-root' : 'consumer-contract' }] } : {}) };
+      return agent.run(request);
+    } });
+    const result = await f.host().run({}, signal());
+    assert.equal(result.counts.blocked, 1);
+    const record = f.host().state()!.records[2];
+    assert.equal(record.corrections?.length ?? 0, 0);
+    assert.match(record.attempts.at(-1)!.error!, conflict ? /Same evidence/ : /structured problem findings/);
+  }
+});
 test('bounded check and review repairs share one persistent ledger, without a manual restart', async () => {
   const f = fixture(1); let implementations = 0, reviews = 0;
   f.setAgent({ run: async request => {
     f.calls.push(`${request.issue}:${request.role}`);
     if (request.role === 'implement') {
       implementations++;
+      certifySyntheticRed(request);
       if (implementations === 1) {
         request.recordFailure!(request.directory, snapshot(f.cwd), 'Located synthetic fixture error');
         assert.throws(() => request.beforeWrite!(), /request_correction/);
-        request.requestCorrection!('Fixture addressed the old field', 'Use the approved slot field', 'Same approved per-slot contract');
+        request.requestCorrection!([finding(request, 'slot-field')], 'Use the approved slot field', 'Same approved per-slot contract');
       }
       request.beforeWrite!();
       fs.writeFileSync(path.join(f.cwd, 'a.txt'), `fixed-${implementations}`);
       request.recordCheck({ project: 'synthetic native', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
     } else if (request.role === 'standards' && ++reviews === 1) {
-      return { status: 'changes_requested', summary: 'Located omitted consumer within the same contract', evidence: ['a.txt consumer'] };
+      return { status: 'changes_requested', summary: 'Located omitted consumer within the same contract', evidence: ['a.txt consumer'], findings: [finding(request, 'omitted-consumer')] };
     }
     return { status: request.role === 'implement' ? 'candidate' : 'passed', summary: 'Synthetic contract verified', evidence: ['Synthetic scope and native evidence'] };
   } });
@@ -76,11 +254,61 @@ test('bounded check and review repairs share one persistent ledger, without a ma
   const ledger = f.host().state()!.records[2].corrections!;
   assert.deepEqual(ledger.map(item => item.kind), ['check', 'review']);
   assert.equal(implementations, 2); assert.equal(reviews, 2);
+  const record = f.host().state()!.records[2];
+  assert.ok(record.tdd!.red, 'Review repair must retain the original certified RED');
+  assert.equal(record.attempts.flatMap(attempt => attempt.checks).filter(check => check.expectedRed).length, 1);
 });
-test('review exhaustion stays blocked across fresh attempts and explicit extras are separately recorded', async () => {
+test('third repair success can be delivered after check review and JSON resume', async () => {
+  const f = fixture(1); const agent = f.getAgent(); let revisions = 0, pause = true;
+  f.setAgent({ run: async request => {
+    if (request.role !== 'implement' && request.issue === 2 && revisions < 3) return { status: 'changes_requested', summary: 'Same located root cause', evidence: ['a.txt'], findings: [finding(request)] };
+    if (request.role === 'implement') {
+      if (revisions === 2 && pause) { pause = false; return { status: 'blocked', summary: 'Explicit pause before third repair', evidence: ['Synthetic pause'] }; }
+      certifySyntheticRed(request);
+      if (revisions === 0) {
+        request.recordFailure!(request.directory, snapshot(f.cwd), 'Initial normal failure');
+        request.requestCorrection!([finding(request)], 'Fix the located consumer', 'Same approved contract');
+      }
+      request.beforeWrite!();
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), `revision-${++revisions}`);
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+      return { status: 'candidate', summary: 'Repair verified', evidence: ['Current source GREEN'] };
+    }
+    return agent.run(request);
+  } });
+  await f.host().run({}, signal());
+  assert.equal(f.host().state()!.records[2].corrections?.length ?? 0, 3, 'Check and review must share exactly three rounds');
+  const result = await f.host().run({ resume: true }, signal());
+  assert.equal(result.counts.awaiting_commit, 1, 'The third repair must be allowed to succeed after resume');
+  assert.equal(f.host().state()!.records[2].corrections!.at(-1)!.outcome, 'passed');
+});
+test('third normal check failure requires attribution then stops writes without charging a fourth round', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async request => {
+    certifySyntheticRed(request);
+    const diagnose = () => request.requestCorrection!([finding(request)], 'Fix the same located consumer', 'Approved contract unchanged');
+    request.recordFailure!(request.directory, snapshot(f.cwd), 'Initial normal failure');
+    for (let round = 1; round <= 3; round++) {
+      diagnose(); request.beforeWrite!();
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), `failed-repair-${round}`);
+      request.recordCheck({ project: 'synthetic Unit', directory: `${request.directory}/check-${round}`, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1 });
+      request.recordFailure!(`${request.directory}/check-${round}`, snapshot(f.cwd), 'Same normal failure requires diagnosis');
+      assert.throws(() => request.beforeWrite!(), /request_correction/, 'Unattributed failure never permits resumed writes');
+    }
+    assert.throws(diagnose, /three repair rounds failed/);
+    assert.throws(() => request.beforeWrite!(), /three repair rounds failed/);
+    return { status: 'blocked', summary: 'Third same-problem check failure ended execution', evidence: ['All three original check directories'] };
+  } });
+  await f.host().run({}, signal());
+  const record = f.host().state()!.records[2];
+  assert.equal(record.corrections!.length, 3);
+  assert.deepEqual(record.corrections!.map(item => item.outcome), ['failed', 'failed', 'failed']);
+  await assert.rejects(f.host().run({ resume: true }, signal()), /three repair rounds failed/);
+});
+test('review exhaustion stays blocked across fresh attempts and extras cannot bypass three rounds', async () => {
   const f = fixture(1); const agent = f.getAgent(); let fail = true, revisions = 0;
   f.setAgent({ run: async request => {
-    if (request.role === 'standards' && fail) return { status: 'changes_requested', summary: 'Located same-contract repair', evidence: ['Synthetic consumer'] };
+    if (request.role === 'standards' && fail) return { status: 'changes_requested', summary: 'Located same-contract repair', evidence: ['Synthetic consumer'], findings: [finding(request)] };
     const report = await agent.run(request);
     if (request.role === 'implement') {
       fs.writeFileSync(path.join(f.cwd, 'a.txt'), `synthetic repair ${++revisions}`);
@@ -89,18 +317,67 @@ test('review exhaustion stays blocked across fresh attempts and explicit extras 
     return report;
   } });
   const stopped = await f.host().run({ commit: true }, signal());
-  assert.equal(stopped.counts.blocked, 1); assert.equal(f.host().state()!.records[2].corrections!.length, 2);
+  assert.equal(stopped.counts.blocked, 1); assert.equal(f.host().state()!.records[2].corrections!.length, 3);
+  const record = f.host().state()!.records[2];
+  assert.equal(revisions, 4, 'Initial implementation plus all three repairs must run');
+  assert.deepEqual(record.corrections!.map(item => item.outcome), ['failed', 'failed', 'failed'], 'All three failed rounds must retain their validation attribution');
+  assert.match(record.attempts.at(-1)!.error!, /three.*failed|failed.*three/i);
   await assert.rejects(f.host().run({}, signal()), /--resume/);
   fail = false;
-  const resumed = await f.host().run({ commit: true, resume: true, extraCorrections: 1 }, signal());
-  assert.equal(resumed.specStatus, 'passed');
-  assert.equal(f.host().state()!.records[2].corrections!.length, 2, 'fresh sessions do not reset spent rounds');
-  assert.equal(f.host().state()!.extraApprovals![0].count, 1);
+  await assert.rejects(f.host().run({ resume: true, extraCorrections: 1 }, signal()), /cannot.*three|per.problem/i);
+  await assert.rejects(f.host().run({ resume: true }, signal()), /three.*failed|failed.*three/i);
+  assert.equal(revisions, 4, 'Fresh resume cannot write after exhaustion');
+});
+test('parent-only legacy migration is identity-bound complete immutable and preserves unstarted evidence', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async () => ({ status: 'blocked', summary: 'Synthetic legacy stop', evidence: ['Legacy original'] }) });
+  await f.host().run({}, signal());
+  const file = path.join(f.state, 'github-state.json'); const state = f.host().state()!;
+  const original = { cause: 'Located old review batch', change: 'Repair two consumers', contract: 'Approved behavior unchanged', evidence: '/original/review', sourceFingerprint: snapshot(f.cwd).fingerprint, kind: 'review' as const, utc: '2026-11-14T00:00:00Z' };
+  state.records[2].corrections = [original, { ...original, cause: 'Stopped before writes' }];
+  atomicJson(file, state);
+  const approval = path.join(f.directory, 'parent-approval.txt'); fs.writeFileSync(approval, 'Explicit synthetic parent mapping approval and no-write original source proof');
+  const host = f.host();
+  assert.equal(typeof host.migrateCorrections, 'function', 'Parent-only migration entry must exist');
+  const input = { issue: 2, stateHash: hash(fs.readFileSync(file)), sourceFingerprint: snapshot(f.cwd).fingerprint, approval: { file: approval, sha256: hash(fs.readFileSync(approval)) }, mappings: [
+    { index: 0, findings: [{ problemId: 'consumer-contract', evidenceKey: `${snapshot(f.cwd).fingerprint}:a.txt#consumer-contract`, cause: original.cause, evidence: [approval] }], outcome: 'passed' as const },
+    { index: 1, findings: [{ problemId: 'other-contract', evidenceKey: `${snapshot(f.cwd).fingerprint}:b.txt#other-contract`, cause: original.cause, evidence: [approval] }], notStarted: { file: approval, sha256: hash(fs.readFileSync(approval)) } },
+  ] };
+  assert.throws(() => host.migrateCorrections({ ...input, stateHash: '0'.repeat(64) }), /state identity/i);
+  assert.throws(() => host.migrateCorrections({ ...input, sourceFingerprint: '0'.repeat(64) }), /source identity/i);
+  assert.throws(() => host.migrateCorrections({ ...input, mappings: input.mappings.slice(0, 1) }), /every legacy/i);
+  host.migrateCorrections(input);
+  const migrated = host.state()!.records[2];
+  assert.deepEqual(migrated.corrections, [original, { ...original, cause: 'Stopped before writes' }]);
+  assert.equal(migrated.legacyMigration!.mappings.length, 2);
+  requireWritable(migrated);
+  const next = { ...original, problemId: 'consumer-contract', evidenceKey: input.mappings[0].findings[0].evidenceKey };
+  approveCorrection(migrated, next); approveCorrection(migrated, next);
+  assert.throws(() => approveCorrection(migrated, next), /three|exhausted/);
+  const unstarted = { ...next, problemId: 'other-contract', evidenceKey: input.mappings[1].findings[0].evidenceKey };
+  approveCorrection(migrated, unstarted); approveCorrection(migrated, unstarted); approveCorrection(migrated, unstarted);
+  assert.throws(() => approveCorrection(migrated, unstarted), /three|exhausted/);
+  assert.throws(() => host.migrateCorrections({ ...input, stateHash: hash(fs.readFileSync(file)) }), /already migrated/i);
+});
+test('request_correction tool carries structured identity rather than a summary-only diagnosis', async () => {
+  const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      const findings = [finding(request)]; let received: unknown;
+      const tool = codingTools(sdk, { ...request, requestCorrection: (...args) => { received = args; } }, signal(), error => { throw error; }).find(tool => tool.name === 'request_correction')!;
+      await tool.execute('structured-correction', { findings, change: 'Fix the consumer', contract: 'Approved behavior unchanged' }, undefined, undefined, {} as Pi.ExtensionToolContext);
+      assert.deepEqual(received, [findings, 'Fix the consumer', 'Approved behavior unchanged'], 'Tool must pass stable finding identity to the host');
+    }
+    return { status: 'blocked', summary: 'Completed tool boundary probe', evidence: ['Tool schema and callback'] };
+  } });
+  await f.host().run({}, signal());
+  assert.match(f.host().state()!.records[2].attempts[0].error!, /Completed tool boundary probe/, 'Structured correction tool boundary must pass');
 });
 test('twelve complete-impact files are allowed by real SDK source tools and reviewed, not hard-split', async () => {
   const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1); const agent = f.getAgent();
   f.setAgent({ run: async request => {
     if (request.role === 'implement') {
+      certifySyntheticRed(request);
       const tools = codingTools(sdk, request, signal(), error => { throw error; });
       const write = tools.find(tool => tool.name === 'scoped_write')!;
       for (let index = 0; index < 12; index++) await write.execute('scope-test', { path: `consumer-${index}.txt`, content: 'One atomic synthetic contract migration' }, undefined, undefined, {} as Pi.ExtensionToolContext);
@@ -329,7 +606,9 @@ test('real SDK tools allow normal source work, deny shell/private assets/unverif
   const execute = (name: string, params: unknown) => tools.find(tool => tool.name === name)!.execute('synthetic', params, undefined, undefined, {} as Pi.ExtensionToolContext);
   assert.equal(tools.some(tool => ['bash', 'powershell'].includes(tool.name)), false);
   await assert.rejects(execute('scoped_write', { path: 'a.txt', content: 'denied' }), /verified dependency/);
-  request.pendingDependencies.clear(); await execute('scoped_write', { path: 'a.txt', content: 'SDK source write' });
+  request.pendingDependencies.clear();
+  request.beforeWrite = () => {}; // Synthetic certified write controller; RED ordering is exercised through GitHubHost above.
+  await execute('scoped_write', { path: 'a.txt', content: 'SDK source write' });
   assert.equal(fs.readFileSync(path.join(f.cwd, 'a.txt'), 'utf8'), 'SDK source write');
   await assert.rejects(execute('scoped_read', { path: '.git/config' }), /Protected/);
   await assert.rejects(execute('scoped_read', { path: 'data/raw/private' }), /Private/);
@@ -363,7 +642,7 @@ test('codingResourceLoader injects saved host facts and contract into real fresh
     assert.equal(environment.engineChecksAuthorized, false);
     assert.deepEqual(environment.nativeExecution, { shell: false, arguments: 'argv', textEncoding: 'utf8' });
     assert.deepEqual(environment.tools, role === 'implement'
-      ? ['scoped_read', 'scoped_edit', 'scoped_write', 'scoped_list', 'scoped_search', 'inspect_git', 'check_evidence', 'request_correction', 'verify_dependency', 'unit_test']
+      ? ['scoped_read', 'scoped_edit', 'scoped_write', 'scoped_list', 'scoped_search', 'inspect_git', 'check_evidence', 'declare_red', 'request_correction', 'verify_dependency', 'unit_test']
       : ['scoped_read', 'scoped_list', 'scoped_search', 'inspect_git', 'check_evidence']);
     const contract = fs.readFileSync(path.join(directory, 'environment-contract.txt'), 'utf8');
     assert.equal(environment.contract.sha256, hash(contract));

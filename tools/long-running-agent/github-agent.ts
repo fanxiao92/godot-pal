@@ -21,7 +21,8 @@ function sourcePath(request: CodingRequest, input: string, write = false): strin
   if (write) {
     if (request.role !== 'implement' || request.pendingDependencies.size) throw new Error('Writes require implementation role and verified dependency integration');
     if (isIgnored(request.cwd, relative)) throw new Error('Cannot modify ignored files');
-    request.beforeWrite?.();
+    if (!request.beforeWrite) throw new Error('RED write controller unavailable');
+    request.beforeWrite(relative);
   }
   return file;
 }
@@ -92,7 +93,7 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
     const perform = async (selection: Selection) => {
       if (signal.aborted) throw new Error('Session cancelled');
       if (request.pendingDependencies.size) throw new Error('Verify prerequisite integration before running tests');
-      const before = snapshot(request.cwd); request.beforeCheck?.(before);
+      const before = snapshot(request.cwd); request.beforeCheck?.(before, selection);
       if (selection.expectedFailure && request.checks.some(check => check.sourceFingerprint === before.fingerprint && check.code !== 0)) throw new Error('Cannot retroactively declare RED for an already observed failure');
       if (selection.scope === 'unit') { sourcePath(request, selection.project!); sourcePath(request, 'tests/unit.runsettings'); }
       else sourcePath(request, 'scripts/Test-Range.ps1');
@@ -101,7 +102,7 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
         const outcome = await executeCheck(request.cwd, directory, request.stateDirectory ?? request.directory, selection, signal, engine);
         const after = snapshot(request.cwd);
         if (canonical(before) !== canonical(after)) throw new QuiescenceUnknownError('Native check changed source identity');
-        request.recordCheck({ project: selection.project ?? `${selection.scope}:${selection.batch ?? 'all'}:${selection.filter ?? 'all'}`, scope: selection.scope, directory, sourceFingerprint: after.fingerprint, code: outcome.code, expectedRed: outcome.expectedRed });
+        request.recordCheck({ project: selection.project ?? `${selection.scope}:${selection.batch ?? 'all'}:${selection.filter ?? 'all'}`, scope: selection.scope, directory, sourceFingerprint: after.fingerprint, code: outcome.code, expectedRed: outcome.expectedRed, expectedFailure: selection.expectedFailure });
         if (outcome.code !== 0 && !outcome.expectedRed) {
           if (!request.recordFailure) throw new Error('No bounded correction controller is available');
           request.recordFailure(directory, after, outcome.summary);
@@ -109,14 +110,22 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
         return result({ status: outcome.expectedRed ? 'expected_red' : outcome.code === 0 ? 'passed' : 'failed', summary: outcome.summary, directory, stdout: fs.readFileSync(path.join(directory, 'stdout.log'), 'utf8').slice(-4000), stderr: fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8').slice(-2000) });
       } catch (error) { fatal(error as Error); throw error; }
     };
-    tools.push(typedTool({ name: 'request_correction', label: 'Record bounded correction', description: 'After diagnosing a recorded normal failure, bind cause, substantive fix and unchanged approved contract before writes/recheck. Shared default two rounds, no new permissions.', parameters: Type.Object({ cause: Type.String({ minLength: 1 }), change: Type.String({ minLength: 1 }), contract: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    tools.push(typedTool({ name: 'declare_red', label: 'Declare test-first stage', description: 'Before writes, freeze the new behavior, public test seam, test/fixture/old-contract migration paths and exact native RED. Stage paths are not a permanent production allowlist. Historical evidence cannot be rewritten.', parameters: Type.Object({ behavior: Type.String({ minLength: 1 }), seam: Type.String({ minLength: 1 }), paths: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), expectedFailure: Type.Object({ test: Type.String({ minLength: 1 }), message: Type.String({ minLength: 1 }) }, { additionalProperties: false }) }, { additionalProperties: false }),
+      execute: async (_id, params) => {
+        if (signal.aborted) throw new Error('Session cancelled');
+        if (!request.declareRed) throw new Error('RED declaration controller unavailable');
+        for (const file of params.paths) sourcePath(request, file);
+        request.declareRed(params); return result({ declared: true, next: 'Migrate old test contracts, add capability test, run exact native RED before production writes' });
+      },
+    }));
+    tools.push(typedTool({ name: 'request_correction', label: 'Record problem-scoped correction', description: 'Diagnose a recorded normal failure using stable root-cause problemIds and host original evidence identity:path#contract-anchor. Reuse existing IDs across checks/reviews/sessions; uncertain attribution requires operator decision. At most three repair rounds per problem; no new permissions.', parameters: Type.Object({ findings: Type.Array(Type.Object({ problemId: Type.String({ pattern: '^[a-z0-9][a-z0-9-]*$' }), evidenceKey: Type.String({ minLength: 1 }), cause: Type.String({ minLength: 1 }), evidence: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }, { additionalProperties: false }), { minItems: 1 }), change: Type.String({ minLength: 1 }), contract: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       execute: async (_id, params) => {
         if (!request.requestCorrection) throw new Error('Correction controller unavailable');
-        try { request.requestCorrection(params.cause, params.change, params.contract); return result({ approved: true, scope: 'existing contract/permissions only' }); }
+        try { request.requestCorrection(params.findings, params.change, params.contract); return result({ approved: true, scope: 'existing contract/permissions only' }); }
         catch (error) { fatal(error as Error); throw error; }
       },
     }));
-    tools.push(typedTool({ name: 'verify_dependency', label: 'Verify prerequisite integration', description: 'Bind a prerequisite to its GitHub acceptance evidence and an actual ancestor commit, before edits/tests.', parameters: Type.Object({ issue: Type.Integer({ minimum: 1 }), commit: Type.String({ pattern: '^[0-9a-f]{40}$' }), evidence: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    tools.push(typedTool({ name: 'verify_dependency', label: 'Verify prerequisite integration', description: 'Bind a direct prerequisite to its GitHub acceptance comment/issue URL or exact excerpt and an actual ancestor commit, before edits/tests. Repeating the same valid issue/commit is idempotent across repair/resume; changed commits require operator reconciliation.', parameters: Type.Object({ issue: Type.Integer({ minimum: 1 }), commit: Type.String({ pattern: '^[0-9a-f]{40}$' }), evidence: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       execute: async (_id, params) => { request.verifyDependency(params.issue, params.commit, params.evidence); return result({ verified: params.issue, commit: params.commit }); },
     }));
     tools.push(typedTool({ name: 'unit_test', label: 'Run native Unit project', description: 'Run a complete approved Core/CLI Unit project. Optional exact RED declaration is frozen before launch; abnormal results stop.', parameters: Type.Object({ project: Type.Union([Type.Literal(unitProjects[0]), Type.Literal(unitProjects[1])]), expectedFailure }, { additionalProperties: false }),

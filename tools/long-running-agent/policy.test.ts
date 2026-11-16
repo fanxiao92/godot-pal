@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
-import { approveCorrection, requireChangedAfterFailure, requireWritable, type Correction, type CorrectionLedger } from './policy.ts';
+import { approveCorrection, attributeValidation, requireChangedAfterFailure, requireWritable, type Correction, type CorrectionLedger } from './policy.ts';
 import { buildCheck, unitProjects } from './checks.ts';
-import { parsePlan, type Source } from './contract.ts';
+import { parsePlan, parseReport, type Source } from './contract.ts';
 
 const source: Source = { head: 'a'.repeat(40), fingerprint: 'before', indexFingerprint: 'index', dirty: true, files: {}, modes: {} };
-const correction = (kind: Correction['kind'] = 'check'): Correction => ({ kind, cause: 'Located wrong consumer field', change: 'Read the required slot field', contract: 'Existing slot contract and independent expected value unchanged', evidence: '/owned/check', sourceFingerprint: source.fingerprint, utc: '2026-11-13T00:00:00Z' });
+const correction = (kind: Correction['kind'] = 'check', problemId = 'slot-field'): Correction => ({ problemId, evidenceKey: `original:src/slot.cs#${problemId}`, kind, cause: 'Located wrong consumer field', change: 'Read the required slot field', contract: 'Existing slot contract and independent expected value unchanged', evidence: '/owned/check', sourceFingerprint: source.fingerprint, utc: '2026-11-13T00:00:00Z' });
 
 test('normal failure requires an evidenced substantive correction before writes/recheck', () => {
   const ledger: CorrectionLedger = { pendingFailure: { directory: '/owned/check', sourceFingerprint: 'before', summary: 'normal failed assertion' } };
@@ -17,17 +17,63 @@ test('normal failure requires an evidenced substantive correction before writes/
   assert.throws(() => requireChangedAfterFailure(ledger, source), /same check/);
   requireChangedAfterFailure(ledger, { ...source, fingerprint: 'fixed' });
 });
-test('implementation and review repairs share two rounds and survive serialized fresh attempts', () => {
+test('same problem has three rounds across check review and JSON while other problems are independent', () => {
   const ledger: CorrectionLedger = {};
   approveCorrection(ledger, correction());
   const restored: CorrectionLedger = JSON.parse(JSON.stringify(ledger));
   approveCorrection(restored, correction('review'));
-  assert.equal(restored.corrections?.length, 2);
-  assert.throws(() => approveCorrection(restored, correction()), /budget exhausted/);
-  restored.extraCorrections = 1;
   approveCorrection(restored, correction());
   assert.equal(restored.corrections?.length, 3);
-  assert.throws(() => approveCorrection(restored, correction()), /budget exhausted/);
+  restored.extraCorrections = 100;
+  assert.throws(() => approveCorrection(restored, correction()), /three|3|exhausted/);
+  approveCorrection(restored, correction('check', 'different-root'));
+  assert.equal(restored.corrections?.length, 4);
+});
+test('same original evidence cannot be renamed and unmapped legacy repairs cannot silently disappear', () => {
+  const ledger: CorrectionLedger = {};
+  approveCorrection(ledger, correction());
+  assert.throws(() => approveCorrection(ledger, { ...correction(), problemId: 'renamed' }), /evidence.*identity|same evidence/i);
+  assert.throws(() => approveCorrection({}, { ...correction(), problemId: undefined }), /problemId/);
+  const legacy = { ...correction(), problemId: undefined, evidenceKey: undefined };
+  const restored: CorrectionLedger = JSON.parse(JSON.stringify({ corrections: [legacy], extraCorrections: 99 }));
+  assert.throws(() => approveCorrection(restored, correction()), /legacy.*migration/i);
+  assert.throws(() => requireWritable(restored), /legacy.*migration/i);
+  assert.equal(restored.corrections?.length, 1);
+  assert.equal(restored.corrections?.[0].problemId, undefined);
+});
+test('structured problem findings survive reports while explicit legacy reports remain valid', () => {
+  const findings = [{ problemId: 'slot-field', evidenceKey: 'original:src/slot.cs#field', cause: 'Required field omitted', evidence: ['/owned/review.json'] }];
+  const parsed = parseReport({ status: 'changes_requested', summary: 'Located repair', evidence: ['src/slot.cs'], findings }, 'standards');
+  assert.deepEqual(JSON.parse(JSON.stringify(parsed)).findings, findings);
+  assert.equal(parseReport({ status: 'changes_requested', summary: 'Legacy read-only finding', evidence: ['source'] }, 'spec').findings, undefined);
+  assert.throws(() => parseReport({ ...parsed, findings: [{ ...findings[0], problemId: '' }] }, 'spec'), /problemId/);
+});
+test('third validation attributes a new root cause independently instead of declaring the repaired problem exhausted', () => {
+  const ledger: CorrectionLedger = {};
+  const same = { problemId: 'slot-field', evidenceKey: correction().evidenceKey!, cause: 'Same located root cause', evidence: ['/owned/validation'] };
+  for (let round = 1; round <= 3; round++) {
+    approveCorrection(ledger, { ...correction(), sourceFingerprint: `failure-${round}` });
+    if (round < 3) attributeValidation(ledger, [same], `/owned/round-${round}`, false);
+  }
+  const other = { ...same, problemId: 'other-root', evidenceKey: 'original:src/other.cs#contract' };
+  attributeValidation(ledger, [other], '/owned/review-after-third', true);
+  assert.deepEqual(ledger.corrections!.map(item => item.outcome), ['failed', 'failed', 'passed']);
+  approveCorrection(ledger, { ...correction(), problemId: other.problemId, evidenceKey: other.evidenceKey });
+  assert.equal(ledger.corrections!.length, 4);
+});
+test('third same-problem failure ends writes immediately and keeps all original validations through JSON', () => {
+  let ledger: CorrectionLedger = {};
+  const same = { problemId: 'slot-field', evidenceKey: correction().evidenceKey!, cause: 'Same located root cause', evidence: ['/owned/validation'] };
+  for (let round = 1; round <= 3; round++) {
+    approveCorrection(ledger, { ...correction(), sourceFingerprint: `failure-${round}` });
+    if (round === 3) assert.throws(() => attributeValidation(ledger, [same], `/owned/round-${round}`, false), /three repair rounds failed/);
+    else attributeValidation(ledger, [same], `/owned/round-${round}`, false);
+    ledger = JSON.parse(JSON.stringify(ledger));
+  }
+  assert.throws(() => requireWritable(ledger), /three repair rounds failed/);
+  assert.deepEqual(ledger.corrections!.map(item => item.validation), ['/owned/round-1', '/owned/round-2', '/owned/round-3']);
+  assert.equal(ledger.corrections!.length, 3);
+  assert.throws(() => approveCorrection(ledger, { ...correction(), problemId: 'renamed' }), /Same evidence/);
 });
 test('Unit remains complete-project feedback and rejects model narrowing', () => {
   const check = buildCheck(process.cwd(), '/owned/check', { scope: 'unit', project: unitProjects[0] });

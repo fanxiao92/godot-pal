@@ -1,12 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { canonical, changedPaths, hash, parseReport, type Report, type Role, type Source } from './contract.ts';
+import { canonical, changedPaths, hash, parseReport, relativeFile, type ProblemFinding, type Report, type Role, type Source } from './contract.ts';
 import { acquire, atomicJson, git, inside, json, lockFile, noLinks, QuiescenceUnknownError, recoverLock, snapshot } from './io.ts';
 import { approved, contextHash, contextsFor, loadGraph, type GitHubReader, type IssueContext, type IssueGraph } from './github.ts';
-import { approveCorrection, defaultCorrections, requireChangedAfterFailure, requireWritable, scopeWarningFiles, type Correction, type CorrectionLedger } from './policy.ts';
+import type { Selection } from './checks.ts';
+import { approveCorrection, attributeValidation, bindProblemEvidence, maxProblemCorrections, requireUnexhausted, requireChangedAfterFailure, requireWritable, scopeWarningFiles, type Correction, type CorrectionLedger } from './policy.ts';
 
-export interface UnitEvidence { project: string; directory: string; sourceFingerprint: string; code: number; scope?: string; expectedRed?: boolean }
+export interface UnitEvidence { project: string; directory: string; sourceFingerprint: string; code: number; scope?: string; expectedRed?: boolean; expectedFailure?: { test: string; message: string } }
+export interface RedDeclaration { behavior: string; seam: string; paths: string[]; expectedFailure: { test: string; message: string } }
+// Absence is reserved for records created before RED enforcement; new records always own this obligation.
+export interface RedWorkflow { required: true; declaration?: RedDeclaration; red?: UnitEvidence }
 export interface CodingEvent { type: string; role?: Role; tool?: string; text?: string; sessionFile?: string; turns?: number }
 export interface CodingRequest {
   cwd: string; issue: number; role: Role; directory: string; contexts: IssueContext[]; prompt: string;
@@ -15,13 +19,19 @@ export interface CodingRequest {
   verifyDependency: (issue: number, commit: string, evidence: string) => void;
   recordCheck: (check: UnitEvidence) => void;
   stateDirectory?: string;
-  beforeWrite?: () => void;
-  beforeCheck?: (source: Source) => void;
+  declareRed?: (declaration: RedDeclaration) => void;
+  beforeWrite?: (relative?: string) => void;
+  beforeCheck?: (source: Source, selection?: Selection) => void;
   recordFailure?: (directory: string, source: Source, summary: string) => void;
-  requestCorrection?: (cause: string, change: string, contract: string) => void;
+  requestCorrection?: (findings: ProblemFinding[], change: string, contract: string) => void;
 }
 export interface CodingExecutor { run(request: CodingRequest): Promise<Report> }
 export interface GitHubServices { reader: GitHubReader; agent: CodingExecutor; source: typeof snapshot }
+export interface LegacyCorrectionMigration {
+  issue: number; stateHash: string; sourceFingerprint: string;
+  approval: { file: string; sha256: string };
+  mappings: { index: number; findings: ProblemFinding[]; outcome?: 'passed' | 'failed'; notStarted?: { file: string; sha256: string } }[];
+}
 export interface RunOptions { commit?: boolean; maxIterations?: number; resume?: boolean; confirmQuiescent?: boolean; extraCorrections?: number }
 type SourceBinding = Pick<Source, 'head' | 'fingerprint' | 'indexFingerprint' | 'dirty'>;
 const binding = ({ head, fingerprint, indexFingerprint, dirty }: Source): SourceBinding => ({ head, fingerprint, indexFingerprint, dirty });
@@ -34,6 +44,7 @@ export interface GitHubAttempt {
 }
 export interface GitHubRecord extends CorrectionLedger {
   phase: 'working' | 'blocked' | 'awaiting_commit' | 'completed'; attempts: GitHubAttempt[]; commit?: string;
+  tdd?: RedWorkflow;
 }
 export interface GitHubState {
   version: 1; kind: 'github_issue_execution_index'; root: number; cwd: string; integrationHead: string;
@@ -91,6 +102,44 @@ export class GitHubHost {
     this.cwd = cwd; this.root = root; this.directory = directory; this.services = services; this.output = output;
   }
   state(): GitHubState | undefined { return readState(this.directory, this.cwd, this.root); }
+  // Parent-only API: deliberately absent from codingTools and autonomous run options.
+  migrateCorrections(input: LegacyCorrectionMigration): void {
+    noLinks(this.directory);
+    if (fs.existsSync(lockFile(this.cwd))) throw new Error('Cannot migrate an active or unknown writer; preserve its lock');
+    const file = path.join(this.directory, 'github-state.json'); noLinks(file);
+    if (hash(fs.readFileSync(file)) !== input.stateHash) throw new Error('Migration state identity changed');
+    const current = this.services.source(this.cwd);
+    if (current.fingerprint !== input.sourceFingerprint) throw new Error('Migration source identity changed');
+    const state = this.state()!, record = state.records[input.issue];
+    if (!record || record.phase !== 'blocked') throw new Error('Migration requires an existing stopped record');
+    if (current.head !== state.integrationHead || current.indexFingerprint !== record.attempts.at(-1)!.input.indexFingerprint) throw new Error('Migration source identity changed HEAD/index');
+    if (record.legacyMigration) throw new Error('Legacy corrections already migrated; parent reconciliation required');
+    const verifyOriginal = (proof: { file: string; sha256: string }) => {
+      if (!path.isAbsolute(proof.file) || inside(this.cwd, proof.file)) throw new Error('Migration approval/proof must be an external original artifact');
+      noLinks(proof.file);
+      if (hash(fs.readFileSync(proof.file)) !== proof.sha256) throw new Error('Migration approval/proof identity changed');
+    };
+    verifyOriginal(input.approval);
+    const legacyIndexes = (record.corrections ?? []).flatMap((item, index) => item.problemId ? [] : [index]);
+    if (!legacyIndexes.length || input.mappings.length !== legacyIndexes.length || new Set(input.mappings.map(item => item.index)).size !== legacyIndexes.length || input.mappings.some(item => !legacyIndexes.includes(item.index))) throw new Error('Migration must cover every legacy correction exactly once');
+    const original = this.originalSource(record.attempts[0]);
+    const mappings: NonNullable<CorrectionLedger['legacyMigration']>['mappings'] = [];
+    for (const mapping of input.mappings) {
+      if (!mapping.findings.length || (mapping.notStarted ? mapping.outcome !== undefined : !['passed', 'failed'].includes(mapping.outcome ?? ''))) throw new Error('Migration needs explicit problem attribution and outcome or evidenced not-started status');
+      this.problemFindings(mapping.findings, original.fingerprint);
+      bindProblemEvidence(record, mapping.findings);
+      if (mapping.notStarted) {
+        verifyOriginal(mapping.notStarted);
+        if (record.corrections![mapping.index].sourceFingerprint !== current.fingerprint) throw new Error('Not-started migration requires original failure source unchanged');
+      }
+      mappings.push({ index: mapping.index, problemIds: [...new Set(mapping.findings.map(item => item.problemId))], evidence: mapping.findings.flatMap(item => item.evidence), outcome: mapping.outcome,
+        notStarted: mapping.notStarted && { ...mapping.notStarted, sourceFingerprint: current.fingerprint } });
+    }
+    record.legacyMigration = { ledgerHash: hash(canonical(record.corrections!.filter(item => !item.problemId))), stateHash: input.stateHash, approval: input.approval, mappings, utc: new Date().toISOString() };
+    // Recheck immutable inputs immediately before the sole write; never acquire/recover a runtime lock here.
+    if (fs.existsSync(lockFile(this.cwd)) || hash(fs.readFileSync(file)) !== input.stateHash || this.services.source(this.cwd).fingerprint !== input.sourceFingerprint) throw new Error('Migration identity or writer ownership changed');
+    this.save(state);
+  }
   private save(state: GitHubState): void {
     state.updatedUtc = new Date().toISOString();
     atomicJson(path.join(this.directory, 'github-state.json'), state);
@@ -188,14 +237,7 @@ export class GitHubHost {
         state = { version: 1, kind: 'github_issue_execution_index', root: this.root, cwd: this.cwd, integrationHead: source.head, records: {}, updatedUtc: new Date().toISOString() };
         this.save(state);
       }
-      if (options.extraCorrections !== undefined) {
-        if (!options.resume || !Number.isSafeInteger(options.extraCorrections) || options.extraCorrections <= 0) throw new Error('Additional correction authority requires --resume and a positive count');
-        const entry = Object.entries(state.records).find(([, record]) => record.phase === 'blocked');
-        if (!entry) throw new Error('Additional corrections must bind an existing blocked ticket');
-        entry[1].extraCorrections = (entry[1].extraCorrections ?? 0) + options.extraCorrections;
-        (state.extraApprovals ??= []).push({ issue: Number(entry[0]), count: options.extraCorrections, sourceFingerprint: this.services.source(this.cwd).fingerprint, utc: new Date().toISOString() });
-        this.save(state);
-      }
+      if (options.extraCorrections !== undefined) throw new Error('--extra-corrections cannot extend the per-problem three-round limit; historical approvals remain evidence only');
       let iterations = 0;
       for (;;) {
         if (signal.aborted) throw new Error('Run cancelled');
@@ -225,6 +267,7 @@ export class GitHubHost {
           }
           if (!options.resume || (record.phase === 'working' && !options.confirmQuiescent) || (last.unknownQuiescence && !options.confirmQuiescent)) throw new Error(`Issue #${id} stopped: inspect status, then explicitly run --resume${record.phase === 'working' || last.unknownQuiescence ? ' --confirm-quiescent' : ''}`);
           if (!graph.nodes[id] || graph.nodes[id].issue.state !== 'open' || !approved(graph.nodes[id].issue) || graph.nodes[id].children.length || graph.nodes[id].issue.assignees.length) throw new Error('Interrupted issue is no longer an approved, unassigned open leaf');
+          requireUnexhausted(record);
           last.unknownQuiescence = false;
           last.endedUtc ??= new Date().toISOString();
           await this.execute(graph, state, Number(id), options, signal);
@@ -281,11 +324,11 @@ export class GitHubHost {
     const original = existing ? this.originalSource(existing.attempts[0]) : input;
     const attempt: GitHubAttempt = { id, directory: path.join('attempts', `${issue}-${id}`), startedUtc: new Date().toISOString(), input: binding(input), original: binding(original), contextsHash: contextHash(contexts), checks: [], dependencyProofs: [] };
     const directory = path.join(this.directory, attempt.directory); fs.mkdirSync(directory);
-    const record: GitHubRecord = existing ?? { phase: 'working', attempts: [] };
+    const record: GitHubRecord = existing ?? { phase: 'working', attempts: [], tdd: { required: true } };
     record.phase = 'working'; record.attempts.push(attempt); state.records[issue] = record;
     state.activity = { issue, updatedUtc: new Date().toISOString() };
     const inputFile = path.join(directory, 'input.json');
-    atomicJson(inputFile, { contexts, source: input, original, corrections: record.corrections ?? [], correctionLimit: defaultCorrections + (record.extraCorrections ?? 0), commandApproval: { commit: options.commit === true, resume: options.resume === true, confirmQuiescent: options.confirmQuiescent === true } });
+    atomicJson(inputFile, { contexts, source: input, original, corrections: record.corrections ?? [], correctionLimitPerProblem: maxProblemCorrections, problemEvidence: record.problemEvidence ?? {}, legacyMigration: record.legacyMigration, commandApproval: { commit: options.commit === true, resume: options.resume === true, confirmQuiescent: options.confirmQuiescent === true } });
     attempt.inputHash = hash(fs.readFileSync(inputFile));
     this.save(state);
     const pending = new Set(graph.nodes[issue].blockers.filter(blocker => state.records[blocker.number]?.phase !== 'completed').map(blocker => blocker.number));
@@ -317,30 +360,70 @@ export class GitHubHost {
             `GitHub context:\n${JSON.stringify(contexts)}`,
             `Recent local progress:\n${Object.entries(state.records).filter(([, value]) => value.phase === 'completed').slice(-5).map(([number, value]) => `#${number} @ ${value.commit}`).join('\n')}`,
             `Previous attempt: ${existing?.attempts.at(-2)?.error ?? 'none'}. Current source may contain explicitly retained partial work; inspect it rather than starting over.`,
-            role === 'implement' ? 'First inspect Git status/history and verify actual prerequisite integration using GitHub acceptance evidence and verify_dependency. No writes/tests before all dependencies are verified. Complete one independently verifiable behavior, including all producers/consumers/fixtures/docs. Select the appropriate complete Unit project or approved Prepare/Game range; never substitute Unit for engine evidence. Read docs/agents/task-execution.md. A predeclared exact RED is planned work. For a complete normal compiler/assertion failure, diagnose original evidence and use request_correction before writes/recheck. Crashes, timeouts, unknown side effects, provider failures and missing/incomplete results STOP. New business decisions, GPU/desktop/private/full-gate authority require operator action.' : `Independent ${role} review: ${role === 'standards' ? 'check repository rules and affected contracts, complete impact set and single responsibility' : 'check approved issue behavior, omissions and normal/error/edge paths; Unit cannot replace missing Game/Prepare evidence'}. Read production/test files and the diff. No writes/tests. Do not infer a pass from another verdict. Use changes_requested only for a located repair within the existing contract/permissions; new decisions or missing run authority are blocked.`,
+            role === 'implement' ? 'First inspect Git status/history and verify actual prerequisite integration using GitHub acceptance evidence and verify_dependency. No writes/tests before all dependencies are verified. Complete one independently verifiable behavior, including all producers/consumers/fixtures/docs. Select the appropriate complete Unit project or approved Prepare/Game range; never substitute Unit for engine evidence. Read docs/agents/task-execution.md. For new behavior, first migrate obsolete test contracts and add an independent capability test: use declare_red to freeze the public seam, behavior, test/fixture/old-contract migration paths and exact failure before any write. Until native exact RED is certified, only those stage paths are writable; then implement production and obtain current-source GREEN. Do not edit historical evidence. A predeclared exact RED is planned work, not a correction. Unchanged existing capability needs checks/reviews, not fabricated RED. For a complete normal compiler/assertion failure, diagnose original evidence and use request_correction before writes/recheck. Crashes, timeouts, unknown side effects, provider failures and missing/incomplete results STOP. New business decisions, GPU/desktop/private/full-gate authority require operator action.' : `Independent ${role} review: ${role === 'standards' ? 'check repository rules and affected contracts, complete impact set and single responsibility' : 'check approved issue behavior, omissions and normal/error/edge paths; Unit cannot replace missing Game/Prepare evidence'}. Read production/test files and the diff. No writes/tests. Do not infer a pass from another verdict. Use changes_requested only for a located repair within the existing contract/permissions; new decisions or missing run authority are blocked.`,
             `File count is advisory (risk signal above ${scopeWarningFiles}), never a stop or a reason to omit consumers/group unrelated tests. Explain atomicity and legal intermediate states; split only independently deliverable behavior.`,
-            `Shared correction ledger: ${JSON.stringify(record.corrections ?? [])}. Limit: ${defaultCorrections + (record.extraCorrections ?? 0)}. Pending failure: ${JSON.stringify(record.pendingFailure ?? null)}. Fresh sessions do not reset it.`,
+            `Problem-scoped correction ledger: ${JSON.stringify(record.corrections ?? [])}. Per-problem maximum: ${maxProblemCorrections}. Original problem evidence identity: ${original.fingerprint}. Evidence bindings: ${JSON.stringify(record.problemEvidence ?? {})}. Legacy mapping: ${JSON.stringify(record.legacyMigration ?? null)}. Pending failure: ${JSON.stringify(record.pendingFailure ?? null)}. Fresh sessions/attempts never reset identities or rounds.`,
+            'Attribute each located root cause/violated contract to its existing stable problemId, not a test/message/role/session name. evidenceKey must be <original problem evidence identity>:<normalized source path>#<stable lowercase-contract-anchor>, shared by both review axes; put role/session original paths in evidence[], not the key. New evidence of the same root cause keeps its ID. Semantic equivalence is the diagnoser/independent reviewers responsibility, not an algorithmic guarantee; uncertain identity or legacy mapping requires operator decision. Exact planned RED/initial failure/read-only diagnosis is not an extra correction. A third repair may validate and succeed; third same-problem failure must preserve all three originals and end execution, no fourth or extra-corrections override. Diagnose each normal failure with request_correction findings before writing/rechecking; never relabel a failed problem for new budget.',
             `Native evidence (each scope/source is separate, no synthetic full-suite pass):\n${JSON.stringify(checkHistory)}`,
+            `Persistent RED workflow (absence means approved legacy record, never inferred from dirty state): ${JSON.stringify(record.tdd ?? null)}`,
             `Prerequisite integration proofs:\n${JSON.stringify(attempt.dependencyProofs)}`,
-            'Return ONLY JSON {"status":"candidate|blocked" for implementation or "passed|changes_requested|blocked" for review,"summary":"what was completed, verified and what is next","evidence":["specific source/issue/check references"]}. No local commit or Issue closure: the host handles only explicitly approved local commits.',
+            'Return ONLY JSON {"status":"candidate|blocked" for implementation or "passed|changes_requested|blocked" for review,"summary":"what was completed, verified and what is next","evidence":["specific source/issue/check references"],"findings":[{"problemId":"stable-root-cause-id","evidenceKey":"original-identity:path#contract-anchor","cause":"located root cause/violated contract","evidence":["original diagnostic/source references"]}]}. changes_requested requires nonempty structured findings for automatic repair; never parse identity from summary. passed reviews certify no remaining findings against all active problem IDs. No local commit or Issue closure: the host handles only explicitly approved local commits.',
           ].join('\n\n');
           fs.writeFileSync(path.join(roleDirectory, 'brief.txt'), prompt, { flag: 'wx' });
           emit({ type: 'stage', role });
           const report = parseReport(await this.services.agent.run({ cwd: this.cwd, issue, role, directory: roleDirectory, contexts, prompt, input: original, signal, emit, checks: checkHistory, pendingDependencies: pending,
             verifyDependency: (dependency, commit, evidence) => {
               const context = contexts.find(item => item.number === dependency);
-              if (!pending.has(dependency) || !context || !/^[0-9a-f]{40}$/.test(commit) || !evidence.trim() || ![context.body, ...context.comments.map(comment => comment.body)].some(body => body.includes(commit) || body.includes(commit.slice(0, 7))) || !ancestor(this.cwd, commit)) throw new Error('Dependency needs GitHub acceptance evidence and an actual ancestor commit');
-              attempt.dependencyProofs.push({ issue: dependency, commit, evidence }); pending.delete(dependency); this.save(state);
+              const previous = record.attempts.flatMap(item => item.dependencyProofs).find(proof => proof.issue === dependency);
+              const accepted = context && [{ body: context.body, url: context.html_url }, ...context.comments.map(comment => ({ body: comment.body, url: comment.html_url }))].some(item =>
+                (item.body.includes(commit) || item.body.includes(commit.slice(0, 7))) && (item.url === evidence || item.body.includes(evidence)));
+              if (!graph.nodes[issue].blockers.some(blocker => blocker.number === dependency) || !context || !/^[0-9a-f]{40}$/.test(commit) || !evidence.trim() || !accepted || !ancestor(this.cwd, commit) || (previous && previous.commit !== commit)) throw new Error('Dependency needs GitHub acceptance evidence and an actual ancestor commit; repeated proof must retain its commit');
+              if (!attempt.dependencyProofs.some(proof => proof.issue === dependency)) attempt.dependencyProofs.push({ issue: dependency, commit, evidence });
+              pending.delete(dependency); this.save(state);
             },
-            recordCheck: check => { attempt.checks.push(check); checkHistory.push(check); this.save(state); },
+            declareRed: declaration => {
+              if (role !== 'implement' || pending.size) throw new Error('RED declaration requires implementation and verified dependencies');
+              if (!record.tdd) throw new Error('Legacy candidate must retain its original evidence, not backfill RED');
+              if (record.tdd.declaration) {
+                if (canonical(record.tdd.declaration) !== canonical(declaration)) throw new Error('RED declaration is frozen across repair/resume');
+                return;
+              }
+              if (!declaration.behavior.trim() || !declaration.seam.trim() || !declaration.expectedFailure.test.trim() || !declaration.expectedFailure.message.trim() || !declaration.paths.length || declaration.paths.some(file => !file || path.isAbsolute(file) || file.includes('\\') || file.split('/').some(part => !part || part === '.' || part === '..'))) throw new Error('RED declaration needs behavior, public seam, relative stage paths and exact failure');
+              if (checkHistory.some(check => check.code !== 0)) throw new Error('Cannot retroactively declare RED after an observed failure');
+              record.tdd.declaration = structuredClone(declaration); this.save(state);
+            },
+            recordCheck: check => {
+              if (check.expectedRed && record.tdd) {
+                if (!record.tdd.declaration || check.code === 0 || canonical(check.expectedFailure) !== canonical(record.tdd.declaration.expectedFailure)) throw new Error('RED evidence must match the frozen declaration');
+                record.tdd.red ??= structuredClone(check);
+              }
+              attempt.checks.push(check); checkHistory.push(check); this.save(state);
+            },
             stateDirectory: this.directory,
-            beforeWrite: () => requireWritable(record),
-            beforeCheck: source => requireChangedAfterFailure(record, source),
+            beforeWrite: relative => {
+              requireWritable(record);
+              if (record.tdd && !record.tdd.red && (!relative || !record.tdd.declaration?.paths.includes(relative))) throw new Error('RED declaration and certified RED required before production writes; only declared stage paths may change');
+            },
+            beforeCheck: (source, selection) => {
+              requireChangedAfterFailure(record, source);
+              if (record.tdd && !record.tdd.red) {
+                const declaration = record.tdd.declaration;
+                if (changedPaths(original, source).some(file => !declaration?.paths.includes(file))) throw new Error('Production changed before certified RED');
+                if (selection?.expectedFailure && (!declaration || canonical(selection.expectedFailure) !== canonical(declaration.expectedFailure))) throw new Error('Native RED must use the frozen declaration');
+              }
+            },
             recordFailure: (directory, source, summary) => { record.pendingFailure = { directory, sourceFingerprint: source.fingerprint, summary }; this.save(state); },
-            requestCorrection: (cause, change, contract) => {
-              if (!record.pendingFailure) throw new Error('No recorded normal failure to correct');
-              approveCorrection(record, { cause, change, contract, evidence: record.pendingFailure.directory, sourceFingerprint: record.pendingFailure.sourceFingerprint, kind: 'check', utc: new Date().toISOString() });
-              this.save(state);
+            requestCorrection: (findings, change, contract) => {
+              if (role !== 'implement' || !record.pendingFailure) throw new Error('No recorded normal failure to correct');
+              if (!findings.length) throw new Error('Normal failure diagnosis requires structured problem findings');
+              const unique = this.problemFindings(findings, original.fingerprint);
+              const failure = record.pendingFailure;
+              try {
+                attributeValidation(record, findings, failure.directory, false);
+                const next: CorrectionLedger = structuredClone(record);
+                for (const finding of unique) approveCorrection(next, { ...finding, change, contract, evidence: [failure.directory, ...finding.evidence].join('\n'), sourceFingerprint: failure.sourceFingerprint, kind: 'check', utc: new Date().toISOString() });
+                record.corrections = next.corrections; record.problemEvidence = next.problemEvidence; delete record.pendingFailure;
+              } finally { this.save(state); }
             },
           }), role);
           atomicJson(path.join(roleDirectory, 'report.json'), report); reports[role] = report;
@@ -352,20 +435,34 @@ export class GitHubHost {
             if (current.head !== input.head || current.indexFingerprint !== input.indexFingerprint) throw new Error('Implementation changed HEAD/index');
             const paths = changedPaths(original, current);
             if (paths.length > scopeWarningFiles) emit({ type: 'scope_warning', text: `${paths.length} files: review single responsibility and complete impact set, not a hard limit` });
-            if (!checkHistory.some(check => check.code === 0 && check.sourceFingerprint === current.fingerprint)) throw new Error('No successful current-source native evidence');
+            const redIndex = record.tdd?.red ? checkHistory.findIndex(check => canonical(check) === canonical(record.tdd!.red)) : -1;
+            if (record.tdd && paths.length && redIndex < 0) throw new Error('Changed candidate requires certified RED before GREEN');
+            if (!checkHistory.some((check, index) => check.code === 0 && check.sourceFingerprint === current.fingerprint && (redIndex < 0 || index > redIndex))) throw new Error('No successful current-source native evidence after RED');
             candidate = current; attempt.candidate = binding(current);
           } else if (canonical(binding(current)) !== canonical(attempt.candidate)) throw new QuiescenceUnknownError('Frozen candidate changed during independent review; confirm writer ownership');
         }
         const repairs = (['standards', 'spec'] as const).filter(role => reports[role]?.status === 'changes_requested');
-        if (!repairs.length) break;
-        const cause = repairs.map(role => `${role}: ${reports[role]!.summary}`).join('\n');
-        approveCorrection(record, { cause, change: 'Repair the located review findings and run affected native checks', contract: 'Existing approved ticket and independent expectations unchanged; no new business decision or run permission', evidence: cycleDirectory, sourceFingerprint: candidate!.fingerprint, kind: 'review', utc: new Date().toISOString() });
+        if (!repairs.length) {
+          attributeValidation(record, [], cycleDirectory, true);
+          this.save(state);
+          break;
+        }
+        const findings = repairs.flatMap(role => {
+          const findings = reports[role]!.findings;
+          if (!findings?.length) throw new Error('Automatic review repair requires structured problem findings; legacy summary is not a problem identity');
+          return findings;
+        });
+        const unique = this.problemFindings(findings, original.fingerprint);
+        attributeValidation(record, findings, cycleDirectory, true);
+        const next: CorrectionLedger = structuredClone(record);
+        for (const finding of unique) approveCorrection(next, { ...finding, change: 'Repair the located review findings and run affected native checks', contract: 'Existing approved ticket and independent expectations unchanged; no new business decision or run permission', evidence: finding.evidence.join('\n'), sourceFingerprint: candidate!.fingerprint, kind: 'review', utc: new Date().toISOString() });
+        record.corrections = next.corrections; record.problemEvidence = next.problemEvidence; delete record.pendingFailure;
         this.save(state);
         cycle++;
       }
       this.assertFresh(graph, issue, attempt.contextsHash);
       if (signal.aborted) throw new Error('Run cancelled');
-      atomicJson(path.join(directory, 'gate.json'), { candidate, reports, checks: checkHistory, corrections: record.corrections ?? [], dependencyProofs: attempt.dependencyProofs });
+      atomicJson(path.join(directory, 'gate.json'), { candidate, reports, checks: checkHistory, tdd: record.tdd, corrections: record.corrections ?? [], problemEvidence: record.problemEvidence, legacyMigration: record.legacyMigration, dependencyProofs: attempt.dependencyProofs });
       attempt.gateHash = hash(fs.readFileSync(path.join(directory, 'gate.json'))); attempt.summary = reports.implement!.summary;
       attempt.endedUtc = new Date().toISOString(); record.phase = 'awaiting_commit'; delete state.activity; this.save(state);
       if (!this.services.source(this.cwd).dirty) this.finish(state, issue, input.head);
@@ -375,6 +472,24 @@ export class GitHubHost {
       if (error instanceof QuiescenceUnknownError || attempt.commitStarted) attempt.unknownQuiescence = true;
       delete state.activity; this.save(state); this.output({ type: 'blocked', text: `#${issue}: ${attempt.error}` });
     }
+  }
+  private problemFindings(findings: ProblemFinding[], originalIdentity: string): ProblemFinding[] {
+    parseReport({ status: 'changes_requested', summary: 'Structured problem attribution', evidence: ['Host diagnosis'], findings }, 'standards');
+    const byKey = new Map<string, ProblemFinding>(), byId = new Map<string, ProblemFinding>();
+    for (const finding of findings) {
+      const prefix = `${originalIdentity}:`;
+      if (!finding.evidenceKey.startsWith(prefix)) throw new Error('Problem evidenceKey must use the host original evidence identity');
+      const anchor = finding.evidenceKey.slice(prefix.length).split('#');
+      if (anchor.length !== 2 || !/^[a-z0-9][a-z0-9-]*$/.test(anchor[1])) throw new Error('Problem evidenceKey requires a normalized source path#contract-anchor');
+      relativeFile(anchor[0]);
+      const previous = byKey.get(finding.evidenceKey);
+      if (previous && previous.problemId !== finding.problemId) throw new Error('Same evidence cannot acquire a different problem identity; normalize independent findings');
+      byKey.set(finding.evidenceKey, finding);
+      const sameProblem = byId.get(finding.problemId);
+      if (sameProblem) sameProblem.evidence.push(...finding.evidence);
+      else byId.set(finding.problemId, structuredClone(finding));
+    }
+    return [...byId.values()];
   }
   private auditContexts(graph: IssueGraph): IssueContext[] {
     const ids = new Set(Object.values(graph.nodes).flatMap(node => [node.issue.number, ...node.blockers.map(blocker => blocker.number)]));
