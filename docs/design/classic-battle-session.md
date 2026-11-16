@@ -1,5 +1,27 @@
 # ClassicBattleSession：Core 普攻与整轮选令
 
+## 当前 #207：Core 一至五个实有敌位（#138 的局部能力）
+
+`ClassicBattleSession` 与 typed `TriggerBattleContent.EnemyTeams` 接受 **1..5 个完整、非 null 的敌位**；玩家接受域仍为1..2。沿用正式 trigger → `ClassicBattleLifecycleSession` → combat 链，不新增接口或第二套战斗引擎。0、6、null 槽和已有不支持能力仍在 RNG/玩法副作用前拒绝，typed team 容量诊断带 teamId。此节更新后文历史检查点的 Core 敌方上限，不覆盖其他能力限制。
+
+- `EnemyTeams[teamId][slot]` / `Current.Enemies[slot]` 的 ordinal 是实例地址；重复 ID7 的五槽仍各有独立 HP、队列与目标。typed 内容深拷贝全部槽及嵌套状态/毒数组；调用者替换输入数组或后续推进不改变已发布快照。
+- 不改既有排序与重定向：选齐存活玩家后才按 E0..E4、P0..P1 抽身法；完整13项参考队列作 WORD 截断、SHORT 严格嵌套比较，不替换为稳定排序。死亡队列位置 pass、不消费动作随机；执行时目标死亡，从原 slot 循环找存活目标。最后一敌 KO 才 Won，终态保留唯一回执。
+- 固定只读参考：`palcommon.h:60` 的 `MAX_ENEMIES_IN_TEAM=5`；`fight.c:87–129` 自动目标、`1450–1601` 经典队列、`1705–1770` 死亡 pass、`3624–3670/3753–3757` 普攻和计数；不编译或运行参考。
+
+公开 Unit 独立字面预期位于 `ClassicBattlePartySessionTests` 与 `TriggerScriptBattleBindingTests`：
+
+| 行为 | 独立输入 / 预期 |
+| --- | --- |
+| 容量、身份与拒绝 | 1..5 敌 × 1/2 玩家可构造；重复 ID7 的0..4均可选；-1/5拒绝且快照/RNG不变；0/6/null槽、三玩家和槽4法术仍拒绝 |
+| 同速与非稳定反例 | 五敌 level0/dex0、两玩家 dex18、七次倍率1 → `E0:18,E1:18,E2:18,E3:18,E4:18,P0:18,P1:18`；玩家1/100 → `P1:100,E1:18,E2:18,E3:18,E4:18,E0:18,P0:1`，另有不同倍率截断例 |
+| 死亡目标与回执 | attack40、防御有效24、+1、无暴击、倍率1 → 每击43；五敌HP43，两人同选4，先杀4再绕至0，1/2/3仍存活；后续公开回合杀3/1/2才Won，死敌pass无额外随机，旧快照保留HP43 |
+| 五敌逐槽行动 | 敌速度118..114先于玩家100/90；敌强度36..40对防20，目标0/1/0/1/0 → 伤害20..24，玩家最终HP134/156；每个 ActorIndex 及敌自身HP100..104独立 |
+| trigger / lifecycle / continuation | 单角色HP300/max350、五敌HP43，按4/0/1/2/3依次击杀，剩敌合计10次伤害20；rawHP100，五个战后钩子按 caller0..4真实执行后半恢复HP225/MP35，仅 owned ACK 提交并进入新五槽战斗；旧/重复回执无效。五轮随机请求数30/24/18/12/6合计90，无成长抽取 |
+
+存量 `ClassicBattleSessionTests.UnsupportedDefinitions` 和 `ModernBattleContentTests` 的解析容量负例原以三敌代表超限，同步改为六敌，并独立覆盖解析后1..5槽的顺序、重复ID及HP。`ModernBattleContent.Parse` 委托 `TriggerBattleContent` 构造并验证，因此该纯Core解析入口也获得1..5容量，不是仍停留在双敌的外层门。这是同一容量契约必要的调用方/测试迁移，不能保留与新接受域矛盾的断言。
+
+**合法中间态与证据边界**：本叶仅交付 Core 规则。外层现代投影、native、Prepare 与 Main 的完整生产链未迁移，原有外层容量门尚未放宽：非投影 native 链在 `NativeBattleContent.CreateChecked`（读回）与 `Write(content, null)`（无 receipt 的 Prepare 写出）处显式拒绝每队非 1..2 的 loaded enemy slots（诊断带 teamId），投影路径继续由投影行强制同一 1..2 loaded 域，Core 1..5 接受域不回退；不宣称五敌正常 Main、布局/视觉/输入或整个 #138 完成，不解除 #140 的父依赖。Core Unit 不替代 Prepare/Game/私有真实资源/GPU/Windows人工/远端CI。空槽、三角色、新动作、敌方法术/双动与旧失败支线不在本叶。敌方 HP/目标/队列仍由 combat 唯一持有，lifecycle 结算角色、trigger 在 owned ACK 后提交；不新增持久化 schema 或另一份真状态。
+
 ## 当前 #160：live Name 角色钩子所有权（Core 窄契约）
 
 本节同步 [#160](https://github.com/fanxiao92/godot-pal/issues/160) 的当前 Core 实现；**后文 #47/#48/#49/#46 等是历史检查点**，其中单人、零钩子及静态初始入口等描述不覆盖本节的现行 seam。本票仍未整票验收、未集成，不代表原生资源/Main 或 M6 交付，也不增加故事验收计数。

@@ -1512,6 +1512,156 @@ public sealed class TriggerScriptBattleBindingTests
         };
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void Typed_content_accepts_one_to_five_complete_slots_and_freezes_the_team(int count)
+    {
+        var enemies = Enumerable.Repeat(new ClassicBattleEnemy(7, 0, 43, 0, 0, 0, 1), count).ToArray();
+        var content = SlotContent(enemies);
+        var frozen = content.EnemyTeams[18];
+        enemies[count - 1] = enemies[count - 1] with { Hp = 1 };
+        Assert.Equal(count, frozen.Count);
+        Assert.All(frozen, e => Assert.Equal((7, 43), (e.Id, e.Hp)));
+        Assert.Throws<NotSupportedException>(() => ((IList<ClassicBattleEnemy>)frozen).Clear());
+        TriggerScriptSession.ValidateEntry(Fixture().Load(), TriggerScriptSessionTests.Language(), content, "shared", "npc");
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("six")]
+    [InlineData("null-team")]
+    [InlineData("null-slot4")]
+    public void Typed_content_rejects_missing_or_excess_slots_with_the_team_identity(string fault)
+    {
+        var enemies = Enumerable.Repeat(new ClassicBattleEnemy(7, 0, 43, 0, 0, 0, 1), fault == "six" ? 6 : 5).ToArray();
+        if (fault == "null-slot4") enemies[4] = null!;
+        var error = Assert.Throws<InvalidDataException>(() => SlotContent(
+            fault == "empty" ? [] : fault == "null-team" ? null! : enemies));
+        Assert.Contains("Battle team 18 requires one to five nonnull enemy slots.", error.Message);
+    }
+
+    [Fact]
+    public void Five_slots_flow_through_trigger_real_lifecycle_all_end_scripts_and_owned_settlement_continuation()
+    {
+        // Fixed classic fixture: hit43; P speed100 precedes E speed18.
+        // Targets4,0,1,2,3 kill one per round. Surviving enemies hit20 each:
+        // 4+3+2+1 = 10 hits, rawHP300->100; Won recovers (350-100)/2 =>225, MP20->35.
+        // RNG per round: livingEnemies+1 queue floats, four player draws, five per enemy hit.
+        // Totals30,24,18,12,6 =90; zero rewards cross no growth thresholds or stat draws.
+        int[][] statuses = Enumerable.Range(0, 5).Select(_ => new int[9]).ToArray();
+        int[][] poisons = Enumerable.Range(0, 5).Select(_ => new int[1]).ToArray();
+        var enemies = Enumerable.Range(0, 5).Select(i => new ClassicBattleEnemy(7, 0, 43, 0, 0, 0, 1)
+            { Statuses = statuses[i], Poisons = poisons[i], BattleEndScript = 5 }).ToArray();
+        var teams = new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = enemies };
+        var role = Role() with { Hp = 300, MaxHp = 350 };
+        var content = new TriggerBattleContent([role], [new(1, 300, 350, 40, 20, 100)],
+            new Dictionary<int, ClassicBattleGrowthData> { [1] = Growth() }, teams);
+        for (int i = 0; i < 5; i++)
+        {
+            statuses[i][0] = poisons[i][0] = 1;
+            enemies[i] = enemies[i] with { Hp = 1, BattleEndScript = 0 };
+        }
+        teams.Clear();
+        Assert.All(content.EnemyTeams[18], e =>
+        {
+            Assert.Equal((7, 43, 5), (e.Id, e.Hp, e.BattleEndScript));
+            Assert.All(e.Statuses, value => Assert.Equal(0, value));
+            Assert.Equal(new[] { 0 }, e.Poisons);
+        });
+        var fixture = Fixture();
+        fixture.Index["source"]!["instructionCount"] = 7;
+        fixture.Index["source"]!["byteLength"] = 56;
+        Pad(fixture, 7);
+        fixture.Commands[2] = Battle(2);
+        fixture.Commands[3] = End(3);
+        fixture.Commands[5] = new JsonObject { ["label"] = "L0005", ["op"] = "showDialog", ["messageId"] = 61,
+            ["descriptionLineWord"] = 0, ["next"] = "L0006",
+            ["source"] = new JsonObject { ["index"] = 5, ["opcode"] = 65535, ["operands"] = new JsonArray(61, 0, 0) } };
+        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("slot end")])]);
+        var random = new BindingRandom();
+        var script = new TriggerScriptSession(fixture.Load(), language, content, random);
+        TriggerScriptSession.ValidateEntry(fixture.Load(), language, content, "shared", "npc");
+        var initialRole = script.BattleRole!;
+        Assert.Equal(0, random.Draws);
+        script.Start("shared", "npc", 28);
+        var request = script.PendingBattle!;
+        var initialCombat = request.Lifecycle.Current.Combat;
+        Assert.Equal(new[] { 0, 1, 2, 3, 4 }, initialCombat.Enemies.Select(e => e.Slot));
+        Assert.All(initialCombat.Enemies, e => Assert.Equal((7, 43), (e.Id, e.Hp)));
+        Assert.False(script.AcknowledgeBattle(request.Id, null));
+        int[] targets = [4, 0, 1, 2, 3];
+        int[][] expectedHp = [[43, 43, 43, 43, 0], [0, 43, 43, 43, 0], [0, 0, 43, 43, 0], [0, 0, 0, 43, 0], [0, 0, 0, 0, 0]];
+        int[] expectedDraws = [30, 54, 72, 84, 90];
+        for (int round = 0; round < 5; round++)
+        {
+            var lifecycle = request.Lifecycle;
+            lifecycle.SelectAttack(0, targets[round]);
+            Assert.True(lifecycle.ResolveNextAction());
+            Assert.Equal(targets[round], lifecycle.Current.Combat.LastAction!.TargetIndex);
+            Assert.Equal(43, lifecycle.Current.Combat.LastAction.Damage);
+            Assert.Equal(expectedHp[round], lifecycle.Current.Combat.Enemies.Select(e => e.Hp));
+            // Every queued enemy position advances, including the just-killed corpse (no RNG).
+            if (round < 4)
+                for (int remaining = 0; remaining < 5 - round; remaining++)
+                    Assert.True(lifecycle.ResolveNextAction());
+            Assert.Equal(round == 4 ? ClassicBattlePhase.Won : ClassicBattlePhase.Selecting, lifecycle.Current.Combat.Phase);
+            Assert.Equal(expectedDraws[round], random.Draws);
+            Assert.Null(lifecycle.Completion); // Last KO still waits for all five enemy-end scripts.
+            Assert.Same(initialRole, script.BattleRole);
+            Assert.False(script.AcknowledgeBattle(request.Id, lifecycle.Completion));
+        }
+        Assert.Equal(100, request.Lifecycle.Current.Combat.PlayerHp);
+        Assert.All(initialCombat.Enemies, e => Assert.Equal(43, e.Hp));
+        Assert.Equal(300, initialCombat.PlayerHp);
+        for (int slot = 0; slot < 5; slot++)
+        {
+            Assert.Equal(new ClassicBattleEndScript(slot, 7, 5), request.Lifecycle.PendingBattleEndScript);
+            script.StartBattleEndScript();
+            Assert.Equal(slot, script.Caller); // repeated ID7 does not replace the enemy ordinal caller
+            Assert.Equal(TriggerScriptPhase.WaitingForDisplay, script.Phase);
+            Assert.Null(request.Lifecycle.Completion);
+            Assert.False(script.AcknowledgeBattle(request.Id, null));
+            FinishDisplay(script);
+            Assert.Equal(28, script.Caller);
+        }
+        var receipt = Assert.IsType<ClassicBattleLifecycleSession.CompletionReceipt>(request.Lifecycle.Completion);
+        Assert.Equal(ClassicBattlePhase.Won, receipt.Outcome);
+        Assert.False(request.Lifecycle.Current.IsInBattle);
+        Assert.Equal((225, 35), (request.Lifecycle.Current.Role.Hp, request.Lifecycle.Current.Role.Mp));
+        Assert.Equal(new BattleExperienceSnapshot(7, 3, 5), request.Lifecycle.Current.Role.HiddenExperience["attack"]);
+        Assert.Equal(new BattleExperienceSnapshot(7, 3, 10), request.Lifecycle.Current.Role.HiddenExperience["health"]);
+        var settled = request.Lifecycle.Current;
+        Assert.False(request.Lifecycle.ResolveNextAction());
+        Assert.Same(settled, request.Lifecycle.Current);
+        Assert.Same(receipt, request.Lifecycle.Completion);
+        Assert.False(script.AcknowledgeBattle(Guid.NewGuid(), receipt));
+        Assert.Same(initialRole, script.BattleRole);
+        Assert.True(script.AcknowledgeBattle(request.Id, receipt));
+        var next = script.PendingBattle!;
+        Assert.NotEqual(request.Id, next.Id);
+        Assert.Equal(new TriggerPosition("shared", "L0002", 2), script.CurrentPosition);
+        Assert.Equal(1, script.ReturnEntry);
+        Assert.Equal(28, script.Caller);
+        Assert.Equal((225, 35), (next.Lifecycle.Current.Role.Hp, next.Lifecycle.Current.Role.Mp));
+        Assert.All(next.Lifecycle.Current.Combat.Enemies, e => Assert.Equal((7, 43), (e.Id, e.Hp)));
+        Assert.All(request.Lifecycle.Current.Combat.Enemies, e => Assert.Equal(0, e.Hp));
+        Assert.All(initialCombat.Enemies, e => Assert.Equal(43, e.Hp));
+        AssertInert(script, random, () => script.AcknowledgeBattle(request.Id, receipt));
+        AssertInert(script, random, () => script.AcknowledgeBattle(next.Id, receipt));
+        Assert.Equal(300, initialRole.Hp);
+        Assert.Equal(300, content.InitialRole.Hp);
+        Assert.Equal(90, random.Draws);
+    }
+
+    private static TriggerBattleContent SlotContent(IReadOnlyList<ClassicBattleEnemy> enemies)
+        => new([Role()], [new(1, 100, 150, 40, 20, 100)],
+            new Dictionary<int, ClassicBattleGrowthData> { [1] = Growth() },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = enemies });
+
     private static DynamicEventWorld SharedWorld(RoleLiveState owner) => DynamicEventWorld.ForHost(
         new StaticSceneRules(new SceneMap(2, new uint[16384], [new SceneFrame(0, 32, 15)]), []),
         new StaticLeader(320, 320, 0, 0, 0, 3,

@@ -574,9 +574,42 @@ public sealed class ModernBattleContentTests
             var parent = field == "enemies" ? data["teams"]![0]! : data;
             if (kind == 0) parent[field] = null;
             else if (kind == 1) parent[field]!.AsArray().Clear();
-            else parent[field]!.AsArray().Add(parent[field]![0]!.DeepClone());
+            else
+            {
+                int limit = field == "enemies" ? 5 : 2;
+                while (parent[field]!.AsArray().Count <= limit)
+                    parent[field]!.AsArray().Add(parent[field]![0]!.DeepClone());
+            }
             Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
         }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void Party_schema_preserves_one_to_five_complete_enemy_slots_without_merging_duplicate_ids(int count)
+    {
+        var data = PartyData();
+        var enemies = data["teams"]![0]!["enemies"]!.AsArray();
+        var enemy = enemies[0]!.DeepClone();
+        enemies.Clear();
+        for (int slot = 0; slot < count; slot++)
+        {
+            var row = enemy.DeepClone();
+            row["hp"] = 100 + slot;
+            enemies.Add(row);
+        }
+
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        var team = Assert.Single(content.EnemyTeams).Value;
+        Assert.Equal(count, team.Count);
+        Assert.Equal(Enumerable.Repeat(7, count), team.Select(e => e.Id));
+        Assert.Equal(Enumerable.Range(100, count), team.Select(e => e.Hp));
+        enemies[0]!["hp"] = 1;
+        Assert.Equal(100, team[0].Hp);
     }
 
     private static JsonObject PartyData()

@@ -57,8 +57,8 @@ public sealed class TriggerBattleContent
             x => new ClassicBattleGrowthData(Copy(x.Value.LevelUpExperience), Array.AsReadOnly(x.Value.LevelUpMagics.ToArray()))));
         EnemyTeams = new ReadOnlyDictionary<int, IReadOnlyList<ClassicBattleEnemy>>(teams.ToDictionary(x => x.Key, x =>
         {
-            if (x.Value is null || x.Value.Count is < 1 or > 2 || x.Value.Any(e => e is null))
-                throw new InvalidDataException("Each team requires one or two nonnull enemy slots.");
+            if (x.Value is null || x.Value.Count is < 1 or > 5 || x.Value.Any(e => e is null))
+                throw new InvalidDataException($"Battle team {x.Key} requires one to five nonnull enemy slots.");
             return (IReadOnlyList<ClassicBattleEnemy>)Array.AsReadOnly(x.Value.Select(e => e with { Statuses = Copy(e.Statuses), Poisons = Copy(e.Poisons) }).ToArray());
         }));
         BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);

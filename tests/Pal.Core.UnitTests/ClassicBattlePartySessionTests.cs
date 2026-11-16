@@ -270,6 +270,218 @@ public sealed class ClassicBattlePartySessionTests
         random.AssertExhausted();
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void One_to_five_complete_enemy_slots_accept_one_or_two_players_without_random(int enemyCount)
+    {
+        foreach (int playerCount in new[] { 1, 2 })
+        {
+            var d = FiveEnemyDefinition();
+            var random = new ScriptedRandom([]);
+            var session = new ClassicBattleSession(d with
+            {
+                Players = d.Players.Take(playerCount).ToArray(), Enemies = d.Enemies.Take(enemyCount).ToArray()
+            }, random);
+            Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+            Assert.Equal(playerCount, session.Current.Players.Count);
+            Assert.Equal(Enumerable.Range(0, enemyCount), session.Current.Enemies.Select(e => e.Slot));
+            Assert.All(session.Current.Enemies, e => Assert.Equal((7, 100), (e.Id, e.Hp)));
+            Assert.Null(session.Completion);
+            Assert.False(session.ResolveNextAction());
+            random.AssertExhausted();
+        }
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("six")]
+    [InlineData("null-slot")]
+    [InlineData("three-players")]
+    [InlineData("magic-slot4")]
+    public void Expanded_capacity_keeps_invalid_and_unsupported_definitions_out_before_random(string fault)
+    {
+        var d = FiveEnemyDefinition();
+        var enemies = d.Enemies.ToArray();
+        if (fault == "null-slot") enemies[4] = null!;
+        if (fault == "magic-slot4") enemies[4] = enemies[4] with { MagicId = 1 };
+        d = d with { Enemies = fault == "empty" ? [] : fault == "six" ? [.. enemies, enemies[0]] : enemies };
+        if (fault == "three-players") d = d with { Players = [.. d.Players, d.Players[0] with { RoleId = 0 }] };
+        var random = new ScriptedRandom([]);
+        Assert.Throws<InvalidDataException>(() => new ClassicBattleSession(d, random));
+        random.AssertExhausted();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void Every_repeated_ID_slot_is_selectable_and_invalid_boundaries_leave_snapshot_and_random_unchanged(int slot)
+    {
+        var random = new ScriptedRandom(QueueDraws(5));
+        var session = new ClassicBattleSession(FiveEnemyDefinition(), random);
+        var initial = session.Current;
+        foreach (int invalid in new[] { -1, 5, 7 })
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(0, invalid));
+            Assert.Same(initial, session.Current);
+        }
+        session.SelectAttack(0, slot);
+        Assert.Equal(slot, session.Current.Players[0].SelectedEnemySlot);
+        Assert.Equal(1, session.Current.SelectingPlayerIndex);
+        Assert.Null(initial.Players[0].SelectedEnemySlot);
+        Assert.Empty(session.Current.ActionQueue);
+        Assert.False(session.ResolveNextAction());
+        var partial = session.Current;
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(1, 5));
+        Assert.Same(partial, session.Current);
+        session.SelectAttack(1, slot);
+        Assert.Equal(slot, session.Current.Players[1].SelectedEnemySlot);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        random.AssertExhausted();
+    }
+
+    [Theory]
+    [InlineData(18, 18, 1f, 1f, 1f, 1f, 1f, 1f, 1f, "E0:18,E1:18,E2:18,E3:18,E4:18,P0:18,P1:18")]
+    [InlineData(1, 100, 1f, 1f, 1f, 1f, 1f, 1f, 1f, "P1:100,E1:18,E2:18,E3:18,E4:18,E0:18,P0:1")]
+    [InlineData(22, 22, 1.1f, .9f, 1f, 1.05f, .95f, .9f, 1.1f, "P1:24,P0:19,E0:19,E2:18,E3:18,E4:17,E1:16")]
+    public void Five_enemy_queue_matches_reference_enemy_first_draws_and_nonstable_nested_comparisons(
+        int dex0, int dex1, float e0, float e1, float e2, float e3, float e4, float p0, float p1, string expected)
+    {
+        // fight.c:1462-1601. Every enemy starts at (0+6)*3=18; WORD truncates each draw.
+        // In row2 the late P1 swap displaces E0 behind E1..E4, unlike a stable sort.
+        var d = FiveEnemyDefinition();
+        d = d with { Players = [d.Players[0] with { Dexterity = dex0 }, d.Players[1] with { Dexterity = dex1 }] };
+        var random = new ScriptedRandom([F(.9f, 1.1f, e0), F(.9f, 1.1f, e1), F(.9f, 1.1f, e2),
+            F(.9f, 1.1f, e3), F(.9f, 1.1f, e4), F(.9f, 1.1f, p0), F(.9f, 1.1f, p1)]);
+        var session = new ClassicBattleSession(d, random);
+        session.SelectAttack(0, 4);
+        Assert.Empty(session.Current.ActionQueue);
+        session.SelectAttack(1, 0);
+        Assert.Equal(expected, string.Join(",", session.Current.ActionQueue.Select(q =>
+            $"{(q.Side == ClassicBattleSide.Enemy ? "E" : "P")}{q.ActorIndex}:{q.Dexterity}")));
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Five_enemy_retarget_wraps_four_to_zero_skips_corpses_and_wins_only_on_last_KO_with_unique_receipt()
+    {
+        // Each hit43: attack40 vs effective defense24 => base42, +1, noncritical, scale1.
+        // Enemy speeds22..18 preserve E0..E4 order behind P0=100/P1=90.
+        // R1: 7 queue floats; P0 kills4, P1 wraps to0 (four draws per hit).
+        // E0/E4 pass with no draws; E1/E2/E3 each draw target0..1 then evade0..16.
+        // R2: E1/E2/E3/P0/P1 = 5 floats; kills3 then wraps to1; only E2 evades.
+        // R3: E2/P0/P1 = 3 floats; P0 kills last2; no further action draws.
+        var random = new ScriptedRandom([.. QueueDraws(5), .. PlayerHit(), .. PlayerHit(),
+            I(0, 1, 0), I(0, 16, 16), I(0, 1, 1), I(0, 16, 16), I(0, 1, 0), I(0, 16, 16),
+            .. QueueDraws(3), .. PlayerHit(), .. PlayerHit(), I(0, 1, 1), I(0, 16, 16),
+            .. QueueDraws(1), .. PlayerHit()]);
+        var d = FiveEnemyDefinition();
+        var players = d.Players.ToArray();
+        var enemies = d.Enemies.Select((e, i) => e with { Hp = 43, Dexterity = 4 - i }).ToArray();
+        var session = new ClassicBattleSession(new(players, enemies), random);
+        var initial = session.Current;
+        players[0] = players[0] with { Attack = 0 };
+        enemies[4] = enemies[4] with { Hp = 1 };
+        Assert.Throws<NotSupportedException>(() => ((IList<ClassicBattleEnemyView>)initial.Enemies).Clear());
+        session.SelectAttack(0, 4);
+        session.SelectAttack(1, 4);
+        var queued = session.Current;
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal((0, 4, 7, 43), (session.Current.LastAction!.ActorIndex, session.Current.LastAction.TargetIndex,
+            session.Current.LastAction.TargetId, session.Current.LastAction.Damage));
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal((1, 0, 7, 43), (session.Current.LastAction!.ActorIndex, session.Current.LastAction.TargetIndex,
+            session.Current.LastAction.TargetId, session.Current.LastAction.Damage));
+        Assert.Equal(new[] { 0, 43, 43, 43, 0 }, session.Current.Enemies.Select(e => e.Hp));
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.Null(session.Completion);
+        var last = session.Current.LastAction;
+        Assert.True(session.ResolveNextAction()); // dead E0
+        Assert.Same(last, session.Current.LastAction);
+        for (int i = 1; i <= 3; i++)
+        {
+            Assert.True(session.ResolveNextAction());
+            Assert.Equal(i, session.Current.LastAction!.ActorIndex);
+            Assert.Equal(ClassicBattleSide.Enemy, session.Current.LastAction.Attacker);
+        }
+        last = session.Current.LastAction;
+        Assert.True(session.ResolveNextAction()); // dead E4
+        Assert.Same(last, session.Current.LastAction);
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        var beforeInvalid = session.Current;
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(0, 4));
+        Assert.Same(beforeInvalid, session.Current);
+        session.SelectAttack(0, 3);
+        session.SelectAttack(1, 3);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(3, session.Current.LastAction!.TargetIndex);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(1, session.Current.LastAction!.TargetIndex);
+        Assert.Equal(new[] { 0, 0, 43, 0, 0 }, session.Current.Enemies.Select(e => e.Hp));
+        Assert.Null(session.Completion);
+        for (int i = 0; i < 3; i++) Assert.True(session.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        session.SelectAttack(0, 2);
+        session.SelectAttack(1, 2);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(2, session.Current.LastAction!.TargetIndex);
+        Assert.Equal(ClassicBattlePhase.Won, session.Current.Phase);
+        Assert.All(session.Current.Enemies, e => Assert.Equal(0, e.Hp));
+        Assert.Equal(new ClassicBattleCounts(3, 6), session.Current.Players[0].Counts);
+        Assert.Equal(new ClassicBattleCounts(2, 4), session.Current.Players[1].Counts);
+        Assert.All(initial.Enemies, e => Assert.Equal(43, e.Hp));
+        Assert.All(queued.Enemies, e => Assert.Equal(43, e.Hp));
+        Assert.All(initial.Players, p => Assert.Equal(new ClassicBattleCounts(0, 0), p.Counts));
+        var receipt = Assert.IsType<ClassicBattleSession.CompletionReceipt>(session.Completion);
+        Assert.Equal(ClassicBattlePhase.Won, receipt.Outcome);
+        var completed = session.Current;
+        Assert.False(session.ResolveNextAction());
+        Assert.Throws<InvalidOperationException>(() => session.SelectAttack(0, 2));
+        Assert.Same(completed, session.Current);
+        Assert.Same(receipt, session.Completion);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Five_fast_enemy_actors_hit_independently_in_slot_order_not_repeated_ID_order()
+    {
+        // Effective strengths36..40 vs defense20 => base40,42,44,46,48 /2 =20..24.
+        // Queue118..114 precedes P0=100/P1=90; target sequence0,1,0,1,0.
+        var d = FiveEnemyDefinition();
+        d = d with { Enemies = d.Enemies.Select((e, i) => e with { Hp = 100 + i, Attack = i, Dexterity = 100 - i }).ToArray() };
+        var random = new ScriptedRandom([.. QueueDraws(5),
+            I(0, 1, 0), .. EnemyHit(), I(0, 1, 1), .. EnemyHit(), I(0, 1, 0), .. EnemyHit(),
+            I(0, 1, 1), .. EnemyHit(), I(0, 1, 0), .. EnemyHit()]);
+        var session = new ClassicBattleSession(d, random);
+        var initial = session.Current;
+        session.SelectAttack(0, 4);
+        session.SelectAttack(1, 0);
+        int[] hp0 = [180, 180, 158, 158, 134], hp1 = [200, 179, 179, 156, 156];
+        for (int i = 0; i < 5; i++)
+        {
+            Assert.True(session.ResolveNextAction());
+            Assert.Equal(new ClassicBattleAction(1, ClassicBattleSide.Enemy, i % 2 == 0 ? 4 : 2, 20 + i, false, false)
+                { ActorIndex = i, TargetIndex = i % 2 }, session.Current.LastAction);
+            Assert.Equal(new[] { hp0[i], hp1[i] }, session.Current.Players.Select(p => p.Hp));
+            Assert.Equal(new[] { 100, 101, 102, 103, 104 }, session.Current.Enemies.Select(e => e.Hp));
+            Assert.Null(session.Completion);
+        }
+        Assert.All(initial.Players, p => Assert.Equal(200, p.Hp));
+        random.AssertExhausted();
+    }
+
+    private static ClassicBattleDefinition FiveEnemyDefinition()
+    {
+        var d = Definition();
+        return d with { Enemies = Enumerable.Repeat(d.Enemies[0], 5).ToArray() };
+    }
+    private static Draw[] QueueDraws(int livingEnemies) => Enumerable.Repeat(F(.9f, 1.1f, 1), livingEnemies + 2).ToArray();
     private static Draw[] QueueDraws() => [F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1)];
     private static Draw[] PlayerHit() => [I(1, 2, 1), I(0, 5, 1), F(1, 1.125f, 1), I(2, 3, 2)];
     private static Draw[] EnemyHit() => [I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1)];

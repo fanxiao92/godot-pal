@@ -50,8 +50,15 @@ public static class NativeBattleContent
                     throw new InvalidDataException("duplicate Growth.RoleId");
             var teams = new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>>();
             foreach (var team in Items(native.Teams, "Teams"))
-                if (!teams.TryAdd(team.TeamId, Items(team.Enemies, "Team.Enemies").Select(ReadEnemy).ToArray()))
+            {
+                var enemies = Items(team.Enemies, "Team.Enemies").Select(ReadEnemy).ToArray();
+                if (!teams.TryAdd(team.TeamId, enemies))
                     throw new InvalidDataException("duplicate TeamId");
+                // Non-projected native reads keep the explicit outer 1..2 loaded-slot boundary;
+                // Core's 1..5 capacity is not enabled on this chain until the outer layers migrate.
+                if (enemies.Length is < 1 or > 2)
+                    throw new InvalidDataException($"Team {team.TeamId} requires one or two loaded enemy slots; Core five-slot capacity is not enabled on this native chain");
+            }
             var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
                 Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray());
             ModernBattleContent.Validate(content);
@@ -67,6 +74,13 @@ public static class NativeBattleContent
     {
         ModernBattleContent.Validate(content);
         projectedSource?.ValidateFor(content);
+        // Without a projection receipt this is the non-projected native/Prepare chain: keep its
+        // explicit outer 1..2 loaded-slot boundary (projected sources enforce the same domain
+        // through their own slot rows).
+        if (projectedSource is null)
+            foreach (var team in content.EnemyTeams)
+                if (team.Value.Count is < 1 or > 2)
+                    throw new InvalidDataException($"Team {team.Key} requires one or two loaded enemy slots; Core five-slot capacity is not enabled on this native chain");
         return new()
         {
             FormatVersion = 1,
