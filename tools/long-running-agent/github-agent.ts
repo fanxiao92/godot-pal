@@ -27,6 +27,11 @@ function sourcePath(request: CodingRequest, input: string, write = false): strin
   return file;
 }
 const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }], details: {} });
+// Host-callback protocol rejections (wrong stage, wrong identity, frozen-contract mismatch, missing precondition)
+// are session-local tool errors: the model reads the original rejection text and corrects itself within the same
+// attempt instead of losing the cold-start session. Quiescence-unknown and an already-signalled session stop stay
+// fatal and keep propagating to the attempt boundary; commitStarted failures live host-side and never pass here.
+const toolError = (text: string) => ({ content: [{ type: 'text' as const, text }], details: {}, isError: true });
 // Agent-side failed-check receipt: the classifier's exact test/message strings are embedded verbatim (raw lines, not JSON-escaped)
 // so a RED re-declaration or correction diagnosis is a copy, never inference from source code. The classifier itself stays unchanged.
 export function failureReceipt(outcome: { code: number; expectedRed: boolean; summary: string }, directory: string): string {
@@ -41,12 +46,18 @@ export function failureReceipt(outcome: { code: number; expectedRed: boolean; su
 }
 export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSignal, fatal: (error: Error) => void, engine?: EngineOptions): Pi.ToolDefinition[] {
   const tools: Pi.ToolDefinition[] = [];
+  const reject = (error: unknown) => {
+    if (signal.aborted || error instanceof QuiescenceUnknownError) { fatal(error instanceof Error ? error : new Error(String(error))); throw error; }
+    return toolError(error instanceof Error ? error.message : String(error));
+  };
   const wrappers = [[sdk.createReadToolDefinition(request.cwd), false], ...(request.role === 'implement' ? [[sdk.createEditToolDefinition(request.cwd), true], [sdk.createWriteToolDefinition(request.cwd), true]] : [])] as [Pi.ToolDefinition, boolean][];
   for (const [tool, write] of wrappers) tools.push({ ...tool, name: `scoped_${tool.name}`, execute: async (id, params, toolSignal, update, context) => {
     if (signal.aborted) throw new Error('Session cancelled');
-    const input = params as { path: string; [key: string]: unknown };
-    const file = sourcePath(request, input.path, write);
-    return tool.execute(id, { ...input, path: file }, toolSignal, update, context);
+    try {
+      const input = params as { path: string; [key: string]: unknown };
+      const file = sourcePath(request, input.path, write);
+      return await tool.execute(id, { ...input, path: file }, toolSignal, update, context);
+    } catch (error) { return reject(error); }
   } });
   tools.push(typedTool({ name: 'scoped_list', label: 'List source directory', description: 'List immediate safe source entries, including the repository root.', parameters: Type.Object({ path: Type.String() }, { additionalProperties: false }),
     execute: async (_id, params) => {
@@ -103,14 +114,14 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
   if (request.role === 'implement') {
     const expectedFailure = Type.Optional(Type.Object({ test: Type.String({ minLength: 1 }), message: Type.String({ minLength: 1 }) }, { additionalProperties: false }));
     const perform = async (selection: Selection) => {
-      if (signal.aborted) throw new Error('Session cancelled');
-      if (request.pendingDependencies.size) throw new Error('Verify prerequisite integration before running tests');
-      const before = snapshot(request.cwd); request.beforeCheck?.(before, selection);
-      if (selection.expectedFailure && request.checks.some(check => check.sourceFingerprint === before.fingerprint && check.code !== 0)) throw new Error('Cannot retroactively declare RED for an already observed failure');
-      if (selection.scope === 'unit') { sourcePath(request, selection.project!); sourcePath(request, 'tests/unit.runsettings'); }
-      else sourcePath(request, 'scripts/Test-Range.ps1');
-      const directory = fs.mkdtempSync(path.join(request.directory, `${selection.scope}-`));
       try {
+        if (signal.aborted) throw new Error('Session cancelled');
+        if (request.pendingDependencies.size) throw new Error('Verify prerequisite integration before running tests');
+        const before = snapshot(request.cwd); request.beforeCheck?.(before, selection);
+        if (selection.expectedFailure && request.checks.some(check => check.sourceFingerprint === before.fingerprint && check.code !== 0)) throw new Error('Cannot retroactively declare RED for an already observed failure');
+        if (selection.scope === 'unit') { sourcePath(request, selection.project!); sourcePath(request, 'tests/unit.runsettings'); }
+        else sourcePath(request, 'scripts/Test-Range.ps1');
+        const directory = fs.mkdtempSync(path.join(request.directory, `${selection.scope}-`));
         const outcome = await executeCheck(request.cwd, directory, request.stateDirectory ?? request.directory, selection, signal, engine);
         const after = snapshot(request.cwd);
         if (canonical(before) !== canonical(after)) throw new QuiescenceUnknownError('Native check changed source identity');
@@ -121,32 +132,39 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
         }
         if (outcome.code !== 0) return result(failureReceipt(outcome, directory));
         return result({ status: 'passed', summary: outcome.summary, directory, stdout: fs.readFileSync(path.join(directory, 'stdout.log'), 'utf8').slice(-4000), stderr: fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8').slice(-2000) });
-      } catch (error) { fatal(error as Error); throw error; }
+      } catch (error) { return reject(error); }
     };
     tools.push(typedTool({ name: 'declare_red', label: 'Declare test-first stage', description: 'Before writes, freeze the new behavior, public test seam, test/fixture/old-contract migration paths and exact native RED. Stage paths are not a permanent production allowlist. Historical evidence cannot be rewritten.', parameters: Type.Object({ behavior: Type.String({ minLength: 1 }), seam: Type.String({ minLength: 1 }), paths: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), expectedFailure: Type.Object({ test: Type.String({ minLength: 1 }), message: Type.String({ minLength: 1 }) }, { additionalProperties: false }) }, { additionalProperties: false }),
       execute: async (_id, params) => {
         if (signal.aborted) throw new Error('Session cancelled');
-        if (!request.declareRed) throw new Error('RED declaration controller unavailable');
-        for (const file of params.paths) sourcePath(request, file);
-        request.declareRed(params); return result({ declared: true, next: 'Migrate old test contracts, add capability test, run exact native RED before production writes' });
+        try {
+          if (!request.declareRed) throw new Error('RED declaration controller unavailable');
+          for (const file of params.paths) sourcePath(request, file);
+          request.declareRed(params); return result({ declared: true, next: 'Migrate old test contracts, add capability test, run exact native RED before production writes' });
+        } catch (error) { return reject(error); }
       },
     }));
     tools.push(typedTool({ name: 'request_correction', label: 'Record problem-scoped correction', description: 'Diagnose a recorded unexpected complete normal failure (compiler/assertion/fixture) that arose during implementation, using stable root-cause problemIds and host original evidence identity:path#contract-anchor. A certified expectedRed is planned work, not a correction: never call request_correction for it; proceed directly to production writes and GREEN. Reuse existing IDs across checks/reviews/sessions; uncertain attribution requires operator decision. At most three repair rounds per problem; no new permissions.', parameters: Type.Object({ findings: Type.Array(Type.Object({ problemId: Type.String({ pattern: '^[a-z0-9][a-z0-9-]*$' }), evidenceKey: Type.String({ minLength: 1 }), cause: Type.String({ minLength: 1 }), evidence: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }, { additionalProperties: false }), { minItems: 1 }), change: Type.String({ minLength: 1 }), contract: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       execute: async (_id, params) => {
         if (!request.requestCorrection) throw new Error('Correction controller unavailable');
         try { request.requestCorrection(params.findings, params.change, params.contract); return result({ approved: true, scope: 'existing contract/permissions only' }); }
-        catch (error) { fatal(error as Error); throw error; }
+        catch (error) { return reject(error); }
       },
     }));
-    tools.push(typedTool({ name: 'record_evidence_resolution', label: 'Bind operator external evidence resolution', description: 'Bind operator-provided external evidence resolving the current pending review correction. file must be an absolute path outside the repository whose sha256 matches that exact file; problemId must equal the pending review correction problemId. The binding itself is the substantive change: the source may legitimately stay unchanged. Duplicate, forged or repository-internal inputs stop the session.', parameters: Type.Object({ problemId: Type.String({ pattern: '^[a-z0-9][a-z0-9-]*$' }), file: Type.String({ minLength: 1 }), sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }), note: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    tools.push(typedTool({ name: 'record_evidence_resolution', label: 'Bind operator external evidence resolution', description: 'Bind operator-provided external evidence resolving the current pending review correction. file must be an absolute path outside the repository; sha256 is optional: provide it to pin the exact content (it must match the file), or omit it and the host computes and records the actual file hash. problemId must equal the pending review correction problemId. The binding itself is the substantive change: the source may legitimately stay unchanged. Duplicate, forged or repository-internal inputs stop the session.', parameters: Type.Object({ problemId: Type.String({ pattern: '^[a-z0-9][a-z0-9-]*$' }), file: Type.String({ minLength: 1 }), sha256: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })), note: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       execute: async (_id, params) => {
         if (!request.recordEvidenceResolution) throw new Error('Evidence resolution controller unavailable');
-        try { request.recordEvidenceResolution(params.problemId, params.file, params.sha256, params.note); return result({ resolved: true, problemId: params.problemId, file: params.file }); }
-        catch (error) { fatal(error as Error); throw error; }
+        try {
+          const sha256 = request.recordEvidenceResolution(params.problemId, params.file, params.sha256, params.note);
+          return result({ resolved: true, problemId: params.problemId, file: params.file, sha256 });
+        } catch (error) { return reject(error); }
       },
     }));
     tools.push(typedTool({ name: 'verify_dependency', label: 'Verify prerequisite integration', description: 'Bind a direct prerequisite to its GitHub acceptance evidence before edits/tests. evidence must be exactly equal to the acceptance comment/issue URL, or be a verbatim excerpt of that comment/issue body (the host matches URL equality or body inclusion); that comment must contain the dependency integration commit as the full 40-hex SHA or its 7-hex short form. Repeating the same valid issue/commit is idempotent across repair/resume; changed commits require operator reconciliation.', parameters: Type.Object({ issue: Type.Integer({ minimum: 1 }), commit: Type.String({ pattern: '^[0-9a-f]{40}$' }), evidence: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
-      execute: async (_id, params) => { request.verifyDependency(params.issue, params.commit, params.evidence); return result({ verified: params.issue, commit: params.commit }); },
+      execute: async (_id, params) => {
+        try { request.verifyDependency(params.issue, params.commit, params.evidence); return result({ verified: params.issue, commit: params.commit }); }
+        catch (error) { return reject(error); }
+      },
     }));
     tools.push(typedTool({ name: 'unit_test', label: 'Run native Unit project', description: 'Run a complete approved Core/CLI Unit project, optionally narrowed by one FullyQualifiedName= or ~ method/class-prefix filter. Optional exact RED declaration is frozen before launch; abnormal results stop.', parameters: Type.Object({ project: Type.Union([Type.Literal(unitProjects[0]), Type.Literal(unitProjects[1])]), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
       execute: async (_id, params) => perform({ scope: 'unit', ...params }),

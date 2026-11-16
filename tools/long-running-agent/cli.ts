@@ -9,7 +9,7 @@ export async function main(argv: string[]): Promise<number> {
   if (!argv.length || argv[0] === 'help' || argv.includes('--help')) {
     const { githubHelp } = await import('./github-cli.ts'); console.log(githubHelp); return 0;
   }
-  if (['run', 'status'].includes(argv[0]) && argv.some(arg => arg === '--issue' || arg.startsWith('--issue='))) {
+  if (['run', 'status', 'preflight'].includes(argv[0]) && argv.some(arg => arg === '--issue' || arg.startsWith('--issue='))) {
     return (await import('./github-cli.ts')).githubMain(argv);
   }
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, strict: true, options: {

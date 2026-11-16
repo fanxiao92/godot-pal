@@ -9,8 +9,12 @@ import { GitHubHost, type CodingEvent, type GitHubStatus } from './github-host.t
 export const githubHelp = `GitHub-backed coding loop (human plans, fresh Pi sessions):
   node tools/long-running-agent/cli.ts run --issue <parent-number-or-URL> [--commit]
   node tools/long-running-agent/cli.ts status --issue <parent-number-or-URL> [--json | --offline]
+  node tools/long-running-agent/cli.ts preflight --issue <parent-number-or-URL>
 
 Uses the current Git root, existing Pi configuration, and an automatic state directory.
+preflight prints a read-only JSON readiness report from state+git only (writer lock/PID, reusable
+dependency proofs, per-problem repair rounds, current-fingerprint GREEN, blockers, tool whitelist);
+no model, GitHub reads, tests or state writes.
 --commit explicitly permits local per-ticket commits and continuation; never push/merge/close Issues.
 Without --commit, a verified dirty candidate waits for your commit. Run the same command afterward.
 Stopped attempts require --resume; interrupted/unknown owners also require --confirm-quiescent.
@@ -58,8 +62,8 @@ export async function githubMain(argv: string[]): Promise<number> {
     'engine-checks': { type: 'boolean' }, 'godot-path': { type: 'string' }, 'fixed-package-directory': { type: 'string' }, 'extra-corrections': { type: 'string' },
   } });
   const command = positionals[0];
-  if (positionals.length !== 1 || !['run', 'status'].includes(command)) throw new Error(githubHelp);
-  const allowed = command === 'status' ? ['issue', 'cwd', 'state', 'offline', 'json'] : ['issue', 'cwd', 'state', 'commit', 'resume', 'confirm-quiescent', 'json', 'max-iterations', 'provider', 'model', 'max-turns', 'session-timeout-ms', 'engine-checks', 'godot-path', 'fixed-package-directory', 'extra-corrections'];
+  if (positionals.length !== 1 || !['run', 'status', 'preflight'].includes(command)) throw new Error(githubHelp);
+  const allowed = command === 'status' ? ['issue', 'cwd', 'state', 'offline', 'json'] : command === 'preflight' ? ['issue', 'cwd', 'state', 'engine-checks', 'godot-path', 'fixed-package-directory'] : ['issue', 'cwd', 'state', 'commit', 'resume', 'confirm-quiescent', 'json', 'max-iterations', 'provider', 'model', 'max-turns', 'session-timeout-ms', 'engine-checks', 'godot-path', 'fixed-package-directory', 'extra-corrections'];
   if (Object.keys(values).some(key => !allowed.includes(key))) throw new Error(`Inappropriate option for ${command}`);
   if (values['confirm-quiescent'] && !values.resume) throw new Error('--confirm-quiescent requires --resume');
   if (Boolean(values.provider) !== Boolean(values.model)) throw new Error('Use existing Pi configuration, or specify both --provider and --model');
@@ -90,6 +94,11 @@ export async function githubMain(argv: string[]): Promise<number> {
   if (command === 'status') {
     const status = new GitHubHost(cwd, root, directory, { reader, source: snapshot, agent: noAgent }).status(values.offline);
     console.log(values.json ? JSON.stringify(status, null, 2) : formatStatus(status));
+    return 0;
+  }
+  if (command === 'preflight') {
+    const report = new GitHubHost(cwd, root, directory, { reader, source: snapshot, agent: noAgent }).preflight(Boolean(engine));
+    console.log(JSON.stringify(report, null, 2));
     return 0;
   }
   const { GitHubPiExecutor } = await import('./github-agent.ts');

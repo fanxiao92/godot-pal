@@ -84,6 +84,16 @@ node tools/long-running-agent/cli.ts status --issue 126 --offline
 
 默认目录自动选择为 `<Pi agentDir>/long-running/<checkout-hash>/<root-issue>/`。不同 checkout 和父票不会混用；status 会打印实际路径。Git common directory 下的 writer lock 复用既有排他机制，跨父票/工作树的 Host 也不并行写同一仓库。
 
+### 只读预检（preflight）
+
+恢复前想知道“现在能不能继续、缺什么”，不读 GitHub、不跑测试、不改状态：
+
+```powershell
+node tools/long-running-agent/cli.ts preflight --issue 126
+```
+
+输出 JSON 就绪报告，全部来自本地 state+git 实测：writer 锁/PID 状态（none/alive/exited/unknown）；每条未完成 record 的可复用 dependencyProofs（issue/commit 合法且作为当前 ancestor 实测，同 issue 冲突 commit 不复用）、每问题已用/剩余修复轮次与待决修正可解除性（源码变更路径或证据绑定路径）、当前指纹下是否存在 GREEN 检查、阻塞原因清单、tdd 声明/认证状态；工具白名单摘要（unit_test 恒可用、range_test 仅在本命令带 --engine-checks 三件套时反映为可用）。`resumable` 只复现 run 会直接拒绝的硬阻塞（锁归属、问题耗尽）；“当前指纹无 GREEN”、待诊断失败等待办列在 blockers 中由实施会话补齐。不调用模型、不解析 issue 评论、不运行任何测试、不写入任何状态。
+
 ## 正常暂停与继续
 
 在 `--max-iterations` 边界结束后，重新执行同一个命令即可继续；不恢复旧对话，而是根据 GitHub、Git 和磁盘原件创建新会话。
@@ -104,7 +114,9 @@ node tools/long-running-agent/cli.ts run --issue 126
 
 已批准的历史记录（例如原 #207）没有这一新增责任字段，保留原候选及原证据，不回滚生产或追补假 RED；这不是新记录的豁免入口。模型没有历史证据写工具，`check_evidence` 只读原件。
 
-事前声明精确测试身份/字面诊断的 RED 命中后可继续实现；其它正常完整的编译/断言/fixture失败，先读原件定位，通过 `request_correction` 记录原因、实质修正和不变契约后才允许写入/必要重验。`request_correction` 仅用于实施中意外出现的完整普通失败；已认证 expectedRed 属计划内工作，勿调用，直接生产写入与 GREEN。没有源码修正不重复原检查或审查，唯一例外是操作者通过 `record_evidence_resolution` 绑定树外原件解除 review 类修正（见工具清单）。两轴的同契约 `changes_requested` 须提供结构化 `findings: [{ problemId, evidenceKey, cause, evidence: [...] }]` 才能自动回实施修复，禁止从摘要猜问题身份。`evidenceKey` 使用brief提供的共同original源码身份加 `:规范源码路径#稳定契约锚点`，不使用各review会话目录；同finding两轴合并登记，原件路径保留在 `evidence[]`。`request_correction` 使用同形 `findings` 加 `change/contract`，host绑定证据与ID，按问题持久计数与验证结果。后续证据是否同根因须由诊断/独立审查确认；不确定则停止请求决定，host不声称算法能识别所有语义改名。
+事前声明精确测试身份/字面诊断的 RED 命中后可继续实现；其它正常完整的编译/断言/fixture失败，先读原件定位，通过 `request_correction` 记录原因、实质修正和不变契约后才允许写入/必要重验。`request_correction` 仅用于实施中意外出现的完整普通失败；已认证 expectedRed 属计划内工作，勿调用，直接生产写入与 GREEN。没有源码修正不重复原检查或审查，唯一例外是操作者通过 `record_evidence_resolution` 绑定树外原件解除 review 类修正（见工具清单）。
+
+工具协议拒绝降级为会话内工具错误：host 回调（`verify_dependency`、`declare_red`、`request_correction`、`record_evidence_resolution`、写入/检查前置与 `unit_test`/`range_test` 的检查记录）抛出的非致命 Error 不再终止 attempt——agent 侧工具包装层把它作为该工具的 `isError` 结果返回原始错误文本，模型在同一会话内改正后重试，一次协议笔误不再消耗冷启动。仍必须向上传播并保全停止的致命类：`QuiescenceUnknownError`、会话时限/取消、provider 错误，以及 commitStarted 之后的任何异常（它们发生在 host 提交路径，不经过工具层）。两轴的同契约 `changes_requested` 须提供结构化 `findings: [{ problemId, evidenceKey, cause, evidence: [...] }]` 才能自动回实施修复，禁止从摘要猜问题身份。`evidenceKey` 使用brief提供的共同original源码身份加 `:规范源码路径#稳定契约锚点`，不使用各review会话目录；同finding两轴合并登记，原件路径保留在 `evidence[]`。`request_correction` 使用同形 `findings` 加 `change/contract`，host绑定证据与ID，按问题持久计数与验证结果。后续证据是否同根因须由诊断/独立审查确认；不确定则停止请求决定，host不声称算法能识别所有语义改名。
 
 崩溃、中止、超时、未知退出/副作用、结果不完整、provider失败、额度耗尽或新业务决定仍保全停止。恢复不等于重置额度，不能事后把已观察的失败改签为RED。
 
@@ -126,6 +138,8 @@ node tools/long-running-agent/cli.ts run --issue 126 --commit --resume --confirm
 
 遗留 `corrections` 没有问题映射时安全阻塞，不自动迁移。parent-only `GitHubHost.migrateCorrections({ issue, stateHash, sourceFingerprint, approval: { file, sha256 }, mappings })` 仅供有明确授权的协调者调用，不暴露给模型工具或自动run选项。`stateHash` 是原 `github-state.json` 字节SHA256；`sourceFingerprint` 是当前 `snapshot` 身份；approval为树外原授权文件。mappings逐一覆盖全部旧条目的 `index`，含结构化 `findings` 与明确 `outcome: passed|failed`；一条可映射多个实际问题。未开始条目改为 `notStarted: { file, sha256 }`，须有树外原件证明且当前源码仍等于该条目失败源码。迁移保留原条目/原件，单列映射且不可由agent重映射刷新次数；已开始旧轮计入实际问题，不复制旧整票总数。运行中/未知锁、身份变化、缺项/重复项或第二次迁移均拒绝。此入口不批准恢复、清锁或引擎运行。
 
+另一个 parent-only 入口 `GitHubHost.advanceIntegration({ commit })` 供协调者在手工提交/调和之后把 `integrationHead` 推进到当前 HEAD，替代手工编辑 state 文件：要求 writer 锁不存在、state 存在、commit 为 40 位且等于当前 HEAD、无 working 状态记录；校验通过后仅推进该字段并保存（等值重复推进拒绝）。不暴露给模型工具或 run 选项，也不批准恢复、清锁或引擎运行。
+
 Ctrl+C / SIGTERM 请求取消并等待 SDK 停止；若中断原生命令，后代静默未核实则继续保留 writer lock。**不会凭超时自动抢锁。**
 
 ## Fresh session 环境与规则
@@ -139,7 +153,7 @@ SDK `agentsFilesOverride` 保留原有 AGENTS 发现，再把契约全文和当�
 ## 模型工具与权限
 
 - `declare_red` 仅登记当前叶的 behavior、seam、paths、expectedFailure；阶段声明跨 repair / resume 冻结，不授予额外路径或执行权限。先迁移旧契约测试，再新增能力 RED；编译错误、旧断言冲突、未匹配失败、零执行或异常不能冒充该 RED。
-- `record_evidence_resolution` 仅用于操作者树外原件解除当前待决 review 类修正：file 必须是仓库工作树外绝对路径且 sha256 与实际文件一致，problemId 须命中该待决修正；绑定即视为本轮实质变化（源码可未变），重复绑定、仓内路径、错 sha 或错 problemId 直接拒绝并停止会话。外部文件先于会话存在即视为操作者提供，内容是否充分由独立审查判断。
+- `record_evidence_resolution` 仅用于操作者树外原件解除当前待决 review 类修正：file 必须是仓库工作树外绝对路径，sha256 可选——提供则必须与实际文件一致，未提供则 host 实测计算并计入绑定（代理无外部文件哈希能力）；problemId 须命中该待决修正；绑定即视为本轮实质变化（源码可未变），重复绑定、仓内路径、错 sha 或错 problemId 直接拒绝并停止会话。外部文件先于会话存在即视为操作者提供，内容是否充分由独立审查判断。
 - 提供受保护的源码 read/list/search/edit/write 和固定的只读 Git 检查；没有任意 shell、MCP、子代理、扩展调度器或远端写工具。
 - 不由人预列每个可改文件，也不设文件数硬上限。超过10文件是聚焦/完整性风险提示：说明为什么属于同一契约及拆分后的中间状态；生产者、消费者、测试、样例、注册与必要文档不能为凑数漏迁。授权路径/行为/权限仍是硬边界。
 - 拒绝工作树外路径、链接、隐藏 index 标志、忽略文件写入、常见凭据路径、`.git`/`.pi`、真实 raw/派生资产及游戏 Assets；不把真实数据发给模型。

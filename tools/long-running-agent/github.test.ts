@@ -6,8 +6,9 @@ import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import type * as Pi from '@earendil-works/pi-coding-agent';
 import { hash } from './contract.ts';
-import { atomicJson, git, json, lockFile, QuiescenceUnknownError, snapshot } from './io.ts';
+import { acquire, atomicJson, git, json, lockFile, QuiescenceUnknownError, snapshot } from './io.ts';
 import { checklistChildren, loadGraph, stateDirectory, type GitHubReader, type IssueContext } from './github.ts';
+import { unitProjects } from './checks.ts';
 import { GitHubHost, type CodingEvent, type CodingExecutor, type CodingRequest } from './github-host.ts';
 import { codingResourceLoader, codingTools, GitHubPiExecutor } from './github-agent.ts';
 import { approveCorrection, requireWritable } from './policy.ts';
@@ -122,13 +123,51 @@ test('TDD rejects undeclared production writes at the codingTools boundary', asy
   f.setAgent({ run: async request => {
     if (request.role === 'implement') {
       const write = codingTools(sdk, request, signal(), error => { throw error; }).find(tool => tool.name === 'scoped_write')!;
-      await assert.rejects(write.execute('undeclared', { path: 'a.txt', content: 'production before RED' }, undefined, undefined, {} as Pi.ExtensionToolContext), /RED declaration/, 'Production writes must wait for a declared and certified RED');
+      const denied = await write.execute('undeclared', { path: 'a.txt', content: 'production before RED' }, undefined, undefined, {} as Pi.ExtensionToolContext);
+      assert.equal(denied.isError, true, 'Production writes must wait for a declared and certified RED');
+      assert.match(JSON.stringify(denied), /RED declaration/);
       assert.equal(fs.readFileSync(path.join(f.cwd, 'a.txt'), 'utf8'), 'baseline');
     }
     return { status: 'blocked', summary: 'Boundary probe completed', evidence: ['SDK scoped_write'] };
   } });
   await f.host().run({}, signal());
   assert.match(f.host().state()!.records[2].attempts[0].error!, /Boundary probe completed/);
+});
+test('host protocol rejections become in-session tool errors instead of killing the attempt', async () => {
+  const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      let fatalCalls = 0;
+      const tools = codingTools(sdk, request, signal(), error => { fatalCalls++; throw error; });
+      const correction = tools.find(tool => tool.name === 'request_correction')!;
+      const rejected = await correction.execute('protocol-miss', { findings: [finding(request)], change: 'premature diagnosis', contract: 'Approved contract unchanged' }, undefined, undefined, {} as Pi.ExtensionToolContext);
+      assert.equal(rejected.isError, true, 'A protocol rejection must be a session-local tool error, not an attempt stop');
+      assert.match(JSON.stringify(rejected), /No recorded normal failure to correct/);
+      const deniedDependency = await tools.find(tool => tool.name === 'verify_dependency')!.execute('fabricated', { issue: 9, commit: f.head, evidence: 'fabricated acceptance' }, undefined, undefined, {} as Pi.ExtensionToolContext);
+      assert.equal(deniedDependency.isError, true);
+      assert.match(JSON.stringify(deniedDependency), /Dependency evidence must exactly equal/);
+      certifySyntheticRed(request);
+      const refrozen = await tools.find(tool => tool.name === 'declare_red')!.execute('refrozen', { ...syntheticDeclaration, paths: ['a.txt'] }, undefined, undefined, {} as Pi.ExtensionToolContext);
+      assert.equal(refrozen.isError, true);
+      assert.match(JSON.stringify(refrozen), /frozen across repair\/resume/);
+      assert.equal(fatalCalls, 0, 'Non-fatal protocol rejections must not stop the session');
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'corrected protocol flow');
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+    }
+    return { status: request.role === 'implement' ? 'candidate' : 'passed', summary: 'Protocol miss corrected within the same session', evidence: ['Original rejection text returned to the model'] };
+  } });
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.awaiting_commit, 1, 'The same attempt must recover from its protocol mistakes');
+  assert.equal(f.host().state()!.records[2].attempts.length, 1);
+});
+test('quiescence unknown stays fatal at the degraded tool boundary', async () => {
+  const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1);
+  const request: CodingRequest = { cwd: f.cwd, issue: 2, role: 'implement', directory: f.directory, contexts: [], prompt: 'Synthetic', input: snapshot(f.cwd), signal: signal(), emit: () => {}, checks: [], pendingDependencies: new Set(),
+    verifyDependency: () => {}, recordCheck: () => {}, beforeCheck: () => { throw new QuiescenceUnknownError('Native check changed source identity'); } };
+  let fatalCalls = 0;
+  const unit = codingTools(sdk, request, request.signal, error => { fatalCalls++; throw error; }).find(tool => tool.name === 'unit_test')!;
+  await assert.rejects(unit.execute('quiescent', { project: unitProjects[0] }, undefined, undefined, {} as Pi.ExtensionToolContext), QuiescenceUnknownError);
+  assert.equal(fatalCalls, 1, 'Quiescence-unknown must still reach fatal and stop the attempt');
 });
 test('TDD rejects changed candidates without RED at the GitHubHost boundary', async () => {
   const f = fixture(1, false);
@@ -145,12 +184,14 @@ test('TDD stage paths permit migration only, exact RED unlocks production and st
       const execute = (name: string, params: unknown) => tools.find(tool => tool.name === name)!.execute('tdd-stage', params, undefined, undefined, {} as Pi.ExtensionToolContext);
       await execute('declare_red', syntheticDeclaration);
       await execute('scoped_write', { path: 'contract-fixture.txt', content: 'Migrated old rejection; independent new capability expectation' });
-      await assert.rejects(execute('scoped_write', { path: 'a.txt', content: 'too early' }), /certified RED/);
+      const tooEarly = await execute('scoped_write', { path: 'a.txt', content: 'too early' });
+      assert.equal(tooEarly.isError, true); assert.match(JSON.stringify(tooEarly), /certified RED/);
       assert.throws(() => request.beforeCheck!(snapshot(f.cwd), { scope: 'unit', expectedFailure: { test: 'Wrong.Test', message: 'Wrong diagnostic' } }), /frozen declaration/);
       assert.throws(() => request.recordCheck({ project: 'synthetic', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1, expectedRed: true, expectedFailure: { test: 'Wrong.Test', message: 'Wrong diagnostic' } }), /frozen declaration/);
       request.beforeCheck!(snapshot(f.cwd), { scope: 'unit', expectedFailure: syntheticDeclaration.expectedFailure });
       request.recordCheck({ project: 'synthetic native', directory: path.join(request.directory, 'red'), sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1, expectedRed: true, expectedFailure: syntheticDeclaration.expectedFailure });
-      await assert.rejects(execute('declare_red', { ...syntheticDeclaration, paths: ['a.txt'] }), /frozen/);
+      const refrozen = await execute('declare_red', { ...syntheticDeclaration, paths: ['a.txt'] });
+      assert.equal(refrozen.isError, true); assert.match(JSON.stringify(refrozen), /frozen/);
       await execute('scoped_write', { path: 'a.txt', content: 'production after exact RED' });
       request.recordCheck({ project: 'synthetic native', directory: path.join(request.directory, 'green'), sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
     } else assert.ok(request.prompt.includes('Synthetic.Capability'));
@@ -481,6 +522,85 @@ test('status analyzes live GitHub without creating state or launching models', (
   assert.equal(status.counts.assigned, 1); assert.equal(status.counts.waiting_dependencies, 1); assert.equal(status.counts.ready, 1);
   assert.equal(fs.existsSync(f.state), false); assert.equal(f.calls.length, 0); assert.match(formatStatus(status), /not proof of local integration/);
 });
+test('preflight reports state-derived readiness without GitHub reads, tests or state writes', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async request => request.role === 'implement'
+    ? { status: 'blocked', summary: 'Synthetic stop before any native check', evidence: ['Synthetic original'] }
+    : { status: 'passed', summary: 'Independent synthetic review', evidence: ['Synthetic review'] } });
+  await f.host().run({}, signal());
+  const host = f.host();
+  assert.equal(typeof host.preflight, 'function', 'GitHubHost must expose the read-only preflight method');
+  const before = fs.readFileSync(path.join(f.state, 'github-state.json'), 'utf8');
+  f.reader.issue = () => { throw new Error('preflight must not read GitHub'); };
+  const report = host.preflight();
+  assert.equal(fs.readFileSync(path.join(f.state, 'github-state.json'), 'utf8'), before, 'preflight must not modify state');
+  assert.equal(report.root, 1); assert.equal(report.integrationHead, f.head);
+  assert.equal(report.checkout.head, f.head); assert.equal(report.checkout.dirty, false); assert.equal(report.checkout.matchesIntegrationHead, true);
+  assert.deepEqual(report.writerLock, { present: false, owner: 'none', pid: null });
+  assert.equal(report.unfinished, 1);
+  assert.deepEqual(report.toolWhitelist, { unitTest: true, rangeTest: false, engineChecksAuthorized: false });
+  const record = report.records.find(row => row.issue === 2)!;
+  assert.equal(record.phase, 'blocked'); assert.equal(record.attempts, 1); assert.equal(record.resumable, true);
+  assert.equal(record.pendingFailure, false); assert.equal(record.tdd!.declared, false); assert.equal(record.tdd!.redCertified, false);
+  assert.equal(record.greenCheckAtCurrentFingerprint, false, 'no native GREEN bound to the current fingerprint');
+  assert.ok(record.blockers.some(text => /no successful native check/i.test(text)), 'the missing current-fingerprint GREEN must be listed as a blocker');
+  assert.equal(record.dependencyProofs.length, 0);
+});
+test('preflight resumability reflects lock ownership, GREEN-at-fingerprint and correction exhaustion', async () => {
+  const g = fixture(1);
+  g.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      certifySyntheticRed(request);
+      fs.writeFileSync(path.join(g.cwd, 'a.txt'), 'issue-2');
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(g.cwd).fingerprint, code: 0 });
+      return { status: 'blocked', summary: 'Synthetic stop after GREEN', evidence: ['Synthetic original'] };
+    }
+    return { status: 'passed', summary: 'Independent synthetic review', evidence: ['Synthetic review'] };
+  } });
+  await g.host().run({}, signal());
+  const host = g.host();
+  const current = host.preflight().records.find(row => row.issue === 2)!;
+  assert.equal(current.greenCheckAtCurrentFingerprint, true);
+  assert.equal(current.blockers.some(text => /no successful native check/i.test(text)), false, 'a current-fingerprint GREEN must not be listed as a blocker');
+  assert.equal(current.resumable, true);
+  const state = host.state()!;
+  state.records[2].attempts[0].dependencyProofs.push({ issue: 7, commit: g.head, evidence: 'valid proof' }, { issue: 8, commit: 'z'.repeat(40), evidence: 'non-hex commit' });
+  const original = { cause: 'Located synthetic failure', change: 'Repair the consumer', contract: 'Approved contract unchanged', evidence: '/original/synthetic', sourceFingerprint: state.records[2].attempts[0].original.fingerprint, kind: 'check' as const, utc: '2026-11-14T00:00:00Z', problemId: 'consumer-contract', evidenceKey: `${state.records[2].attempts[0].original.fingerprint}:a.txt#consumer-contract`, outcome: 'failed' as const };
+  state.records[2].corrections = [original, original, { ...original, outcome: undefined }];
+  atomicJson(path.join(g.state, 'github-state.json'), state);
+  const diagnosed = host.preflight().records.find(row => row.issue === 2)!;
+  assert.deepEqual(diagnosed.dependencyProofs, [
+    { issue: 7, commit: g.head, validCommit: true, ancestorOfHead: true, reusable: true },
+    { issue: 8, commit: 'z'.repeat(40), validCommit: false, ancestorOfHead: false, reusable: false },
+  ]);
+  assert.equal(diagnosed.problems[0].problemId, 'consumer-contract');
+  assert.equal(diagnosed.problems[0].roundsUsed, 3);
+  assert.equal(diagnosed.problems[0].roundsRemaining, 0);
+  assert.equal(diagnosed.problems[0].pendingCorrection?.kind, 'check');
+  assert.equal(diagnosed.problems[0].pendingCorrection?.sourceChangedSinceFailure, true);
+  assert.equal(diagnosed.problems[0].pendingCorrection?.evidenceBindingAvailable, false);
+  assert.ok(diagnosed.blockers.some(text => /pending correction for consumer-contract/i.test(text)));
+  assert.equal(diagnosed.resumable, true, 'a diagnosed pending correction remains resumable; only lock/exhaustion hard-block');
+  state.records[2].corrections = [original, original, original];
+  atomicJson(path.join(g.state, 'github-state.json'), state);
+  const exhausted = host.preflight().records.find(row => row.issue === 2)!;
+  assert.equal(exhausted.resumable, false);
+  assert.ok(exhausted.blockers.some(text => /exhausted three repair rounds/i.test(text)));
+  const release = acquire(g.cwd, g.state);
+  const locked = host.preflight();
+  assert.deepEqual(locked.writerLock, { present: true, owner: 'alive', pid: process.pid });
+  assert.equal(locked.records.find(row => row.issue === 2)!.resumable, false);
+  assert.ok(locked.records.find(row => row.issue === 2)!.blockers.some(text => /live owner/i.test(text)));
+  release();
+});
+test('cli preflight subcommand prints the readiness report and stays option-guarded', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async () => ({ status: 'blocked', summary: 'Synthetic stop', evidence: ['Synthetic original'] }) });
+  await f.host().run({}, signal());
+  await assert.rejects(githubMain(['preflight', '--issue', '1', '--state', f.state, '--cwd', f.cwd, '--commit']), /Inappropriate/);
+  assert.equal(await githubMain(['preflight', '--issue', '1', '--state', f.state, '--cwd', f.cwd]), 0);
+  assert.equal(await githubMain(['preflight', '--issue', '1', '--state', f.state, '--cwd', f.cwd, '--engine-checks', '--godot-path', f.directory, '--fixed-package-directory', f.directory]), 0, 'engine options only reflect the tool whitelist, never launch anything');
+});
 test('root-only run needs no plan.json, streams activity, persists progress and waits for a manual commit', async () => {
   const f = fixture(); const status = await f.host().run({}, signal());
   assert.equal(status.rows.find(row => row.number === 2)?.status, 'awaiting_commit'); assert.equal(f.calls.length, 3);
@@ -632,13 +752,16 @@ test('real SDK tools allow normal source work, deny shell/private assets/unverif
   assert.ok((tools.find(tool => tool.name === 'unit_test')!.parameters as { properties: { filter?: unknown } }).properties.filter, 'unit_test must expose the FQN filter');
   const execute = (name: string, params: unknown) => tools.find(tool => tool.name === name)!.execute('synthetic', params, undefined, undefined, {} as Pi.ExtensionToolContext);
   assert.equal(tools.some(tool => ['bash', 'powershell'].includes(tool.name)), false);
-  await assert.rejects(execute('scoped_write', { path: 'a.txt', content: 'denied' }), /verified dependency/);
+  const unverified = await execute('scoped_write', { path: 'a.txt', content: 'denied' });
+  assert.equal(unverified.isError, true); assert.match(JSON.stringify(unverified), /verified dependency/);
   request.pendingDependencies.clear();
   request.beforeWrite = () => {}; // Synthetic certified write controller; RED ordering is exercised through GitHubHost above.
   await execute('scoped_write', { path: 'a.txt', content: 'SDK source write' });
   assert.equal(fs.readFileSync(path.join(f.cwd, 'a.txt'), 'utf8'), 'SDK source write');
-  await assert.rejects(execute('scoped_read', { path: '.git/config' }), /Protected/);
-  await assert.rejects(execute('scoped_read', { path: 'data/raw/private' }), /Private/);
+  const protectedPath = await execute('scoped_read', { path: '.git/config' });
+  assert.equal(protectedPath.isError, true); assert.match(JSON.stringify(protectedPath), /Protected/);
+  const privateAssets = await execute('scoped_read', { path: 'data/raw/private' });
+  assert.equal(privateAssets.isError, true); assert.match(JSON.stringify(privateAssets), /Private/);
   const listing = await execute('scoped_list', { path: '.' }); assert.ok(JSON.stringify(listing).includes('a.txt')); assert.ok(!JSON.stringify(listing).includes('.git'));
   const readonly = codingTools(sdk, { ...request, role: 'spec' }, signal(), () => {});
   assert.equal(readonly.some(tool => ['scoped_write', 'scoped_edit', 'unit_test', 'verify_dependency'].includes(tool.name)), false);
@@ -775,6 +898,67 @@ test('record_evidence_resolution binds operator external evidence and rejects fo
   assert.equal(ledger[0].kind, 'review');
   assert.equal(ledger[0].evidenceResolution?.file, path.join(f.directory, 'operator-evidence.txt'));
   assert.match(ledger[0].evidenceResolution?.sha256 ?? '', /^[0-9a-f]{64}$/);
+});
+test('record_evidence_resolution accepts an omitted sha256 by binding the host-computed file hash', async () => {
+  const sdk = await import('@earendil-works/pi-coding-agent'); const f = fixture(1); const agent = f.getAgent(); let implementations = 0;
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      implementations++;
+      if (implementations === 1) {
+        certifySyntheticRed(request);
+        fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'issue-2');
+        request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+        return { status: 'candidate', summary: 'Initial candidate delivered', evidence: ['a.txt'] };
+      }
+      const evidence = path.join(f.directory, 'operator-evidence.txt');
+      fs.writeFileSync(evidence, 'operator-reviewed external evidence original');
+      const tool = codingTools(sdk, request, signal(), error => { throw error; }).find(item => item.name === 'record_evidence_resolution')!;
+      const schema = tool.parameters as { properties: Record<string, unknown>; required?: string[] };
+      assert.ok(!schema.required?.includes('sha256'), 'the tool schema must not force a client-side sha256 the agent cannot compute');
+      const wrong = await tool.execute('wrong-sha', { problemId: 'consumer-contract', file: evidence, sha256: 'f'.repeat(64), note: 'provided wrong sha' }, undefined, undefined, {} as Pi.ExtensionToolContext);
+      assert.equal(wrong.isError, true); assert.match(JSON.stringify(wrong), /sha256 does not match/);
+      const resolved = await tool.execute('omitted-sha', { problemId: 'consumer-contract', file: evidence, note: 'operator resolution without client-side hashing' }, undefined, undefined, {} as Pi.ExtensionToolContext);
+      assert.equal(resolved.isError, undefined, 'omitting sha256 must resolve instead of failing on the missing parameter');
+      const parsed = JSON.parse((resolved.content as { type: 'text'; text: string }[])[0].text);
+      assert.equal(parsed.sha256, hash(fs.readFileSync(evidence)));
+      const unchanged = snapshot(f.cwd);
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: unchanged.fingerprint, code: 0 });
+      return { status: 'candidate', summary: 'Review correction resolved by operator evidence with a host-computed sha256', evidence: [evidence] };
+    }
+    if (request.role === 'standards' && implementations === 1) return { status: 'changes_requested', summary: 'Located consumer repair', evidence: ['a.txt'], findings: [finding(request)] };
+    return agent.run(request);
+  } });
+  const result = await f.host().run({ commit: true }, signal());
+  assert.equal(result.counts.local_completed, 1, 'source-unchanged review repair must still pass the gate after a host-computed binding');
+  const ledger = f.host().state()!.records[2].corrections!;
+  assert.equal(ledger[0].evidenceResolution?.sha256, hash(fs.readFileSync(path.join(f.directory, 'operator-evidence.txt'))));
+});
+test('parent-only advanceIntegration validates ownership and advances a single field', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async () => ({ status: 'blocked', summary: 'Synthetic stop', evidence: ['Synthetic original'] }) });
+  await f.host().run({}, signal());
+  const host = f.host();
+  assert.equal(typeof host.advanceIntegration, 'function', 'GitHubHost must expose the parent-only advanceIntegration entry');
+  assert.throws(() => host.advanceIntegration({ commit: 'abc' }), /40-hex/);
+  assert.throws(() => host.advanceIntegration({ commit: 'a'.repeat(40) }), /current HEAD/);
+  const state = host.state()!;
+  const head = git(f.cwd, 'rev-parse', 'HEAD').trim();
+  state.records[2].phase = 'working';
+  atomicJson(path.join(f.state, 'github-state.json'), state);
+  assert.throws(() => host.advanceIntegration({ commit: head }), /working/);
+  const release = acquire(f.cwd, f.state);
+  assert.throws(() => host.advanceIntegration({ commit: head }), /lock/);
+  release();
+  state.records[2].phase = 'blocked';
+  atomicJson(path.join(f.state, 'github-state.json'), state);
+  fs.writeFileSync(path.join(f.cwd, 'coordinator.txt'), 'explicit coordinator reconciliation');
+  git(f.cwd, 'add', 'coordinator.txt'); git(f.cwd, 'commit', '--quiet', '-m', 'Manual coordinator commit');
+  const advanced = git(f.cwd, 'rev-parse', 'HEAD').trim();
+  host.advanceIntegration({ commit: advanced });
+  const after = host.state()!;
+  assert.equal(after.integrationHead, advanced);
+  assert.equal(after.records[2].phase, 'blocked', 'only the integration head field advances');
+  assert.throws(() => host.advanceIntegration({ commit: advanced }), /already/);
 });
 test('request_correction description confines the tool to unexpected normal failures', async () => {
   const sdk = await import('@earendil-works/pi-coding-agent'); const g = fixture(1);

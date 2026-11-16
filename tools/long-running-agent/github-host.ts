@@ -5,7 +5,7 @@ import { canonical, changedPaths, hash, parseReport, relativeFile, type ProblemF
 import { acquire, atomicJson, git, inside, json, lockFile, noLinks, QuiescenceUnknownError, recoverLock, snapshot } from './io.ts';
 import { approved, contextHash, contextsFor, loadGraph, type GitHubReader, type IssueContext, type IssueGraph } from './github.ts';
 import type { Selection } from './checks.ts';
-import { approveCorrection, attributeValidation, bindEvidenceResolution, bindProblemEvidence, maxProblemCorrections, requireUnexhausted, requireChangedAfterFailure, requireWritable, scopeWarningFiles, type Correction, type CorrectionLedger } from './policy.ts';
+import { approveCorrection, attributeValidation, bindEvidenceResolution, bindProblemEvidence, correctionRounds, maxProblemCorrections, requireUnexhausted, requireChangedAfterFailure, requireWritable, scopeWarningFiles, type Correction, type CorrectionLedger } from './policy.ts';
 
 export interface UnitEvidence { project: string; directory: string; sourceFingerprint: string; code: number; scope?: string; expectedRed?: boolean; expectedFailure?: { test: string; message: string } }
 export interface RedDeclaration { behavior: string; seam: string; paths: string[]; expectedFailure: { test: string; message: string } }
@@ -24,7 +24,7 @@ export interface CodingRequest {
   beforeCheck?: (source: Source, selection?: Selection) => void;
   recordFailure?: (directory: string, source: Source, summary: string) => void;
   requestCorrection?: (findings: ProblemFinding[], change: string, contract: string) => void;
-  recordEvidenceResolution?: (problemId: string, file: string, sha256: string, note: string) => void;
+  recordEvidenceResolution?: (problemId: string, file: string, sha256: string | undefined, note: string) => string;
 }
 export interface CodingExecutor { run(request: CodingRequest): Promise<Report> }
 export interface GitHubServices { reader: GitHubReader; agent: CodingExecutor; source: typeof snapshot }
@@ -55,6 +55,10 @@ export interface GitHubState {
   extraApprovals?: { issue: number; count: number; sourceFingerprint: string; utc: string }[];
 }
 export interface StatusRow { number: number; title: string; status: string; reason?: string; commit?: string; prerequisitesToVerify: number[]; evidenceDirectory?: string; sessionFiles?: Partial<Record<Role, string>>; lastSummary?: string }
+export interface PreflightDependencyProof { issue: number; commit: string; validCommit: boolean; ancestorOfHead: boolean; reusable: boolean }
+export interface PreflightProblem { problemId: string; roundsUsed: number; roundsRemaining: number; lastOutcome?: 'passed' | 'failed'; pendingCorrection?: { kind: 'check' | 'review'; sourceChangedSinceFailure: boolean; evidenceBindingAvailable: boolean } }
+export interface PreflightRecord { issue: number; phase: GitHubRecord['phase']; attempts: number; resumable: boolean; blockers: string[]; dependencyProofs: PreflightDependencyProof[]; problems: PreflightProblem[]; pendingFailure: boolean; tdd: { required: true; declared: boolean; redCertified: boolean } | null; greenCheckAtCurrentFingerprint: boolean; lastError: string | null }
+export interface PreflightReport { root: number; cwd: string; directory: string; generatedUtc: string; integrationHead: string; checkout: { head: string; branch: string; dirty: boolean; matchesIntegrationHead: boolean }; writerLock: { present: boolean; owner: 'none' | 'alive' | 'exited' | 'unknown'; pid: number | null }; unfinished: number; records: PreflightRecord[]; toolWhitelist: { unitTest: boolean; rangeTest: boolean; engineChecksAuthorized: boolean } }
 export interface GitHubStatus {
   root: number; cwd: string; directory: string; fetchedUtc: string; stale: boolean; warnings: string[];
   counts: Record<string, number>; activity?: GitHubState['activity']; rows: StatusRow[]; integrationHead?: string; nextAction: string;
@@ -103,6 +107,62 @@ export class GitHubHost {
     this.cwd = cwd; this.root = root; this.directory = directory; this.services = services; this.output = output;
   }
   state(): GitHubState | undefined { return readState(this.directory, this.cwd, this.root); }
+  // Read-only readiness report for unfinished records: state + git measurements only. No GitHub reads,
+  // no native checks, no state writes, no model. `resumable` mirrors what run() would refuse outright
+  // (writer lock ownership, exhausted problems); remaining work items are listed in `blockers`.
+  preflight(engineChecksAuthorized = false): PreflightReport {
+    const state = this.state();
+    if (!state) throw new Error('No GitHub state found; start a run or choose the matching --state');
+    const current = this.services.source(this.cwd);
+    const lockPath = lockFile(this.cwd);
+    const present = fs.existsSync(lockPath);
+    let owner: PreflightReport['writerLock']['owner'] = 'none', pid: number | null = null;
+    if (present) {
+      try { pid = (json(lockPath) as { pid: number }).pid ?? null; } catch { pid = null; }
+      const alive = ownerAlive(this.cwd, this.directory);
+      owner = alive === true ? 'alive' : alive === false ? 'exited' : 'unknown';
+    }
+    const lockBlocked = owner === 'alive' || owner === 'unknown';
+    const records: PreflightRecord[] = [];
+    for (const [id, record] of Object.entries(state.records)) {
+      if (record.phase === 'completed') continue;
+      const last = record.attempts.at(-1)!;
+      const checks = record.attempts.flatMap(attempt => attempt.checks);
+      const proofs = record.attempts.flatMap(attempt => attempt.dependencyProofs);
+      const conflicting = new Set(proofs.flatMap((proof, index) => proofs.some((other, otherIndex) => index !== otherIndex && proof.issue === other.issue && proof.commit !== other.commit) ? [proof.issue] : []));
+      const dependencyProofs: PreflightDependencyProof[] = proofs.map(proof => {
+        const validCommit = Number.isSafeInteger(proof.issue) && proof.issue > 0 && /^[0-9a-f]{40}$/.test(proof.commit);
+        const ancestorOfHead = validCommit && ancestor(this.cwd, proof.commit);
+        return { issue: proof.issue, commit: proof.commit, validCommit, ancestorOfHead, reusable: validCommit && ancestorOfHead && !conflicting.has(proof.issue) };
+      });
+      const problemIds = [...new Set([...(record.corrections ?? []).flatMap(correction => correction.problemId ? [correction.problemId] : []), ...(record.legacyMigration?.mappings.flatMap(mapping => mapping.problemIds) ?? [])])];
+      const problems: PreflightProblem[] = problemIds.map(problemId => {
+        const rounds = correctionRounds(record, problemId);
+        const pending = [...(record.corrections ?? [])].reverse().find(correction => correction.problemId === problemId && !correction.outcome);
+        return { problemId, roundsUsed: rounds.length, roundsRemaining: Math.max(0, maxProblemCorrections - rounds.length), lastOutcome: rounds.at(-1)?.outcome,
+          pendingCorrection: pending && { kind: pending.kind, sourceChangedSinceFailure: current.fingerprint !== pending.sourceFingerprint, evidenceBindingAvailable: pending.kind === 'review' && !pending.evidenceResolution } };
+      });
+      const greenCheckAtCurrentFingerprint = checks.some(check => check.code === 0 && check.sourceFingerprint === current.fingerprint);
+      const blockers: string[] = [];
+      if (owner === 'alive') blockers.push('Writer lock held by a live owner; do not start another writer');
+      else if (owner === 'unknown') blockers.push('Writer lock ownership unknown; inspect status before continuing');
+      if (record.phase === 'working' && !lockBlocked) blockers.push('Working attempt stopped without a clean finish; explicit --resume --confirm-quiescent required');
+      if (last.unknownQuiescence) blockers.push('Unknown quiescence; explicit --resume --confirm-quiescent required');
+      const exhausted = problems.filter(problem => problem.roundsUsed >= maxProblemCorrections && problem.lastOutcome === 'failed');
+      for (const problem of exhausted) blockers.push(`Problem ${problem.problemId} exhausted three repair rounds; preserve originals and end execution`);
+      if (record.pendingFailure) blockers.push('Undiagnosed native failure; request_correction before writes or recheck');
+      for (const problem of problems) if (problem.pendingCorrection) blockers.push(`Pending correction for ${problem.problemId}: substantive source change or external evidence binding required`);
+      if (!greenCheckAtCurrentFingerprint) blockers.push('No successful native check bound to the current source fingerprint');
+      if (record.phase === 'awaiting_commit' && last.candidate) blockers.push(current.fingerprint === last.candidate.fingerprint ? 'Awaiting operator commit of the frozen candidate (--commit or a manual commit, then rerun)' : 'Frozen candidate changed; explicit --resume must revalidate it');
+      records.push({ issue: Number(id), phase: record.phase, attempts: record.attempts.length, resumable: !lockBlocked && !exhausted.length, blockers, dependencyProofs, problems, pendingFailure: Boolean(record.pendingFailure),
+        tdd: record.tdd ? { required: true, declared: Boolean(record.tdd.declaration), redCertified: Boolean(record.tdd.red) } : null,
+        greenCheckAtCurrentFingerprint, lastError: last.error ?? null });
+    }
+    return { root: this.root, cwd: this.cwd, directory: this.directory, generatedUtc: new Date().toISOString(), integrationHead: state.integrationHead,
+      checkout: { head: current.head, branch: git(this.cwd, 'branch', '--show-current').trim(), dirty: current.dirty, matchesIntegrationHead: current.head === state.integrationHead },
+      writerLock: { present, owner, pid }, unfinished: records.length, records,
+      toolWhitelist: { unitTest: true, rangeTest: engineChecksAuthorized, engineChecksAuthorized } };
+  }
   // Parent-only API: deliberately absent from codingTools and autonomous run options.
   migrateCorrections(input: LegacyCorrectionMigration): void {
     noLinks(this.directory);
@@ -139,6 +199,22 @@ export class GitHubHost {
     record.legacyMigration = { ledgerHash: hash(canonical(record.corrections!.filter(item => !item.problemId))), stateHash: input.stateHash, approval: input.approval, mappings, utc: new Date().toISOString() };
     // Recheck immutable inputs immediately before the sole write; never acquire/recover a runtime lock here.
     if (fs.existsSync(lockFile(this.cwd)) || hash(fs.readFileSync(file)) !== input.stateHash || this.services.source(this.cwd).fingerprint !== input.sourceFingerprint) throw new Error('Migration identity or writer ownership changed');
+    this.save(state);
+  }
+  // Parent-only API: record an integration baseline the coordinator already created (manual commit,
+  // reconciliation) instead of hand-editing github-state.json. Deliberately absent from codingTools and run options.
+  advanceIntegration(input: { commit: string }): void {
+    noLinks(this.directory);
+    if (fs.existsSync(lockFile(this.cwd))) throw new Error('Cannot advance integration while a writer lock exists');
+    const state = this.state();
+    if (!state) throw new Error('No GitHub state to advance');
+    if (!/^[0-9a-f]{40}$/.test(input.commit)) throw new Error('Integration commit must be a full 40-hex SHA');
+    if (Object.values(state.records).some(record => record.phase === 'working')) throw new Error('Cannot advance integration past an unfinished working record');
+    if (input.commit !== git(this.cwd, 'rev-parse', 'HEAD').trim()) throw new Error('Integration commit must be the current HEAD');
+    if (input.commit === state.integrationHead) throw new Error('Integration head already at this commit; nothing to advance');
+    // Recheck ownership immediately before the sole single-field write, mirroring migrateCorrections.
+    if (fs.existsSync(lockFile(this.cwd))) throw new Error('Writer lock appeared; preserve it');
+    state.integrationHead = input.commit;
     this.save(state);
   }
   private save(state: GitHubState): void {
@@ -437,9 +513,12 @@ export class GitHubHost {
               if (!path.isAbsolute(file) || inside(this.cwd, resolved)) throw new Error('External evidence file must be an absolute path outside the repository working tree');
               noLinks(resolved);
               if (!fs.statSync(resolved).isFile()) throw new Error('External evidence file must be a regular file');
-              if (hash(fs.readFileSync(resolved)) !== sha256) throw new Error('External evidence sha256 does not match the actual file');
-              bindEvidenceResolution(record, { problemId, file: resolved, sha256, note, utc: new Date().toISOString() });
+              // The agent has no external-file hashing capability; an omitted sha256 is measured host-side and bound.
+              const actual = hash(fs.readFileSync(resolved));
+              if (sha256 !== undefined && sha256 !== actual) throw new Error('External evidence sha256 does not match the actual file');
+              bindEvidenceResolution(record, { problemId, file: resolved, sha256: actual, note, utc: new Date().toISOString() });
               this.save(state);
+              return actual;
             },
           }), role);
           atomicJson(path.join(roleDirectory, 'report.json'), report); reports[role] = report;
