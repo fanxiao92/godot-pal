@@ -164,18 +164,31 @@ function extractReportJson(text: string): unknown {
     throw original;
   }
 }
+// A completed session is durable work; harmless extra keys an LLM adds to its final report must not
+// kill the attempt. Project the report and its findings onto the contract's key set before validation
+// so unknown keys are ignored and never persisted; every other object() call site stays an exact key set.
+const reportKeys = ['status', 'summary', 'evidence', 'findings'];
+const findingKeys = ['problemId', 'evidenceKey', 'cause', 'evidence'];
+function projectKnownKeys(value: unknown, keys: string[]): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const projected: Record<string, unknown> = {};
+  for (const key of keys) if (key in value) projected[key] = (value as Record<string, unknown>)[key];
+  return projected;
+}
 export function parseReport(input: unknown, role: Role): Report {
-  return validateReport(typeof input === 'string' ? extractReportJson(input) : input, role);
+  const report = projectKnownKeys(typeof input === 'string' ? extractReportJson(input) : input, reportKeys) as Record<string, unknown>;
+  if (Array.isArray(report.findings)) report.findings = report.findings.map(finding => projectKnownKeys(finding, findingKeys));
+  return validateReport(report, role);
 }
 function validateReport(input: unknown, role: Role): Report {
-  object(input, ['status', 'summary', 'evidence', 'findings'], 'agent result');
+  object(input, reportKeys, 'agent result');
   if (!(role === 'implement' ? ['candidate', 'blocked'] : ['passed', 'blocked', 'changes_requested']).includes(String(input.status))) throw new Error(`Invalid ${role} result status`);
   text(input.summary, 'summary');
   if (!Array.isArray(input.evidence) || !input.evidence.length || input.evidence.some(e => typeof e !== 'string' || !e.trim())) throw new Error('Result must include evidence references');
   if (input.findings !== undefined) {
     if (!Array.isArray(input.findings)) throw new Error('findings must be an array');
     for (const finding of input.findings) {
-      object(finding, ['problemId', 'evidenceKey', 'cause', 'evidence'], 'problem finding');
+      object(finding, findingKeys, 'problem finding');
       text(finding.problemId, 'problemId');
       if (!/^[a-z0-9][a-z0-9-]*$/.test(finding.problemId)) throw new Error('Invalid stable problemId');
       text(finding.evidenceKey, 'evidenceKey'); text(finding.cause, 'cause');

@@ -56,9 +56,20 @@ test('report parsing accepts prose-wrapped fenced or last balanced JSON while re
   assert.equal(parseReport(`Prose ${JSON.stringify({ unrelated: 'ignored' })} middle ${JSON.stringify(report)} tail.`, 'implement').status, 'blocked');
   assert.throws(() => parseReport('[{"status":"blocked"}]', 'implement'), /Invalid agent result fields/);
   assert.throws(() => parseReport('Prose with no report object at all.', 'implement'), SyntaxError);
-  assert.throws(() => parseReport(`${JSON.stringify(report)} trailing ${JSON.stringify({ unrelated: true })}`, 'implement'), /Invalid agent result fields/);
+  assert.throws(() => parseReport(`${JSON.stringify(report)} trailing ${JSON.stringify({ unrelated: true })}`, 'implement'), /Invalid implement result status/);
   assert.throws(() => parseReport('Fence only.\n\n\`\`\`json\n[1, 2]\n\`\`\`', 'implement'), /Invalid agent result fields/);
-  assert.throws(() => parseReport('{"status":"blocked","summary":"s","evidence":["e"]} trailing {"unrelated":true}', 'spec'), /Invalid agent result fields/);
+  assert.throws(() => parseReport('{"status":"blocked","summary":"s","evidence":["e"]} trailing {"unrelated":true}', 'spec'), /Invalid spec result status/);
+});
+test('report parsing ignores harmless unknown keys on the report and finding objects without weakening required validation', () => {
+  const structured = { problemId: 'slot-field', evidenceKey: 'original:src/slot.cs#field', cause: 'Required field omitted', evidence: ['/owned/review.json'] };
+  const parsed = parseReport({ status: 'changes_requested', summary: 'Located repair', evidence: ['src/slot.cs'], generatedAt: '2026-11-14T00:00:00Z', findings: [{ ...structured, confidence: 'high' }] }, 'standards');
+  assert.deepEqual(JSON.parse(JSON.stringify(parsed)), { status: 'changes_requested', summary: 'Located repair', evidence: ['src/slot.cs'], findings: [structured] });
+  assert.equal(parseReport(JSON.stringify({ status: 'passed', summary: 's', evidence: ['e'], modelNote: 'extra' }), 'spec').status, 'passed');
+  assert.throws(() => parseReport({ status: 'changes_requested', summary: 's', evidence: ['e'], findings: [{ ...structured, problemId: 5 }] }, 'standards'), /problemId must be nonblank/);
+  assert.throws(() => parseReport({ status: 'changes_requested', summary: 's', evidence: ['e'], findings: [{ ...structured, evidence: [' '] }] }, 'standards'), /Problem finding requires original evidence/);
+  assert.throws(() => parseReport({ status: 'changes_requested', summary: 's', evidence: ['e'], findings: [{ problemId: structured.problemId, evidenceKey: structured.evidenceKey, cause: structured.cause }] }, 'standards'), /Problem finding requires original evidence/);
+  assert.throws(() => parseReport({ status: 'changes_requested', summary: 's', evidence: ['e'], findings: 'legacy' }, 'standards'), /findings must be an array/);
+  assert.throws(() => parseReport({ summary: 's', evidence: ['e'] }, 'spec'), /result status/);
 });
 test('third validation attributes a new root cause independently instead of declaring the repaired problem exhausted', () => {
   const ledger: CorrectionLedger = {};

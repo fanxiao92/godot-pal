@@ -296,6 +296,47 @@ test('automatic review repair rejects summary-only legacy findings and conflicti
     assert.match(record.attempts.at(-1)!.error!, conflict ? /Same evidence/ : /structured problem findings/);
   }
 });
+test('harmless unknown keys in structured review findings still enter the repair loop while malformed findings stay rejected', async () => {
+  {
+    const f = fixture(1); const agent = f.getAgent(); let implementations = 0;
+    f.setAgent({ run: async request => {
+      if (request.role !== 'implement' && request.issue === 2 && implementations === 1) {
+        const annotated = { status: 'changes_requested' as const, summary: 'Located consumer repair with an LLM-added annotation', evidence: ['a.txt'], findings: [{ ...finding(request), confidence: 'high' }] };
+        return annotated;
+      }
+      const report = await agent.run(request);
+      if (request.role === 'implement') {
+        fs.writeFileSync(path.join(f.cwd, 'a.txt'), `revision-${++implementations}`);
+        request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+      }
+      return report;
+    } });
+    const result = await f.host().run({}, signal());
+    assert.equal(result.counts.awaiting_commit, 1, 'Harmless unknown keys must not kill the completed review session');
+    const ledger = f.host().state()!.records[2].corrections!;
+    assert.equal(ledger.length, 1, 'The repair loop must charge exactly one correction round');
+    assert.equal(ledger[0].problemId, 'consumer-contract');
+    assert.ok(!('confidence' in ledger[0]), 'Ignored finding keys are never persisted into the correction ledger');
+    assert.equal(implementations, 2);
+  }
+  for (const typeError of [false, true]) {
+    const f = fixture(1); const agent = f.getAgent();
+    f.setAgent({ run: async request => {
+      if (request.role !== 'implement' && request.issue === 2) {
+        const original = finding(request);
+        const malformed = (typeError ? { ...original, evidence: 5 } : { problemId: original.problemId, evidenceKey: original.evidenceKey, cause: original.cause }) as unknown as ReturnType<typeof finding>;
+        const report = { status: 'changes_requested' as const, summary: 'Located consumer', evidence: ['a.txt'], findings: [malformed] };
+        return report;
+      }
+      return agent.run(request);
+    } });
+    const result = await f.host().run({}, signal());
+    assert.equal(result.counts.blocked, 1, 'Missing required keys and type errors must stay rejected');
+    const record = f.host().state()!.records[2];
+    assert.equal(record.corrections?.length ?? 0, 0);
+    assert.match(record.attempts.at(-1)!.error!, /Problem finding requires original evidence/);
+  }
+});
 test('bounded check and review repairs share one persistent ledger, without a manual restart', async () => {
   const f = fixture(1); let implementations = 0, reviews = 0;
   f.setAgent({ run: async request => {
