@@ -597,6 +597,160 @@ public class StoryRoundtripSceneTests
         AssertThat(fixture.Snapshot()).IsEqual(before);
     }
 
+    [TestCase(Timeout = 90000)]
+    public async Task AttackAllMemberCommitsWithoutTargetMenuStrikesBothLoadedSlotsAndSettlesOnce()
+    {
+        // #143 (T15): the authored attack-all member's Attack confirm commits the all-target
+        // selection directly (uibattle.c 1094-1099/1611-1617 — the classic target menu is never
+        // entered for that member), one strike covers both loaded slots of the mixed five-slot
+        // team in reference order {2,1,0,4,3} with per-target records, and the battle settles
+        // exactly once through the formal Prepare chain.
+        using var fixture = new AuthoredStoryFixture("PartyWin", mixedEmptySlots: true, attackAllMember0: true);
+        string[] before = fixture.Snapshot();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        bool capableMemberSawTargetMenu = false;
+        List<int[]> strikeTargets = [];
+        List<int[]> strikeDamages = [];
+        List<bool> strikeSingleCritical = [];
+        List<int> numberSlots = [];
+        IReadOnlyList<ClassicBattleAction>? capturedStrike = null;
+        void Observe(Main observed)
+        {
+            var combat = observed.StoryBattle?.Current.Combat;
+            if (observed.StoryBattleMode == StoryBattlePresentation.TargetMenu && combat?.SelectingPlayerIndex == 0)
+                capableMemberSawTargetMenu = true;
+            if (combat?.LastAction is { Attacker: ClassicBattleSide.Player, AttackAll: true }
+                && combat.LastActionTargets is { Count: > 1 } targets)
+            {
+                if (!ReferenceEquals(capturedStrike, targets))
+                {
+                    capturedStrike = targets;
+                    strikeTargets.Add(targets.Select(record => record.TargetIndex).ToArray());
+                    strikeDamages.Add(targets.Select(record => record.Damage).ToArray());
+                    strikeSingleCritical.Add(targets.Select(record => record.Critical).Distinct().Count() == 1);
+                }
+            }
+            if (observed.StoryBattleMode == StoryBattlePresentation.Feedback
+                && combat?.LastAction is { AttackAll: true })
+            {
+                var digits = observed.GetChildren().OfType<PalStoryBattleView>().Single().NumberDigits;
+                if (digits.Count >= 2)
+                    numberSlots = digits.Select(digit => digit.Slot).Distinct().ToList();
+            }
+        }
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(72, 136), new(100, 120), new(128, 104), new(156, 88), new(184, 72)],
+            players: [new(200, 176), new(256, 152)], updateObserver: Observe))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            var script = old.Dialogue!.Session!;
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            AssertThat(battle.Current.Combat.Players[0].CanAttackAll).IsTrue();
+            AssertThat(battle.Current.Combat.Players[1].CanAttackAll).IsFalse();
+            // Member 0's Attack confirm commits the all-target selection directly: member 1 is
+            // already selecting and the classic target menu never opened for the capable member.
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu
+                && battle.Current.Combat.SelectingPlayerIndex == 1);
+            AssertThat(battle.Current.Combat.Players[0].SelectedAttackAll).IsTrue();
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsNull();
+            // Member 1 keeps the classic single-target menu; the final commit builds the queue.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            while (script.PendingBattle is not null && old.StoryBattleMode != StoryBattlePresentation.Settlement)
+            {
+                await host.Wait(() => old.StoryBattleMode is StoryBattlePresentation.Feedback or StoryBattlePresentation.Settlement
+                    || script.PendingBattle is null);
+                if (script.PendingBattle is null || old.StoryBattleMode == StoryBattlePresentation.Settlement) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+            }
+            // Every attack-all strike hit exactly the loaded slots in reference order {2,1,0,4,3}.
+            AssertThat(strikeTargets.Count > 0).IsTrue();
+            AssertThat(strikeTargets.All(targets => targets.SequenceEqual(new[] { 1, 3 }))).IsTrue();
+            AssertThat(strikeSingleCritical.All(single => single)).IsTrue(); // one roll covers the whole strike
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0 });
+            // Both struck enemies displayed their own damage number at once (fight.c 2198-2212).
+            AssertThat(numberSlots.Count >= 2).IsTrue();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Settlement);
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StoryBattleMode is null);
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.StoryExperienceGranted).IsEqual(6);
+            AssertThat(old.StoryCashGranted).IsEqual(10);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(capableMemberSawTargetMenu).IsFalse();
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+        AssertThat(fixture.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase]
+    public void AttackAllPresentationCoversEveryStruckEnemyWithOneAnim()
+    {
+        // fight.c 2036-2256 with sTarget -1: the actor walks the single-target offsets toward the
+        // fixed (150,100) center; the three FX frames blit at BOTH struck enemies without the
+        // per-frame x offset; both struck enemies shift color at poses 8-9 and shake -8/-4/-6
+        // horizontally at poses 10-12; the HP result reveals at pose 7.
+        var presentation = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+            [new Vector2(100, 120), new Vector2(156, 88)], [1, 3], [80, 60], [40, 55], 2, dual: false, secondStrike: false);
+        Vector2[] poses =
+        [
+            new(200, 176), new(200, 176), new(200, 176), new(200, 176),
+            new(214, 120), new(214, 120), new(204, 118), new(204, 118), new(204, 118),
+            new(206, 119), new(206, 119), new(206, 119), new(206, 119),
+            new(200, 176), new(200, 176), new(200, 176)
+        ];
+        for (int pose = 0; pose < 16; pose++)
+        {
+            var shown = presentation.At(pose, 25);
+            AssertThat(shown.PlayerFrame).IsEqual(pose < 4 ? 7 : pose < 7 ? 8 : pose < 13 ? 9 : 2);
+            AssertThat(shown.PlayerPosition == poses[pose]).IsTrue();
+            var struck = shown.StruckEnemies!;
+            AssertThat(struck.Count).IsEqual(2);
+            // Slot is the struck enemy's combat slot index (EnemyDraws keys per-slot draws on it),
+            // not the hit-list ordinal — slots 1 and 3 are the loaded mixed-team slots.
+            AssertThat(struck[0].Slot).IsEqual(1);
+            AssertThat(struck[1].Slot).IsEqual(3);
+            AssertThat(shown.EffectFrame == (pose is >= 7 and <= 9 ? pose - 7 : (int?)null)).IsTrue();
+            for (int hit = 0; hit < 2; hit++)
+            {
+                Vector2 basePosition = hit == 0 ? new Vector2(100, 120) : new Vector2(156, 88);
+                Vector2 shake = pose == 10 ? new Vector2(-8, 0) : pose == 11 ? new Vector2(-4, 0)
+                    : pose == 12 ? new Vector2(-6, 0) : Vector2.Zero;
+                AssertThat(struck[hit].Position == basePosition + shake).IsTrue();
+                AssertThat(struck[hit].ColorShift).IsEqual(pose is 8 or 9 ? 6 : 0);
+                AssertThat(struck[hit].DisplayedHp).IsEqual(pose >= 7 ? (hit == 0 ? 40 : 55) : (hit == 0 ? 80 : 60));
+                AssertThat(struck[hit].ResultVisible == (pose >= 7)).IsTrue();
+                AssertThat(struck[hit].EffectPosition == basePosition).IsTrue(); // no per-frame offset
+            }
+        }
+        // fight.c 2080-2101: a dual attack-all actor stays at its home column instead (first
+        // strike −8/−4, second strike −20/−12).
+        var first = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+            [new Vector2(100, 120)], [1], [80], [70], 2, dual: true, secondStrike: false);
+        var second = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+            [new Vector2(100, 120)], [1], [70], [60], 2, dual: true, secondStrike: true);
+        for (int pose = 0; pose < 16; pose++)
+        {
+            AssertThat(first.At(pose, 25).PlayerPosition == new Vector2(192, 172)).IsTrue();
+            AssertThat(second.At(pose, 25).PlayerPosition == new Vector2(180, 164)).IsTrue();
+        }
+    }
+
     [TestCase("effect")]
     [TestCase("idle")]
     [TestCase("number")]

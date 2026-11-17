@@ -16,6 +16,11 @@ public sealed record ClassicBattlePlayer(int RoleId, int Hp, int MaxHp, int Atta
     public int DyingScript { get; init; }
     public int FriendDeathScript { get; init; }
     public int? CoveredByRoleId { get; init; }
+    /// <summary>The authored attack-all word (PLAYERROLES rgwAttackAll, data-schema "是否全体攻击"):
+    /// the transportable capability declaration through the formal authored/native chain. The
+    /// fixed reference engine itself scans only equipment effects (PAL_PlayerCanAttackAll,
+    /// global.c 2048-2080); a declared true word here is an authored extension of that same
+    /// capability, not retail engine behavior.</summary>
     public bool AttackAll { get; init; }
     /// <summary>Base magical-attack and flee panels; the #49 temporary percent boosts scale these
     /// (script.c 0x0030 reads the base PLAYERROLES words), so combat content declares them.</summary>
@@ -58,6 +63,14 @@ public sealed record ClassicBattleAction(int Round, ClassicBattleSide Attacker, 
     public int TargetIndex { get; init; }
     /// <summary>True on the second strike of a dual attack; one queue action still counts once (fight.c:3628).</summary>
     public bool SecondStrike { get; init; }
+    /// <summary>True when this strike targeted every applicable enemy at once (fight.c 3686-3735):
+    /// the record is one per-target result in reference hit order; Damage is the applied WORD
+    /// delta (previous HP minus the float-truncated new HP), unlike the single-target branch's
+    /// possibly-overkill raw strike value.</summary>
+    public bool AttackAll { get; init; }
+    /// <summary>True on both strikes of a dual attack action (kStatusDualAttack); presentation
+    /// keeps a dual attack-all actor at its home position (fight.c 2080-2101).</summary>
+    public bool DualAttack { get; init; }
     /// <summary>Party index of the member that covered the enemy strike (fight.c:4959-4973); null when nobody covered.</summary>
     public int? CovererPartyIndex { get; init; }
 }
@@ -75,6 +88,12 @@ public sealed record ClassicBattlePlayerView(int PartyIndex, int RoleId, int Hp,
     public int BoostDefense { get; init; }
     public int BoostDexterity { get; init; }
     public int BoostFlee { get; init; }
+    /// <summary>PAL_PlayerCanAttackAll (global.c 2048-2080): the authored player word or any
+    /// non-zero equipment rgwAttackAll register grants the all-target attack selection.</summary>
+    public bool CanAttackAll { get; init; }
+    /// <summary>True when this member committed the round's all-target attack selection
+    /// (reference sTarget -1); SelectedEnemySlot stays null for such a commitment.</summary>
+    public bool SelectedAttackAll { get; init; }
 }
 public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp)
 {
@@ -118,4 +137,7 @@ public sealed record ClassicBattleView(ClassicBattlePhase Phase, int Round, int 
     public ClassicBattleRoleHook? PendingRoleHook { get; init; }
     /// <summary>The newest resolved flee attempt; published once per failed boss escape, replacing any prior attempt.</summary>
     public ClassicBattleFleeAttempt? LastFleeAttempt { get; init; }
+    /// <summary>Per-target results of the newest presented strike in hit order (single-element for
+    /// single-target and enemy actions); one all-target strike publishes one record per hit slot.</summary>
+    public IReadOnlyList<ClassicBattleAction> LastActionTargets { get; init; } = [];
 }

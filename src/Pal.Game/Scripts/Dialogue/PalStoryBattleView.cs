@@ -146,6 +146,7 @@ internal partial class PalStoryBattleView : Node2D
         int playerShift = 0, enemyShift = 0, php = combat.PlayerHp, ehp = combat.EnemyHp;
         int? fx = null;
         bool result = false;
+        IReadOnlyList<StoryStruckEnemy>? struckEnemies = null;
         if (fleePresentation is { } fleeing)
         {
             // fight.c 4153-4171: the failed escaper steps +4/+2 three times, then stands at
@@ -164,6 +165,7 @@ internal partial class PalStoryBattleView : Node2D
             pf = hit.PlayerFrame; player = hit.PlayerPosition; enemy = hit.EnemyPosition;
             enemyShift = hit.EnemyColorShift; ehp = hit.DisplayedEnemyHp; result = hit.ResultVisible;
             fx = hit.EffectFrame; fxPosition = hit.EffectPosition;
+            struckEnemies = hit.StruckEnemies;
         }
         if (party)
         {
@@ -175,7 +177,7 @@ internal partial class PalStoryBattleView : Node2D
         { EnemyIdleFrames = Array.AsReadOnly(idleFrames), EnemyIdleCounters = Array.AsReadOnly(idleCounters), NumberDigits = NumberDigits, FeedbackWord = FeedbackWord, PartyPlayers = partyPlayers, PartyEnemies = partyEnemies,
             SelectingPlayer = party ? combat.SelectingPlayerIndex : null,
             EnemyVisible = IsEnemyVisible(0),
-            PartyBoosts = BoostSums(combat) };
+            PartyBoosts = BoostSums(combat), StruckEnemies = struckEnemies };
     }
 
     // The boost panel exists only while a role-hook boost register actually changed a member's
@@ -224,23 +226,32 @@ internal partial class PalStoryBattleView : Node2D
         for (int i = 0; i < draws.Length; i++)
         {
             var slot = combat.Enemies[i];
-            draws[i] = action is { Attacker: ClassicBattleSide.Player, TargetIndex: var targeted } && targeted == i
-                && playerPresentation is { } strike
-                ? new(idleFrames[i], strike.EnemyPosition, strike.EnemyColorShift, strike.DisplayedEnemyHp)
-                : action is { Attacker: ClassicBattleSide.Enemy, ActorIndex: var mover } && mover == i
-                    && EnemyPresentation is { } attacker
-                    ? new(attacker.EnemyFrame, attacker.EnemyPosition, 0, slot.Hp)
-                    : new(idleFrames[i], team.EnemySlots[i].EnemyPosition, 0, slot.Hp);
+            // fight.c 2173-2256: an all-target strike moves, shifts and reveals every struck
+            // enemy together; the un-struck slots keep their idle gesture.
+            if (playerPresentation is { StruckEnemies: { } struck } && struck.Any(x => x.Slot == i))
+            {
+                var struckSlot = struck.Single(x => x.Slot == i);
+                draws[i] = new(idleFrames[i], struckSlot.Position, struckSlot.ColorShift, struckSlot.DisplayedHp);
+            }
+            else if (action is { Attacker: ClassicBattleSide.Player, TargetIndex: var targeted } && targeted == i
+                && playerPresentation is { } strike)
+                draws[i] = new(idleFrames[i], strike.EnemyPosition, strike.EnemyColorShift, strike.DisplayedEnemyHp);
+            else if (action is { Attacker: ClassicBattleSide.Enemy, ActorIndex: var mover } && mover == i
+                && EnemyPresentation is { } attacker)
+                draws[i] = new(attacker.EnemyFrame, attacker.EnemyPosition, 0, slot.Hp);
+            else
+                draws[i] = new(idleFrames[i], team.EnemySlots[i].EnemyPosition, 0, slot.Hp);
             draws[i] = draws[i] with { Visible = IsEnemyVisible(i) };
         }
         return draws;
     }
 
     // fight.c post-action check removes the KO'ed instance, not every slot sharing its ID.
-    // Core resolves damage before feedback; keep that target visible until its animation ends.
+    // Core resolves damage before feedback; keep every struck target visible until its animation
+    // ends — an all-target strike strikes several slots at once (fight.c 2173-2190).
     private bool IsEnemyVisible(int slot) => combat.Enemies[slot].Hp > 0
         || (mode == StoryBattlePresentation.Feedback && playerPresentation is not null
-            && combat.LastAction is { Attacker: ClassicBattleSide.Player, TargetIndex: var target } && target == slot);
+            && combat.LastActionTargets.Any(record => record.Attacker == ClassicBattleSide.Player && record.TargetIndex == slot));
 
     public override void _Draw()
     {
@@ -279,7 +290,14 @@ internal partial class PalStoryBattleView : Node2D
             // fight.c:2029: the acting member's own battle sprite resolves the effect group.
             int actingMember = combat.LastAction is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } ? actor : 0;
             var texture = effects[(actingMember, effect)];
-            DrawTexture(texture, shown.EffectPosition - new Vector2(texture.GetWidth() / 2, texture.GetHeight()));
+            if (shown.StruckEnemies is { } multi)
+            {
+                // fight.c 2173-2190: the same FX frame blits at every struck enemy's own position.
+                foreach (var struck in multi)
+                    DrawTexture(texture, struck.EffectPosition - new Vector2(texture.GetWidth() / 2, texture.GetHeight()));
+            }
+            else
+                DrawTexture(texture, shown.EffectPosition - new Vector2(texture.GetWidth() / 2, texture.GetHeight()));
         }
         DrawRect(new Rect2(0, 174, 320, shown.PartyBoosts.Count > 0 ? 33 : 26), new Color(0, 0, 0, .9f));
         if (shown.PartyEnemies.Count > 0)
@@ -343,6 +361,8 @@ internal readonly record struct StoryBattleDrawSnapshot(int PlayerFrame, int Ene
     // Party per-actor truth in party/slot order; empty keeps the legacy single-pair projection.
     internal IReadOnlyList<StoryActorDraw> PartyPlayers { get; init; } = Array.Empty<StoryActorDraw>();
     internal IReadOnlyList<StoryActorDraw> PartyEnemies { get; init; } = Array.Empty<StoryActorDraw>();
+    // Per-struck-enemy state of one all-target strike; null keeps the single-target projection.
+    internal IReadOnlyList<StoryStruckEnemy>? StruckEnemies { get; init; }
     // Per-member role-hook boost sums; empty while no boost register is set.
     internal IReadOnlyList<int> PartyBoosts { get; init; } = Array.Empty<int>();
     internal int? SelectingPlayer { get; init; }

@@ -20,7 +20,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
     internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null,
         bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
         bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false,
-        bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false)
+        bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false, bool attackAllMember0 = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -34,6 +34,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The mixed empty-slot derivation requires PartyWin.", nameof(mixedEmptySlots));
         if (mixedEmptySlots && (heterogeneousEnemies || singlePlayerTwoEnemies || zeroHpPuppetEntry))
             throw new ArgumentException("The mixed empty-slot derivation is its own five-slot author shape.", nameof(mixedEmptySlots));
+        if (attackAllMember0 && (!mixedEmptySlots || scenario != "PartyWin"))
+            throw new ArgumentException("The attack-all derivation is defined on the mixed empty-slot PartyWin shape.", nameof(attackAllMember0));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -56,7 +58,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -131,6 +133,22 @@ internal sealed class AuthoredStoryFixture : IDisposable
                     foreach (string section in new[] { "roles", "players" })
                         data[section]![1]!["equipment"]![3] = 0;
                     data["roleEquipment"]![1]![3] = 0;
+                }
+                if (attackAllMember0)
+                {
+                    // #143 (T15) test-owned authored capability: member 0 carries the authored
+                    // attack-all word (PLAYERROLES rgwAttackAll) — the transportable all-target
+                    // declaration through the formal native chain; member 1 keeps single targets.
+                    // The numeric words are hand-checked against the reference math: the all-target
+                    // strike applies base 42 (attack 40 vs effective defense (0+6)*4 = 24,
+                    // resistance 1) divided by the running 1,2,4,8,16 division (fight.c 3686-3735),
+                    // so hp 21 dies to both 42/1 and 42/2 exactly, with or without the critical x3;
+                    // and dexterity 999 (the reference cap) x [0.9,1.1] always outruns member 1's
+                    // 100 x [0.9,1.1] (fight.c 1462-1578), so the frozen hit set is deterministically
+                    // {1,3} and the battle settles once in round 1.
+                    data["players"]![0]!["attackAll"] = true;
+                    data["players"]![0]!["dexterity"] = 999;
+                    foreach (int slot in new[] { 1, 3 }) team["enemies"]![slot]!["hp"] = 21;
                 }
                 File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
                 numbers = numericInput;
@@ -208,6 +226,9 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned mixed empty-slot five-slot derivation (T13c #141); empty runtime slots are authored, not retail data.";
             }
+            if (attackAllMember0)
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned attack-all word, member-0 speed word 999 and loaded-slot HP 21 words (T15 #143); authored capability/numeric declarations, not retail data.";
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")
                 foreach (var player in metadata["visual"]!["players"]!.AsArray())

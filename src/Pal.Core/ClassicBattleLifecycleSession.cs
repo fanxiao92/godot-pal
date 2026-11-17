@@ -94,6 +94,15 @@ public sealed class ClassicBattleLifecycleSession
         Current = View(activeCombat.Current);
     }
 
+    /// <summary>The all-target attack selection forwarded to the active combat owner (reference
+    /// sTarget -1; the classic Attack confirm commits it without a target menu, uibattle.c 1611-1617).</summary>
+    public void SelectAttackAll(int partyIndex)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.SelectAttackAll(partyIndex);
+        Current = View(activeCombat.Current);
+    }
+
     /// <summary>The whole-party boss flee attempt (fight.c 4119-4173); only a boss battle supports it.</summary>
     public void SelectFlee(int partyIndex)
     {

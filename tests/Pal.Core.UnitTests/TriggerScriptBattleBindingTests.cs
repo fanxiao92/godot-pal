@@ -99,8 +99,32 @@ public sealed class TriggerScriptBattleBindingTests
             Assert.Equal(new int[6], next.PendingBattle.Lifecycle.Current.Role.Equipment);
         }
 
+        // #143 (T15): a non-zero equipment rgwAttackAll register is the reference all-target
+        // capability (PAL_PlayerCanAttackAll); the selected battle now starts through it, and
+        // removing the gear drops the capability under the same current-capability rule.
+        {
+            var content = EquippedContent(true, "attackAll");
+            var equipment = BattleEquipmentState.Initialize(content);
+            Assert.Equal(2, equipment.AttackAllWord(1, 0));
+            var owner = new RoleLiveState([content.InitialRole]);
+            var random = new BindingRandom();
+            var fixture = Fixture();
+            fixture.Commands[2] = End(2);
+            var script = TriggerScriptSession.ForSharedRoles(fixture.Load(), TriggerScriptSessionTests.Language(),
+                content, random, owner, equipmentState: equipment);
+            script.GetCurrentEntryRequirements("shared", "npc", 60);
+            script.Start("shared", "npc", 60);
+            Assert.True(script.PendingBattle!.Lifecycle.Current.Combat.Players[0].CanAttackAll);
+            var poisons = new PartyPoisonState([1], [Enumerable.Repeat(new PoisonSlot(0, 0), 16).ToArray()], new Dictionary<int, int>());
+            equipment.RemoveEquippedItem(1, 0, owner, poisons);
+            var next = TriggerScriptSession.ForSharedRoles(Fixture().Load(), TriggerScriptSessionTests.Language(),
+                content, random, owner, equipmentState: equipment);
+            next.Start("shared", "npc", 60);
+            Assert.False(next.PendingBattle!.Lifecycle.Current.Combat.Players[0].CanAttackAll);
+        }
+
         // Selected current capability, not unselected/frozen equipment, governs acceptance.
-        foreach (string unsupported in new[] { "attackAll", "cooperativeMagic", "sprite" })
+        foreach (string unsupported in new[] { "cooperativeMagic", "sprite" })
         {
             var content = EquippedContent(true, unsupported);
             var equipment = BattleEquipmentState.Initialize(content);

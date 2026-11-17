@@ -68,15 +68,19 @@ public sealed class ModernBattleContentTests
     }
 
     [Fact]
-    public void Physical_battle_rejects_attack_all_without_changing_format_or_trigger_behavior()
+    public void Physical_battle_executes_the_authored_attack_all_word_through_the_trigger_chain()
     {
+        // #143 (T15): the authored player attackAll word is now an executable capability through
+        // the formal validation and trigger chains, not merely a preserved format field.
         var data = Data();
         data["players"]![0]!["attackAll"] = true;
         var content = ModernBattleContent.Parse(data.ToJsonString());
-        Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(content, 18));
+        ModernBattleContent.ValidatePhysicalBattle(content, 18);
         Assert.True(content.Player.AttackAll);
-        ModernBattleContent.Validate(content);
-        AssertUnsupported(content);
+        var random = new BattleRandom();
+        var script = Script(content, random);
+        script.Start("shared", "npc", 28);
+        Assert.True(script.PendingBattle!.Lifecycle.Current.Combat.Players[0].CanAttackAll);
     }
 
     [Theory]
@@ -157,11 +161,11 @@ public sealed class ModernBattleContentTests
     }
 
     [Theory]
-    [InlineData("attackAll", 1, false)]
     [InlineData("cooperativeMagic", 351, false)]
     [InlineData("battleSprite", 6, false)]
     [InlineData("attackAll", 0, true)]
     [InlineData("cooperativeMagic", 0, true)]
+    [InlineData("attackAll", 1, true)]
     [InlineData("attackAll", 65535, true, 0)]
     public void Physical_battle_reuses_selected_equipment_closure_without_mutating_it(string field, int value, bool supported, int effectRole = 1)
     {
@@ -1049,13 +1053,17 @@ public sealed class ModernBattleContentTests
     }
 
     [Fact]
-    public void True_attack_all_is_preserved_but_not_executable()
+    public void True_attack_all_is_preserved_and_consumed_by_the_session_selection()
     {
         var data = Data();
         data["players"]![0]!["attackAll"] = true;
         var content = ModernBattleContent.Parse(data.ToJsonString());
         Assert.True(content.Player.AttackAll);
-        AssertUnsupported(content);
+        var session = new ClassicBattleSession(new([content.Player], content.EnemyTeams[18]), new BattleRandom());
+        Assert.True(session.Current.Players[0].CanAttackAll);
+        session.SelectAttackAll(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.True(session.Current.Players[0].SelectedAttackAll);
     }
 
     [Theory]

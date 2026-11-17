@@ -699,6 +699,139 @@ public sealed class ClassicBattlePartySessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Attack_all_member_strikes_every_loaded_slot_in_reference_order_with_decayed_damage()
+    {
+        // #143 (T15) fight.c:3686-3735: the all-target strike covers the living non-empty slots in
+        // reference order {2,1,0,4,3}; each target takes base 42 (attack40 vs effective defense 24)
+        // divided by 1,2,4,8,16 as a FLOAT division whose WORD truncation is observable
+        // (1000-10.5 -> 989), from one 0..5 critical roll; no +1..2, role0 bonus or final scale
+        // draw exists in this branch. The capable member's specific target normalizes to the
+        // all-target selection (PAL_BattlePlayerValidateAction fight.c:3489-3494).
+        var d = FiveEnemyDefinition();
+        d = d with { Players = [new(1, 200, 200, 40, 20, 100) { AttackAll = true }],
+            Enemies = d.Enemies.Select(e => e with { Hp = 1000 }).ToArray() };
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 5, 1), I(2, 3, 2)]);
+        var session = new ClassicBattleSession(d, random);
+        Assert.True(session.Current.Players[0].CanAttackAll);
+        session.SelectAttack(0, 2);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.True(session.Current.Players[0].SelectedAttackAll);
+        Assert.Null(session.Current.Players[0].SelectedEnemySlot);
+        Assert.True(session.ResolveNextAction());
+        // Order {2,1,0,4,3}: 42, 21, 1000-10.5->989 (applied 11), 1000-5.25->994 (6), 1000-2.625->997 (3).
+        Assert.Equal(new[] { 2, 1, 0, 4, 3 }, session.Current.LastActionTargets.Select(r => r.TargetIndex).ToArray());
+        Assert.Equal(new[] { 42, 21, 11, 6, 3 }, session.Current.LastActionTargets.Select(r => r.Damage).ToArray());
+        Assert.All(session.Current.LastActionTargets, r =>
+        {
+            Assert.True(r.AttackAll);
+            Assert.False(r.Critical);
+            Assert.False(r.SecondStrike);
+            Assert.Equal(0, r.ActorIndex); // the acting member, not the strike order
+        });
+        Assert.Equal(new[] { 989, 979, 958, 997, 994 }, session.Current.Enemies.Select(e => e.Hp).ToArray());
+        Assert.Equal(new ClassicBattleCounts(1, 2), session.Current.Players[0].Counts);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Attack_all_selection_requires_the_capability_and_commits_without_side_effects()
+    {
+        // uibattle.c 1094-1099/1611-1617: only a capable member ever reaches the all-target commit;
+        // the request on anyone else changes no state and consumes no random.
+        var random = new ScriptedRandom([]);
+        var session = new ClassicBattleSession(FiveEnemyDefinition(), random);
+        Assert.False(session.Current.Players[0].CanAttackAll);
+        var before = session.Current;
+        Assert.Throws<InvalidOperationException>(() => session.SelectAttackAll(0));
+        Assert.Same(before, session.Current);
+        Assert.Empty(before.ActionQueue);
+        random.AssertExhausted();
+        var capable = FiveEnemyDefinition();
+        capable = capable with { Players = [new(1, 200, 200, 40, 20, 100) { AttackAll = true }] };
+        var committing = new ClassicBattleSession(capable, new ScriptedRandom(QueueDraws(5)));
+        committing.SelectAttackAll(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, committing.Current.Phase);
+        Assert.Equal(1, committing.Current.Round);
+        Assert.True(committing.Current.Players[0].SelectedAttackAll);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Attack_all_critical_roll_covers_the_whole_strike_and_dual_attacks_reroll_per_strike()
+    {
+        // fight.c 3686-3696: ONE RandomLong(0,5) per strike decides every target's critical; a dual
+        // attack reruns the whole loop with a fresh critical and a reset division, and the counts
+        // still grow once per action (fight.c 3753-3755). The capability here is the equipment
+        // rgwAttackAll word (PAL_PlayerCanAttackAll); the same closure carries the dual status.
+        // Strike 1 (no critical): 42/21/11/6/3; strike 2 (critical, x3): 126/63/32/16/8 applied.
+        var d = FiveEnemyDefinition();
+        d = d with { Players = [new(1, 200, 200, 40, 20, 100) { Equipment = [0, 0, 0, 170, 0, 0] }],
+            Enemies = d.Enemies.Select(e => e with { Hp = 500 }).ToArray() };
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 5, 1), I(0, 5, 0), I(2, 3, 3)]);
+        var session = new ClassicBattleSession(d, random, AttackAllEquipment(dualAttack: true));
+        Assert.True(session.Current.Players[0].CanAttackAll);
+        session.SelectAttackAll(0);
+        Assert.True(session.ResolveNextAction()); // the first strike; the dual action stays open
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.All(session.Current.LastActionTargets, r => Assert.False(r.SecondStrike));
+        Assert.Equal(new[] { 489, 479, 458, 497, 494 }, session.Current.Enemies.Select(e => e.Hp).ToArray());
+        Assert.Equal(new ClassicBattleCounts(0, 0), session.Current.Players[0].Counts);
+        Assert.True(session.ResolveNextAction()); // the second strike re-rolls critical (0) and division
+        var second = session.Current.LastActionTargets;
+        Assert.All(second, r => { Assert.True(r.SecondStrike); Assert.True(r.DualAttack); Assert.True(r.AttackAll); Assert.True(r.Critical); });
+        Assert.Equal(new[] { 126, 63, 32, 16, 8 }, second.Select(r => r.Damage).ToArray());
+        Assert.Equal(new[] { 457, 416, 332, 489, 478 }, session.Current.Enemies.Select(e => e.Hp).ToArray());
+        Assert.Equal(new ClassicBattleCounts(1, 3), session.Current.Players[0].Counts);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Attack_all_freezes_the_hit_set_for_both_strikes_and_counts_each_ko_reward_once()
+    {
+        // fight.c 735-765: PostActionCheck clears KO'd enemies only after the whole action, so the
+        // dual second strike still strikes the first-strike kill (applied damage 0, no second
+        // reward); the empty slots never join the set and never advance the division.
+        var d = FiveEnemyDefinition();
+        d = d with { Players = [new(1, 200, 200, 40, 20, 100) { Equipment = [0, 0, 0, 170, 0, 0] }],
+            Enemies = [d.Enemies[0] with { Hp = 100, Experience = 7, Cash = 4 }, EmptyEnemy(),
+                d.Enemies[0] with { Hp = 42, Experience = 7, Cash = 4 }, EmptyEnemy(), EmptyEnemy()] };
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 5, 1), I(0, 5, 1), I(2, 3, 2)]);
+        var session = new ClassicBattleSession(d, random, AttackAllEquipment(dualAttack: true));
+        session.SelectAttackAll(0);
+        Assert.True(session.ResolveNextAction());
+        // Hit set {2, 0}: slot 2 takes 42 and dies exactly; slot 0 takes the /2 strike 21.
+        Assert.Equal(new[] { 2, 0 }, session.Current.LastActionTargets.Select(r => r.TargetIndex).ToArray());
+        Assert.Equal(new[] { 42, 21 }, session.Current.LastActionTargets.Select(r => r.Damage).ToArray());
+        Assert.Equal(7, session.ExperienceGained);
+        Assert.Equal(4, session.CashGained);
+        Assert.True(session.ResolveNextAction()); // the second strike keeps the frozen set
+        Assert.Equal(new[] { 2, 0 }, session.Current.LastActionTargets.Select(r => r.TargetIndex).ToArray());
+        Assert.Equal(new[] { 0, 21 }, session.Current.LastActionTargets.Select(r => r.Damage).ToArray());
+        Assert.Equal(7, session.ExperienceGained); // the corpse strike never counts a second KO
+        Assert.Equal(new[] { 58, 0, 0, 0, 0 }, session.Current.Enemies.Select(e => e.Hp).ToArray());
+        Assert.False(session.Current.Enemies[2].IsEmpty); // the killed real enemy keeps its identity
+        Assert.Equal(new ClassicBattleCounts(1, 2), session.Current.Players[0].Counts);
+        random.AssertExhausted();
+    }
+
+    // PAL_PlayerCanAttackAll (global.c 2048-2080): a non-zero equipment rgwAttackAll register on
+    // the hand slot grants the all-target attack; the optional persistent dual status rides the
+    // same declared closure (PAL_SetPlayerStatus good-status branch).
+    private static BattleEquipmentState AttackAllEquipment(bool dualAttack)
+    {
+        int[] worn = [0, 0, 0, 170, 0, 0];
+        var grid = Enumerable.Range(0, 6).Select(id => (IReadOnlyList<int>)(id == 1 ? worn : new int[6])).ToArray();
+        var effect = new BattleEquipmentEffect(0, 0, 0, 0, [0, 0, 0, 0, 0, 0, 0, 0, dualAttack ? 60000 : 0])
+            { AttackAll = 1 };
+        var rows = Enumerable.Range(0, 6).Select(id => (BattleEquipmentEffect)(id == 1
+            ? effect : new BattleEquipmentEffect(0, 0, 0, 0, new int[9]))).ToArray();
+        return BattleEquipmentState.Initialize(grid, new Dictionary<int, BattleEquipmentObject> { [170] = new(170, rows) });
+    }
+
     private static ClassicBattleDefinition FiveEnemyDefinition()
     {
         var d = Definition();

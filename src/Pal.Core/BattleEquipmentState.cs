@@ -5,7 +5,8 @@ namespace Pal.Core;
 /// <summary>Per-role effect row of one equipment object's equip script (global.c script 0x0017/0x001A/0x002D word writes).
 /// The optional stat words cover PLAYERROLES stat 18/21/22 equipment writes (magicStrength, fleeRate,
 /// poisonResistance). AttackAll and CooperativeMagic retain nullable field 4/65 WORDs in content and
-/// equipment registers; selected combat rejects nonzero values rather than executing their effects.</summary>
+/// equipment registers; a non-zero selected attackAll word grants the reference all-target attack
+/// (PAL_PlayerCanAttackAll) while selected combat still rejects nonzero cooperativeMagic values.</summary>
 public sealed record BattleEquipmentEffect(int Attack, int Defense, int Dexterity, int BattleSprite, IReadOnlyList<int> Statuses,
     int? MagicPower = null, int? FleeRate = null, int? PoisonResistance = null)
 {
@@ -17,9 +18,9 @@ public sealed record BattleEquipmentEffect(int Attack, int Defense, int Dexterit
 public sealed record BattleEquipmentObject(int ObjectId, IReadOnlyList<BattleEquipmentEffect> Effects);
 
 /// <summary>Formal six-role equipment initialization (PAL_UpdateEquipments, global.c:1352) and effective panel
-/// projections (PAL_GetPlayerAttackStrength/Defense/Dexterity global.c:1736/1800/1832 and PAL_GetPlayerBattleSprite
-/// global.c:1978-2008). Retains nullable field 4/65 equipment words for selected-combat validation,
-/// not attack-all or cooperative-magic execution.</summary>
+/// projections (PAL_GetPlayerAttackStrength/Defense/Dexterity global.c 1736/1800/1832 and PAL_GetPlayerBattleSprite
+/// global.c 1978-2008). Retains the nullable field 65 equipment word for selected-combat validation;
+/// the field 4 attackAll word is the reference all-target capability source.</summary>
 public sealed class BattleEquipmentState
 {
     public const int RoleCount = 6;   // MAX_PLAYER_ROLES (palcommon.h)
@@ -277,7 +278,8 @@ public sealed class BattleEquipmentState
         return live;
     }
 
-    /// <summary>Retained field 4 WORD for one equipment register; null means no write, not an attack-all capability.</summary>
+    /// <summary>Retained field 4 WORD for one equipment register; null means no write. Any non-zero
+    /// value is the reference all-target attack capability (PAL_PlayerCanAttackAll).</summary>
     public int? AttackAllWord(int roleId, int registerIndex)
     {
         Role(roleId);

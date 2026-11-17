@@ -42,7 +42,7 @@ public partial class Main
     private StoryBattlePoseClock poseClock;
     private uint presentationNow;
     private StoryEnemyAttackPresentation? enemyPresentation;
-    private StoryPlayerAttackPresentation? playerPresentation;
+    private IStoryPlayerStrikePresentation? playerPresentation;
     private int effectEnemyHeight;
     private StoryEnemyIdleState[]? enemyIdle;
     private List<string>? settlementLines;
@@ -54,6 +54,8 @@ public partial class Main
     private readonly StoryBattleNumbers storyNumbers = new();
     private bool feedbackBorn;
     private int feedbackBeforeHp;
+    // The presented action's enemies-before-HP snapshot (all-target strikes read it per target).
+    private int[] feedbackEnemiesBefore = [];
     internal StoryEnemyAttackSnapshot? StoryEnemyPresentation => storyView?.EnemyPresentation;
     internal StoryBattleDrawSnapshot? StoryDrawSnapshot => storyView?.DrawSnapshot;
     internal uint StoryPresentationTicks => presentationNow;
@@ -196,6 +198,18 @@ public partial class Main
                 }
                 if (confirm)
                 {
+                    var selectingMember = lifecycle.Current.Combat.SelectingPlayerIndex
+                        ?? throw new InvalidOperationException("Attack menu has no selecting party member.");
+                    if (lifecycle.Current.Combat.Players[selectingMember].CanAttackAll)
+                    {
+                        // uibattle.c 1094-1099 + 1611-1617 (PAL_CLASSIC): an attack-all member's
+                        // Attack confirm commits sTarget -1 directly; the classic target menu is
+                        // never entered for such a member.
+                        lifecycle.SelectAttackAll(selectingMember);
+                        StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Selecting
+                            ? StoryBattlePresentation.AttackMenu : StoryBattlePresentation.Resolving;
+                        break;
+                    }
                     var enemies = lifecycle.Current.Combat.Enemies;
                     // No previous-target memory: each member starts from the first alive slot.
                     storyTargetSlot = Enumerable.Range(0, enemies.Count).First(slot => enemies[slot].Hp > 0);
@@ -278,6 +292,7 @@ public partial class Main
                 int beforeEnemyHp = enemiesBefore[action.Attacker == ClassicBattleSide.Player ? action.TargetIndex : 0];
                 storyNumbers.BeginAction(); feedbackBorn = false;
                 feedbackBeforeHp = action.Attacker == ClassicBattleSide.Player ? beforeEnemyHp : beforeHp;
+                feedbackEnemiesBefore = enemiesBefore;
                 var combat = lifecycle.Current.Combat;
                 var playerOrigins = storyVisual!.PlayerOrigins(combat.Players.Count);
                 var actingEnemy = action.Attacker == ClassicBattleSide.Enemy ? storyTeam!.EnemySlots[action.ActorIndex] : null;
@@ -286,11 +301,23 @@ public partial class Main
                     playerOrigins[action.TargetIndex], actingEnemy.EnemyPosition, beforeHp,
                     combat.Players[action.TargetIndex].Hp, story.BattleContent.Players[action.TargetIndex].MaxHp,
                     action, enemyIdle![action.ActorIndex].Frame);
-                playerPresentation = action.Attacker != ClassicBattleSide.Player ? null : new(
-                    playerOrigins[action.ActorIndex], storyTeam!.EnemySlots[action.TargetIndex].EnemyPosition,
-                    beforeEnemyHp, combat.Enemies[action.TargetIndex].Hp,
-                    StoryEnemyAttackPresentation.RestFrame(combat.Players[action.ActorIndex].Hp,
-                        story.BattleContent.Players[action.ActorIndex].MaxHp));
+                playerPresentation = null;
+                if (action.Attacker == ClassicBattleSide.Player)
+                {
+                    playerPresentation = action.AttackAll
+                        ? new StoryPlayerAttackAllPresentation(playerOrigins[action.ActorIndex],
+                            combat.LastActionTargets.Select(record => (Vector2)storyTeam!.EnemySlots[record.TargetIndex].EnemyPosition).ToArray(),
+                            combat.LastActionTargets.Select(record => record.TargetIndex).ToArray(),
+                            combat.LastActionTargets.Select(record => enemiesBefore[record.TargetIndex]).ToArray(),
+                            combat.LastActionTargets.Select(record => combat.Enemies[record.TargetIndex].Hp).ToArray(),
+                            StoryEnemyAttackPresentation.RestFrame(combat.Players[action.ActorIndex].Hp,
+                                story.BattleContent.Players[action.ActorIndex].MaxHp),
+                            action.DualAttack, action.SecondStrike)
+                        : new StoryPlayerAttackPresentation(playerOrigins[action.ActorIndex], storyTeam!.EnemySlots[action.TargetIndex].EnemyPosition,
+                            beforeEnemyHp, combat.Enemies[action.TargetIndex].Hp,
+                            StoryEnemyAttackPresentation.RestFrame(combat.Players[action.ActorIndex].Hp,
+                                story.BattleContent.Players[action.ActorIndex].MaxHp));
+                }
                 StoryBattleMode = StoryBattlePresentation.Feedback;
                 poseClock = StoryBattlePoseClock.Start(now);
                 AdvanceStoryGesture(0);
@@ -376,11 +403,26 @@ public partial class Main
             if (!feedbackBorn && (playerHit || enemyEnqueue))
             {
                 var origins = storyVisual!.PlayerOrigins(lifecycle.Current.Combat.Players.Count);
-                Vector2 target = playerHit ? storyTeam!.EnemySlots[action.TargetIndex].EnemyPosition
-                    : origins[action.TargetIndex];
-                target.Y = Math.Max(10, target.Y - (playerHit ? 115 : 75));
-                storyNumbers.EnqueueAction(feedbackBeforeHp, action, target, now, pending: true);
-                feedbackBorn = true;
+                if (playerHit && action.AttackAll)
+                {
+                    // fight.c 2198-2212: every struck enemy's stat change displays together at its
+                    // own position after the first FX frame — one pending number per struck slot.
+                    foreach (var record in lifecycle.Current.Combat.LastActionTargets)
+                    {
+                        Vector2 target = storyTeam!.EnemySlots[record.TargetIndex].EnemyPosition;
+                        target.Y = Math.Max(10, target.Y - 115);
+                        storyNumbers.EnqueueAction(feedbackEnemiesBefore[record.TargetIndex], record, target, now, pending: true);
+                    }
+                    feedbackBorn = true;
+                }
+                else
+                {
+                    Vector2 target = playerHit ? storyTeam!.EnemySlots[action.TargetIndex].EnemyPosition
+                        : origins[action.TargetIndex];
+                    target.Y = Math.Max(10, target.Y - (playerHit ? 115 : 75));
+                    storyNumbers.EnqueueAction(feedbackBeforeHp, action, target, now, pending: true);
+                    feedbackBorn = true;
+                }
             }
             if ((playerPresentation is not null && poseClock.Pose >= 8) || shownEnemy is { ResultVisible: true })
                 storyNumbers.RevealPending();

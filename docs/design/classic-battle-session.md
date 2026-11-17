@@ -1,5 +1,15 @@
 # ClassicBattleSession：Core 普攻与整轮选令
 
+## 当前 #143：普通攻击全体（T15）
+
+有参考全体攻击能力的队员经同一攻击选令与动作队列提交一次全体目标选令，不新增队列、随机源或第二套状态。能力来源 = 授权玩家字 `ClassicBattlePlayer.AttackAll`（正式 authored/native 链可运输的声明，PLAYERROLES rgwAttackAll；固定参考引擎本身只扫装备效果）∨ 任一非零装备 `AttackAllWord` 寄存器（`PAL_PlayerCanAttackAll`，global.c 2048-2080 原文）。旧拒绝面（玩家字 + 装备字）迁移为能力正例；cooperativeMagic 装备字仍拒绝。
+
+- **选令**：`ClassicBattleSession.SelectAttackAll(partyIndex)`（`ClassicBattleLifecycleSession` 同名转发）要求 Selecting、当前选令成员且具备能力，否则无副作用拒绝；提交即参考 sTarget -1，全员选完才建队。有能力的成员用 `SelectAttack(partyIndex, enemySlot)` 提交具体目标时按 `PAL_BattlePlayerValidateAction`（fight.c 3489-3494）归一化为全体；视图发布 `Players[i].CanAttackAll/SelectedAttackAll`（全体提交时 `SelectedEnemySlot` 保持 null）。`CancelSelection` 清全体承诺与其余承诺一致。
+- **执行**（fight.c 3686-3735）：一击一次 `RandomLong(0,5)` 会心掷骰（bravery 保留掷骰恒取会心）覆盖整击；命中序固定 {2,1,0,4,3}；命中集在动作开始时冻结（存活非空槽，空槽与先前动作已杀槽既不命中也不推进除数；PostActionCheck 在整动作后才清 KO，双击第二击仍打第一击击杀目标，applied 伤害 0、不重复计奖）。逐目标：`BaseDamage`→抗性整除（SHORT）→float ×3（会心）→ `/division`（1,2,4,8,16 逐目标加倍，float 除）→ ≤0 抬 1 → WORD 截断扣血（截断可观察，如 1000-10.5→989）；无 +1..2、role0 加成或末尾 float 摆动。双击每击重掷会心并重置除数；attack/health 计数与 KO 奖励每动作一次；胜负与回合只在整动作后结算。
+- **观察面**：`ClassicBattleView.LastActionTargets` 逐目标记录（单体/敌方动作单元素；全体一击每命中槽一条，按命中序）；`ClassicBattleAction.AttackAll/DualAttack` 标记全体语义与双击动作；全体记录的 `Damage` 是 applied WORD 差（前 HP 减截断后 HP），区别于单体分支可能过量的原始伤害。
+- **Main 接线**：AttackMenu 确认时选令成员 `CanAttackAll` 则直接 `SelectAttackAll`（uibattle.c 1094-1099 + 1611-1617，经典全体成员不进目标选单）；一击一次表现动画：非双击走向固定 (150,100) 中心，双击+全体钉在本位（fight.c 2080-2101：首击 -8/-4、第二击 -20/-12），FX 同帧绘在每个命中敌位（2173-2190，无逐帧偏移），全体受击色偏（8-9 拍）与纯水平震动（10-12 拍 -8/-4/-6，2198-2256），逐目标伤害数字在各命中敌位同时入队（DisplayStatChange 语义）。
+- **覆盖**：Core 新增四例（`ClassicBattlePartySessionTests`：全体顺序/除数/截断字面值、无能力拒绝与提交边界、会心单掷与双击重掷/计数一次、冻结命中集与单次奖励；装备闭包同时携带 rgwAttackAll 与双击状态）；`ClassicBattleEquipmentSessionTests` attackAll 字（1/65535）迁移为四入口能力正例；`TriggerScriptBattleBindingTests` attackAll 迁移为可开战 + 卸装备后能力消失；`ModernBattleContentTests` 两事实与装备闭包理论行迁移为可执行；scene-realfull 新增全体成员 Main 流程与全体攻击表现字面表（两个新增测试均注册于 range 可执行的 scene-realfull，表现字面表由此获得执行证据；scene-battle-light 保持其原有 30 例）。法术、道具、自动选令与法术型全体（kMagicTypeAttackAll）不在本票。
+
 ## 当前 #142：经典选令取消与目标返回（T14）
 
 选令编辑接入固定参考的 PAL_CLASSIC 取消分支，不新增队列、随机或第二套状态。公开 seam：`ClassicBattleSession.CancelSelection()` → `ClassicBattleLifecycleSession.CancelSelection()`（同一 active combat owner，发布视图跟随重开成员）。

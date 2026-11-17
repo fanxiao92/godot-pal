@@ -351,9 +351,49 @@ public sealed class ClassicBattleEquipmentSessionTests
             random.AssertExhausted();
         }
 
+        // #143 (T15): the equipment rgwAttackAll word is the reference all-target capability
+        // (PAL_PlayerCanAttackAll global.c 2048-2080) and now opens the combat domain through
+        // every entry; the authored player word stays false here, so the capability is the
+        // equipment register alone.
+        foreach (int attackAll in new[] { 1, 65535 })
+        {
+            var content = Content(equipmentAttackAll: attackAll);
+            var effect = content.EquipmentObjects[170].Effects[1];
+            Assert.Equal(attackAll, effect.AttackAll);
+            Assert.Null(effect.CooperativeMagic);
+            Assert.Equal(0, effect.BattleSprite);
+            Assert.False(content.Players[1].AttackAll);
+            Assert.Equal(new int[9], content.Players[0].Statuses);
+            var equipment = BattleEquipmentState.Initialize(content);
+            Assert.Equal(attackAll, equipment.AttackAllWord(1, 3));
+            var random = new ScriptedRandom(QueueDraws());
+            var session = new ClassicBattleSession(Definition(content), random, equipment);
+            Assert.Equal(new[] { false, true }, session.Current.Players.Select(p => p.CanAttackAll).ToArray());
+            var uncapable = session.Current;
+            Assert.Throws<InvalidOperationException>(() => session.SelectAttackAll(0));
+            Assert.Same(uncapable, session.Current);
+            session.SelectAttack(0, 0);
+            Assert.False(session.Current.Players[0].SelectedAttackAll);
+            session.SelectAttackAll(1);
+            Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+            Assert.True(session.Current.Players[1].SelectedAttackAll);
+            Assert.Null(session.Current.Players[1].SelectedEnemySlot);
+            random.AssertExhausted();
+            new ClassicBattleLifecycleSession(content.InitialRoles.Values.ToArray(), content.Players,
+                content.EnemyTeams[18], content.GrowthByRole, new ScriptedRandom(QueueDraws()), equipment);
+            var owner = new RoleLiveState(content.InitialRoles.Values.ToArray());
+            var world = DynamicEventWorld.ForHost(
+                new StaticSceneRules(new SceneMap(2, new uint[16384], [new SceneFrame(0, 32, 15)]), []),
+                new StaticLeader(320, 320, 0, 0, 0, 3,
+                    new SceneSprite(17, Enumerable.Range(0, 12).Select(i => new SceneFrame(i, 20, 30)))), 2, 0, 0, owner);
+            var script = TriggerScriptSession.ForSharedRoles(events, language, content, new ScriptedRandom(QueueDraws()), owner, world);
+            script.GetCurrentEntryRequirements("shared", "npc", 1);
+            script.Start("shared", "npc", 1);
+            Assert.True(script.PendingBattle!.Lifecycle.Current.Combat.Players[1].CanAttackAll);
+        }
+
         (int? AttackAll, int? CooperativeMagic, string Word)[] cases =
-            [(1, null, "attackAll"), (65535, null, "attackAll"),
-             (null, 351, "cooperativeMagic"), (null, 65535, "cooperativeMagic")];
+            [(null, 351, "cooperativeMagic"), (null, 65535, "cooperativeMagic")];
         foreach (var test in cases)
         {
             var content = Content(equipmentAttackAll: test.AttackAll, equipmentCooperativeMagic: test.CooperativeMagic);
@@ -365,8 +405,6 @@ public sealed class ClassicBattleEquipmentSessionTests
             Assert.Equal(new int[9], content.Players[1].Statuses);
             var equipment = BattleEquipmentState.Initialize(content);
             var random = new ScriptedRandom([]);
-            // Designated first RED: all controls above succeed; the current state drops this WORD,
-            // so this first direct construction incorrectly succeeds (Assert.Throws: no exception).
             var directError = Assert.Throws<InvalidDataException>(() =>
                 new ClassicBattleSession(Definition(content), random, equipment));
             var lifecycleError = Assert.Throws<InvalidDataException>(() =>
@@ -404,11 +442,6 @@ public sealed class ClassicBattleEquipmentSessionTests
             Assert.Equal((95, 20), (world.PartyVitals[1].Hp, world.PartyVitals[1].Mp));
             Assert.Equal([0, 0, 0, 0, 0, 0, 0, 0, 60000], role1.Statuses);
             Assert.Equal(55, role1.HiddenExperience["attack"].Count);
-            // The old player attack-all check must keep its exact diagnostic and priority.
-            var oldPlayers = content.Players.Select(p => p.RoleId == 1 ? p with { AttackAll = true } : p).ToArray();
-            var oldError = Assert.Throws<InvalidDataException>(() =>
-                new ClassicBattleSession(new(oldPlayers, content.EnemyTeams[18]), random, equipment));
-            Assert.Equal("Classic combat does not yet support statuses, poisons, attack-all or an equipment battle-sprite override; equipment requires its declared closure and cover must name a role 0..5.", oldError.Message);
             random.AssertExhausted();
         }
     }
