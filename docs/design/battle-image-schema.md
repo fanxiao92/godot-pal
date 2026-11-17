@@ -1,6 +1,6 @@
 # 战斗图像包契约（battle-image-schema）v1
 
-状态：**abc 形状已冻结并交付（#92）；ball 按同形交付（#93）；f 按同形交付（#94）；fbp 按同形交付（#95，M5 MKF 四票收官）**。M6 的 FIRE 扩展（#146）已批准并形成局部验证候选：生产注册/help、指定 RED 与两个 CLI 工程回归已完成，尚待 fresh 双轴审查及集成；其契约与完整门限制见文末，不能据本文称整票已交付。忠实还原以 `reference/sdlpal/` 为权威（[ADR-0001](../adr/0001-faithful-event-transcription.md)、[ADR-0004](../adr/0004-data-and-script-layers.md)）；通用 JSON 规则与 [data-schema](data-schema.md) 一致（camelCase、严格校验、只读提取）。
+状态：**abc 形状已冻结并交付（#92）；ball 按同形交付（#93）；f 按同形交付（#94）；fbp 按同形交付（#95，M5 MKF 四票收官）；FIRE 导出已交付并集成（#146，本地集成 63e793e5）**。M6 的 FIRE 原生准备（#147）契约见文末末节；忠实还原以 `reference/sdlpal/` 为权威（[ADR-0001](../adr/0001-faithful-event-transcription.md)、[ADR-0004](../adr/0004-data-and-script-layers.md)）；通用 JSON 规则与 [data-schema](data-schema.md) 一致（camelCase、严格校验、只读提取）。
 
 ## 参考事实（abc.mkf）
 
@@ -121,5 +121,24 @@ pal-extract export-battle-images --input <directory> --archive <abc|ball|f|fbp|f
 - 新/空输出可用；输入内输出、非空目录、文件、链接或链接祖先仍拒绝。确定性例比较两次导出的完整文件集和逐文件原字节，并核输入 bytes/mtime/readonly attributes 保持；覆盖拒绝后原输出也保持不变。全部解码暂存完成、再发布文件且 index 最后发布的既有策略不变，不引入失败回滚。
 - 本轮原生验证确认新增 **10 个 Unit 案例**（8 个方法，含 theory 展开）和 **22 个 Integration 案例**（17 个 FIRE 正反例 + 现有参数 theory 新增 5 例）。完整 CLI Unit **475 passed / 0 failed / 0 skipped**；完整 CLI Integration **382 passed / 0 failed / 2 skipped**（共 384，只有既有两个 case-sensitive-filesystem skips），旧四档回归保留。与合同基数 465 / 360+2 及实际新增 +10 / +22 一致，不采用调查建议的 8/16。
 - 指定 RED 已通过真实 CLI 获得：`Export_fire_decodes_complete_indexed_package` 的首个 `Assert.Equal(0, result.ExitCode)` 实际为 2；TRX 仅此 1 个失败，test root exit=1，无编译/夹具/超时/中止替代。确认后才最小注册 fire strategy 与生产 help；随后两个完整工程 test root 均 exit=0，未重试、未改测试断言。原始命令、数字退出、stdout/stderr、UTC 和三份 TRX 保存在外部 `C:/evidence/m6/herdr-resume-20261109-1233/146/R3/`；文档更新不等于独立审查或集成。
-- 按工程规范的显式未同步分支，**full-gate 的非 Game 计数 pins 尚未同步，完整门被阻断**。#161 预约 `scripts/GameTestBatches.ps1` / `tests/Pal.Game.Tests/GameBatches.Tests.ps1`，本票五路径不触及它们；Main 须另授无冲突的 ledger 同步并消费真实执行计数，不能以局部候选关闭 #146 或解锁 #147。
+- 按工程规范的显式未同步分支，**full-gate 的非 Game 计数 pins 尚未同步，完整门被阻断**。#161 预约 `scripts/GameTestBatches.ps1` / `tests/Pal.Game.Tests/GameBatches.Tests.ps1`，本票五路径不触及它们；Main 须另授无冲突的 ledger 同步并消费真实执行计数，不能以局部候选关闭 #146 或解锁 #147。（历史状态：#146 已于 63e793e5 集成关闭；后续 #147 已按当前源码事实同步两份 ledger。）
 - FIRE Prepare/原生加载、法术播放、Game/headless、真实私有资源、GPU/人工、远端 CI 和完整 M6 均未由本源码准备证明。运行时不读取 MKF，不添加 Godot 依赖；只读输入不是新的可变玩法状态，也不提前冻结存档契约。
+
+## M6-A T19：FIRE 的显式原生准备与加载（#147）
+
+### 入口与产物
+
+- 公开静态 `Pal.Game.Editor.PrepareFireEffects.Prepare(string inputDirectory, string outputDirectory) -> IReadOnlyDictionary<int, string>`；headless Editor 场景 `res://Editor/PrepareFireEffects.tscn`（`--fire-input <目录> --fire-output <新建或空目录>`，成功标记 `PAL_PREPARE_FIRE_EFFECTS:<映射条数>`）与 wrapper `scripts/Prepare-FireEffects.ps1`（参数/链接/进程守卫与既有 Prepare wrapper 同形）。运行时不调用该节点，正常 Main 只消费已准备资源。
+- 消费一个完整的 export-battle-images fire 包（上节契约）：输出 `Sprites/<chunk>.tres`（既有 `PalSprite`/`PalFrame`，`SpriteId` = 原 FIRE chunk 号，保留名义 `FrameCount` 与含别名的实际帧集，`Source` = `{archive: fire.mkf, chunk, encoding: Windows YJ2, frameLayout: PAL sprite WORD offset table + RLE frames}`）与 `Textures/<chunk>/<frame>.tres`（既有原生 `ImageTexture`，取自包内对应 PNG）；返回 chunk → sprite URI 映射。不新增纹理格式、UID/模型或平行 loader；空 chunk 不发布精灵；chunk 号是法术效果身份，不重编号为连续物品号。
+
+### 校验与安全
+
+- 发布前严格校验完整包：index.json 逐字段（版本/来源 fire.mkf+pat.mkf/调色板声明/每 chunk 身份与压缩/totals 与实际一致）、精灵文档与清单交叉核对（chunk/decodedByteLength/frameCount/帧数）、帧平面 base64 长度 = width×height、PNG 可解码且尺寸与帧声明一致、实际文件集与声明集精确相等（多余/缺失均拒绝）；非法输入以精确 `InvalidDataException` 定位，不防不夹值。
+- 路径安全沿用既有 Prepare 边界：输出必须位于项目 Assets 内且新建或空、输入/输出不得重叠、输入在 src/Pal.Game 外、拒绝链接/reparse；输入只读且前后重核哈希；失败只清理本次自建文件与目录，不删除不明产物、不假成功。
+- 发布后自检：用取自包数据（非加载目标）构造的 expected 与已发布文件的精确 SHA-256 清单，走既有生产校验链 `NativeBattleVisualProfile.LoadSprite(uri, expected, resourceSha256)` 逐字段读回（含别名下标、offset、尺寸、indices/alpha、Source 身份、纹理 URI/类型/尺寸），兼容一参 `LoadSprite(uri)` 行为不变。
+
+### 验证与登记（本票实际执行）
+
+- 两层独立验证：`tests/Pal.Prepare.Tests/FireEffectsPrepareProcessTests.cs` 真实 Godot 进程（argv/标记/退出/重复运行拒绝、输入只读、输出文件集）；`src/Pal.Game/Tests/PrepareFireEffectsTests.cs` GdUnit 公开会话（字面往返 + checked 加载 + 13 个发布前拒绝例，预期全部来自人工字节夹具）。
+- Ledger 同步（按当前源码事实）：`Get-PrepareTestCount` 102→115（editor publish 例 + repair 新增 12 个 wrapper/argv 真实进程用例，合计 13 个 fire 进程用例）；native-map 728→742（新增 `PrepareFireEffectsTests`）；库存 1018→1032；game 正例 1015→1029（committable 1014→1028）。同步同时修正 `GameBatches.Tests.ps1` 的存量滞后基线（core 1465→1473、库存 1016→1018→本轮 1032、scene-realfull 42→44/41→43、committable 1012→1014→本轮 1028、补齐两个 `NormalBattleFlee*` 用例身份）。
+- 仍不包含：FIRE 动画时序/法术播放、通用图像导入框架、音视频或场景调色板循环（M7）；真实 FIRE 资源仅本地显式准备，不入库不上传。
