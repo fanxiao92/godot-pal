@@ -44,20 +44,36 @@ export function failureReceipt(outcome: { code: number; expectedRed: boolean; su
   }
   return `${base}${failures}stdout (tail):\n${fs.readFileSync(path.join(directory, 'stdout.log'), 'utf8').slice(-4000)}\nstderr (tail):\n${fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8').slice(-2000)}`;
 }
-export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSignal, fatal: (error: Error) => void, engine?: EngineOptions): Pi.ToolDefinition[] {
+export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSignal, fatal: (error: Error) => void, engine?: EngineOptions, runNativeCheck: typeof executeCheck = executeCheck): Pi.ToolDefinition[] {
   const tools: Pi.ToolDefinition[] = [];
   const reject = (error: unknown) => {
     if (signal.aborted || error instanceof QuiescenceUnknownError) { fatal(error instanceof Error ? error : new Error(String(error))); throw error; }
     return toolError(error instanceof Error ? error.message : String(error));
   };
+  // glm-5.3 twice issued same-turn parallel [check, edit] tool batches (#142 attempt 1f42baed unit-G18Rvg,
+  // #147 attempt f59851b0): the edit landed inside the check's before/after snapshot window and the resulting
+  // QuiescenceUnknownError lost the whole cold-start session. Prompt discipline did not prevent it twice, so
+  // the execute layer enforces it: every source-mutating execute (scoped_edit/scoped_write) and every native
+  // check execute (unit_test/range_test) shares one promise-chain mutex, serialized within and across both
+  // groups. Read-only tools never take the lock; the chain swallows settlement so a rejected holder still
+  // releases the mutex while its caller observes the original error unchanged.
+  let tail: Promise<unknown> = Promise.resolve();
+  const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
+    const run = tail.then(operation);
+    tail = run.then(() => undefined, () => undefined);
+    return run;
+  };
   const wrappers = [[sdk.createReadToolDefinition(request.cwd), false], ...(request.role === 'implement' ? [[sdk.createEditToolDefinition(request.cwd), true], [sdk.createWriteToolDefinition(request.cwd), true]] : [])] as [Pi.ToolDefinition, boolean][];
   for (const [tool, write] of wrappers) tools.push({ ...tool, name: `scoped_${tool.name}`, execute: async (id, params, toolSignal, update, context) => {
     if (signal.aborted) throw new Error('Session cancelled');
-    try {
-      const input = params as { path: string; [key: string]: unknown };
-      const file = sourcePath(request, input.path, write);
-      return await tool.execute(id, { ...input, path: file }, toolSignal, update, context);
-    } catch (error) { return reject(error); }
+    const body = async () => {
+      try {
+        const input = params as { path: string; [key: string]: unknown };
+        const file = sourcePath(request, input.path, write);
+        return await tool.execute(id, { ...input, path: file }, toolSignal, update, context);
+      } catch (error) { return reject(error); }
+    };
+    return write ? serialize(body) : body();
   } });
   tools.push(typedTool({ name: 'scoped_list', label: 'List source directory', description: 'List immediate safe source entries, including the repository root.', parameters: Type.Object({ path: Type.String() }, { additionalProperties: false }),
     execute: async (_id, params) => {
@@ -122,7 +138,7 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
         if (selection.scope === 'unit') { sourcePath(request, selection.project!); sourcePath(request, 'tests/unit.runsettings'); }
         else sourcePath(request, 'scripts/Test-Range.ps1');
         const directory = fs.mkdtempSync(path.join(request.directory, `${selection.scope}-`));
-        const outcome = await executeCheck(request.cwd, directory, request.stateDirectory ?? request.directory, selection, signal, engine);
+        const outcome = await runNativeCheck(request.cwd, directory, request.stateDirectory ?? request.directory, selection, signal, engine);
         const after = snapshot(request.cwd);
         if (canonical(before) !== canonical(after)) throw new QuiescenceUnknownError('Native check changed source identity');
         request.recordCheck({ project: selection.project ?? `${selection.scope}:${selection.batch ?? 'all'}:${selection.filter ?? 'all'}`, scope: selection.scope, directory, sourceFingerprint: after.fingerprint, code: outcome.code, expectedRed: outcome.expectedRed, expectedFailure: selection.expectedFailure });
@@ -167,10 +183,10 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
       },
     }));
     tools.push(typedTool({ name: 'unit_test', label: 'Run native Unit project', description: 'Run a complete approved Core/CLI Unit project, optionally narrowed by one FullyQualifiedName= or ~ method/class-prefix filter. Optional exact RED declaration is frozen before launch; abnormal results stop.', parameters: Type.Object({ project: Type.Union([Type.Literal(unitProjects[0]), Type.Literal(unitProjects[1])]), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
-      execute: async (_id, params) => perform({ scope: 'unit', ...params }),
+      execute: async (_id, params) => serialize(() => perform({ scope: 'unit', ...params })),
     }));
     if (engine) tools.push(typedTool({ name: 'range_test', label: 'Run approved Prepare/Game range', description: 'Existing Test-Range.ps1 only; Prepare whole scope, Game explicit positive batch and optional one FQN method/class-prefix. Global engine lock and PID/Name guard. No full gate, private data, GPU, arbitrary commands or timeout overrides.', parameters: Type.Object({ scope: Type.Union([Type.Literal('prepare'), Type.Literal('game')]), batch: Type.Optional(Type.Union(gameBatches.map(batch => Type.Literal(batch)))), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
-      execute: async (_id, params) => perform(params),
+      execute: async (_id, params) => serialize(() => perform(params)),
     }));
   }
   return tools;

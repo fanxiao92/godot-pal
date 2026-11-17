@@ -163,6 +163,7 @@ SDK `agentsFilesOverride` 保留原有 AGENTS 发现，再把契约全文和当�
 - 拒绝工作树外路径、链接、隐藏 index 标志、忽略文件写入、常见凭据路径、`.git`/`.pi`、真实 raw/派生资产及游戏 Assets；不把真实数据发给模型。
 - `unit_test` 沿原生 dotnet CLI，Core/CLI明确工程、`tests/unit.runsettings`、隐式restore/build、全工程或单个 `FullyQualifiedName=`/`~` 方法、类前缀筛选/新日志/TRX，不接受 DisplayName 或 Boolean 组合筛选。只有当前源码真实成功才记录通过；预期RED和正常失败单列，不当通过。Unit失败只核原生完整会话/计数及必要的指定RED身份，不要求逐案例一对一图；Prepare/Game失败继续复用既有 `Read-TestRunIdentity` 强检查，不另造平行图解析器。
 - `range_test` 仅在显式引擎授权后提供，调用既有 `scripts/Test-Range.ps1`：Prepare整层、Game既有正向批次及单个FQN方法/类前缀，保留原发现/身份/诊断/清理契约，不能传DisplayName、任意Boolean筛选、超时放宽或跳过guard。
+- 工具层共享异步互斥串行化源码变更类（`scoped_edit`/`scoped_write`）与检查类（`unit_test`/`range_test`）的 execute（同组与跨组均互斥，读类工具不锁），模型同回合并行调用被安全串行化，编辑不会落盘在检查快照窗口内。
 - Engine运行另持OS临时目录下的全局锁；Windows仅查Godot PID/Name，有任何现存进程先停。异常后保留锁，显式静默确认只解除本执行目录且owner已退出的锁。全局锁只协调本Host，不能替代与外部Godot运行者的唯一执行确认。当前未实现其它平台的引擎PID守卫。
 - 私有真实资源、GPU、人工、远端CI和完整门不自动化执行；需要它们时blocked，不能用Unit、headless或评审代签。
 - 没有 OS sandbox：批准的 dotnet 测试会执行仓库代码，批准的 git commit 会运行现有 hooks；工具路径守卫依赖唯一 writer，不能抵御恶意并发文件替换。运行前必须信任仓库和命令。

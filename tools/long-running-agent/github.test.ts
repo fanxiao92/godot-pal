@@ -8,7 +8,7 @@ import type * as Pi from '@earendil-works/pi-coding-agent';
 import { hash } from './contract.ts';
 import { acquire, atomicJson, git, json, lockFile, QuiescenceUnknownError, snapshot } from './io.ts';
 import { checklistChildren, loadGraph, stateDirectory, type GitHubReader, type IssueContext } from './github.ts';
-import { unitProjects, classifyFailure } from './checks.ts';
+import { unitProjects, classifyFailure, type CheckOutcome, type EngineOptions, type Selection } from './checks.ts';
 import { GitHubHost, type CodingEvent, type CodingExecutor, type CodingRequest } from './github-host.ts';
 import { codingResourceLoader, codingTools, failureReceipt, GitHubPiExecutor } from './github-agent.ts';
 import { approveCorrection, requireWritable } from './policy.ts';
@@ -168,6 +168,132 @@ test('quiescence unknown stays fatal at the degraded tool boundary', async () =>
   const unit = codingTools(sdk, request, request.signal, error => { fatalCalls++; throw error; }).find(tool => tool.name === 'unit_test')!;
   await assert.rejects(unit.execute('quiescent', { project: unitProjects[0] }, undefined, undefined, {} as Pi.ExtensionToolContext), QuiescenceUnknownError);
   assert.equal(fatalCalls, 1, 'Quiescence-unknown must still reach fatal and stop the attempt');
+});
+// Two proven same-turn parallel [check, edit] races (#142 attempt 1f42baed unit-G18Rvg, #147 attempt f59851b0)
+// landed an edit inside the check's before/after snapshot window and killed whole sessions through
+// QuiescenceUnknownError. These tests pin the codingTools-level serialization contract. The minimal fake
+// seam (codingTools runNativeCheck, default executeCheck) suspends a synthetic check without spawning dotnet
+// or touching the global engine lock; write/edit fakes stay local to synthetic fixture repositories.
+type RunNativeCheck = (cwd: string, directory: string, stateDirectory: string, selection: Selection, signal: AbortSignal, engine?: EngineOptions) => Promise<CheckOutcome>;
+async function checkEditFixture(runNativeCheck: RunNativeCheck) {
+  const sdk = await import('@earendil-works/pi-coding-agent');
+  const f = fixture(1);
+  fs.mkdirSync(path.join(f.cwd, 'tests', 'Pal.Core.UnitTests'), { recursive: true });
+  fs.writeFileSync(path.join(f.cwd, unitProjects[0]), '<Project Sdk="Microsoft.NET.Sdk"/>\n');
+  fs.writeFileSync(path.join(f.cwd, 'tests', 'unit.runsettings'), '<RunSettings/>\n');
+  git(f.cwd, 'add', '.'); git(f.cwd, 'commit', '--quiet', '-m', 'Approved unit project seam');
+  const recorded: { sourceFingerprint: string; code: number }[] = [];
+  const request: CodingRequest = { cwd: f.cwd, issue: 2, role: 'implement', directory: f.directory, contexts: [], prompt: 'Synthetic', input: snapshot(f.cwd), signal: signal(), emit: () => {}, checks: [], pendingDependencies: new Set(), verifyDependency: () => {}, recordCheck: check => { recorded.push(check); }, beforeWrite: () => {} };
+  let fatalCalls = 0;
+  const tools = codingTools(sdk, request, signal(), error => { fatalCalls++; throw error; }, undefined, runNativeCheck);
+  const execute = (name: string, params: unknown) => tools.find(tool => tool.name === name)!.execute('mutex', params, undefined, undefined, {} as Pi.ExtensionToolContext);
+  return { f, execute, recorded, fatalCalls: () => fatalCalls };
+}
+test('same-turn parallel check and source-write tool calls serialize, not race into quiescence-unknown', async () => {
+  let release!: () => void, entered!: () => void;
+  const suspended = new Promise<void>(resolve => { release = resolve; });
+  const enteredWindow = new Promise<void>(resolve => { entered = resolve; });
+  const harness = await checkEditFixture(async (_cwd, directory) => {
+    entered();
+    fs.writeFileSync(path.join(directory, 'stdout.log'), 'suspended synthetic check\n');
+    fs.writeFileSync(path.join(directory, 'stderr.log'), '');
+    await suspended;
+    return { code: 0, expectedRed: false, summary: 'suspended synthetic check' };
+  });
+  const file = path.join(harness.f.cwd, 'a.txt');
+  const check = harness.execute('unit_test', { project: unitProjects[0] });
+  await enteredWindow;
+  const edit = harness.execute('scoped_write', { path: 'a.txt', content: 'concurrent edit' });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(fs.readFileSync(file, 'utf8'), 'baseline', 'no source edit may land while the check holds its snapshot window');
+  release();
+  const outcome = await check;
+  assert.notEqual((outcome as { isError?: boolean }).isError, true, 'the check must pass: its source identity window stayed stable');
+  assert.match(JSON.stringify(outcome), /passed/);
+  await edit;
+  assert.equal(fs.readFileSync(file, 'utf8'), 'concurrent edit', 'the queued write lands only after the check completes');
+  assert.equal(harness.recorded.length, 1);
+  assert.equal(harness.fatalCalls(), 0);
+});
+test('concurrent source writes serialize against each other in submission order', async () => {
+  const f = fixture(1);
+  const request: CodingRequest = { cwd: f.cwd, issue: 2, role: 'implement', directory: f.directory, contexts: [], prompt: 'Synthetic', input: snapshot(f.cwd), signal: signal(), emit: () => {}, checks: [], pendingDependencies: new Set(), verifyDependency: () => {}, recordCheck: () => {}, beforeWrite: () => {} };
+  const events: string[] = [];
+  let invocations = 0, releaseFirst!: () => void, firstEntered!: () => void;
+  const gate = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const entered = new Promise<void>(resolve => { firstEntered = resolve; });
+  const gated = async () => {
+    const label = `write${++invocations}`;
+    events.push(`${label}-start`);
+    if (invocations === 1) { firstEntered(); await gate; }
+    events.push(`${label}-end`);
+    return { content: [{ type: 'text' as const, text: 'synthetic write' }], details: {} };
+  };
+  const fakeSdk = {
+    createReadToolDefinition: () => ({ name: 'read', label: 'Read', description: 'Synthetic read', parameters: {}, execute: async () => ({ content: [{ type: 'text' as const, text: 'synthetic read' }], details: {} }) }),
+    createEditToolDefinition: () => ({ name: 'edit', label: 'Edit', description: 'Synthetic edit', parameters: {}, execute: gated }),
+    createWriteToolDefinition: () => ({ name: 'write', label: 'Write', description: 'Synthetic write', parameters: {}, execute: gated }),
+  } as unknown as typeof Pi;
+  const tools = codingTools(fakeSdk, request, signal(), () => {});
+  const execute = (params: unknown) => tools.find(tool => tool.name === 'scoped_write')!.execute('mutex', params, undefined, undefined, {} as Pi.ExtensionToolContext);
+  const first = execute({ path: 'a.txt', content: 'first' });
+  await entered;
+  const second = execute({ path: 'b.txt', content: 'second' });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.deepEqual(events, ['write1-start'], 'a second source write must wait while the first holds the shared mutex');
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(events, ['write1-start', 'write1-end', 'write2-start', 'write2-end'], 'same-group writes run serialized in submission order');
+});
+test('sequential check and source-write behavior is unchanged by serialization', async () => {
+  const harness = await checkEditFixture(async (_cwd, directory) => {
+    fs.writeFileSync(path.join(directory, 'stdout.log'), 'fast synthetic check\n');
+    fs.writeFileSync(path.join(directory, 'stderr.log'), '');
+    return { code: 0, expectedRed: false, summary: 'fast synthetic check' };
+  });
+  const file = path.join(harness.f.cwd, 'a.txt');
+  await harness.execute('scoped_write', { path: 'a.txt', content: 'v1' });
+  const firstFingerprint = snapshot(harness.f.cwd).fingerprint;
+  const first = await harness.execute('unit_test', { project: unitProjects[0] });
+  assert.notEqual((first as { isError?: boolean }).isError, true); assert.match(JSON.stringify(first), /passed/);
+  await harness.execute('scoped_write', { path: 'a.txt', content: 'v2' });
+  const secondFingerprint = snapshot(harness.f.cwd).fingerprint;
+  const second = await harness.execute('unit_test', { project: unitProjects[0] });
+  assert.notEqual((second as { isError?: boolean }).isError, true); assert.match(JSON.stringify(second), /passed/);
+  assert.deepEqual(harness.recorded.map(record => record.sourceFingerprint), [firstFingerprint, secondFingerprint], 'each check records the stable post-write source identity');
+  assert.equal(fs.readFileSync(file, 'utf8'), 'v2');
+  assert.equal(harness.fatalCalls(), 0);
+});
+test('a failing check releases the mutex for subsequent source writes', async () => {
+  const harness = await checkEditFixture(async () => { throw new Error('synthetic check failure'); });
+  const failed = await harness.execute('unit_test', { project: unitProjects[0] });
+  assert.equal((failed as { isError?: boolean }).isError, true);
+  assert.match(JSON.stringify(failed), /synthetic check failure/);
+  assert.equal(harness.fatalCalls(), 0, 'an ordinary check error stays a session-local tool error');
+  const after = await harness.execute('scoped_write', { path: 'a.txt', content: 'after failure' });
+  assert.notEqual((after as { isError?: boolean }).isError, true);
+  assert.equal(fs.readFileSync(path.join(harness.f.cwd, 'a.txt'), 'utf8'), 'after failure');
+});
+test('read-only tools do not wait for the check mutex', async () => {
+  let release!: () => void, entered!: () => void;
+  const suspended = new Promise<void>(resolve => { release = resolve; });
+  const enteredWindow = new Promise<void>(resolve => { entered = resolve; });
+  const harness = await checkEditFixture(async (_cwd, directory) => {
+    entered();
+    fs.writeFileSync(path.join(directory, 'stdout.log'), 'suspended synthetic check\n');
+    fs.writeFileSync(path.join(directory, 'stderr.log'), '');
+    await suspended;
+    return { code: 0, expectedRed: false, summary: 'suspended synthetic check' };
+  });
+  const check = harness.execute('unit_test', { project: unitProjects[0] });
+  await enteredWindow;
+  const read = await harness.execute('scoped_read', { path: 'a.txt' });
+  assert.match(JSON.stringify(read), /baseline/, 'reads complete while the check is suspended');
+  const listing = await harness.execute('scoped_list', { path: '.' });
+  assert.match(JSON.stringify(listing), /a\.txt/);
+  release();
+  const outcome = await check;
+  assert.notEqual((outcome as { isError?: boolean }).isError, true);
 });
 test('TDD rejects changed candidates without RED at the GitHubHost boundary', async () => {
   const f = fixture(1, false);
