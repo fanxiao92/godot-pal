@@ -14,9 +14,13 @@ public static partial class ModernBattleContent
         if (root.ValueKind != JsonValueKind.Object) throw Error(Root, "expected an object");
         bool gridDeclared = root.TryGetProperty("roleEquipment", out JsonElement gridElement);
         bool objectsDeclared = root.TryGetProperty("equipments", out JsonElement objectsElement);
+        bool inventoryDeclared = root.TryGetProperty("inventory", out JsonElement inventoryElement);
+        bool equipMenuDeclared = root.TryGetProperty("equipMenu", out JsonElement equipMenuElement);
         var rootKeys = new List<string> { "formatVersion", "roles", "players", "growth", "teams" };
         if (gridDeclared) rootKeys.Add("roleEquipment");
         if (objectsDeclared) rootKeys.Add("equipments");
+        if (inventoryDeclared) rootKeys.Add("inventory");
+        if (equipMenuDeclared) rootKeys.Add("equipMenu");
         EventJson.Keys(root, Root, [.. rootKeys]);
         if (Number(root, "formatVersion", Root) != 1)
             throw Error(Root, "unsupported formatVersion");
@@ -60,11 +64,55 @@ public static partial class ModernBattleContent
         var roleEquipment = gridDeclared ? RoleEquipment(gridElement) : null;
         var equipmentObjects = objectsDeclared ? EquipmentObjects(objectsElement) : null;
         BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);
+        var initialInventory = inventoryDeclared ? InventoryRows(inventoryElement) : null;
+        var equipMenu = equipMenuDeclared ? EquipMenuBindings(equipMenuElement) : null;
         TriggerBattleContent content;
-        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles); }
+        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles, initialInventory, equipMenu); }
         catch (InvalidDataException error) { throw Error(Root, error.Message); }
         Validate(content);
         return content;
+    }
+
+    /// <summary>Explicit ordered initial bag rows (WORD item ids, amounts 0..99, slot order kept).
+    /// Mirrors InventoryLiveState's seed domain; the host owns the shared instance.</summary>
+    private static IReadOnlyList<InventorySlot> InventoryRows(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".inventory", "expected an array");
+        var rows = new List<InventorySlot>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".inventory[{index++}]";
+            EventJson.Keys(item, path, "itemId", "amount");
+            rows.Add(new(Number(item, "itemId", path, 1), Number(item, "amount", path, 0, 99), 0));
+        }
+        return System.Array.AsReadOnly(rows.ToArray());
+    }
+
+    /// <summary>Equip-menu bindings: object, body part 0..5 and the eligible-role id list
+    /// (kItemFlagEquipableByPlayerRole bits; an empty list is a listed, never-equippable object).</summary>
+    private static IReadOnlyList<BattleEquipMenuBinding> EquipMenuBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".equipMenu", "expected an array");
+        var bindings = new List<BattleEquipMenuBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".equipMenu[{index++}]";
+            EventJson.Keys(item, path, "objectId", "part", "equipableBy");
+            if (item.GetProperty("equipableBy").ValueKind != JsonValueKind.Array)
+                throw Error(path + ".equipableBy", "expected an array");
+            int mask = 0;
+            int roleIndex = 0;
+            foreach (JsonElement role in item.GetProperty("equipableBy").EnumerateArray())
+            {
+                int value = Integer(role, path + $".equipableBy[{roleIndex++}]", 0, 5);
+                if ((mask & (1 << value)) != 0) throw Error(path + ".equipableBy", $"duplicate role id {value}");
+                mask |= 1 << value;
+            }
+            bindings.Add(new(Number(item, "objectId", path, 1), Number(item, "part", path, 0, BattleEquipmentState.SlotCount - 1), mask));
+        }
+        return System.Array.AsReadOnly(bindings.ToArray());
     }
 
     private static IReadOnlyList<IReadOnlyList<int>> RoleEquipment(JsonElement element)

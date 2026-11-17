@@ -162,6 +162,163 @@ public class MenuSceneTests
         await host.Wait(() => host.Main.Menu!.Mode == ExplorationMenuMode.Closed);
     }
 
+    [TestCase(Timeout = 180000)]
+    public async Task EquipmentPageEquipsFromStockReturnsOldItemAndFeedsTheNextBattle()
+    {
+        // #214: the equip loop over the shared live owners on the formal Main. Independent
+        // numbers: PartyEquip authors role0 panels 40/20/100 bare and role1 wearing
+        // [197 head, 0, 210 shoulder, 170 hand, 237 feet, 248 wear] (authored effect rows
+        // 197: role0 0/0 and role1 attack 6/defense 2, 210: dexterity 8, 170: 5/2/5 + dual attack,
+        // 237: defense 30, 248: dexterity 6); the test-owned menuEquip derivation adds head
+        // object 199 (role0 attack 3/defense 2, role1 defense 4), bag rows 197x2/199x1/210x1
+        // and part/eligibility bindings (210 stays role1-only as the rejection sentinel).
+        using var fixture = new AuthoredStoryFixture("PartyEquip", menuEquip: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1", "--story-language", "zh-Hans");
+        using var host = new MenuHost(selection);
+        host.AssertHealthy();
+        await host.Wait(() => host.Updates.Count > 0);
+        var menu = host.Main.Menu!;
+
+        // Battle #1 baseline: the boss trigger consumes the authored gear (the M6-A chain).
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu, timeoutMs: 30000);
+        var first = host.Main.StoryBattle!.Current.Combat;
+        AssertThat((first.Players[0].Attack, first.Players[0].Defense)).IsEqual((40, 20));
+        AssertThat(first.Players[1].Defense).IsEqual(52); // authored 18 + head 2 + hand 2 + feet 30
+        await FinishBattle();
+
+        // The menu gains the equipment entry exactly for the authored equip context.
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        AssertThat(menu.Entries.Count).IsEqual(2);
+        AssertThat(menu.EntryLabel(1)).IsEqual("防身");
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipItems);
+        AssertRows(menu, [(197, "HEAD", "HEADBAND", 2), (199, "HEAD", "LEATHER CAP", 1), (210, "SHOULDER", "CAPE", 1)]);
+
+        // Eligibility bits per member and the member's current gear (uigame.c player box).
+        host.Tap(Key.Down);
+        host.Tap(Key.Down); // 210: role1-only
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipRoles);
+        var page = menu.EquipRolesView();
+        AssertThat((page.Name, page.PartLabel)).IsEqual(("CAPE", "SHOULDER"));
+        AssertThat(page.Roles[0].Eligible).IsFalse();
+        AssertThat(page.Roles[1].Eligible).IsTrue();
+        AssertThat(string.Join(",", page.Roles[1].Gear)).IsEqual("HEADBAND,CAPE,WOODEN SWORD,SANDALS,AMULET");
+
+        // Confirm on the ineligible member never equips (no half change; uigame.c flag gate).
+        host.Tap(Key.Enter);
+        await host.AwaitUpdates(2);
+        AssertThat(menu.Mode).IsEqual(ExplorationMenuMode.EquipRoles);
+        AssertThat(menu.EquipSelection).IsEqual(210);
+
+        // Same-object equip on 小侠's shoulder slot: registers rewritten, stock unmoved.
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.AwaitUpdates(2);
+        AssertThat(menu.Mode).IsEqual(ExplorationMenuMode.EquipRoles); // wLastUnequippedItem 210
+        AssertThat(menu.EquipSelection).IsEqual(210);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipItems);
+        AssertRows(menu, [(197, "HEAD", "HEADBAND", 2), (199, "HEAD", "LEATHER CAP", 1), (210, "SHOULDER", "CAPE", 1)]);
+
+        // 197 onto 大侠's empty head: one copy consumed, back to the item list.
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipItems);
+        host.Tap(Key.Down); // wrap the remembered item cursor 210 -> 197 (itemmenu.c iCurInvMenuItem)
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipRoles);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipItems); // wLastUnequippedItem 0
+        AssertRows(menu, [(197, "HEAD", "HEADBAND", 1), (199, "HEAD", "LEATHER CAP", 1), (210, "SHOULDER", "CAPE", 1)]);
+
+        // 199 onto 小侠's head: the displaced 197 returns and stays selected (old-item flow).
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipRoles);
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.AwaitUpdates(2);
+        AssertThat(menu.Mode).IsEqual(ExplorationMenuMode.EquipRoles); // wLastUnequippedItem 197
+        AssertThat(menu.EquipSelection).IsEqual(197);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipItems);
+        AssertRows(menu, [(197, "HEAD", "HEADBAND", 2), (210, "SHOULDER", "CAPE", 1)]);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+
+        // The status page reads the same live owners: 大侠 40/20 (197's authored role0
+        // row adds nothing), 小侠 35+5/18+2+4+30.
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        host.Tap(Key.Up);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Status);
+        var hero = menu.StatusView();
+        AssertThat((hero.Attack, hero.Defense)).IsEqual((40, 20));
+        host.Tap(Key.Right);
+        await host.Wait(() => menu.StatusMemberIndex == 1);
+        var second = menu.StatusView();
+        AssertThat((second.Attack, second.Defense)).IsEqual((40, 54));
+        AssertThat(string.Join(",", second.Equipment.Select(gear => gear.Name))).IsEqual(
+            "LEATHER CAP,CAPE,WOODEN SWORD,SANDALS,AMULET");
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+
+        // Battle #2 consumes the current equipment through the shared owner (#187 binding).
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu, timeoutMs: 30000);
+        var next = host.Main.StoryBattle!.Current.Combat;
+        AssertThat((next.Players[0].Attack, next.Players[0].Defense)).IsEqual((40, 20));
+        AssertThat(next.Players[1].Defense).IsEqual(54);
+        await FinishBattle();
+        return;
+
+        void AssertRows(ExplorationMenuSession session,
+            (int ObjectId, string Part, string Name, int Amount)[] expected) =>
+            AssertThat(string.Join(";", session.EquipItemsView()
+                .Select(row => $"{row.ObjectId}:{row.PartLabel}:{row.Name}:{row.Amount}")))
+                .IsEqual(string.Join(";", expected.Select(row => $"{row.ObjectId}:{row.Part}:{row.Name}:{row.Amount}")));
+
+        async Task FinishBattle()
+        {
+            var script = host.Main.Dialogue!.Session!;
+            while (script.PendingBattle is not null)
+            {
+                await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu
+                    || script.PendingBattle is null);
+                if (script.PendingBattle is null) break;
+                await host.ConfirmBattleMenu(StoryBattlePresentation.TargetMenu);
+                var combat = host.Main.StoryBattle!.Current.Combat;
+                int selecting = combat.SelectingPlayerIndex
+                    ?? throw new InvalidOperationException("Target menu has no selecting member.");
+                bool final = Enumerable.Range(selecting + 1, combat.Players.Count - selecting - 1)
+                    .All(index => combat.Players[index].Hp == 0);
+                await host.ConfirmBattleMenu(final
+                    ? StoryBattlePresentation.Resolving : StoryBattlePresentation.AttackMenu);
+            }
+            await host.Wait(() => host.Main.StoryBattleMode is null
+                && host.Main.Dialogue!.Session!.PendingDisplay is not null, timeoutMs: 90000);
+            await host.FinishDisplay();
+            await host.Wait(() => host.Main.Interaction!.Phase == NpcInteractionPhase.Exploring, timeoutMs: 30000);
+        }
+    }
+
     [TestCase(Timeout = 30000)]
     public void PreparedLanguagesCoverEveryMenuWordGlyphInBothLanguages()
     {
@@ -176,7 +333,11 @@ public class MenuSceneTests
             ExplorationMenuSession.AttackPowerWord, ExplorationMenuSession.MagicPowerWord,
             ExplorationMenuSession.DefenseWord, ExplorationMenuSession.DexterityWord,
             ExplorationMenuSession.FleeRateWord, ExplorationMenuSession.RoleNameWordBase,
-            ExplorationMenuSession.RoleNameWordBase + 1,
+            ExplorationMenuSession.RoleNameWordBase + 1, ExplorationMenuSession.EquipmentEntryWord,
+            ExplorationMenuSession.PartWordBase, ExplorationMenuSession.PartWordBase + 1,
+            ExplorationMenuSession.PartWordBase + 2, ExplorationMenuSession.PartWordBase + 3,
+            ExplorationMenuSession.PartWordBase + 4, ExplorationMenuSession.PartWordBase + 5,
+            170, 197, 199, 210, 237, 248,
         ];
         foreach (string language in new[] { "zh-Hans", "en" })
         {

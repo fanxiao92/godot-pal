@@ -17,6 +17,11 @@ public partial class Main
     private CheckedBattleVisualTeam? storyTeam;
     private GodotBattleRandom? storyRandom;
     private PalStoryBattleView? storyView;
+    // #214: the story host's shared equipment/poison/inventory owners. The menu, the status page
+    // and (with an authored equip context) the next trigger battle consume these same instances.
+    private BattleEquipmentState? storyEquipment;
+    private PartyPoisonState? storyPoisons;
+    private InventoryLiveState? storyInventory;
     internal Func<PalStoryBattleView> StoryBattleViewFactory { get; set; } = () => new PalStoryBattleView();
     private TriggerBattleRequest? storyRequest;
     private bool battleConfirm;
@@ -102,23 +107,42 @@ public partial class Main
             display = new PalDialogueDisplay();
             dialogue = new PalTriggerDialogue();
             roleLiveState = new RoleLiveState(checkedStory.BattleContent.InitialRoles.Values.ToArray());
+            storyEquipment = BattleEquipmentState.Initialize(checkedStory.BattleContent);
+            storyInventory = new InventoryLiveState(checkedStory.BattleContent.InitialInventory);
+            int[] storyPartyRoleIds = checkedStory.BattleContent.Players.Select(player => player.RoleId).ToArray();
+            storyPoisons = new PartyPoisonState(storyPartyRoleIds,
+                storyPartyRoleIds.Select(_ => (IReadOnlyList<PoisonSlot>)Enumerable.Range(0, PartyPoisonState.Capacity)
+                    .Select(_ => new PoisonSlot(0, 0)).ToArray()).ToArray(),
+                new Dictionary<int, int>());
+            // #214: with an authored equip context the trigger battle consumes the current
+            // equipment owner (#187); scenarios without one keep the frozen-author construction.
+            bool equipmentPage = checkedStory.BattleContent.EquipMenu.Count > 0;
             dialogue.FirstBattleWorld = DynamicEventWorld.ForHost(checkedStory.Exploration.Rules,
                 checkedStory.Exploration.Leader, map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
                 roleLiveState, checkedStory.BattleContent.Players.Select(player => player.RoleId).ToArray());
-            dialogue.Initialize(display, checkedStory, storyRandom);
+            dialogue.Initialize(display, checkedStory, storyRandom,
+                equipmentPage ? storyEquipment : null, equipmentPage ? storyPoisons : null);
             story = checkedStory; storyVisual = checkedVisual; mapScene = map;
             Interaction = interaction; Display = display; Dialogue = dialogue; SelectedLanguage = selected.Language;
-            // #213: the exploration menu host binding. The session resolves the prepared menu,
+            // #213/#214: the exploration menu host binding. The session resolves the prepared menu,
             // label and role-name words now, and the font preflight covers every glyph the menu
-            // can draw, so missing content rejects before the scene publishes ready.
+            // can draw, so missing content rejects before the scene publishes ready. The
+            // equipment page exists only for scenarios that author an equip context; its bag,
+            // bindings and poison owner come from the same shared live owners.
+            var menuEntries = new List<ExplorationMenuEntry>
+            {
+                new(ExplorationMenuPage.Status, ExplorationMenuSession.StatusEntryWord),
+            };
+            if (equipmentPage) menuEntries.Add(new(ExplorationMenuPage.Equipment, ExplorationMenuSession.EquipmentEntryWord));
             menu = new ExplorationMenuSession(
-                [new(ExplorationMenuPage.Status, ExplorationMenuSession.StatusEntryWord)],
+                menuEntries,
                 checkedStory.BattleContent.Players.Select(player => new ExplorationMenuMember(player.RoleId,
                     ExplorationMenuSession.RoleNameWordBase + player.RoleId,
                     checkedStory.BattleContent.PanelDeclaredRoles.Contains(player.RoleId),
                     player.Attack, player.MagicPower, player.Defense, player.Dexterity, player.FleeRate)).ToArray(),
-                roleLiveState, BattleEquipmentState.Initialize(checkedStory.BattleContent),
-                checkedStory.BattleContent.GrowthByRole, checkedStory.SelectedWords);
+                roleLiveState, storyEquipment,
+                checkedStory.BattleContent.GrowthByRole, checkedStory.SelectedWords, storyPoisons,
+                checkedStory.BattleContent.EquipMenu, checkedStory.BattleContent.EquipmentObjects, storyInventory);
             PalMenuView.ValidateTexts(checkedStory.Font,
                 Enumerable.Range(0, menu.Entries.Count).Select(menu.EntryLabel)
                     .Concat(new[]
@@ -129,6 +153,12 @@ public partial class Main
                         ExplorationMenuSession.DexterityWord, ExplorationMenuSession.FleeRateWord,
                     }.Select(word => checkedStory.SelectedWords[word]))
                     .Concat(menu.Party.Select(member => checkedStory.SelectedWords[member.NameWord]))
+                    .Concat(equipmentPage
+                        ? Enumerable.Range(0, BattleEquipmentState.SlotCount)
+                            .Select(part => checkedStory.SelectedWords[ExplorationMenuSession.PartWordBase + part])
+                            .Concat(checkedStory.BattleContent.EquipMenu
+                                .Select(binding => checkedStory.SelectedWords[binding.ObjectId]))
+                        : Enumerable.Empty<string>())
                     .Append("0123456789:/"));
             AddChild(map); AddChild(display); AddChild(dialogue);
             display.Failed += DisplayFailed;
@@ -671,6 +701,7 @@ public partial class Main
         settlementLines = null; settlementStage = 0; settlementPresented = false;
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
+        storyEquipment = null; storyPoisons = null; storyInventory = null;
         ReleaseMenu();
     }
 

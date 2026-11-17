@@ -129,5 +129,29 @@ public static partial class ModernBattleContent
         if (content.RoleEquipment.Count != 0 || content.EquipmentObjects.Count != 0)
             BattleEquipmentState.ValidateEquipmentClosure(content.RoleEquipment,
                 content.EquipmentObjects.Values.ToList(), content.InitialRoles.Values);
+        // The explicit exploration equip context ($.inventory/$.equipMenu) is inert for battles;
+        // its domain mirrors the shared owners' seeds so malformed authored rows reject at parse
+        // and transport, never at first menu use.
+        var seenItems = new HashSet<int>();
+        foreach (var (slot, index) in content.InitialInventory.Select((x, i) => (x, i)))
+        {
+            string path = Root + $".inventory[{index}]";
+            if (slot is null) throw Error(path, "row is null");
+            Range(slot.ItemId, path + ".itemId", 1);
+            Range(slot.Amount, path + ".amount", 0, 99);
+            if (!seenItems.Add(slot.ItemId)) throw Error(path + ".itemId", $"duplicate inventory item ID {slot.ItemId}");
+        }
+        var seenObjects = new HashSet<int>();
+        foreach (var (binding, index) in content.EquipMenu.Select((x, i) => (x, i)))
+        {
+            string path = Root + $".equipMenu[{index}]";
+            if (binding is null) throw Error(path, "binding is null");
+            Range(binding.ObjectId, path + ".objectId", 1);
+            if (!content.EquipmentObjects.ContainsKey(binding.ObjectId))
+                throw Error(path + ".objectId", $"equipment object {binding.ObjectId} is not declared");
+            Range(binding.Part, path + ".part", 0, BattleEquipmentState.SlotCount - 1);
+            Range(binding.EquipableRoleMask, path + ".equipableBy", 0, 63);
+            if (!seenObjects.Add(binding.ObjectId)) throw Error(path + ".objectId", $"duplicate equip-menu object ID {binding.ObjectId}");
+        }
     }
 }

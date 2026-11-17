@@ -12,6 +12,13 @@ public partial class PalBattleContent : Resource
     [Export] public PalBattleTeam[] Teams { get; set; } = [];
     [Export] public int[] RoleEquipment { get; set; } = [];
     [Export] public PalBattleEquipment[] Equipments { get; set; } = [];
+    // #214 explicit exploration equip context: ordered initial bag rows (parallel item/amount
+    // arrays) and equip-menu bindings (object, body part, eligible-role mask per binding).
+    [Export] public int[] InventoryItems { get; set; } = [];
+    [Export] public int[] InventoryAmounts { get; set; } = [];
+    [Export] public int[] EquipMenuObjects { get; set; } = [];
+    [Export] public int[] EquipMenuParts { get; set; } = [];
+    [Export] public int[] EquipMenuRoleMasks { get; set; } = [];
 
     // Optional projection provenance, not an authentication or a runtime JSON dependency.
     [Export] public bool ProjectionPresent { get; set; }

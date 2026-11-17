@@ -94,7 +94,8 @@ public partial class PalTriggerDialogue : Node
         _display = display; display.UpdateCompleted += OnDisplayUpdated;
     }
 
-    public void Initialize(PalDialogueDisplay display, CheckedStoryProfile story, IBattleRandom random)
+    public void Initialize(PalDialogueDisplay display, CheckedStoryProfile story, IBattleRandom random,
+        BattleEquipmentState? equipmentState = null, PartyPoisonState? partyPoisons = null)
     {
         ArgumentNullException.ThrowIfNull(display); ArgumentNullException.ThrowIfNull(story); ArgumentNullException.ThrowIfNull(random);
         if (_display is not null || display.Session is { Current.Phase: not DialogueDisplayPhase.Completed })
@@ -102,9 +103,17 @@ public partial class PalTriggerDialogue : Node
         _story = story; _events = story.Events; _language = story.Language; _font = story.Font;
         _prompts = story.Prompts.ToArray(); _palette = story.Palette.ToArray();
         foreach (var pair in story.Portraits) _portraits.Add(pair.Key, pair.Value);
+        // #214: the checked-story host binds its shared equipment/poison owners so the next
+        // trigger battle consumes the current gear (#187 ForSharedRoles) instead of the frozen
+        // author snapshot. Without the world host there is no shared role owner to bind, so the
+        // shared-owner request itself rejects instead of silently dropping the binding.
         Session = FirstBattleWorld is { } world
-            ? new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random, world)
-            : new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random);
+            ? TriggerScriptSession.ForSharedRoles(story.Events, story.Language, story.BattleContent, random,
+                world.RoleLiveState ?? throw new InvalidOperationException("The shared story world must bind its live role owner before trigger initialization."),
+                world, equipmentState: equipmentState, partyPoisons: partyPoisons)
+            : equipmentState is null && partyPoisons is null
+                ? new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random)
+                : throw new InvalidOperationException("Shared equipment or poison owners require the shared story world host.");
         _display = display; display.UpdateCompleted += OnDisplayUpdated;
     }
 

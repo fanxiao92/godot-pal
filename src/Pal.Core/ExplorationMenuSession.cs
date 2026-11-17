@@ -1,14 +1,14 @@
 namespace Pal.Core;
 
-public enum ExplorationMenuMode { Closed, MainMenu, Status }
+public enum ExplorationMenuMode { Closed, MainMenu, Status, EquipItems, EquipRoles }
 
 /// <summary>Menu verbs as the fixed reference maps them (input.c: direction keys navigate,
 /// Search=confirm, Menu=cancel). The host translates its physical keys into these verbs.</summary>
 public enum ExplorationMenuKey { Up, Down, Left, Right, Confirm, Cancel }
 
-/// <summary>Deliverable menu pages; #213 binds only the read-only status page. Operative pages
-/// (equipment/items/magic/shop) arrive with their later M6-B leaves on the same session.</summary>
-public enum ExplorationMenuPage { Status }
+/// <summary>Deliverable menu pages; #213 binds the read-only status page and #214 the equipment
+/// page on the same session. Operative pages (items/magic/shop) arrive with their later M6-B leaves.</summary>
+public enum ExplorationMenuPage { Status, Equipment }
 
 /// <summary>One main-menu entry: the page Confirm opens and its label WORD.</summary>
 public sealed record ExplorationMenuEntry(ExplorationMenuPage Page, int WordId);
@@ -21,6 +21,18 @@ public sealed record ExplorationMenuMember(int RoleId, int NameWord, bool PanelD
 
 /// <summary>One nonempty equipment slot with its resolved object-name word text.</summary>
 public sealed record ExplorationMenuEquipment(int ObjectId, string Name);
+
+/// <summary>One equip-list row (itemmenu.c PAL_ItemSelectMenu over equipable stock): the object,
+/// its body-part slot, the owned amount and the resolved item/part words.</summary>
+public sealed record ExplorationMenuEquipRow(int ObjectId, int Part, int Amount, string Name, string PartLabel);
+
+/// <summary>One role row of the equip selection page (uigame.c PAL_EquipItemMenu): the role name,
+/// the item's eligibility bit for that role and the role's currently equipped object names.</summary>
+public sealed record ExplorationMenuEquipRole(string Name, bool Eligible, IReadOnlyList<string> Gear);
+
+/// <summary>The equip role-selection page for one item: object, part slot, words and the party rows.</summary>
+public sealed record ExplorationMenuEquipSelection(int ObjectId, int Part, string Name, string PartLabel,
+    IReadOnlyList<ExplorationMenuEquipRole> Roles);
 
 /// <summary>One live poison slot with its resolved object-name word text.</summary>
 public sealed record ExplorationMenuPoison(int PoisonId, string Name);
@@ -49,16 +61,27 @@ public sealed class ExplorationMenuSession
     /// <summary>Role display names: the language word 60100+RoleId (modern convention; the
     /// reference reads PLAYERROLES rgwName words, which the authored chain carries here).</summary>
     public const int RoleNameWordBase = 60100;
+    /// <summary>Equipment main-menu entry word (#214).</summary>
+    public const int EquipmentEntryWord = 60019;
+    /// <summary>Body-part label words by slot (reference ui.h EQUIP_LABEL_* 600..605; slot order is
+    /// global.h kBodyPartHead,Body,Shoulder,Hand,Feet,Wear — the UI label list reorders shoulder).</summary>
+    public const int PartWordBase = 60020;
 
     private readonly RoleLiveState roles;
     private readonly BattleEquipmentState equipment;
     private readonly IReadOnlyDictionary<int, ClassicBattleGrowthData> growth;
     private readonly IReadOnlyDictionary<int, string> words;
     private readonly PartyPoisonState? poisons;
+    private readonly IReadOnlyList<BattleEquipMenuBinding>? equipMenu;
+    private readonly IReadOnlyDictionary<int, BattleEquipmentObject>? equipmentObjects;
+    private readonly InventoryLiveState? inventory;
 
     public ExplorationMenuSession(IReadOnlyList<ExplorationMenuEntry> entries, IReadOnlyList<ExplorationMenuMember> party,
         RoleLiveState roles, BattleEquipmentState equipment, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth,
-        IReadOnlyDictionary<int, string> words, PartyPoisonState? poisons = null)
+        IReadOnlyDictionary<int, string> words, PartyPoisonState? poisons = null,
+        IReadOnlyList<BattleEquipMenuBinding>? equipMenu = null,
+        IReadOnlyDictionary<int, BattleEquipmentObject>? equipmentObjects = null,
+        InventoryLiveState? inventory = null)
     {
         ArgumentNullException.ThrowIfNull(roles);
         ArgumentNullException.ThrowIfNull(equipment);
@@ -102,12 +125,50 @@ public sealed class ExplorationMenuSession
         }
         Entries = Array.AsReadOnly(entries.ToArray());
         Party = Array.AsReadOnly(party.ToArray());
+        if (entries.Any(entry => entry.Page == ExplorationMenuPage.Equipment))
+        {
+            // The equipment page requires the whole shared equip context up front: bindings over
+            // declared objects, the live bag and the poison owner its equip operation composes.
+            if (equipMenu is null || equipMenu.Count == 0)
+                throw new InvalidDataException("The equipment page requires authored equip-menu bindings.");
+            if (equipmentObjects is null || equipmentObjects.Count == 0)
+                throw new InvalidDataException("The equipment page requires the declared equipment objects.");
+            if (inventory is null)
+                throw new InvalidDataException("The equipment page requires the shared live inventory owner.");
+            if (poisons is null)
+                throw new InvalidDataException("The equipment page requires the shared poison owner.");
+            var bound = new HashSet<int>();
+            foreach (var binding in equipMenu)
+            {
+                if (binding is null || binding.ObjectId is < 1 or > 65535 || !bound.Add(binding.ObjectId))
+                    throw new InvalidDataException("Equip-menu bindings require unique object WORD ids 1..65535.");
+                if (binding.Part is < 0 or > 5)
+                    throw new InvalidDataException($"Equip-menu binding for object {binding.ObjectId} requires a body part 0..5.");
+                if (binding.EquipableRoleMask is < 0 or > 63)
+                    throw new InvalidDataException($"Equip-menu binding for object {binding.ObjectId} requires a role mask 0..63.");
+                if (!equipmentObjects.ContainsKey(binding.ObjectId))
+                    throw new InvalidDataException($"Equip-menu object {binding.ObjectId} is not declared.");
+                // Resolve now: a missing item or part word rejects before any menu state exists.
+                Word(binding.ObjectId);
+                Word(PartWordBase + binding.Part);
+            }
+            this.equipMenu = Array.AsReadOnly(equipMenu.ToArray());
+            this.equipmentObjects = equipmentObjects;
+            this.inventory = inventory;
+        }
     }
 
     public ExplorationMenuMode Mode { get; private set; }
     /// <summary>The remembered main-menu cursor (gpGlobals->iCurMainMenuItem); it survives closes.</summary>
     public int SelectedEntry { get; private set; }
     public int StatusMemberIndex { get; private set; }
+    /// <summary>The remembered equip item-list cursor (gpGlobals->iCurInvMenuItem); it survives closes
+    /// and clamps to the current stock list, which shrinks as equips consume the last copies.</summary>
+    public int SelectedEquipItem { get; private set; }
+    /// <summary>The object selected in the equip role page (uigame.c wItem/wLastUnequippedItem).</summary>
+    public int EquipSelection { get; private set; }
+    /// <summary>The equip role-selection cursor (uigame.c iCurrentPlayer); it starts at member 0 on entry.</summary>
+    public int SelectedEquipRole { get; private set; }
     public IReadOnlyList<ExplorationMenuEntry> Entries { get; }
     public IReadOnlyList<ExplorationMenuMember> Party { get; }
 
@@ -146,6 +207,13 @@ public sealed class ExplorationMenuSession
                             Mode = ExplorationMenuMode.Status;
                             StatusMemberIndex = 0; // PAL_PlayerStatus starts at party member 0
                         }
+                        else if (Entries[SelectedEntry].Page == ExplorationMenuPage.Equipment)
+                        {
+                            // play.c PAL_GameEquipItem opens the equipable item select at the
+                            // remembered inventory cursor (gpGlobals->iCurInvMenuItem).
+                            Mode = ExplorationMenuMode.EquipItems;
+                            ClampEquipCursor();
+                        }
                         break;
                     case ExplorationMenuKey.Cancel:
                         Mode = ExplorationMenuMode.Closed;
@@ -172,6 +240,79 @@ public sealed class ExplorationMenuSession
                         break;
                 }
                 break;
+            case ExplorationMenuMode.EquipItems:
+            {
+                // itemmenu.c PAL_ItemSelectMenu over the equipable stock: Up/Down wrap, Search
+                // confirms an item and kKeyMenu cancels back to the in-game menu. Only owned
+                // stock (amount > 0) is listed — the reference compresses depleted slots away.
+                var stock = Stock();
+                switch (key)
+                {
+                    case ExplorationMenuKey.Up or ExplorationMenuKey.Left:
+                        if (stock.Count > 0) SelectedEquipItem = (SelectedEquipItem + stock.Count - 1) % stock.Count;
+                        break;
+                    case ExplorationMenuKey.Down or ExplorationMenuKey.Right:
+                        if (stock.Count > 0) SelectedEquipItem = (SelectedEquipItem + 1) % stock.Count;
+                        break;
+                    case ExplorationMenuKey.Confirm:
+                        if (stock.Count == 0)
+                        {
+                            // An empty equipable stock selects object 0 (rgInventory[0].wItem);
+                            // PAL_GameEquipItem returns to its caller — the in-game menu.
+                            Mode = ExplorationMenuMode.MainMenu;
+                        }
+                        else
+                        {
+                            EquipSelection = stock[SelectedEquipItem].ObjectId;
+                            SelectedEquipRole = 0; // uigame.c iCurrentPlayer = 0 on entry
+                            Mode = ExplorationMenuMode.EquipRoles;
+                        }
+                        break;
+                    case ExplorationMenuKey.Cancel:
+                        Mode = ExplorationMenuMode.MainMenu;
+                        break;
+                }
+                break;
+            }
+            case ExplorationMenuMode.EquipRoles:
+            {
+                // uigame.c PAL_EquipItemMenu: Up/Down/Left/Right wrap over the party; kKeyMenu
+                // returns to the item select; kKeySearch on an eligible role runs the equip
+                // script (script.c 0x0018) and the loop re-reads wLastUnequippedItem.
+                switch (key)
+                {
+                    case ExplorationMenuKey.Up or ExplorationMenuKey.Left:
+                        SelectedEquipRole = (SelectedEquipRole + Party.Count - 1) % Party.Count;
+                        break;
+                    case ExplorationMenuKey.Down or ExplorationMenuKey.Right:
+                        SelectedEquipRole = (SelectedEquipRole + 1) % Party.Count;
+                        break;
+                    case ExplorationMenuKey.Confirm:
+                    {
+                        var binding = EquipBinding(EquipSelection);
+                        int roleId = Party[SelectedEquipRole].RoleId;
+                        // An ineligible role (kItemFlagEquipableByPlayerRole bit clear) does
+                        // nothing: no gear, stock or cursor change, no half equip.
+                        if (!binding.Eligible(roleId)) break;
+                        int next = equipment.EquipItem(roleId, binding.Part, binding.ObjectId,
+                            equipmentObjects!, inventory!, roles, poisons!);
+                        if (next != 0 && equipMenu!.Any(candidate => candidate.ObjectId == next))
+                            EquipSelection = next; // the displaced object stays selected for another role
+                        else
+                        {
+                            // wLastUnequippedItem 0 (or an object without a menu binding) ends
+                            // the role screen: PAL_EquipItemMenu returns to the item select.
+                            Mode = ExplorationMenuMode.EquipItems;
+                            ClampEquipCursor();
+                        }
+                        break;
+                    }
+                    case ExplorationMenuKey.Cancel:
+                        Mode = ExplorationMenuMode.EquipItems;
+                        break;
+                }
+                break;
+            }
         }
     }
 
@@ -209,6 +350,45 @@ public sealed class ExplorationMenuSession
             Word(LevelWord), Word(HpWord), Word(MpWord), Word(ExperienceWord),
             Word(AttackPowerWord), Word(MagicPowerWord), Word(DefenseWord),
             Word(DexterityWord), Word(FleeRateWord));
+    }
+
+    /// <summary>The equipable stock list in binding order (itemmenu.c lists owned copies only).
+    /// Depleted slots stay unlisted, matching the reference's menu-open compression view.</summary>
+    public IReadOnlyList<ExplorationMenuEquipRow> EquipItemsView()
+    {
+        if (Mode != ExplorationMenuMode.EquipItems)
+            throw new InvalidOperationException("The equipment item list is not open.");
+        return Stock().Select(binding => new ExplorationMenuEquipRow(binding.ObjectId, binding.Part,
+            inventory!.GetAmount(binding.ObjectId), Word(binding.ObjectId), PartLabel(binding.Part))).ToArray();
+    }
+
+    /// <summary>The role-selection page for the current item: eligibility bits and each member's
+    /// currently equipped object names (uigame.c PAL_EquipItemMenu's player box and gear list).</summary>
+    public ExplorationMenuEquipSelection EquipRolesView()
+    {
+        if (Mode != ExplorationMenuMode.EquipRoles)
+            throw new InvalidOperationException("The equipment role selection is not open.");
+        var binding = EquipBinding(EquipSelection);
+        return new(binding.ObjectId, binding.Part, Word(binding.ObjectId), PartLabel(binding.Part),
+            Party.Select(member => new ExplorationMenuEquipRole(Word(member.NameWord),
+                binding.Eligible(member.RoleId),
+                roles.Roles[member.RoleId].Equipment.Where(objectId => objectId != 0).Select(Word).ToArray())).ToArray());
+    }
+
+    /// <summary>The bound equip-menu rows whose stock is owned, in authored binding order.</summary>
+    private IReadOnlyList<BattleEquipMenuBinding> Stock() =>
+        equipMenu!.Where(binding => inventory!.GetAmount(binding.ObjectId) > 0).ToArray();
+
+    private BattleEquipMenuBinding EquipBinding(int objectId) =>
+        equipMenu!.SingleOrDefault(binding => binding.ObjectId == objectId)
+            ?? throw new InvalidDataException($"Equip-menu object {objectId} has no binding.");
+
+    private string PartLabel(int part) => Word(PartWordBase + part);
+
+    private void ClampEquipCursor()
+    {
+        int count = Stock().Count;
+        if (SelectedEquipItem >= count) SelectedEquipItem = Math.Max(0, count - 1);
     }
 
     private string Word(int id) => words.TryGetValue(id, out string? text) && text is not null

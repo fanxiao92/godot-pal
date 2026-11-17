@@ -268,6 +268,66 @@ public sealed class BattleEquipmentState
         equipment[roleId, slotIndex] = 0;
     }
 
+    /// <summary>One equip-script execution for a (role, part, object): script.c 0x0018 runs
+    /// PAL_RemoveEquipmentEffect unconditionally (registers, hand dual attack and wear poisons
+    /// reset even when the part re-equips its current object), then installs the authored effect
+    /// row — the equip script's following 0x0017/0x001A/0x002D words — and moves stock per the
+    /// reference arms: a single incoming copy whose displaced item is absent exchanges in place,
+    /// otherwise one incoming copy is removed and one displaced copy is returned. Returns the
+    /// wLastUnequippedItem WORD: the displaced object (0 when the part was empty) or the object
+    /// itself on a same-object rewrite, which never stacks because registers are rewritten, not
+    /// added. Role eligibility is the caller's menu gate (uigame.c kItemFlagEquipableByPlayerRole
+    /// bits), not this operation's.</summary>
+    public int EquipItem(int roleId, int partIndex, int objectId,
+        IReadOnlyDictionary<int, BattleEquipmentObject> equipmentObjects,
+        InventoryLiveState inventory, RoleLiveState roleLiveState, PartyPoisonState partyPoisons)
+    {
+        ArgumentNullException.ThrowIfNull(equipmentObjects);
+        ArgumentNullException.ThrowIfNull(inventory);
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        ArgumentNullException.ThrowIfNull(partyPoisons);
+        Role(roleId);
+        if (partIndex is < 0 or >= SlotCount)
+            throw new ArgumentOutOfRangeException(nameof(partIndex), partIndex, "Equipment part index must be 0..5.");
+        if (objectId is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(objectId), objectId, "Equipment object ID must be 1..65535.");
+        if (!equipmentObjects.TryGetValue(objectId, out BattleEquipmentObject? obj))
+            throw new InvalidDataException($"Equipment object {objectId} is not declared.");
+        int previous = equipment[roleId, partIndex];
+        // 0x0018's PAL_RemoveEquipmentEffect call precedes its same-object guard: the live
+        // record's gear word clears and hand/wear side effects run for every equip, not only swaps.
+        RemoveEquippedItem(roleId, partIndex, roleLiveState, partyPoisons);
+        // The equip script's following words install the authored effect row for this (role, part).
+        BattleEquipmentEffect effect = obj.Effects[roleId];
+        equipment[roleId, partIndex] = objectId;
+        attack[roleId, partIndex] = effect.Attack;
+        defense[roleId, partIndex] = effect.Defense;
+        dexterity[roleId, partIndex] = effect.Dexterity;
+        battleSprite[roleId, partIndex] = effect.BattleSprite;
+        magicPower[roleId, partIndex] = effect.MagicPower ?? 0;
+        fleeRate[roleId, partIndex] = effect.FleeRate ?? 0;
+        poisonResistance[roleId, partIndex] = effect.PoisonResistance ?? 0;
+        attackAll[roleId, partIndex] = effect.AttackAll;
+        cooperativeMagic[roleId, partIndex] = effect.CooperativeMagic;
+        // PAL_SetPlayerStatus good-status branch (global.c:2255): the longer word wins, never stacks.
+        for (int status = GoodStatusFirstIndex; status < StatusCount; status++)
+            if (effect.Statuses[status] > statuses[roleId, status]) statuses[roleId, status] = effect.Statuses[status];
+        var live = roleLiveState.Roles[roleId];
+        int[] gear = live.Equipment.ToArray();
+        int[] liveStatuses = live.Statuses.ToArray();
+        gear[partIndex] = objectId;
+        for (int status = GoodStatusFirstIndex; status < StatusCount; status++)
+            if (effect.Statuses[status] > liveStatuses[status]) liveStatuses[status] = effect.Statuses[status];
+        roleLiveState.MergeSettledRoles([live with { Equipment = gear, Statuses = liveStatuses }]);
+        if (previous == objectId) return objectId; // 0x0018's guard: no gear or stock change.
+        if (!inventory.TryExchangeSingle(objectId, previous))
+        {
+            inventory.RemoveItem(objectId, 1);
+            if (previous != 0) inventory.AddItem(previous, 1);
+        }
+        return previous;
+    }
+
     private BattleRoleSnapshot ValidateRemovalRole(int roleId, RoleLiveState roleLiveState)
     {
         if (!roleLiveState.Roles.TryGetValue(roleId, out var live)

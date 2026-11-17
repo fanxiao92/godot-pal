@@ -23,6 +23,14 @@ public sealed partial class PalMenuView : Node2D
     private string[] rightLines = [];
     private string nameText = "";
     private int selectedEntry;
+    // #214 equipment page: composed row texts are validated here and only drawn afterwards.
+    private string[] equipItemLines = [];
+    private int selectedEquipItem;
+    private string equipSelectionText = "";
+    private string[] equipRoleLines = [];
+    private string[] equipGearLines = [];
+    private int selectedEquipRole;
+    private bool equipRolesAnyEligible;
 
     internal ExplorationMenuMode Mode => menu?.Mode ?? ExplorationMenuMode.Closed;
 
@@ -58,6 +66,10 @@ public sealed partial class PalMenuView : Node2D
         statusLines = [];
         rightLines = [];
         nameText = "";
+        equipItemLines = [];
+        equipSelectionText = "";
+        equipRoleLines = [];
+        equipGearLines = [];
         if (menu.Mode == ExplorationMenuMode.Status)
         {
             var view = menu.StatusView();
@@ -80,7 +92,24 @@ public sealed partial class PalMenuView : Node2D
                 .. view.Poisons.Select(poison => poison.Name),
             ];
         }
-        ValidateTexts(font!, entryLabels.Concat(statusLines).Concat(rightLines).Append(nameText));
+        else if (menu.Mode == ExplorationMenuMode.EquipItems)
+        {
+            var rows = menu.EquipItemsView();
+            selectedEquipItem = menu.SelectedEquipItem;
+            equipItemLines = rows.Select(row => $"{row.PartLabel} {row.Name} X{row.Amount}").ToArray();
+            nameText = equipItemLines.Length > 0 ? equipItemLines[Math.Clamp(selectedEquipItem, 0, equipItemLines.Length - 1)] : "";
+        }
+        else if (menu.Mode == ExplorationMenuMode.EquipRoles)
+        {
+            var selection = menu.EquipRolesView();
+            selectedEquipRole = menu.SelectedEquipRole;
+            equipSelectionText = $"{selection.PartLabel} {selection.Name}";
+            equipRolesAnyEligible = selection.Roles.Any(role => role.Eligible);
+            equipRoleLines = selection.Roles.Select(role => role.Name).ToArray();
+            equipGearLines = selection.Roles[Math.Clamp(selectedEquipRole, 0, selection.Roles.Count - 1)].Gear.ToArray();
+        }
+        ValidateTexts(font!, entryLabels.Concat(statusLines).Concat(rightLines).Append(nameText)
+            .Concat(equipItemLines).Append(equipSelectionText).Concat(equipRoleLines).Concat(equipGearLines));
         QueueRedraw();
     }
 
@@ -102,6 +131,33 @@ public sealed partial class PalMenuView : Node2D
         }
         DrawRect(new Rect2(0, 0, 320, 200), palette[0], filled: true);
         DrawRect(new Rect2(2, 2, 316, 196), PaletteColor(0x4F), width: 1);
+        if (menu.Mode == ExplorationMenuMode.EquipItems)
+        {
+            // itemmenu.c: the equipable stock list with owned amounts.
+            for (int index = 0; index < equipItemLines.Length; index++)
+            {
+                bool selected = index == selectedEquipItem;
+                DrawBitmapText(equipItemLines[index], 16, 12 + index * 18, selected ? 5 : 0x4F);
+                if (selected) DrawRect(new Rect2(8, 20 + index * 18, 6, 6), PaletteColor(5));
+            }
+            return;
+        }
+        if (menu.Mode == ExplorationMenuMode.EquipRoles)
+        {
+            // uigame.c PAL_EquipItemMenu: the item header, the party role box (an ineligible
+            // selected role keeps the plain label color — the reference's inactive highlight)
+            // and the selected role's currently equipped objects.
+            DrawBitmapText(equipSelectionText, 16, 8, 5);
+            for (int index = 0; index < equipRoleLines.Length; index++)
+            {
+                bool selected = index == selectedEquipRole;
+                DrawBitmapText(equipRoleLines[index], 16, 34 + index * 18, selected && equipRolesAnyEligible ? 5 : 0x4F);
+                if (selected) DrawRect(new Rect2(8, 42 + index * 18, 6, 6), PaletteColor(equipRolesAnyEligible ? 5 : 0x4F));
+            }
+            for (int index = 0; index < equipGearLines.Length; index++)
+                DrawBitmapText(equipGearLines[index], 150, 34 + index * 16, 0x4F);
+            return;
+        }
         DrawBitmapText(nameText, 16, 8, 5);
         for (int index = 0; index < statusLines.Length; index++)
             DrawBitmapText(statusLines[index], 16, 30 + index * 18, 0x4F);

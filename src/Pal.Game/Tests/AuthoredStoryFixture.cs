@@ -21,7 +21,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
         bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
         bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false,
         bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false, bool attackAllMember0 = false,
-        bool fleeEscape = false)
+        bool fleeEscape = false, bool menuEquip = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -39,6 +39,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The attack-all derivation is defined on the mixed empty-slot PartyWin shape.", nameof(attackAllMember0));
         if (fleeEscape && (scenario != "LostReload" || playerHp is null))
             throw new ArgumentException("The flee-escape derivation is defined on the LostReload author with an explicit playerHp word.", nameof(fleeEscape));
+        if (menuEquip && scenario != "PartyEquip")
+            throw new ArgumentException("The menu-equip context derivation requires the PartyEquip author.", nameof(menuEquip));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -61,7 +63,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape || menuEquip)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -160,6 +162,36 @@ internal sealed class AuthoredStoryFixture : IDisposable
                     data["players"]![0]!["dexterity"] = 999;
                     foreach (int slot in new[] { 1, 3 }) team["enemies"]![slot]!["hp"] = 21;
                 }
+                if (menuEquip)
+                {
+                    // #214 (M6-B T02): the test-owned equip context — initial bag rows, a sixth
+                    // head object 199 (role0 attack 3/defense 2, role1 defense 4) and per-object
+                    // part/eligibility bindings for every worn object. 210 stays role1-only as
+                    // the reference's flagged-but-role0-ineligible rejection sentinel.
+                    JsonNode EquipRow(int attack, int defense) => new JsonObject
+                    {
+                        ["attack"] = attack, ["defense"] = defense, ["dexterity"] = 0, ["battleSprite"] = 0,
+                        ["statuses"] = new JsonArray(0, 0, 0, 0, 0, 0, 0, 0, 0)
+                    };
+                    JsonNode ZeroRow() => EquipRow(0, 0);
+                    data["equipments"]!.AsArray().Add(new JsonObject
+                    {
+                        ["objectId"] = 199,
+                        ["effects"] = new JsonArray(EquipRow(3, 2), EquipRow(0, 4),
+                            ZeroRow(), ZeroRow(), ZeroRow(), ZeroRow())
+                    });
+                    data["inventory"] = new JsonArray(
+                        new JsonObject { ["itemId"] = 197, ["amount"] = 2 },
+                        new JsonObject { ["itemId"] = 199, ["amount"] = 1 },
+                        new JsonObject { ["itemId"] = 210, ["amount"] = 1 });
+                    data["equipMenu"] = new JsonArray(
+                        new JsonObject { ["objectId"] = 197, ["part"] = 0, ["equipableBy"] = new JsonArray(0, 1) },
+                        new JsonObject { ["objectId"] = 199, ["part"] = 0, ["equipableBy"] = new JsonArray(0, 1) },
+                        new JsonObject { ["objectId"] = 210, ["part"] = 2, ["equipableBy"] = new JsonArray(1) },
+                        new JsonObject { ["objectId"] = 170, ["part"] = 3, ["equipableBy"] = new JsonArray(0, 1) },
+                        new JsonObject { ["objectId"] = 237, ["part"] = 4, ["equipableBy"] = new JsonArray(0, 1) },
+                        new JsonObject { ["objectId"] = 248, ["part"] = 5, ["equipableBy"] = new JsonArray(0, 1) });
+                }
                 File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
                 numbers = numericInput;
             }
@@ -243,6 +275,9 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (fleeEscape)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned non-boss flee derivation (T17 #145): startBattle operand2 re-points to an appended flee branch and the player declares fleeRate 999; authored stream derived, not retail data.";
+            if (menuEquip)
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned menu equip context (T02 #214): bag rows, head object 199 and part/eligibility bindings; authored inputs, not retail data.";
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")
                 foreach (var player in metadata["visual"]!["players"]!.AsArray())

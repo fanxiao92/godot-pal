@@ -63,7 +63,8 @@ public static class NativeBattleContent
                     throw new InvalidDataException($"Team {team.TeamId} requires one to five runtime enemy slots");
             }
             var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
-                Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray());
+                Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray(),
+                ReadInventory(native), ReadEquipMenu(native));
             ModernBattleContent.Validate(content);
             return new(content, ReadProjection(native, content));
         }
@@ -112,6 +113,11 @@ public static class NativeBattleContent
                 LevelUpMagics = x.Value.LevelUpMagics.Select(row => new PalBattleLearnableMagic { Level = row.Level, MagicId = row.MagicId }).ToArray() }).ToArray(),
             Teams = content.EnemyTeams.Select(x => new PalBattleTeam { TeamId = x.Key, Enemies = x.Value.Select(WriteEnemy).ToArray() }).ToArray(),
             RoleEquipment = content.RoleEquipment.SelectMany(row => row).ToArray(),
+            InventoryItems = content.InitialInventory.Select(slot => slot.ItemId).ToArray(),
+            InventoryAmounts = content.InitialInventory.Select(slot => slot.Amount).ToArray(),
+            EquipMenuObjects = content.EquipMenu.Select(binding => binding.ObjectId).ToArray(),
+            EquipMenuParts = content.EquipMenu.Select(binding => binding.Part).ToArray(),
+            EquipMenuRoleMasks = content.EquipMenu.Select(binding => binding.EquipableRoleMask).ToArray(),
             Equipments = content.EquipmentObjects.Select(x => new PalBattleEquipment { ObjectId = x.Key,
                 Effects = x.Value.Effects.Select(effect => new PalBattleEquipmentEffect { Attack = effect.Attack, Defense = effect.Defense,
                     Dexterity = effect.Dexterity, BattleSprite = effect.BattleSprite, Statuses = effect.Statuses.ToArray(),
@@ -183,6 +189,25 @@ public static class NativeBattleContent
                 row.PoisonResistance < 0 ? null : row.PoisonResistance)).ToArray()));
         }
         return objects;
+    }
+
+    private static IReadOnlyList<InventorySlot> ReadInventory(PalBattleContent native)
+    {
+        int[] items = Copy(native.InventoryItems, "InventoryItems");
+        int[] amounts = Copy(native.InventoryAmounts, "InventoryAmounts");
+        if (items.Length != amounts.Length)
+            throw new InvalidDataException("InventoryItems and InventoryAmounts require aligned rows");
+        return items.Select((item, index) => new InventorySlot(item, amounts[index], 0)).ToArray();
+    }
+
+    private static IReadOnlyList<BattleEquipMenuBinding> ReadEquipMenu(PalBattleContent native)
+    {
+        int[] objects = Copy(native.EquipMenuObjects, "EquipMenuObjects");
+        int[] parts = Copy(native.EquipMenuParts, "EquipMenuParts");
+        int[] masks = Copy(native.EquipMenuRoleMasks, "EquipMenuRoleMasks");
+        if (objects.Length != parts.Length || objects.Length != masks.Length)
+            throw new InvalidDataException("EquipMenu arrays require aligned rows");
+        return objects.Select((item, index) => new BattleEquipMenuBinding(item, parts[index], masks[index])).ToArray();
     }
 
     private static ClassicBattlePlayer ReadPlayer(PalBattlePlayer x) => new(x.RoleId, x.Hp, x.MaxHp, x.Attack, x.Defense, x.Dexterity)

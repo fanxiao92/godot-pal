@@ -54,6 +54,24 @@ public sealed class InventoryLiveState
         return Change(itemId, amount == 0 ? -1 : -amount);
     }
 
+    /// <summary>script.c 0x0018's in-place exchange branch: when the incoming item occupies
+    /// exactly one copy here and the displaced item is present in no slot (a depleted slot with
+    /// its id still counts as present), the displaced item replaces the incoming item's slot —
+    /// the reference avoids removing and re-appending at the tail. Returns false without any
+    /// write whenever a precondition fails; the caller then runs the remove/add arms.</summary>
+    public bool TryExchangeSingle(int newItemId, int oldItemId)
+    {
+        ValidateItem(newItemId);
+        ValidateItem(oldItemId);
+        if (newItemId == 0 || oldItemId == 0 || newItemId == oldItemId) return false;
+        int index = Find(newItemId);
+        if (index == Capacity || slots[index].ItemId != newItemId || slots[index].Amount != 1) return false;
+        int existing = Find(oldItemId);
+        if (existing != Capacity && slots[existing].ItemId == oldItemId) return false;
+        slots[index] = slots[index] with { ItemId = oldItemId };
+        return true;
+    }
+
     private int Change(int itemId, int amount)
     {
         if (itemId == 0) return 0;
