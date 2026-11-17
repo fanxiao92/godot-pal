@@ -25,7 +25,7 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     public NativeStoryProfileFixture(bool party = false, bool hiddenCurrentGlyph = false, bool currentHookPositive = false,
         bool seedDyingGlyph = false, bool futureDyingWrite = false, bool secondOrderDyingWrite = false,
         bool randomDyingBranch = false, bool titleDyingGlyph = false, bool forceCurrentFriendDeath = false,
-        bool fiveEnemies = false, bool emptyEnemies = false)
+        bool fiveEnemies = false, bool emptyEnemies = false, bool useMenu = false)
     {
         if (fiveEnemies && (hiddenCurrentGlyph || currentHookPositive || futureDyingWrite || secondOrderDyingWrite
             || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
@@ -33,6 +33,9 @@ internal sealed class NativeStoryProfileFixture : IDisposable
         if (emptyEnemies && (party || fiveEnemies || hiddenCurrentGlyph || currentHookPositive || futureDyingWrite || secondOrderDyingWrite
             || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
             throw new ArgumentException("The empty-slot variant requires the plain single-member story graph.", nameof(emptyEnemies));
+        if (useMenu && (party || fiveEnemies || emptyEnemies || hiddenCurrentGlyph || currentHookPositive || seedDyingGlyph
+            || futureDyingWrite || secondOrderDyingWrite || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
+            throw new ArgumentException("The use-menu variant requires the plain story graph.", nameof(useMenu));
         if (forceCurrentFriendDeath && (!currentHookPositive || !secondOrderDyingWrite || randomDyingBranch || titleDyingGlyph))
             throw new ArgumentException("The controlled FriendDeath variant requires only the second-order current-hook graph.", nameof(forceCurrentFriendDeath));
         if (titleDyingGlyph && (!futureDyingWrite || randomDyingBranch || secondOrderDyingWrite))
@@ -56,11 +59,18 @@ internal sealed class NativeStoryProfileFixture : IDisposable
         Static.Scene.Palette = ResourceLoader.Load<PalPalette>(Root + "/Palette.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
         Static.Scene.Sprites[0].Frames[0].Texture = ResourceLoader.Load<Texture2D>(TextureSource);
         Static.SavePacked();
-        Write("index.json", currentHookGraph ? Index.Replace("\"instructionCount\":13,\"byteLength\":104", "\"instructionCount\":64,\"byteLength\":512") : Index);
-        Write("shared.json", currentHookGraph ? HiddenCurrentGlyphShared(seedDyingGlyph, futureDyingWrite, secondOrderDyingWrite, randomDyingBranch) : Shared);
+        Write("index.json", currentHookGraph ? Index.Replace("\"instructionCount\":13,\"byteLength\":104", "\"instructionCount\":64,\"byteLength\":512") : useMenu ? Index.Replace("\"instructionCount\":13,\"byteLength\":104", "\"instructionCount\":16,\"byteLength\":128") : Index);
+        Write("shared.json", currentHookGraph ? HiddenCurrentGlyphShared(seedDyingGlyph, futureDyingWrite, secondOrderDyingWrite, randomDyingBranch) : useMenu ? UseMenuShared() : Shared);
         Write("outcomes.json", futureDyingWrite ? FutureOutcomes
-            : currentHookGraph ? Outcomes.Replace("\"next\":null", "\"next\":\"shared#L000D\"") : Outcomes);
+            : currentHookGraph ? Outcomes.Replace("\"next\":null", "\"next\":\"shared#L000D\"") : useMenu ? Outcomes.Replace("\"next\":null", "\"next\":\"shared#L000D\"") : Outcomes);
         Numeric = Numbers(Party);
+        if (useMenu)
+        {
+            // #215: one authored use-menu binding — object 300, consuming, single-target.
+            Numeric.UseMenuObjects = [300];
+            Numeric.UseMenuConsuming = [1];
+            Numeric.UseMenuApplyToAll = [0];
+        }
         if (hiddenCurrentGlyph && !currentHookPositive)
         {
             Numeric.Players[0].HasNameObjectId = true;
@@ -111,6 +121,8 @@ internal sealed class NativeStoryProfileFixture : IDisposable
         Font = new PalDialogueFont { SourceIdentity = "synthetic-story-font" };
         foreach (int codepoint in new[] { 65, 66, 67, 68, 0x7532, 0x4e59, 0x4e19, 0x4e01 })
             Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = codepoint, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
+        if (useMenu) foreach (int codepoint in new[] { 0x620A, 69 })
+            Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = codepoint, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
         if (seedDyingGlyph || futureDyingWrite)
             Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = 69, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
         if (secondOrderDyingWrite)
@@ -126,19 +138,20 @@ internal sealed class NativeStoryProfileFixture : IDisposable
             : secondOrderDyingWrite ? ["甲", "乙", "丙", "丁", "乙", "乙", "乙"]
             : futureDyingWrite ? ["甲", "乙", "丙", "丁", "乙", "乙"]
             : currentHookPositive ? ["甲", "乙", "丙", "丁", "乙"]
-            : hiddenCurrentGlyph ? ["甲", "乙", "丙", "丁", "戊"] : ["甲", "乙", "丙", "丁"]);
+            : hiddenCurrentGlyph || useMenu ? ["甲", "乙", "丙", "丁", "戊"] : ["甲", "乙", "丙", "丁"]);
         English = Language("en", randomDyingBranch ? ["A", "B", "C", "D", "B", "E", "G"]
             : secondOrderDyingWrite ? ["A", "B", "C", "D", "B", "E", "F"]
             : futureDyingWrite ? ["A", "B", "C", "D", "B", "E"]
             : currentHookPositive ? ["A", "B", "C", "D", seedDyingGlyph ? "E" : "B"]
-            : hiddenCurrentGlyph ? ["A", "B", "C", "D", "E"] : ["A", "B", "C", "D"]);
+            : hiddenCurrentGlyph || useMenu ? ["A", "B", "C", "D", "E"] : ["A", "B", "C", "D"]);
         if (titleDyingGlyph)
             foreach (var language in new[] { Chinese, English })
                 language.Messages.Single(message => message.StartMessageId == 66).Entries.Insert(0,
                     new PalDialogueMessageEntry { Text = "G:" });
         Save(Chinese, "Language.zh-Hans.tres"); Save(English, "Language.en.tres");
         for (int i = 0; i < 3; i++) Save(Image("prompt-" + i), $"Prompt-{i:D2}.tres");
-        foreach (int id in new[] { 7, 8, 9, 10 }) Save(Image("portrait-" + id), $"Portrait-{id}.tres");
+        foreach (int id in useMenu ? new[] { 7, 8, 9, 10, 11 } : new[] { 7, 8, 9, 10 })
+            Save(Image("portrait-" + id), $"Portrait-{id}.tres");
         Profile = new PalStoryProfile
         {
             FormatVersion = 1, StaticResources = Static.ResourceRoot, StaticProfile = Static.Uri,
@@ -148,11 +161,14 @@ internal sealed class NativeStoryProfileFixture : IDisposable
             Portraits = new Godot.Collections.Dictionary<int, string>
             { [7] = Root + "/Portrait-7.tres", [8] = Root + "/Portrait-8.tres", [9] = Root + "/Portrait-9.tres", [10] = Root + "/Portrait-10.tres" }
         };
+        if (useMenu) Profile.Portraits[11] = Root + "/Portrait-11.tres";
         // Independent literal manifest; never use production dependency enumeration to author expectations.
         ExpectedPaths = new[] { Static.ResourceRoot + "/Scenes/Scene.tscn", Static.Uri, TextureSource, TextureSource + ".import" }
             .Concat(new[] { "index.json", "shared.json", "outcomes.json", "Numeric.tres", "Role.tres", "Palette.tres", "Font.tres", "Glyph.tres",
                 "Language.zh-Hans.tres", "Language.en.tres", "Prompt-00.tres", "Prompt-01.tres", "Prompt-02.tres",
-                "Portrait-7.tres", "Portrait-8.tres", "Portrait-9.tres", "Portrait-10.tres" }.Select(name => Root + "/" + name)).ToArray();
+                "Portrait-7.tres", "Portrait-8.tres", "Portrait-9.tres", "Portrait-10.tres" }
+                .Concat(useMenu ? new[] { "Portrait-11.tres" } : Array.Empty<string>())
+                .Select(name => Root + "/" + name)).ToArray();
         RefreshHashes(); SaveProfile();
     }
 
@@ -320,6 +336,20 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     {"label":"L0011","op":"showDialog","messageId":64,"descriptionLineWord":0,"next":"L0012","source":{"index":17,"opcode":65535,"operands":[64,0,0]}},
     {"label":"L0012","op":"end","mode":"keep","next":"shared#L0013","source":{"index":18,"opcode":0,"operands":[0,0,0]}}]}
     """;
+
+    // #215 item-use closure: object 300's item.wScriptOnUse entry draws a portrait-11 line with
+    // message 65 (zh 戊 / en E) in both languages; the tail rechains outcomes#L000C into it.
+    private static string UseMenuShared() => Shared
+        .Replace(
+            "\"sourceAddress\":1}],\"commands\":[",
+            "\"sourceAddress\":1},"
+            + "{\"id\":\"use300\",\"owner\":{\"type\":\"object\",\"id\":300},\"slot\":\"item.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}],\"commands\":[")
+        .Replace(
+            "\"next\":\"outcomes#L0007\",\"source\":{\"index\":6,\"opcode\":0,\"operands\":[0,0,0]}}]}",
+            "\"next\":\"outcomes#L0007\",\"source\":{\"index\":6,\"opcode\":0,\"operands\":[0,0,0]}},"
+            + "{\"label\":\"L000D\",\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":11,\"color\":0,\"rngWord\":0,\"next\":\"L000E\",\"source\":{\"index\":13,\"opcode\":60,\"operands\":[11,0,0]}},"
+            + "{\"label\":\"L000E\",\"op\":\"showDialog\",\"messageId\":65,\"descriptionLineWord\":0,\"next\":\"L000F\",\"source\":{\"index\":14,\"opcode\":65535,\"operands\":[65,0,0]}},"
+            + "{\"label\":\"L000F\",\"op\":\"end\",\"mode\":\"keep\",\"next\":null,\"source\":{\"index\":15,\"opcode\":0,\"operands\":[0,0,0]}}]}");
 
     private const string Index = """
     {"formatVersion":1,"profile":"faithful","source":{"archive":"SSS.MKF","chunk":4,"byteOrder":"little","instructionCount":13,"byteLength":104,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"files":["outcomes","shared"]}

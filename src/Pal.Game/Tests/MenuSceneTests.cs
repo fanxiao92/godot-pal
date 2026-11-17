@@ -319,6 +319,129 @@ public class MenuSceneTests
         }
     }
 
+    [TestCase(Timeout = 120000)]
+    public async Task ItemPageUsesHealsFailsAndConsumesThroughTheRealScriptContext()
+    {
+        // #215: the exploration item-use chain on the formal story Main (play.c PAL_GameUseItem
+        // over itemmenu.c PAL_ItemSelectMenu(kItemFlagUsable) and uigame.c PAL_ItemUseMenu).
+        // Independent numbers: PartyWin authors role0 HP100/MP20, role1 HP95/MP20 (max 150/50);
+        // the test-owned scripts heal +30 (single, with a real dialogue line), +10 party-wide and
+        // a markFailed no-op; consumption follows kItemFlagConsuming AND script success only.
+        using var fixture = new AuthoredStoryFixture("PartyWin", menuItems: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1", "--story-language", "zh-Hans");
+        using var host = new MenuHost(selection);
+        host.AssertHealthy();
+        await host.Wait(() => host.Updates.Count > 0);
+        var menu = host.Main.Menu!;
+
+        // The authored use context gains the items entry; the list shows the usable stock rows
+        // with available amounts in binding order (itemmenu.c compresses the rest away).
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        AssertThat(menu.Entries.Count).IsEqual(2);
+        AssertThat(menu.EntryLabel(1)).IsEqual("ITEMS");
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Items);
+        AssertRows(menu, [(300, "生命提升", 2), (301, "护大家", 1), (302, "别倒", 1)]);
+
+        // 300 on 小侠: the target page reads the live shared vitals (uigame.c stat box); the
+        // committed run executes the checked on-use script through the real Dialogue host.
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemTargets);
+        var targets = menu.ItemTargetsView();
+        AssertThat((targets.ObjectId, targets.Name)).IsEqual((300, "生命提升"));
+        AssertThat(string.Join(",", targets.Targets.Select(target => target.Name))).IsEqual("大侠,小侠");
+        AssertThat((targets.Targets[1].Hp, targets.Targets[1].Mp)).IsEqual((95, 20));
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemScript);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        // play.c: the single-target loop reopens the player select for another use.
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemTargets);
+        var healed = menu.ItemTargetsView();
+        AssertThat((healed.Targets[0].Hp, healed.Targets[1].Hp)).IsEqual((100, 125));
+        AssertThat(healed.Targets[1].Mp).IsEqual(50); // changeHpMp writes HP and MP together
+        // Cancel breaks back to the item list without a second run; one copy is gone.
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Items);
+        AssertRows(menu, [(300, "生命提升", 1), (301, "护大家", 1), (302, "别倒", 1)]);
+
+        // The second 300 on 大侠 (remembered player cursor stays on the last selection): the
+        // copy count reaches zero and the row leaves the compressed list.
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemTargets);
+        AssertThat(menu.SelectedUseRole).IsEqual(1);
+        host.Tap(Key.Up); // PAL_ItemUseMenu wraps: member 1 -> 0
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemScript);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemTargets);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Items);
+        AssertRows(menu, [(301, "护大家", 1), (302, "别倒", 1)]);
+
+        // 301 is apply-to-all: no target page — the run commits straight from the list with the
+        // caller word 0xFFFF and heals both members; PAL_GameUseItem then returns and uigame.c
+        // PAL_InGameMenu case 3 'goto out' closes the whole menu after the one run.
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemScript);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+        AssertThat(host.Main.MenuView).IsNull();
+
+        // 302 marks the script failed: the reopened items page (remembered entries and inventory
+        // cursors) runs it once; the target loop reopens but the consuming copy stays.
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Items);
+        AssertRows(menu, [(302, "别倒", 1)]);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemTargets);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemScript);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemTargets);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Items);
+        AssertRows(menu, [(302, "别倒", 1)]);
+
+        // The item-select cancel ends the whole use flow (itemmenu.c kKeyMenu returns 0,
+        // play.c PAL_GameUseItem returns, uigame.c case 3 'goto out'): the menu closes and
+        // the exploration state resumes without leaking the closing cancel into the NPC
+        // trigger. The status page then reads the same shared live owners the scripts wrote:
+        // 100+30+10 / 95+30+10 HP and capped 50 MP.
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        // The remembered main-menu cursor stayed on the items entry (iCurMainMenuItem survives
+        // closes); step back to the status entry before confirming.
+        host.Tap(Key.Up);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Status);
+        var hero = menu.StatusView();
+        AssertThat((hero.Hp, hero.Mp)).IsEqual((140, 50));
+        host.Tap(Key.Right);
+        await host.Wait(() => menu.StatusMemberIndex == 1);
+        var second = menu.StatusView();
+        AssertThat((second.Hp, second.Mp)).IsEqual((135, 50));
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+        AssertThat(host.Main.Interaction!.Phase).IsEqual(NpcInteractionPhase.Exploring);
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Interaction!.PendingTrigger is not null);
+        AssertThat(menu.Mode).IsEqual(ExplorationMenuMode.Closed);
+
+        void AssertRows(ExplorationMenuSession session,
+            (int ObjectId, string Name, int Amount)[] expected) =>
+            AssertThat(string.Join(";", session.ItemsView()
+                .Select(row => $"{row.ObjectId}:{row.Name}:{row.Amount}")))
+                .IsEqual(string.Join(";", expected.Select(row => $"{row.ObjectId}:{row.Name}:{row.Amount}")));
+    }
+
     [TestCase(Timeout = 30000)]
     public void PreparedLanguagesCoverEveryMenuWordGlyphInBothLanguages()
     {
@@ -334,10 +457,11 @@ public class MenuSceneTests
             ExplorationMenuSession.DefenseWord, ExplorationMenuSession.DexterityWord,
             ExplorationMenuSession.FleeRateWord, ExplorationMenuSession.RoleNameWordBase,
             ExplorationMenuSession.RoleNameWordBase + 1, ExplorationMenuSession.EquipmentEntryWord,
+            ExplorationMenuSession.ItemsEntryWord,
             ExplorationMenuSession.PartWordBase, ExplorationMenuSession.PartWordBase + 1,
             ExplorationMenuSession.PartWordBase + 2, ExplorationMenuSession.PartWordBase + 3,
             ExplorationMenuSession.PartWordBase + 4, ExplorationMenuSession.PartWordBase + 5,
-            170, 197, 199, 210, 237, 248,
+            170, 197, 199, 210, 237, 248, 300, 301, 302,
         ];
         foreach (string language in new[] { "zh-Hans", "en" })
         {

@@ -36,6 +36,10 @@ public partial class Main
     private bool storyFlee;
     // input.c 'd' kKeyDefend: the pending D press in the action menu.
     private bool storyDefend;
+    // #215 play.c PAL_GameUseItem: the item script run this host started (its request id and the
+    // checked entry address its owned receipt must return to) while the menu parks in ItemScript.
+    private Guid itemUseId;
+    private int itemUseEntryAddress;
     private ClassicBattleFleeAttempt? storyLastFleeAttempt;
     private Vector2? fleeOrigin;
     private int fleePartyIndex = -1;
@@ -117,6 +121,9 @@ public partial class Main
             // #214: with an authored equip context the trigger battle consumes the current
             // equipment owner (#187); scenarios without one keep the frozen-author construction.
             bool equipmentPage = checkedStory.BattleContent.EquipMenu.Count > 0;
+            // #215: with an authored use context the menu gains the items page; its on-use
+            // entries are checked up front with the story profile.
+            bool itemsPage = checkedStory.BattleContent.UseMenu.Count > 0;
             dialogue.FirstBattleWorld = DynamicEventWorld.ForHost(checkedStory.Exploration.Rules,
                 checkedStory.Exploration.Leader, map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
                 roleLiveState, checkedStory.BattleContent.Players.Select(player => player.RoleId).ToArray());
@@ -134,6 +141,7 @@ public partial class Main
                 new(ExplorationMenuPage.Status, ExplorationMenuSession.StatusEntryWord),
             };
             if (equipmentPage) menuEntries.Add(new(ExplorationMenuPage.Equipment, ExplorationMenuSession.EquipmentEntryWord));
+            if (itemsPage) menuEntries.Add(new(ExplorationMenuPage.Items, ExplorationMenuSession.ItemsEntryWord));
             menu = new ExplorationMenuSession(
                 menuEntries,
                 checkedStory.BattleContent.Players.Select(player => new ExplorationMenuMember(player.RoleId,
@@ -142,7 +150,8 @@ public partial class Main
                     player.Attack, player.MagicPower, player.Defense, player.Dexterity, player.FleeRate)).ToArray(),
                 roleLiveState, storyEquipment,
                 checkedStory.BattleContent.GrowthByRole, checkedStory.SelectedWords, storyPoisons,
-                checkedStory.BattleContent.EquipMenu, checkedStory.BattleContent.EquipmentObjects, storyInventory);
+                checkedStory.BattleContent.EquipMenu, checkedStory.BattleContent.EquipmentObjects, storyInventory,
+                checkedStory.BattleContent.UseMenu);
             PalMenuView.ValidateTexts(checkedStory.Font,
                 Enumerable.Range(0, menu.Entries.Count).Select(menu.EntryLabel)
                     .Concat(new[]
@@ -158,6 +167,10 @@ public partial class Main
                             .Select(part => checkedStory.SelectedWords[ExplorationMenuSession.PartWordBase + part])
                             .Concat(checkedStory.BattleContent.EquipMenu
                                 .Select(binding => checkedStory.SelectedWords[binding.ObjectId]))
+                        : Enumerable.Empty<string>())
+                    .Concat(itemsPage
+                        ? checkedStory.BattleContent.UseMenu
+                            .Select(binding => checkedStory.SelectedWords[binding.ObjectId])
                         : Enumerable.Empty<string>())
                     .Append("0123456789:/"));
             AddChild(map); AddChild(display); AddChild(dialogue);
@@ -702,6 +715,7 @@ public partial class Main
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
         storyEquipment = null; storyPoisons = null; storyInventory = null;
+        itemUseId = Guid.Empty;
         ReleaseMenu();
     }
 
@@ -726,7 +740,18 @@ public partial class Main
             }
             else
             {
-                foreach (ExplorationMenuKey key in pendingMenuKeys) menu.Press(key);
+                if (menu.Mode == ExplorationMenuMode.ItemScript)
+                {
+                    // The pending item run advances on this real update boundary: the host either
+                    // starts the checked on-use script or receipts its completed call, then the
+                    // parked view re-presents behind the script's dialogue.
+                    AdvanceItemUse();
+                }
+                else
+                {
+                    foreach (ExplorationMenuKey key in pendingMenuKeys) menu.Press(key);
+                    if (menu.Mode == ExplorationMenuMode.ItemScript) AdvanceItemUse();
+                }
                 if (menu.Mode == ExplorationMenuMode.Closed)
                 {
                     menuView?.GetParent()?.RemoveChild(menuView);
@@ -749,6 +774,34 @@ public partial class Main
         && storyRequest is null && StoryBattleMode is null && activeTrigger is null && firstBattleActiveTrigger is null
         && !StoryLostTerminal && Interaction is { Phase: NpcInteractionPhase.Exploring }
         && Dialogue?.Session is not { BlocksSceneUpdates: true };
+
+    /// <summary>#215 play.c PAL_GameUseItem: the committed item run executes on the production
+    /// trigger executor with the selected member's role as its caller (or the apply-to-all
+    /// 0xFFFF which keeps the saved caller); the parked menu keeps its view behind the script's
+    /// dialogue (the battle-hook layering) and only the owned, entry-stable receipt completes
+    /// the use with the script's saved success flag.</summary>
+    private void AdvanceItemUse()
+    {
+        if (menu!.PendingItemUse is not { } request) return;
+        if (itemUseId == Guid.Empty)
+        {
+            var entry = story!.ItemUseEntries.TryGetValue(request.ObjectId, out var bound)
+                ? bound : throw new InvalidDataException($"Use-menu object {request.ObjectId} has no checked on-use entry.");
+            Display!.ZIndex = 200;
+            Dialogue!.Start(entry.FileId, entry.Id, request.TargetRoleId, request.Id);
+            itemUseId = request.Id;
+            itemUseEntryAddress = entry.SourceAddress;
+        }
+        else if (Dialogue!.Session is { Phase: TriggerScriptPhase.Completed } session
+            && session.SourceRequestId == itemUseId && session.ReturnEntry == itemUseEntryAddress)
+        {
+            bool success = session.ScriptSuccess;
+            itemUseId = Guid.Empty;
+            Display!.ZIndex = 0;
+            menu.CompleteItemUse(request.Id, success);
+            GD.Print($"PAL_ITEM_USED:object={request.ObjectId};caller={request.TargetRoleId};success={success}");
+        }
+    }
 
     private void PresentMenu() => menuView!.Present(menu!, story!.Font, story.Palette.ToArray());
 

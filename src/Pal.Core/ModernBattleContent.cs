@@ -16,11 +16,13 @@ public static partial class ModernBattleContent
         bool objectsDeclared = root.TryGetProperty("equipments", out JsonElement objectsElement);
         bool inventoryDeclared = root.TryGetProperty("inventory", out JsonElement inventoryElement);
         bool equipMenuDeclared = root.TryGetProperty("equipMenu", out JsonElement equipMenuElement);
+        bool useMenuDeclared = root.TryGetProperty("useMenu", out JsonElement useMenuElement);
         var rootKeys = new List<string> { "formatVersion", "roles", "players", "growth", "teams" };
         if (gridDeclared) rootKeys.Add("roleEquipment");
         if (objectsDeclared) rootKeys.Add("equipments");
         if (inventoryDeclared) rootKeys.Add("inventory");
         if (equipMenuDeclared) rootKeys.Add("equipMenu");
+        if (useMenuDeclared) rootKeys.Add("useMenu");
         EventJson.Keys(root, Root, [.. rootKeys]);
         if (Number(root, "formatVersion", Root) != 1)
             throw Error(Root, "unsupported formatVersion");
@@ -66,8 +68,9 @@ public static partial class ModernBattleContent
         BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);
         var initialInventory = inventoryDeclared ? InventoryRows(inventoryElement) : null;
         var equipMenu = equipMenuDeclared ? EquipMenuBindings(equipMenuElement) : null;
+        var useMenu = useMenuDeclared ? UseMenuBindings(useMenuElement) : null;
         TriggerBattleContent content;
-        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles, initialInventory, equipMenu); }
+        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles, initialInventory, equipMenu, useMenu); }
         catch (InvalidDataException error) { throw Error(Root, error.Message); }
         Validate(content);
         return content;
@@ -111,6 +114,22 @@ public static partial class ModernBattleContent
                 mask |= 1 << value;
             }
             bindings.Add(new(Number(item, "objectId", path, 1), Number(item, "part", path, 0, BattleEquipmentState.SlotCount - 1), mask));
+        }
+        return System.Array.AsReadOnly(bindings.ToArray());
+    }
+
+    /// <summary>Use-menu bindings: object plus its kItemFlagConsuming and kItemFlagApplyToAll
+    /// words. Listing declares the exploration-usable category (kItemFlagUsable).</summary>
+    private static IReadOnlyList<BattleUseMenuBinding> UseMenuBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".useMenu", "expected an array");
+        var bindings = new List<BattleUseMenuBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".useMenu[{index++}]";
+            EventJson.Keys(item, path, "objectId", "consuming", "applyToAll");
+            bindings.Add(new(Number(item, "objectId", path, 1), Boolean(item, "consuming", path), Boolean(item, "applyToAll", path)));
         }
         return System.Array.AsReadOnly(bindings.ToArray());
     }

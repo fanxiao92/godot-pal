@@ -224,8 +224,8 @@ public class NativeStoryProfileTests
         string expected;
         switch (fault)
         {
-            case "missing-map": fixture.Profile.Portraits.Remove(10); fixture.Profile.ResourceSha256.Remove(fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected entry"; break;
-            case "extra-map": fixture.Profile.Portraits.Add(11, fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected entry"; break;
+            case "missing-map": fixture.Profile.Portraits.Remove(10); fixture.Profile.ResourceSha256.Remove(fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected and item-use entries"; break;
+            case "extra-map": fixture.Profile.Portraits.Add(11, fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected and item-use entries"; break;
             case "zero-map": fixture.Profile.Portraits.Add(0, fixture.Root + "/Portrait-10.tres"); expected = "nonzero WORD"; break;
             case "portrait": fixture.Save(new PalDialogueIndexedImage { SourceIdentity = "bad", Width = 2, Height = 1, PaletteIndices = [1], Alpha = [255] }, "Portrait-10.tres"); fixture.RefreshHashes(); expected = "Portrait-10.tres"; break;
             case "prompt": fixture.Save(new PalDialogueIndexedImage { Width = 1, Height = 1, PaletteIndices = [1], Alpha = [255] }, "Prompt-02.tres"); fixture.RefreshHashes(); expected = "Prompt-02.tres"; break;
@@ -335,6 +335,66 @@ public class NativeStoryProfileTests
         AssertThat(loaded.BattleContent.EnemyTeams[19].Count).IsEqual(2);
         AssertThat(loaded.BattleContent.EnemyTeams[19][0].Cash).IsEqual(1);
         AssertThat(loaded.Requirements.BattleTeamIds.SequenceEqual(new[] { 18 })).IsTrue();
+    }
+
+    [TestCase("clean")]
+    [TestCase("no-entry")]
+    [TestCase("duplicate-entry")]
+    [TestCase("disabled-entry")]
+    [TestCase("glyph")]
+    [TestCase("missing-portrait")]
+    public void UseMenuObjectsResolveOneEnabledItemEntryAndJoinBothLanguageBoundaries(string fault)
+    {
+        // #215: the native story load's item-use boundary. Every authored use-menu object must
+        // resolve exactly one enabled item.wScriptOnUse trigger entry, and those item entries
+        // join the both-language display-glyph loop and the exact portrait coverage union — the
+        // unselected language must never lose glyph or portrait coverage silently.
+        using var fixture = new NativeStoryProfileFixture(useMenu: true);
+        const string useEntry =
+            "{\"id\":\"use300\",\"owner\":{\"type\":\"object\",\"id\":300},\"slot\":\"item.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}";
+        if (fault == "missing-portrait")
+        {
+            fixture.Profile.Portraits.Remove(11);
+            fixture.Profile.ResourceSha256.Remove(fixture.Root + "/Portrait-11.tres");
+            fixture.SaveProfile();
+        }
+        else if (fault != "clean")
+        {
+            switch (fault)
+            {
+                case "no-entry":
+                    fixture.Edit("shared.json", "," + useEntry, "");
+                    break;
+                case "duplicate-entry":
+                    fixture.Edit("shared.json", useEntry, useEntry + ","
+                        + "{\"id\":\"use300b\",\"owner\":{\"type\":\"object\",\"id\":300},\"slot\":\"item.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}");
+                    break;
+                case "disabled-entry":
+                    fixture.Edit("shared.json", "\"target\":\"L000D\",\"sourceAddress\":13", "\"target\":null,\"sourceAddress\":0");
+                    break;
+                default:
+                    // Only the item entry's EN line uses 'E'; zh stays the selected language.
+                    fixture.Font.Glyphs.Remove(fixture.Font.Glyphs.Single(glyph => glyph.Codepoint == 69));
+                    fixture.Save(fixture.Font, "Font.tres");
+                    break;
+            }
+            fixture.RefreshHashes();
+            fixture.SaveProfile();
+        }
+        if (fault == "clean")
+        {
+            var profile = NativeStoryProfile.Load(fixture.Uri, "zh-Hans");
+            AssertThat(profile.ItemUseEntries.Keys.Order().SequenceEqual(new[] { 300 })).IsTrue();
+            AssertThat(profile.ItemUseEntries[300].SourceAddress).IsEqual(13);
+            AssertThat(profile.Portraits.Keys.Order().SequenceEqual(new[] { 7, 8, 9, 10, 11 })).IsTrue();
+            return;
+        }
+        string expected = fault is "no-entry" or "duplicate-entry" or "disabled-entry"
+            ? "requires exactly one enabled item.wScriptOnUse"
+            : fault == "glyph" ? "U+0045" : "exactly the selected and item-use entries";
+        string error = Failure(() => NativeStoryProfile.Load(fixture.Uri, "zh-Hans"));
+        AssertThat(error.Contains(expected)).IsTrue();
+        if (fault == "glyph") AssertThat(error.Contains("Font.tres") && error.Contains("json#L")).IsTrue();
     }
 
     private static void ReadOnly(Action action)

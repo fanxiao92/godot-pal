@@ -64,7 +64,7 @@ public static class NativeBattleContent
             }
             var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
                 Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray(),
-                ReadInventory(native), ReadEquipMenu(native));
+                ReadInventory(native), ReadEquipMenu(native), ReadUseMenu(native));
             ModernBattleContent.Validate(content);
             return new(content, ReadProjection(native, content));
         }
@@ -118,6 +118,9 @@ public static class NativeBattleContent
             EquipMenuObjects = content.EquipMenu.Select(binding => binding.ObjectId).ToArray(),
             EquipMenuParts = content.EquipMenu.Select(binding => binding.Part).ToArray(),
             EquipMenuRoleMasks = content.EquipMenu.Select(binding => binding.EquipableRoleMask).ToArray(),
+            UseMenuObjects = content.UseMenu.Select(binding => binding.ObjectId).ToArray(),
+            UseMenuConsuming = content.UseMenu.Select(binding => binding.Consuming ? 1 : 0).ToArray(),
+            UseMenuApplyToAll = content.UseMenu.Select(binding => binding.ApplyToAll ? 1 : 0).ToArray(),
             Equipments = content.EquipmentObjects.Select(x => new PalBattleEquipment { ObjectId = x.Key,
                 Effects = x.Value.Effects.Select(effect => new PalBattleEquipmentEffect { Attack = effect.Attack, Defense = effect.Defense,
                     Dexterity = effect.Dexterity, BattleSprite = effect.BattleSprite, Statuses = effect.Statuses.ToArray(),
@@ -208,6 +211,23 @@ public static class NativeBattleContent
         if (objects.Length != parts.Length || objects.Length != masks.Length)
             throw new InvalidDataException("EquipMenu arrays require aligned rows");
         return objects.Select((item, index) => new BattleEquipMenuBinding(item, parts[index], masks[index])).ToArray();
+    }
+
+    private static IReadOnlyList<BattleUseMenuBinding> ReadUseMenu(PalBattleContent native)
+    {
+        int[] objects = Copy(native.UseMenuObjects, "UseMenuObjects");
+        int[] consuming = Copy(native.UseMenuConsuming, "UseMenuConsuming");
+        int[] applyToAll = Copy(native.UseMenuApplyToAll, "UseMenuApplyToAll");
+        if (objects.Length != consuming.Length || objects.Length != applyToAll.Length)
+            throw new InvalidDataException("UseMenu arrays require aligned rows");
+        return objects.Select((item, index) => new BattleUseMenuBinding(item,
+            Flag(consuming[index], "UseMenuConsuming", index), Flag(applyToAll[index], "UseMenuApplyToAll", index))).ToArray();
+    }
+
+    private static bool Flag(int word, string field, int index)
+    {
+        if (word is not (0 or 1)) throw new InvalidDataException($"{field}[{index}]: expected word 0 or 1");
+        return word == 1;
     }
 
     private static ClassicBattlePlayer ReadPlayer(PalBattlePlayer x) => new(x.RoleId, x.Hp, x.MaxHp, x.Attack, x.Defense, x.Dexterity)

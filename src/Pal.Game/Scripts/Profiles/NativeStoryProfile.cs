@@ -63,6 +63,18 @@ public static class NativeStoryProfile
                 && entry.SourceAddress != 0 && entry.SourceAddress == native.EntryAddress
                 && entry.OwnerId == native.OwnerId, "story owner-trigger-entry identity mismatch or disabled entry");
             var content = NativeBattleContent.Load(native.BattleContentUri);
+            // #215: every authored use-menu binding resolves exactly one enabled item.wScriptOnUse
+            // entry now; a usable object without its on-use script rejects before the scene binds.
+            var itemUseEntries = new Dictionary<int, TriggerEventEntry>();
+            foreach (var binding in content.UseMenu)
+            {
+                var matches = events.Entries.Where(e =>
+                    e.OwnerType == "object" && e.OwnerId == binding.ObjectId
+                    && e.Slot == "item.wScriptOnUse" && e.Kind == "trigger").ToArray();
+                Require(matches.Length == 1 && matches[0].SourceAddress != 0,
+                    $"use-menu object {binding.ObjectId} requires exactly one enabled item.wScriptOnUse trigger entry");
+                itemUseEntries.Add(binding.ObjectId, matches[0]);
+            }
             // Party/multi-enemy capability is bounded by the actually selected closure: the
             // language loop below runs TriggerScriptSession.ValidateEntry, which validates every
             // startBattle team of the selected entry (one to three players and enemy slots) and
@@ -74,6 +86,7 @@ public static class NativeStoryProfile
             var portraits = portraitUris.ToDictionary(x => x.Key, x => LoadImage(x.Value));
             var packages = new Dictionary<string, DialogueLanguagePackage>(StringComparer.Ordinal);
             var requirements = new Dictionary<string, TriggerEntryRequirements>(StringComparer.Ordinal);
+            var itemRequirements = new Dictionary<string, IReadOnlyDictionary<int, TriggerEntryRequirements>>(StringComparer.Ordinal);
             IReadOnlyDictionary<int, string>? selectedWords = null;
             foreach (string id in new[] { "zh-Hans", "en" })
             {
@@ -84,11 +97,17 @@ public static class NativeStoryProfile
                     packages.Add(id, resource.ToCorePackage());
                     if (id == language) selectedWords = resource.CopyWords();
                     requirements.Add(id, TriggerScriptSession.ValidateEntry(events, packages[id], content, native.EntryFileId, native.EntryId));
+                    var perItem = new Dictionary<int, TriggerEntryRequirements>();
+                    foreach (var pair in itemUseEntries)
+                        perItem.Add(pair.Key, TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.FileId, pair.Value.Id));
+                    itemRequirements.Add(id, perItem);
                 }
                 catch (InvalidDataException error) { throw new InvalidDataException(resource.ResourcePath + ": " + error.Message, error); }
             }
-            Require(requirements.Values.SelectMany(x => x.PortraitIds).ToHashSet().SetEquals(portraits.Keys),
-                "Portraits must cover exactly the selected entry's nonzero portrait IDs");
+            var requiredPortraits = requirements.Values.SelectMany(x => x.PortraitIds)
+                .Concat(itemRequirements.Values.SelectMany(x => x.Values.SelectMany(item => item.PortraitIds))).ToHashSet();
+            Require(requiredPortraits.SetEquals(portraits.Keys),
+                "Portraits must cover exactly the selected and item-use entries' nonzero portrait IDs");
 
             var packedScene = LoadResource<PackedScene>(sceneUri);
             Node? node = null;
@@ -105,7 +124,10 @@ public static class NativeStoryProfile
                 Require(scene.Palette is not null && scene.Palette.Rgb is { Length: 768 }, "story requires the native 256-color scene palette");
                 byte[] rgb = scene.Palette!.Rgb;
                 var palette = Enumerable.Range(0, 256).Select(i => new Color(rgb[i * 3] / 255f, rgb[i * 3 + 1] / 255f, rgb[i * 3 + 2] / 255f)).ToArray();
-                foreach (var requirement in requirements.Values)
+                // Both supported languages stay validated together (#215 adds the item entries to
+                // the same boundary); the unselected language must never lose glyph coverage.
+                foreach (var requirement in requirements.Values
+                    .Concat(itemRequirements.Values.SelectMany(languageItems => languageItems.Values)))
                 foreach (var display in requirement.DisplayBlocks)
                 {
                     try { PalDialogueDisplay.ValidateContent(display.Content, DialogueTextTokenizer.DefaultColor, font, null, prompts, palette); }
@@ -114,7 +136,7 @@ public static class NativeStoryProfile
                 // Detect byte changes during validation, not future edits/import-cache or GPU changes.
                 foreach (string path in hashes.Keys) CheckFile(path, hashes);
                 return new(native.StaticResources, native.StaticProfile, native.BundleSha256, native.SourceIdentity,
-                    entry, events, packages[language], content, requirements[language], exploration, font, prompts, portraits, palette, hashes, packedScene, selectedWords!);
+                    entry, events, packages[language], content, requirements[language], exploration, font, prompts, portraits, palette, hashes, packedScene, selectedWords!, itemUseEntries);
             }
             finally { node?.Free(); }
         }
@@ -154,6 +176,9 @@ public sealed class CheckedStoryProfile
     public string BundleSha256 { get; }
     public string SourceIdentity { get; }
     public TriggerEventEntry Entry { get; }
+    /// <summary>#215: the resolved item.wScriptOnUse entry per authored use-menu object; the story
+    /// adapter runs these entries for the exploration item-use flow (play.c PAL_GameUseItem).</summary>
+    public IReadOnlyDictionary<int, TriggerEventEntry> ItemUseEntries { get; }
     public TriggerEventCollection Events { get; }
     public DialogueLanguagePackage Language { get; }
     public TriggerBattleContent BattleContent { get; }
@@ -168,11 +193,13 @@ public sealed class CheckedStoryProfile
     internal CheckedStoryProfile(string staticResources, string staticProfile, string bundleSha256, string sourceIdentity,
         TriggerEventEntry entry, TriggerEventCollection events, DialogueLanguagePackage language, TriggerBattleContent battleContent,
         TriggerEntryRequirements requirements, CheckedExplorationProfile exploration, PalDialogueFont font,
-        PalDialogueIndexedImage[] prompts, Dictionary<int, PalDialogueIndexedImage> portraits, Color[] palette, Dictionary<string, string> hashes, PackedScene scene, IReadOnlyDictionary<int, string> selectedWords)
+        PalDialogueIndexedImage[] prompts, Dictionary<int, PalDialogueIndexedImage> portraits, Color[] palette, Dictionary<string, string> hashes, PackedScene scene, IReadOnlyDictionary<int, string> selectedWords,
+        Dictionary<int, TriggerEventEntry>? itemUseEntries = null)
     {
         Scene = scene; SelectedWords = selectedWords;
         StaticResources = staticResources; StaticProfile = staticProfile; BundleSha256 = bundleSha256; SourceIdentity = sourceIdentity;
         Entry = entry; Events = events; Language = language; BattleContent = battleContent; Requirements = requirements;
+        ItemUseEntries = new ReadOnlyDictionary<int, TriggerEventEntry>(itemUseEntries ?? new Dictionary<int, TriggerEventEntry>());
         Exploration = exploration; Font = font; Prompts = Array.AsReadOnly(prompts.ToArray());
         Portraits = new ReadOnlyDictionary<int, PalDialogueIndexedImage>(new Dictionary<int, PalDialogueIndexedImage>(portraits));
         Palette = Array.AsReadOnly(palette.ToArray());

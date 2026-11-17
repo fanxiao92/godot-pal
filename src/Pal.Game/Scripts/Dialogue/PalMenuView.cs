@@ -31,6 +31,13 @@ public sealed partial class PalMenuView : Node2D
     private string[] equipGearLines = [];
     private int selectedEquipRole;
     private bool equipRolesAnyEligible;
+    // #215 items page: composed row texts are validated here and only drawn afterwards.
+    private string[] useItemLines = [];
+    private int selectedUseItem;
+    private string useHeaderText = "";
+    private string[] useTargetLines = [];
+    private string[] useTargetStatLines = [];
+    private int selectedUseRole;
 
     internal ExplorationMenuMode Mode => menu?.Mode ?? ExplorationMenuMode.Closed;
 
@@ -70,6 +77,10 @@ public sealed partial class PalMenuView : Node2D
         equipSelectionText = "";
         equipRoleLines = [];
         equipGearLines = [];
+        useItemLines = [];
+        useHeaderText = "";
+        useTargetLines = [];
+        useTargetStatLines = [];
         if (menu.Mode == ExplorationMenuMode.Status)
         {
             var view = menu.StatusView();
@@ -108,8 +119,31 @@ public sealed partial class PalMenuView : Node2D
             equipRoleLines = selection.Roles.Select(role => role.Name).ToArray();
             equipGearLines = selection.Roles[Math.Clamp(selectedEquipRole, 0, selection.Roles.Count - 1)].Gear.ToArray();
         }
+        else if (menu.Mode is ExplorationMenuMode.Items or ExplorationMenuMode.ItemScript)
+        {
+            // itemmenu.c: the usable stock list with available amounts; the equipped appendix
+            // rows mark their equipment origin instead of counting it as stock.
+            var rows = menu.ItemsView();
+            selectedUseItem = menu.SelectedEquipItem;
+            useItemLines = rows.Select(row =>
+                (row.Equipped ? "* " : "") + row.Name + (row.Equipped ? "" : $" X{row.Amount}")).ToArray();
+            nameText = useItemLines.Length > 0 ? useItemLines[Math.Clamp(selectedUseItem, 0, useItemLines.Length - 1)] : "";
+        }
+        else if (menu.Mode == ExplorationMenuMode.ItemTargets)
+        {
+            // uigame.c PAL_ItemUseMenu: the item header, the party rows and the selected member's
+            // live HP/MP words (the reference draws the full stat box while picking).
+            var selection = menu.ItemTargetsView();
+            selectedUseRole = menu.SelectedUseRole;
+            useHeaderText = selection.Name;
+            useTargetLines = selection.Targets.Select(target => target.Name).ToArray();
+            var target = selection.Targets[Math.Clamp(selectedUseRole, 0, selection.Targets.Count - 1)];
+            useTargetStatLines = [$"{selection.HpLabel}:{target.Hp}/{target.MaxHp}",
+                $"{selection.MpLabel}:{target.Mp}/{target.MaxMp}"];
+        }
         ValidateTexts(font!, entryLabels.Concat(statusLines).Concat(rightLines).Append(nameText)
-            .Concat(equipItemLines).Append(equipSelectionText).Concat(equipRoleLines).Concat(equipGearLines));
+            .Concat(equipItemLines).Append(equipSelectionText).Concat(equipRoleLines).Concat(equipGearLines)
+            .Concat(useItemLines).Append(useHeaderText).Concat(useTargetLines).Concat(useTargetStatLines));
         QueueRedraw();
     }
 
@@ -156,6 +190,33 @@ public sealed partial class PalMenuView : Node2D
             }
             for (int index = 0; index < equipGearLines.Length; index++)
                 DrawBitmapText(equipGearLines[index], 150, 34 + index * 16, 0x4F);
+            return;
+        }
+        if (menu.Mode is ExplorationMenuMode.Items or ExplorationMenuMode.ItemScript)
+        {
+            // itemmenu.c: the usable stock list with available amounts; equipped appendix rows
+            // carry the * marker and no stock count.
+            for (int index = 0; index < useItemLines.Length; index++)
+            {
+                bool selected = index == selectedUseItem;
+                DrawBitmapText(useItemLines[index], 16, 12 + index * 18, selected ? 5 : 0x4F);
+                if (selected) DrawRect(new Rect2(8, 20 + index * 18, 6, 6), PaletteColor(5));
+            }
+            return;
+        }
+        if (menu.Mode == ExplorationMenuMode.ItemTargets)
+        {
+            // uigame.c PAL_ItemUseMenu: the item header, the party rows and the selected member's
+            // live HP/MP words.
+            DrawBitmapText(useHeaderText, 16, 8, 5);
+            for (int index = 0; index < useTargetLines.Length; index++)
+            {
+                bool selected = index == selectedUseRole;
+                DrawBitmapText(useTargetLines[index], 16, 34 + index * 18, selected ? 5 : 0x4F);
+                if (selected) DrawRect(new Rect2(8, 42 + index * 18, 6, 6), PaletteColor(5));
+            }
+            for (int index = 0; index < useTargetStatLines.Length; index++)
+                DrawBitmapText(useTargetStatLines[index], 150, 34 + index * 16, 0x4F);
             return;
         }
         DrawBitmapText(nameText, 16, 8, 5);

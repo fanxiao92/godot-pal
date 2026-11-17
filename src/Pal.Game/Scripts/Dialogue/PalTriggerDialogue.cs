@@ -160,7 +160,11 @@ public partial class PalTriggerDialogue : Node
         TriggerEventEntry entry = _events.GetEntry(fileId, entryId);
         if (_story is not null)
         {
-            if (entry != _story.Entry) throw new InvalidDataException("Story adapter only supports its checked selected entry.");
+            // The story adapter runs its checked selected entry plus the checked item on-use
+            // entries (#215 play.c PAL_GameUseItem); any other entry stays unsupported.
+            if (entry != _story.Entry
+                && !(_story.ItemUseEntries.TryGetValue(entry.OwnerId, out var itemEntry) && entry == itemEntry))
+                throw new InvalidDataException("Story adapter only supports its checked selected entry.");
             if (sourceRequestId is null)
                 throw new InvalidOperationException("A story trigger requires its source interaction request.");
         }

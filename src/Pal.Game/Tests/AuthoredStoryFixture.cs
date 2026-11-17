@@ -21,7 +21,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
         bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
         bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false,
         bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false, bool attackAllMember0 = false,
-        bool fleeEscape = false, bool menuEquip = false)
+        bool fleeEscape = false, bool menuEquip = false, bool menuItems = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -41,6 +41,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The flee-escape derivation is defined on the LostReload author with an explicit playerHp word.", nameof(fleeEscape));
         if (menuEquip && scenario != "PartyEquip")
             throw new ArgumentException("The menu-equip context derivation requires the PartyEquip author.", nameof(menuEquip));
+        if (menuItems && scenario != "PartyWin")
+            throw new ArgumentException("The menu-items context derivation requires the PartyWin author.", nameof(menuItems));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -63,7 +65,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape || menuEquip)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape || menuEquip || menuItems)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -192,6 +194,21 @@ internal sealed class AuthoredStoryFixture : IDisposable
                         new JsonObject { ["objectId"] = 237, ["part"] = 4, ["equipableBy"] = new JsonArray(0, 1) },
                         new JsonObject { ["objectId"] = 248, ["part"] = 5, ["equipableBy"] = new JsonArray(0, 1) });
                 }
+                if (menuItems)
+                {
+                    // #215 (M6-B T03): the test-owned item-use context — usable bag rows and
+                    // per-object consuming/apply-to-all bindings. 300 heals one member +30 with a
+                    // real dialogue line, 301 heals the party +10, 302 marks the script failed;
+                    // all three are consuming so the success flag decides every removal.
+                    data["inventory"] = new JsonArray(
+                        new JsonObject { ["itemId"] = 300, ["amount"] = 2 },
+                        new JsonObject { ["itemId"] = 301, ["amount"] = 1 },
+                        new JsonObject { ["itemId"] = 302, ["amount"] = 1 });
+                    data["useMenu"] = new JsonArray(
+                        new JsonObject { ["objectId"] = 300, ["consuming"] = true, ["applyToAll"] = false },
+                        new JsonObject { ["objectId"] = 301, ["consuming"] = true, ["applyToAll"] = true },
+                        new JsonObject { ["objectId"] = 302, ["consuming"] = true, ["applyToAll"] = false });
+                }
                 File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
                 numbers = numericInput;
             }
@@ -199,6 +216,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
             Directory.CreateDirectory(Path.Combine(input, "events"));
             foreach (string path in Directory.GetFiles(Path.Combine(source, "Story/events"))) File.Copy(path, Path.Combine(input, "events", Path.GetFileName(path)));
             if (fleeEscape) AddFleeEscapeBranch();
+            if (menuItems) AddItemUseEntries();
             var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "Story/story-package.json")))!;
             if (singlePlayerTwoEnemies)
             {
@@ -278,6 +296,9 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (menuEquip)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned menu equip context (T02 #214): bag rows, head object 199 and part/eligibility bindings; authored inputs, not retail data.";
+            if (menuItems)
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned menu item-use context (T03 #215): usable bag rows, consuming/apply-to-all bindings and item.wScriptOnUse entries; authored inputs, not retail data.";
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")
                 foreach (var player in metadata["visual"]!["players"]!.AsArray())
@@ -330,6 +351,75 @@ internal sealed class AuthoredStoryFixture : IDisposable
             ["messageId"] = 3, ["descriptionLineWord"] = 0 });
         commands.Add(new JsonObject { ["label"] = "L0015", ["op"] = "end", ["next"] = null,
             ["source"] = new JsonObject { ["index"] = 15, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) },
+            ["mode"] = "keep" });
+        var bytes = new byte[commands.Count * 8];
+        for (int address = 0; address < commands.Count; address++)
+        {
+            var source = commands[address]!["source"]!;
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8), checked((ushort)source["opcode"]!.GetValue<int>()));
+            for (int word = 0; word < 3; word++)
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8 + 2 + word * 2), checked((ushort)source["operands"]![word]!.GetValue<int>()));
+        }
+        index["source"]!["instructionCount"] = commands.Count;
+        index["source"]!["byteLength"] = bytes.Length;
+        index["source"]!["sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        File.WriteAllText(arenaPath, arena.ToJsonString());
+        File.WriteAllText(indexPath, index.ToJsonString());
+    }
+
+    private void AddItemUseEntries()
+    {
+        // Only this owned authored shape is relocatable (same rule as the HP/MP prefix). The
+        // original author bytes stay read-only; the derivation owns a fresh GUID-owned input.
+        string arenaPath = Path.Combine(input, "events/arena.json");
+        string indexPath = Path.Combine(input, "events/index.json");
+        var arena = JsonNode.Parse(File.ReadAllText(arenaPath))!;
+        var index = JsonNode.Parse(File.ReadAllText(indexPath))!;
+        var entries = arena["entries"]!.AsArray();
+        var commands = arena["commands"]!.AsArray();
+        if (entries.Count != 1 || entries[0]!["id"]!.GetValue<string>() != "challenge"
+            || commands.Count != 10 || commands[9]!["op"]!.GetValue<string>() != "end"
+            || commands[9]!["mode"]!.GetValue<string>() != "keep" || commands[9]!["next"] is not null
+            || commands[3]!["op"]!.GetValue<string>() != "startBattle" || commands[3]!["isBoss"]!.GetValue<bool>() != true
+            || (int)commands[3]!["source"]!["operands"]![0]! != 18 || commands[3]!["fleeTarget"] is not null
+            || commands[3]!["lossTarget"]!.GetValue<string>() != "L0007"
+            || (int)index["source"]!["instructionCount"]! != 10)
+            throw new InvalidDataException("The menu-items derivation requires the known ten-instruction PartyWin author arena shape.");
+        // The previous terminal row stops being the stream's end: its next chains to the first
+        // appended item command (end keep ignores it at runtime, the schema keeps WORD order).
+        commands[9]!["next"] = "L0010";
+        // 300 (single-target heal +30 with a dialogue line): itemmenu.c/uigame.c run the object's
+        // wScriptOnUse entry with the selected member's role as the caller.
+        entries.Add(new JsonObject { ["id"] = "use300", ["owner"] = new JsonObject { ["type"] = "object", ["id"] = 300 },
+            ["slot"] = "item.wScriptOnUse", ["kind"] = "trigger", ["target"] = "L0010", ["sourceAddress"] = 10 });
+        commands.Add(new JsonObject { ["label"] = "L0010", ["op"] = "changeHpMp", ["next"] = "L0011",
+            ["scope"] = 0, ["amount"] = 30,
+            ["source"] = new JsonObject { ["index"] = 10, ["opcode"] = 0x001D, ["operands"] = new JsonArray(0, 30, 0) } });
+        commands.Add(new JsonObject { ["label"] = "L0011", ["op"] = "setDialog", ["next"] = "L0012",
+            ["source"] = new JsonObject { ["index"] = 11, ["opcode"] = 60, ["operands"] = new JsonArray(0, 0, 0) },
+            ["box"] = "upper", ["portraitId"] = 0, ["color"] = 0, ["rngWord"] = 0 });
+        commands.Add(new JsonObject { ["label"] = "L0012", ["op"] = "showDialog", ["next"] = "L0013",
+            ["source"] = new JsonObject { ["index"] = 12, ["opcode"] = 65535, ["operands"] = new JsonArray(25, 0, 0) },
+            ["messageId"] = 25, ["descriptionLineWord"] = 0 });
+        commands.Add(new JsonObject { ["label"] = "L0013", ["op"] = "end", ["next"] = "L0014",
+            ["source"] = new JsonObject { ["index"] = 13, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) },
+            ["mode"] = "keep" });
+        // 301 (apply-to-all heal +10): play.c runs it once with the caller word 0xFFFF.
+        entries.Add(new JsonObject { ["id"] = "use301", ["owner"] = new JsonObject { ["type"] = "object", ["id"] = 301 },
+            ["slot"] = "item.wScriptOnUse", ["kind"] = "trigger", ["target"] = "L0014", ["sourceAddress"] = 14 });
+        commands.Add(new JsonObject { ["label"] = "L0014", ["op"] = "changeHpMp", ["next"] = "L0015",
+            ["scope"] = 1, ["amount"] = 10,
+            ["source"] = new JsonObject { ["index"] = 14, ["opcode"] = 0x001D, ["operands"] = new JsonArray(1, 10, 0) } });
+        commands.Add(new JsonObject { ["label"] = "L0015", ["op"] = "end", ["next"] = "L0016",
+            ["source"] = new JsonObject { ["index"] = 15, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) },
+            ["mode"] = "keep" });
+        // 302 (failing powder): script.c 0x0041 clears the success flag, so play.c keeps the copy.
+        entries.Add(new JsonObject { ["id"] = "use302", ["owner"] = new JsonObject { ["type"] = "object", ["id"] = 302 },
+            ["slot"] = "item.wScriptOnUse", ["kind"] = "trigger", ["target"] = "L0016", ["sourceAddress"] = 16 });
+        commands.Add(new JsonObject { ["label"] = "L0016", ["op"] = "markFailed", ["next"] = "L0017",
+            ["source"] = new JsonObject { ["index"] = 16, ["opcode"] = 0x41, ["operands"] = new JsonArray(0, 0, 0) } });
+        commands.Add(new JsonObject { ["label"] = "L0017", ["op"] = "end", ["next"] = null,
+            ["source"] = new JsonObject { ["index"] = 17, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) },
             ["mode"] = "keep" });
         var bytes = new byte[commands.Count * 8];
         for (int address = 0; address < commands.Count; address++)

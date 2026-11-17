@@ -12,6 +12,11 @@ public sealed record BattleEquipMenuBinding(int ObjectId, int Part, int Equipabl
     public bool Eligible(int roleId) => roleId is >= 0 and <= 5 && (EquipableRoleMask & (1 << roleId)) != 0;
 }
 
+/// <summary>One authored use-menu binding (battle-data.json $.useMenu): the object, its
+/// kItemFlagConsuming and kItemFlagApplyToAll words. Listing an object declares
+/// kItemFlagUsable for the exploration host (play.c PAL_GameUseItem).</summary>
+public sealed record BattleUseMenuBinding(int ObjectId, bool Consuming, bool ApplyToAll);
+
 /// <summary>Role-keyed numeric content; party order is Players and enemy identity is its team slot.
 /// Subsequent battles use settled roles, never the initial player HP.</summary>
 public sealed class TriggerBattleContent
@@ -34,6 +39,8 @@ public sealed class TriggerBattleContent
     public IReadOnlyList<InventorySlot> InitialInventory { get; }
     /// <summary>Authored equip-menu bindings; empty when the scenario declares no equipment page.</summary>
     public IReadOnlyList<BattleEquipMenuBinding> EquipMenu { get; }
+    /// <summary>Authored use-menu bindings; empty when the scenario declares no items page.</summary>
+    public IReadOnlyList<BattleUseMenuBinding> UseMenu { get; }
 
     [JsonIgnore] public BattleRoleSnapshot InitialRole => Single(InitialRoles.Values);
     [JsonIgnore] public ClassicBattlePlayer Player => Single(Players);
@@ -53,7 +60,8 @@ public sealed class TriggerBattleContent
         IReadOnlyList<BattleEquipmentObject>? equipmentObjects = null,
         IReadOnlyCollection<int>? panelDeclaredRoles = null,
         IReadOnlyList<InventorySlot>? initialInventory = null,
-        IReadOnlyList<BattleEquipMenuBinding>? equipMenu = null)
+        IReadOnlyList<BattleEquipMenuBinding>? equipMenu = null,
+        IReadOnlyList<BattleUseMenuBinding>? useMenu = null)
     {
         ArgumentNullException.ThrowIfNull(roles); ArgumentNullException.ThrowIfNull(players);
         ArgumentNullException.ThrowIfNull(growth); ArgumentNullException.ThrowIfNull(teams);
@@ -87,6 +95,7 @@ public sealed class TriggerBattleContent
             x => x.ObjectId, x => x with { Effects = Array.AsReadOnly(x.Effects.Select(e => e with { Statuses = Copy(e.Statuses) }).ToArray()) }));
         InitialInventory = CopyInventory(initialInventory);
         EquipMenu = CopyEquipMenu(equipMenu, EquipmentObjects);
+        UseMenu = CopyUseMenu(useMenu);
     }
 
     private static IReadOnlyList<InventorySlot> CopyInventory(IReadOnlyList<InventorySlot>? rows)
@@ -101,6 +110,16 @@ public sealed class TriggerBattleContent
                 throw new InvalidDataException($"$.inventory[{index}].amount: initial bag amounts must be 0..99.");
         }
         return Array.AsReadOnly(rows.Select(slot => slot with { }).ToArray());
+    }
+
+    private static IReadOnlyList<BattleUseMenuBinding> CopyUseMenu(IReadOnlyList<BattleUseMenuBinding>? bindings)
+    {
+        if (bindings is null || bindings.Count == 0) return Array.Empty<BattleUseMenuBinding>();
+        var seen = new HashSet<int>();
+        foreach (var (binding, index) in bindings.Select((x, i) => (x, i)))
+            if (binding is null || binding.ObjectId is < 1 or > 65535 || !seen.Add(binding.ObjectId))
+                throw new InvalidDataException($"$.useMenu[{index}]: bindings require unique object WORD ids 1..65535.");
+        return Array.AsReadOnly(bindings.ToArray());
     }
 
     private static IReadOnlyList<BattleEquipMenuBinding> CopyEquipMenu(IReadOnlyList<BattleEquipMenuBinding>? bindings,

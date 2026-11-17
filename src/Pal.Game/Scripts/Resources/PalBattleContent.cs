@@ -19,6 +19,11 @@ public partial class PalBattleContent : Resource
     [Export] public int[] EquipMenuObjects { get; set; } = [];
     [Export] public int[] EquipMenuParts { get; set; } = [];
     [Export] public int[] EquipMenuRoleMasks { get; set; } = [];
+    // #215 explicit exploration use context: use-menu bindings as parallel object/consuming/
+    // apply-to-all word rows (bool[] is not a Godot-exportable collection, so flags travel as 0/1).
+    [Export] public int[] UseMenuObjects { get; set; } = [];
+    [Export] public int[] UseMenuConsuming { get; set; } = [];
+    [Export] public int[] UseMenuApplyToAll { get; set; } = [];
 
     // Optional projection provenance, not an authentication or a runtime JSON dependency.
     [Export] public bool ProjectionPresent { get; set; }

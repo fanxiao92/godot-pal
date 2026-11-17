@@ -310,6 +310,18 @@ public partial class Main : Node2D
                     }
                     return;
                 }
+                if (menu is { Mode: ExplorationMenuMode.ItemScript })
+                {
+                    // #215: the pending item script owns the frame (play.c blocks inside
+                    // PAL_RunTriggerScript): direction presses never reach the frozen world and
+                    // never queue menu keys; releases keep held-key state truthful for the resume.
+                    if (key.Pressed) GetViewport().SetInputAsHandled();
+                    else if (dynamicSession is { } dynamicRelease) dynamicRelease.Release((ExplorationKey)i);
+                    else if (battle is { } battleRelease) battleRelease.Release((ExplorationKey)i);
+                    else if (Interaction is { } interactionRelease) interactionRelease.Release((ExplorationKey)i);
+                    else input!.Release((ExplorationKey)i);
+                    return;
+                }
                 if (menu is { Mode: not ExplorationMenuMode.Closed })
                 {
                     // The open menu owns direction presses (uigame.c menu loops); releases keep
@@ -348,7 +360,13 @@ public partial class Main : Node2D
             if (key.Pressed && !key.Echo
                 && (key.Keycode is Key.Enter or Key.Space or Key.KpEnter || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right))
             {
-                if (menu is { Mode: not ExplorationMenuMode.Closed })
+                if (menu is { Mode: ExplorationMenuMode.ItemScript })
+                {
+                    // #215: the item script's display owns Search while the run is pending; the
+                    // press propagates to it untouched and never queues a menu confirm or reaches
+                    // the frozen exploration search.
+                }
+                else if (menu is { Mode: not ExplorationMenuMode.Closed })
                 {
                     // The open menu consumes Search as its confirm; the press never reaches the
                     // exploration search, so closing cannot leak into an NPC trigger (uigame.c).
@@ -391,12 +409,12 @@ public partial class Main : Node2D
             if (key.Pressed && !key.Echo && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
                 && storyRequest is null && menu is not null)
             {
-                if (menu.Mode != ExplorationMenuMode.Closed)
+                if (menu.Mode is not (ExplorationMenuMode.Closed or ExplorationMenuMode.ItemScript))
                 {
                     pendingMenuKeys.Add(ExplorationMenuKey.Cancel);
                     GetViewport().SetInputAsHandled();
                 }
-                else
+                else if (menu.Mode == ExplorationMenuMode.Closed)
                 {
                     menuOpenPressed = true;
                     GetViewport().SetInputAsHandled();
