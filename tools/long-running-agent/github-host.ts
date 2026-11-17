@@ -36,6 +36,14 @@ export interface LegacyCorrectionMigration {
 export interface RunOptions { commit?: boolean; maxIterations?: number; resume?: boolean; confirmQuiescent?: boolean; extraCorrections?: number; autoReceipt?: boolean }
 type SourceBinding = Pick<Source, 'head' | 'fingerprint' | 'indexFingerprint' | 'dirty'>;
 const binding = ({ head, fingerprint, indexFingerprint, dirty }: Source): SourceBinding => ({ head, fingerprint, indexFingerprint, dirty });
+// Repair mode: the TDD obligation of this record is carried by the correction loop, not by a fresh
+// declaration — at least one registered kind 'check' correction (request_correction) exists for an
+// observed native failure. The new-behavior stage gates (declaration paths, RED prerequisites and
+// the RED-before-GREEN candidate order) no longer apply; requireWritable/pendingFailure diagnosis
+// and current-source GREEN always remain, and records without a registered correction keep every gate.
+function repairMode(record: GitHubRecord): boolean {
+  return Boolean(record.tdd && record.corrections?.some(correction => correction.kind === 'check'));
+}
 export interface GitHubAttempt {
   id: string; directory: string; startedUtc: string; endedUtc?: string; input: SourceBinding; original: SourceBinding; inputHash?: string;
   contextsHash: string; candidate?: SourceBinding; gateHash?: string; error?: string; summary?: string;
@@ -486,11 +494,11 @@ export class GitHubHost {
             stateDirectory: this.directory,
             beforeWrite: relative => {
               requireWritable(record);
-              if (record.tdd && !record.tdd.red && (!relative || !record.tdd.declaration?.paths.includes(relative))) throw new Error('RED declaration and certified RED required before production writes; only declared stage paths may change');
+              if (record.tdd && !repairMode(record) && !record.tdd.red && (!relative || !record.tdd.declaration?.paths.includes(relative))) throw new Error('RED declaration and certified RED required before production writes; only declared stage paths may change');
             },
             beforeCheck: (source, selection) => {
               requireChangedAfterFailure(record, source);
-              if (record.tdd && !record.tdd.red) {
+              if (record.tdd && !repairMode(record) && !record.tdd.red) {
                 const declaration = record.tdd.declaration;
                 if (changedPaths(original, source).some(file => !declaration?.paths.includes(file))) throw new Error('Production changed before certified RED');
                 if (selection?.expectedFailure && (!declaration || canonical(selection.expectedFailure) !== canonical(declaration.expectedFailure))) throw new Error('Native RED must use the frozen declaration');
@@ -532,9 +540,10 @@ export class GitHubHost {
             if (current.head !== input.head || current.indexFingerprint !== input.indexFingerprint) throw new Error('Implementation changed HEAD/index');
             const paths = changedPaths(original, current);
             if (paths.length > scopeWarningFiles) emit({ type: 'scope_warning', text: `${paths.length} files: review single responsibility and complete impact set, not a hard limit` });
+            const repair = repairMode(record);
             const redIndex = record.tdd?.red ? checkHistory.findIndex(check => canonical(check) === canonical(record.tdd!.red)) : -1;
-            if (record.tdd && paths.length && redIndex < 0) throw new Error('Changed candidate requires certified RED before GREEN');
-            if (!checkHistory.some((check, index) => check.code === 0 && check.sourceFingerprint === current.fingerprint && (redIndex < 0 || index > redIndex))) throw new Error('No successful current-source native evidence after RED');
+            if (record.tdd && !repair && paths.length && redIndex < 0) throw new Error('Changed candidate requires certified RED before GREEN');
+            if (!checkHistory.some((check, index) => check.code === 0 && check.sourceFingerprint === current.fingerprint && (repair || redIndex < 0 || index > redIndex))) throw new Error('No successful current-source native evidence after RED');
             candidate = current; attempt.candidate = binding(current);
           } else if (canonical(binding(current)) !== canonical(attempt.candidate)) throw new QuiescenceUnknownError('Frozen candidate changed during independent review; confirm writer ownership');
         }

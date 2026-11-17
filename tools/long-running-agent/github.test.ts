@@ -355,6 +355,73 @@ test('TDD obligation survives dirty resume and cannot relabel a recorded failure
   const record = f.host().state()!.records[2];
   assert.equal(record.attempts.length, 2); assert.deepEqual(record.tdd, { required: true });
 });
+test('repair mode releases TDD stage gates for a legitimately corrected observed failure', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      // #211 mirror: the first native check observes an existing failing fixture migration before any declaration.
+      request.recordCheck({ project: 'synthetic fixture migration', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1 });
+      request.recordFailure!(request.directory, snapshot(f.cwd), 'Observed existing failing fixture migration at the first native check');
+      assert.throws(() => request.beforeWrite!(), /request_correction/, 'Repair mode never exempts the pendingFailure diagnosis gate');
+      request.requestCorrection!([finding(request, 'fixture-migration')], 'Migrate the obsolete fixture to the approved contract', 'Approved ticket and independent expectations unchanged');
+      let rejection = '';
+      try { request.beforeWrite!('a.txt'); } catch (error) { rejection = (error as Error).message; }
+      if (rejection) return { status: 'blocked', summary: `Repair-mode write still rejected: ${rejection}`, evidence: ['beforeWrite TDD gate'] };
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'fixture migrated under repair mode');
+      request.beforeCheck!(snapshot(f.cwd));
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+    }
+    return { status: request.role === 'implement' ? 'candidate' : 'passed', summary: 'Repair-mode fixture migration delivered', evidence: ['a.txt', 'Corrected first observed failure'] };
+  } });
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.awaiting_commit, 1, `Repair mode must release the write gate before GREEN; blocked instead: ${f.host().state()!.records[2].attempts[0].error ?? ''}`);
+  const record = f.host().state()!.records[2];
+  assert.equal(record.tdd!.declaration, undefined, 'Repair mode needs no declaration');
+  assert.equal(record.tdd!.red, undefined, 'Repair mode never backfills a certified RED');
+  assert.equal(record.corrections![0].kind, 'check');
+});
+test('repair mode still forces request_correction for a new pending failure', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      request.recordCheck({ project: 'synthetic fixture migration', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1 });
+      request.recordFailure!(request.directory, snapshot(f.cwd), 'First observed failure enters repair mode');
+      request.requestCorrection!([finding(request, 'fixture-migration')], 'Migrate the obsolete fixture to the approved contract', 'Approved ticket and independent expectations unchanged');
+      request.beforeWrite!('a.txt');
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'first repair under repair mode');
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+      request.recordFailure!(request.directory, snapshot(f.cwd), 'Second observed failure inside repair mode');
+      assert.throws(() => request.beforeWrite!(), /request_correction/, 'Repair mode never exempts requireWritable');
+      return { status: 'blocked', summary: 'Second failure still demands a fresh diagnosis', evidence: ['pendingFailure retained'] };
+    }
+    return { status: 'passed', summary: 'Independent synthetic review', evidence: ['Synthetic'] };
+  } });
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.blocked, 1);
+  const record = f.host().state()!.records[2];
+  assert.ok(record.pendingFailure, `A new failure must stay pending inside repair mode; implement stopped at: ${record.attempts[0].error ?? ''}`);
+  assert.equal(record.pendingFailure!.summary, 'Second observed failure inside repair mode');
+  assert.equal(record.corrections!.length, 1, 'The undiagnosed second failure must not be silently charged as a new correction round');
+});
+test('records without registered corrections retain every new-behavior TDD gate', async () => {
+  const f = fixture(1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      assert.throws(() => request.beforeWrite!('a.txt'), /RED declaration/, 'Undeclared new-behavior records keep the write gate');
+      request.recordCheck({ project: 'synthetic fixture migration', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1 });
+      request.recordFailure!(request.directory, snapshot(f.cwd), 'Observed failure without any registered correction');
+      assert.throws(() => request.declareRed!(syntheticDeclaration), /retroactively/, 'Observed failures still cannot be relabeled as RED');
+      assert.throws(() => request.beforeWrite!(), /request_correction/, 'An uncorrected pending failure still blocks every write');
+      return { status: 'blocked', summary: 'Negative control retained all TDD gates', evidence: ['a.txt'] };
+    }
+    return { status: 'passed', summary: 'Independent synthetic review', evidence: ['Synthetic'] };
+  } });
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.blocked, 1);
+  const record = f.host().state()!.records[2];
+  assert.deepEqual(record.corrections ?? [], [], 'Repair mode is never entered without a registered check correction');
+  assert.deepEqual(record.tdd, { required: true });
+});
 test('TDD certified RED survives a stopped review and fresh resume without replay', async () => {
   const f = fixture(1); const agent = f.getAgent();
   f.setAgent({ run: async request => {

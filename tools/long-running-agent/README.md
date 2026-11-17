@@ -116,6 +116,8 @@ node tools/long-running-agent/cli.ts run --issue 126
 
 不照搬 demo 的无条件自动重试。新记录持久保留 RED 责任：没有声明前拒绝源码写入，声明后、精确 RED 证实前只允许该阶段的测试/fixture/旧契约迁移路径。路径不按生产/测试目录硬编码分类、没有文件数上限，也不是 RED 后的永久授权白名单。`unit_test` / `range_test` 的 `expectedFailure` 必须与冻结声明一致；原生分类器继续负责精确身份/字面诊断匹配。Host 拒绝缺 RED 或只有 RED 之前 GREEN 的变更候选，repair / resume 不重置声明或责任，不能靠 dirty / 新 attempt 豁免。无改动的能力复核仍用当前检查及独立双审，不制造伪 RED。
 
+修复既有失败的结构缺口由“修复模式”承接：`tdd` 存在且 `corrections` 已含至少一条经 `request_correction` 合法入账的 `kind: check` 修正（观察失败先诊断登记）时，该记录进入修复模式——写入/检查前置的新行为阶段门（声明路径与 RED 前置）及候选门“缺认证 RED 拒绝 / RED 之后才允许 GREEN”的顺序要求不再适用，写权限回归标准修复环语义：pendingFailure 仍必须先 request_correction（`requireWritable` 不豁免），没有源码修正不重复原检查。当前源码 GREEN 与两轴独立审查不豁免：候选仍须绑定当前指纹的成功原生检查并通过双审。新行为票不受影响：无任何已登记修正的记录保留全部声明→认证 RED→写→GREEN 门与反追溯守卫；review 类修正单独不构成进入修复模式，反追溯守卫在任何模式下保留，已观察失败不能事后改签为 RED。
+
 已批准的历史记录（例如原 #207）没有这一新增责任字段，保留原候选及原证据，不回滚生产或追补假 RED；这不是新记录的豁免入口。模型没有历史证据写工具，`check_evidence` 只读原件。
 
 事前声明精确测试身份/字面诊断的 RED 命中后可继续实现；其它正常完整的编译/断言/fixture失败，先读原件定位，通过 `request_correction` 记录原因、实质修正和不变契约后才允许写入/必要重验。`request_correction` 仅用于实施中意外出现的完整普通失败；已认证 expectedRed 属计划内工作，勿调用，直接生产写入与 GREEN。没有源码修正不重复原检查或审查，唯一例外是操作者通过 `record_evidence_resolution` 绑定树外原件解除待决修正（check 或 review 类，见工具清单）。
