@@ -19,6 +19,8 @@ public partial class Main
     internal Func<PalStoryBattleView> StoryBattleViewFactory { get; set; } = () => new PalStoryBattleView();
     private TriggerBattleRequest? storyRequest;
     private bool battleConfirm;
+    // input.c 66-70 kKeyMenu (Escape/Insert/Alt/KP_0): the pending cancel of the active battle menu.
+    private bool storyCancel;
     // Enemy-slot highlight while a member picks a target; reference selection has no
     // previous-target memory (fixed initial -1, UI update disabled).
     private int storyTargetSlot;
@@ -150,7 +152,7 @@ public partial class Main
             // battle.c1782 startup, then the immediately due first StartFrame (battle.c763–792).
             AdvanceStoryEnemies(); AdvanceStoryEnemies();
             outerClock = StoryBattlePoseClock.Start(now); outerDue = false;
-            storyRequest = pending; storyView = view; battleConfirm = false; settlementPresented = false;
+            storyRequest = pending; storyView = view; battleConfirm = false; storyCancel = false; settlementPresented = false;
             storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
             StoryBattleMode = StoryBattlePresentation.AttackMenu;
             Display!.SetProcess(false);
@@ -168,6 +170,7 @@ public partial class Main
             }
         }
         bool confirm = battleConfirm; battleConfirm = false;
+        bool cancel = storyCancel; storyCancel = false;
         switch (StoryBattleMode)
         {
             case StoryBattlePresentation.AttackMenu:
@@ -183,6 +186,14 @@ public partial class Main
                         ? StoryBattlePresentation.Resolving : StoryBattlePresentation.AttackMenu;
                     break;
                 }
+                if (cancel)
+                {
+                    // uibattle.c 1225-1252 (PAL_CLASSIC kKeyMenu): revert the newest committed
+                    // member selection; the first member has nothing editable above it and the
+                    // request stays in the same menu without side effects.
+                    lifecycle.CancelSelection();
+                    break;
+                }
                 if (confirm)
                 {
                     var enemies = lifecycle.Current.Combat.Enemies;
@@ -192,6 +203,14 @@ public partial class Main
                 }
                 break;
             case StoryBattlePresentation.TargetMenu:
+                if (cancel)
+                {
+                    // uibattle.c 1512: cancelling the target returns to the move menu; nothing was
+                    // committed, so no Core call, no queue and no highlight memory remain.
+                    storyCycle = 0;
+                    StoryBattleMode = StoryBattlePresentation.AttackMenu;
+                    break;
+                }
                 if (storyCycle != 0)
                 {
                     var enemies = lifecycle.Current.Combat.Enemies;
@@ -554,7 +573,7 @@ public partial class Main
         {
             storyView.GetParent()?.RemoveChild(storyView); storyView.ReleaseTextures(); storyView.Free();
         }
-        storyView = null; storyRequest = null; storyTeam = null; StoryBattleMode = null; battleConfirm = false; resumeStoryDisplay = false;
+        storyView = null; storyRequest = null; storyTeam = null; StoryBattleMode = null; battleConfirm = false; storyCancel = false; resumeStoryDisplay = false;
         enemyPresentation = null; playerPresentation = null; enemyIdle = null; outerDue = false;
         storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
         storyFlee = false; storyLastFleeAttempt = null; fleeOrigin = null; fleePartyIndex = -1; storyRedStep = -1;

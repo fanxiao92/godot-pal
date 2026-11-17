@@ -102,6 +102,32 @@ public sealed class ClassicBattleLifecycleSessionTests
     }
 
     [Fact]
+    public void Cancel_selection_reopens_the_member_through_the_lifecycle_view_and_closes_after_the_settlement()
+    {
+        // uibattle.c 1225-1252: the cancel revert is a real selection edit through the lifecycle's
+        // active combat owner; the finished lifecycle no longer accepts any selection input.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), .. PlayerStrike()]);
+        var session = new ClassicBattleLifecycleSession([Role(4), Role(2)],
+            [new(4, 100, 150, 40, 20, 100), new(2, 100, 150, 40, 20, 90)],
+            [new(7, 0, 43, 0, 0, 0, 1)],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = Growth(), [2] = Growth() }, random);
+        session.SelectAttack(0, 0);
+        Assert.Equal(1, session.Current.Combat.SelectingPlayerIndex);
+        Assert.True(session.CancelSelection(), "Classic cancel must reopen the newest committed member selection.");
+        Assert.Equal(0, session.Current.Combat.SelectingPlayerIndex);
+        Assert.Null(session.Current.Combat.Players[0].SelectedEnemySlot);
+        Assert.True(session.Current.IsInBattle);
+        session.SelectAttack(0, 0);
+        session.SelectAttack(1, 0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Combat.Phase);
+        Assert.Throws<InvalidOperationException>(() => session.CancelSelection());
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Won, session.Completion!.Outcome);
+        Assert.Throws<InvalidOperationException>(() => session.CancelSelection()); // finished lifecycle
+        random.AssertExhausted();
+    }
+
+    [Fact]
     public void Role_and_growth_inputs_and_old_views_are_deeply_isolated()
     {
         BattleRoleSnapshot role = Role();

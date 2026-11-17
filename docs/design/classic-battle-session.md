@@ -1,5 +1,14 @@
 # ClassicBattleSession：Core 普攻与整轮选令
 
+## 当前 #142：经典选令取消与目标返回（T14）
+
+选令编辑接入固定参考的 PAL_CLASSIC 取消分支，不新增队列、随机或第二套状态。公开 seam：`ClassicBattleSession.CancelSelection()` → `ClassicBattleLifecycleSession.CancelSelection()`（同一 active combat owner，发布视图跟随重开成员）。
+
+- **主选单取消（uibattle.c 1224-1252）**：仅 Selecting 阶段可用；一次取消恰好回退最新已提交且可重选的一名成员，使其重新选令；参考回退循环跳过死亡/不可选者（本域只有死亡成员，且死亡成员从未提交选令）；首位可选成员之上无可编辑项，请求为无副作用 no-op（不 Publish、不消费随机、不动队列）；其他成员已提交目标保持不变。最终成员提交后进入 Resolving，编辑关闭（InvalidOperationException）；已结束的 lifecycle 同样拒绝。已提交逃跑与可编辑选令不会共存（它提交后续全部成员并直接开轮），故清目标即完整回退；本域尚无物品预留。
+- **目标选单取消（uibattle.c 1512）**：返回动作选单，未提交任何内容，无 Core 调用；重进目标选单从首个存活槽重新开始（无 previous-target 记忆，battle.c:1771 初始 -1 语义不变）。
+- **Main 接线（input.c 66-70）**：`_Input` 捕获 kKeyMenu 键族（Escape/Insert/Alt/KP_0），仅在 story 战斗 AttackMenu/TargetMenu（不含 HookDialogue/Feedback/Settlement，不含探索）；每帧丢弃取用，stale/echo 取消不会入队；`ProcessStoryBattle` 的 AttackMenu 分支调 `lifecycle.CancelSelection()`，TargetMenu 分支仅切回动作选单并清 cycle。
+- **覆盖**：`ClassicBattlePartySessionTests` 三例（新建承诺回退/首位边界、死亡成员不重开/末员提交关闭、混合空槽下回退与重选仅限存活槽）、`ClassicBattleLifecycleSessionTests` 一例（经 lifecycle 视图回退并在结算后关闭），及 scene-realfull 的正式 Prepare 链 Main 流程（见 `src/Pal.Game/Tests/README.md` #142 小节）。
+
 ## 当前 #207/#210：一至五个实有敌位贯通 Core 与外层门（#138）
 
 `ClassicBattleSession` 与 typed `TriggerBattleContent.EnemyTeams` 接受 **1..5 个完整、非 null 的敌位**；玩家接受域为 1..3（#137）。沿用正式 trigger → `ClassicBattleLifecycleSession` → combat 链，不新增接口或第二套战斗引擎。0、6、null 槽和已有不支持能力仍在 RNG/玩法副作用前拒绝，typed team 容量诊断带 teamId。此节更新后文历史检查点的 Core 敌方上限，不覆盖其他能力限制。

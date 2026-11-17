@@ -38,6 +38,107 @@ public sealed class ClassicBattlePartySessionTests
     }
 
     [Fact]
+    public void Cancel_reopens_the_newest_committed_selection_without_random_and_the_first_member_is_a_boundary()
+    {
+        // uibattle.c 1225-1252 (PAL_CLASSIC kKeyMenu in the main move menu): the cancel reverts the
+        // newest committed member to wait again and re-select; the first selectable member has
+        // nothing editable above it, so the request keeps the published snapshot untouched.
+        var random = new ScriptedRandom(QueueDraws3());
+        var session = new ClassicBattleSession(ThreePlayerDefinition(), random);
+        session.SelectAttack(0, 1);
+        session.SelectAttack(1, 0);
+        Assert.Equal(2, session.Current.SelectingPlayerIndex);
+        Assert.True(session.CancelSelection(), "Classic cancel must reopen the newest committed member selection.");
+        Assert.Equal(1, session.Current.SelectingPlayerIndex);
+        Assert.Null(session.Current.Players[1].SelectedEnemySlot);
+        Assert.Equal(1, session.Current.Players[0].SelectedEnemySlot);
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Empty(session.Current.ActionQueue);
+        Assert.True(session.CancelSelection());
+        Assert.Equal(0, session.Current.SelectingPlayerIndex);
+        Assert.Null(session.Current.Players[0].SelectedEnemySlot);
+        var firstMember = session.Current;
+        Assert.False(session.CancelSelection());
+        Assert.Same(firstMember, session.Current); // the first member boundary publishes nothing
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(1, 0)); // not the selecting member
+        session.SelectAttack(0, 0); // the reopened member re-edits onto a different slot
+        session.SelectAttack(1, 1);
+        session.SelectAttack(2, 0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.Equal(new int?[] { 0, 1, 0 }, session.Current.Players.Select(p => p.SelectedEnemySlot));
+        Assert.Equal(5, session.Current.ActionQueue.Count);
+        Assert.Throws<InvalidOperationException>(() => session.CancelSelection()); // the final commit closed editing
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Cancel_after_a_member_death_never_reopens_the_dead_member_and_closes_after_the_last_commit()
+    {
+        // Round 1 (the KO script): E0 kills party0, E1 hits party1, party1 kills E0. The next
+        // round's selector (index 1) has nothing editable above it — the dead member's selection
+        // never reopens — and the last living member's commit closes editing for the round.
+        var random = new ScriptedRandom([.. QueueDraws(),
+            I(0, 1, 0), .. EnemyHit(), I(0, 1, 0), I(0, 1, 1), .. EnemyHit(), .. PlayerHit(),
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1)]);
+        var d = Definition();
+        d = d with { Players = [d.Players[0] with { Hp = 20 }, d.Players[1] with { Hp = 21, MaxHp = 21 }],
+            Enemies = [d.Enemies[0] with { Hp = 43, Dexterity = 100 }, d.Enemies[1] with { Dexterity = 90 }] };
+        var session = new ClassicBattleSession(d, random);
+        session.SelectAttack(0, 0);
+        session.SelectAttack(1, 0);
+        for (int i = 0; i < 4; i++) Assert.True(session.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Equal(1, session.Current.SelectingPlayerIndex); // party0 is dead
+        Assert.All(session.Current.Players, p => Assert.Null(p.SelectedEnemySlot)); // the new round cleared commitments
+        Assert.False(session.CancelSelection()); // the dead member above is not reopened
+        Assert.Equal(1, session.Current.SelectingPlayerIndex);
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(1, 0)); // slot0 stays dead
+        session.SelectAttack(1, 1);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.Equal(3, session.Current.ActionQueue.Count);
+        Assert.Throws<InvalidOperationException>(() => session.CancelSelection());
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Mixed_empty_slots_cancel_and_re_edit_keep_only_alive_targets_selectable()
+    {
+        // Five runtime slots [7, empty, 7, empty, empty] with three players: cancel reopens the
+        // newest commitment across the empties and re-editing stays confined to the alive slots.
+        var d = Definition() with { Players = ThreePlayerDefinition().Players,
+            Enemies = [Definition().Enemies[0], EmptyEnemy(), Definition().Enemies[0], EmptyEnemy(), EmptyEnemy()] };
+        var random = new ScriptedRandom(QueueDraws3()); // two living enemies + three players
+        var session = new ClassicBattleSession(d, random);
+        session.SelectAttack(0, 0);
+        session.SelectAttack(1, 2);
+        Assert.Equal(2, session.Current.SelectingPlayerIndex);
+        Assert.True(session.CancelSelection());
+        Assert.Equal(1, session.Current.SelectingPlayerIndex);
+        Assert.Null(session.Current.Players[1].SelectedEnemySlot);
+        Assert.Equal(0, session.Current.Players[0].SelectedEnemySlot);
+        foreach (int empty in new[] { 1, 3, 4 })
+            Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(1, empty));
+        session.SelectAttack(1, 0); // the reopened member re-edits onto the other alive slot
+        Assert.True(session.CancelSelection()); // the re-commitment made member 1 the newest again
+        Assert.Equal(1, session.Current.SelectingPlayerIndex);
+        Assert.Null(session.Current.Players[1].SelectedEnemySlot);
+        Assert.Equal(0, session.Current.Players[0].SelectedEnemySlot);
+        Assert.True(session.CancelSelection()); // cancelling again reopens member 0
+        Assert.Equal(0, session.Current.SelectingPlayerIndex);
+        Assert.Null(session.Current.Players[0].SelectedEnemySlot);
+        Assert.Null(session.Current.Players[1].SelectedEnemySlot);
+        Assert.False(session.CancelSelection()); // the first member boundary
+        session.SelectAttack(0, 2);
+        session.SelectAttack(1, 2);
+        session.SelectAttack(2, 0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.Equal(new int?[] { 2, 2, 0 }, session.Current.Players.Select(p => p.SelectedEnemySlot));
+        Assert.Equal(new[] { 0, 2 }, session.Current.ActionQueue.Where(q => q.Side == ClassicBattleSide.Enemy)
+            .Select(q => q.ActorIndex).OrderBy(actor => actor).ToArray()); // empties never queue
+        random.AssertExhausted();
+    }
+
+    [Fact]
     public void Three_players_pick_targets_in_party_order_execute_queue_and_win()
     {
         // battle.c:27-31 g_rgPlayerPos[2] and battle.h MAX_PLAYERS_IN_PARTY: the combat domain

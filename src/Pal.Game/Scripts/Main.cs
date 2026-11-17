@@ -323,6 +323,16 @@ public partial class Main : Node2D
                 storyFlee = true;
                 GetViewport().SetInputAsHandled();
             }
+            // input.c 66-70: the kKeyMenu family (Escape/Insert/Alt/KP_0) cancels the active
+            // battle menu. Only the selecting menus consume it; the paused role-hook dialogue
+            // display owns its own input and exploration never sees battle-frame keys.
+            if (key.Pressed && !key.Echo && storyRequest is not null
+                && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
+                && StoryBattleMode is StoryBattlePresentation.AttackMenu or StoryBattlePresentation.TargetMenu)
+            {
+                storyCancel = true;
+                GetViewport().SetInputAsHandled();
+            }
         }
         catch (Exception error) { Fail($"Exploration input failed: {error.Message}"); }
     }

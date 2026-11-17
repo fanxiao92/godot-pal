@@ -102,6 +102,16 @@ public sealed class ClassicBattleLifecycleSession
         Current = View(activeCombat.Current);
     }
 
+    /// <summary>uibattle.c 1225-1252 (PAL_CLASSIC kKeyMenu): the classic cancel revert through
+    /// the lifecycle's active combat owner; the published view follows the reopened member.</summary>
+    public bool CancelSelection()
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        bool reopened = activeCombat.CancelSelection();
+        Current = View(activeCombat.Current);
+        return reopened;
+    }
+
     public bool ResolveNextAction()
     {
         if (activeCombat is null || !activeCombat.ResolveNextAction()) return false;

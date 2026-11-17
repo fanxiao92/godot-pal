@@ -493,6 +493,110 @@ public class StoryRoundtripSceneTests
         AssertThat(fresh.Frame).IsEqual(0); AssertThat((int)fresh.Counter).IsEqual(2);
     }
 
+    [TestCase(Timeout = 90000)]
+    public async Task PreparedThreePlayersCancelTargetsRevertEarlierSelectionsAndSettleOnce()
+    {
+        // #142 (T14): the classic kKeyMenu cancel works through normal Main production input —
+        // cancelling the target returns to the action menu with no commit, cancelling the
+        // action menu reopens the newest committed member (the first member is a boundary
+        // no-op), and the finally committed selections settle exactly once through the formal
+        // mixed-empty chain with only loaded slots targeted.
+        using var fixture = new AuthoredStoryFixture("PartyWin", threePlayer: true, mixedEmptySlots: true);
+        string[] before = fixture.Snapshot();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(72, 136), new(100, 120), new(128, 104), new(156, 88), new(184, 72)],
+            players: [new(180, 180), new(234, 170), new(270, 146)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            var script = old.Dialogue!.Session!;
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            // The first member's cancel is the boundary no-op: same menu, no commit, no queue.
+            host.Tap(Key.Escape);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(0);
+            AssertThat(battle.Current.Combat.Players.All(player => player.SelectedEnemySlot is null)).IsTrue();
+            AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(0);
+            // Cancelling the target returns to the action menu without committing member 0.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Escape);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsNull();
+            // Member 0 commits slot 3 (cycling across the empty slot 2).
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Right);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(3);
+            // Member 1's action-menu cancel reopens member 0's still-editable selection.
+            host.Tap(Key.Escape);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 0);
+            AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsNull();
+            // Re-entering the target menu restarts from the first alive slot; member 0 re-edits to 1.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(1);
+            // Member 1: a target cancel then re-confirm keeps the default first-alive target.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Escape);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(1);
+            // Member 2's cancel reopens member 1; member 1 re-edits onto slot 3.
+            host.Tap(Key.Escape);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 1);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(1);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsNull();
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Right);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(3);
+            // The final member's commit closes editing and builds the queue.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            AssertThat(battle.Current.Combat.Players.Select(player => player.SelectedEnemySlot).ToArray())
+                .IsEqual(new int?[] { 1, 3, 1 });
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+            while (script.PendingBattle is not null && old.StoryBattleMode != StoryBattlePresentation.Settlement)
+            {
+                await host.Wait(() => old.StoryBattleMode is StoryBattlePresentation.Feedback or StoryBattlePresentation.Settlement
+                    || script.PendingBattle is null);
+                if (script.PendingBattle is null || old.StoryBattleMode == StoryBattlePresentation.Settlement) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+            }
+            // Every presented action targets a loaded slot; the party wins and settles exactly once.
+            AssertThat(host.Actions.All(action => action.Attacker == ClassicBattleSide.Player)).IsTrue();
+            AssertThat(host.Actions.All(action => action.TargetIndex is 1 or 3)).IsTrue();
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0 });
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Settlement);
+            AssertThat(old.StorySettlementLine!.Contains(":6", StringComparison.Ordinal)
+                && old.StorySettlementLine.Contains("10", StringComparison.Ordinal)).IsTrue();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StoryBattleMode is null);
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.StoryExperienceGranted).IsEqual(6);
+            AssertThat(old.StoryCashGranted).IsEqual(10);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.Right) || Input.IsKeyPressed(Key.Escape)).IsFalse();
+        AssertThat(fixture.Snapshot()).IsEqual(before);
+    }
+
     [TestCase("effect")]
     [TestCase("idle")]
     [TestCase("number")]

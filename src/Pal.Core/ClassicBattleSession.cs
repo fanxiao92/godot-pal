@@ -125,6 +125,28 @@ public sealed class ClassicBattleSession
         Publish();
     }
 
+    /// <summary>uibattle.c 1225-1252 (PAL_CLASSIC kKeyMenu in the main move menu): the classic
+    /// cancel reverts the newest committed member selection so that member selects again; the
+    /// first selectable member has nothing editable above it and the request is a side-effect
+    /// free no-op that publishes nothing. A committed flee never coexists with selection (it
+    /// commits every later member and starts the round), so clearing the target is the complete
+    /// revert; no item reservation exists in this domain yet.</summary>
+    public bool CancelSelection()
+    {
+        if (Current.Phase != ClassicBattlePhase.Selecting) throw new InvalidOperationException("This battle is not selecting an action.");
+        int selecting = Current.SelectingPlayerIndex ?? throw new InvalidOperationException("No member is selecting an action.");
+        for (int i = selecting - 1; i >= 0; i--)
+        {
+            // The reference revert loop skips members that cannot re-select; in this domain only
+            // the dead ones qualify, and a dead member never committed a selection.
+            if (targets[i] is null) continue;
+            targets[i] = null;
+            Publish();
+            return true;
+        }
+        return false;
+    }
+
     private void BuildQueue()
     {
         var entries = new List<ClassicBattleQueueEntry>();
