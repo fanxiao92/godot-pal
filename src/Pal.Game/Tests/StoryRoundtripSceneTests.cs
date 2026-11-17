@@ -863,14 +863,17 @@ public class StoryRoundtripSceneTests
         if (missing == "idle")
         {
             // Per-slot idle speed is required author data, not an optional reference capability.
-            // Formal Prepare rejects it during construction; the fixture cleans its failed output.
+            // Since the per-slot presentation group is all-or-none, the partial enemy-slot
+            // declaration is rejected by formal Prepare during fixture construction with the
+            // current group diagnostic (same migration as StoryMainProcessTests): no partial
+            // Main runs. The fixture cleans its failed output.
             InvalidDataException? rejected = null;
             try { using var unexpected = new AuthoredStoryFixture("Win", missing); }
             catch (InvalidDataException error) { rejected = error; }
             AssertThat(rejected is not null).IsTrue();
             string diagnostic = rejected!.Message;
             AssertThat(diagnostic.StartsWith(Path.Combine(Path.GetTempPath(), "pal-story-c-"), StringComparison.Ordinal)).IsTrue();
-            AssertThat(diagnostic.Contains("story-package.json: visual.teams[0]: enemies[0]: metadata has missing, duplicate or unknown fields; missing: idleAnimSpeed", StringComparison.Ordinal)).IsTrue();
+            AssertThat(diagnostic.Contains("story-package.json: visual.teams[0]: enemies[0]: enemy presentation fields must be declared together", StringComparison.Ordinal)).IsTrue();
             return;
         }
         using var fixture = new AuthoredStoryFixture("Win", missing);
