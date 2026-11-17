@@ -111,6 +111,15 @@ public sealed class ClassicBattleLifecycleSession
         Current = View(activeCombat.Current);
     }
 
+    /// <summary>uibattle.c 1166-1171 (PAL_CLASSIC kKeyDefend in the main move menu): the defend
+    /// commit forwarded to the active combat owner; no target menu exists for it.</summary>
+    public void SelectDefend(int partyIndex)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.SelectDefend(partyIndex);
+        Current = View(activeCombat.Current);
+    }
+
     /// <summary>uibattle.c 1225-1252 (PAL_CLASSIC kKeyMenu): the classic cancel revert through
     /// the lifecycle's active combat owner; the published view follows the reopened member.</summary>
     public bool CancelSelection()
@@ -147,6 +156,7 @@ public sealed class ClassicBattleLifecycleSession
             role.Hp = player.Hp;
             role.HiddenExperience["attack"].Count = player.Counts.Attack;
             role.HiddenExperience["health"].Count = player.Counts.Health;
+            role.HiddenExperience["defense"].Count = player.Counts.Defense;
             role.HiddenExperience["flee"].Count = player.Counts.Flee;
         }
     }

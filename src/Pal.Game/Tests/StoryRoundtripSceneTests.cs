@@ -598,6 +598,110 @@ public class StoryRoundtripSceneTests
     }
 
     [TestCase(Timeout = 90000)]
+    public async Task PreparedThreePlayersDefendCommitPoseCountsAndSettleOnce()
+    {
+        // #144 (T16): kKeyDefend ('d', input.c:85) commits the defend action through normal Main
+        // production input (uibattle.c 1166-1171 — no target menu, nothing consumed at commit),
+        // the classic cancel reverts the committed defend like any newest member selection, the
+        // defenders hold the reference defend frame 3 (fight.c 977-980) while the round runs, the
+        // hidden defense count 2 lands per performed defend (fight.c 4113-4115) with no attack
+        // count, the flags clear with the next selection (fight.c 1599-1604/1068), and the
+        // battle still settles exactly once through the formal Prepare chain.
+        using var fixture = new AuthoredStoryFixture("PartyWin", threePlayer: true);
+        string[] before = fixture.Snapshot();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        bool sawDefendPose = false;
+        bool sawClearedCounts = false;
+        void Observe(Main observed)
+        {
+            if (observed.StoryBattle is not { } battle) return;
+            var combat = battle.Current.Combat;
+            if (!sawDefendPose && observed.StoryBattleMode == StoryBattlePresentation.Feedback
+                && combat.LastAction is { Attacker: ClassicBattleSide.Player, ActorIndex: 2 }
+                && observed.StoryDrawSnapshot is { } pose)
+            {
+                // Both defenders performed before the attacker (fight.c 1535 x5 priority) and
+                // hold frame 3 while member 2's strike animates.
+                sawDefendPose = combat.Players[0].IsDefending && combat.Players[1].IsDefending
+                    && pose.PartyPlayers[0].Frame == 3 && pose.PartyPlayers[1].Frame == 3;
+            }
+            if (!sawClearedCounts && observed.StoryBattleMode == StoryBattlePresentation.AttackMenu
+                && combat.Players[0].Counts.Defense == 2 && combat.Players[1].Counts.Defense == 2
+                && combat.Players[0].Counts.Attack == 0 && combat.Players[1].Counts.Attack == 0
+                && combat.Players.All(member => !member.IsDefending))
+                sawClearedCounts = true;
+        }
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)],
+            players: [new(180, 180), new(234, 170), new(270, 146)], updateObserver: Observe))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            var script = old.Dialogue!.Session!;
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            // Member 0's D commit has no target menu: member 1 already selects, nothing consumed.
+            host.Tap(Key.D);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu
+                && battle.Current.Combat.SelectingPlayerIndex == 1);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsNull();
+            AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(0);
+            // The classic cancel reopens member 0's committed defend like any newest selection.
+            host.Tap(Key.Escape);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 0
+                && old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            // Re-commit members 0 and 1 as defenders.
+            host.Tap(Key.D);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 1);
+            host.Tap(Key.D);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 2);
+            // 'd' in the target menu is not a defend input (input.c gates it to the move menu).
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.D);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.TargetMenu);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(2);
+            AssertThat(battle.Current.Combat.Players[2].SelectedEnemySlot).IsNull();
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+            while (script.PendingBattle is not null && old.StoryBattleMode != StoryBattlePresentation.Settlement)
+            {
+                while (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                {
+                    // Every later round commits plain attacks through the classic target menu.
+                    await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                    await host.ConfirmMemberTarget(battle);
+                }
+                await host.Wait(() => old.StoryBattleMode is StoryBattlePresentation.Feedback or StoryBattlePresentation.Settlement
+                    || script.PendingBattle is null);
+                if (script.PendingBattle is null || old.StoryBattleMode == StoryBattlePresentation.Settlement) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+            }
+            AssertThat(sawDefendPose).IsTrue();
+            AssertThat(sawClearedCounts).IsTrue();
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 0 });
+            // Plain PartyWin authors zero rewards, so the victory completes without settlement
+            // lines (the PartyThreePlayers precedent's tail).
+            await host.Wait(() => old.StoryBattleMode is null);
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.D) || Input.IsKeyPressed(Key.Escape)).IsFalse();
+        AssertThat(fixture.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase(Timeout = 90000)]
     public async Task AttackAllMemberCommitsWithoutTargetMenuStrikesBothLoadedSlotsAndSettlesOnce()
     {
         // #143 (T15): the authored attack-all member's Attack confirm commits the all-target

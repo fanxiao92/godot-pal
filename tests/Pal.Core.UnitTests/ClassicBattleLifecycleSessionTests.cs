@@ -655,6 +655,27 @@ public sealed class ClassicBattleLifecycleSessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Defend_count_lands_in_the_hidden_defense_track_through_the_lifecycle()
+    {
+        // fight.c 4113-4115: the performed defend adds the hidden defense experience count; the
+        // lifecycle syncs it into the role's defense track exactly like attack/health/flee,
+        // and the round end clears the runtime flag with the next selection.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 0, 0), I(0, 16, 10)]);
+        var session = Start(Role(), random);
+        session.SelectDefend(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Combat.Phase);
+        session.ResolveNextAction();
+        Assert.Equal(2, session.Current.Role.HiddenExperience["defense"].Count);
+        Assert.Equal(0, session.Current.Role.HiddenExperience["attack"].Count);
+        Assert.True(session.Current.Combat.Players[0].IsDefending);
+        session.ResolveNextAction(); // the evaded enemy strike ends the round
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Combat.Phase);
+        Assert.Equal(2, session.Current.Role.HiddenExperience["defense"].Count);
+        Assert.False(session.Current.Combat.Players[0].IsDefending);
+        random.AssertExhausted();
+    }
+
     private static BattleRoleSnapshot Role(int roleId = 1) => new(roleId, 2, 100, 150, 20, 50, new(5, 2, 17),
         new Dictionary<string, BattleExperienceSnapshot> {
             ["health"] = new(7, 3, 55), ["magic"] = new(7, 3, 55), ["attack"] = new(7, 3, 55),

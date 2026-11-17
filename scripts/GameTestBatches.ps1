@@ -123,7 +123,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
             'Pal.Game.Tests.StoryRoundtripSceneTests.SinglePlayerTwoEnemiesDrawBothDuplicateSlotsOnFirstBattleUpdateAndFreshMain',
             'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedHeterogeneousSlotsUseOwnActionsTargetsAndFreshMain') }
         @{ name = 'native-map'; count = 728; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
-        @{ name = 'scene-realfull'; count = 41; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests', 'TriggerDialogueFixtureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyThreePlayersPickTargetsByCyclingExecuteQueueAndWin', 'Pal.Game.Tests.StoryRoundtripSceneTests.ZeroHpPuppetMemberEntersAtOneHpStaysDeadAndSettlesByIdentity', 'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedMixedEmptySlotsUseRuntimeIndicesTargetLoadedOnlyAndSettleOnceThroughFreshMain', 'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedThreePlayersCancelTargetsRevertEarlierSelectionsAndSettleOnce', 'Pal.Game.Tests.StoryRoundtripSceneTests.AttackAllMemberCommitsWithoutTargetMenuStrikesBothLoadedSlotsAndSettlesOnce', 'Pal.Game.Tests.StoryRoundtripSceneTests.AttackAllPresentation', 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') }
+        @{ name = 'scene-realfull'; count = 42; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests', 'TriggerDialogueFixtureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyThreePlayersPickTargetsByCyclingExecuteQueueAndWin', 'Pal.Game.Tests.StoryRoundtripSceneTests.ZeroHpPuppetMemberEntersAtOneHpStaysDeadAndSettlesByIdentity', 'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedMixedEmptySlotsUseRuntimeIndicesTargetLoadedOnlyAndSettleOnceThroughFreshMain', 'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedThreePlayersCancelTargetsRevertEarlierSelectionsAndSettleOnce', 'Pal.Game.Tests.StoryRoundtripSceneTests.AttackAllMemberCommitsWithoutTargetMenuStrikesBothLoadedSlotsAndSettlesOnce', 'Pal.Game.Tests.StoryRoundtripSceneTests.AttackAllPresentation', 'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedThreePlayersDefendCommitPoseCountsAndSettleOnce', 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') }
     )
     $localOnly = if ($Scope -ceq 'committable') {
         @($inventory | Where-Object { $name = $_.name; $script:LocalOnlyRealMatches | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)
@@ -168,7 +168,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.class -CNE 'FailureControlTests' -and $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 1015) { throw "Game inventory differs: $($inventory.Count)/1015." }
+    if ($inventory.Count -ne 1016) { throw "Game inventory differs: $($inventory.Count)/1016." }
     $spriteFieldsPositive = 'Pal.Game.Tests.NativeBattleVisualProfileTests.StandaloneCheckedSpriteMatchesIndependentFieldsAndSourceBoundaries'
     $spriteFieldsCases = @($inventory | Where-Object name -CEQ $spriteFieldsPositive)
     $spriteFieldsOwners = @($batches | Where-Object { $_.expected -ccontains $spriteFieldsPositive })
@@ -183,12 +183,12 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
     }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
-        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 1433; skipped = 0 }
+        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 1465; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 536; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 419; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = (Get-PrepareTestCount); skipped = 0 }
-        # 1012 full-scope positives; committable scope executes one fewer (#76 local-only split).
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (1012 - $localOnly.Count); skipped = 0 }
+        # 1013 full-scope positives; committable scope executes one fewer (#76 local-only split).
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (1013 - $localOnly.Count); skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {

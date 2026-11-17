@@ -312,6 +312,202 @@ public sealed class ClassicBattleSessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Defend_commit_advances_selection_consumes_nothing_and_reverts_by_cancel()
+    {
+        // uibattle.c 1166-1171: kKeyDefend commits the defend action directly with no target
+        // menu; the commit itself draws no random (only the queue build does) and stays
+        // revertible by the classic cancel until the last member commits (uibattle.c 1225-1252).
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0], data.Players[0] with { RoleId = 2, Dexterity = 90 }] };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectDefend(0);
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Equal(1, session.Current.SelectingPlayerIndex);
+        Assert.Null(session.Current.Players[0].SelectedEnemySlot);
+        Assert.Empty(session.Current.ActionQueue);
+        Assert.False(session.Current.Players[0].IsDefending);
+        // The defend commit is the member's editable selection: one cancel reopens member 0.
+        Assert.True(session.CancelSelection());
+        Assert.Equal(0, session.Current.SelectingPlayerIndex);
+        session.SelectDefend(0);
+        session.SelectDefend(1);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        // fight.c 1535-1537: the committed defend multiplies the queue dexterity by five
+        // (100 -> 500, 90 -> 450) ahead of the enemy's 18; exactly the three queue rolls ran.
+        Assert.Equal([500, 450, 18], session.Current.ActionQueue.Select(entry => (int)entry.Dexterity).ToArray());
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Defend_perform_sets_flag_count_priority_and_halves_enemy_strikes()
+    {
+        // fight.c 4110-4116: the flag and the hidden defense count (+2) land at perform time,
+        // never at selection; no strike, attack or health counter exists. The defend priority
+        // (fight.c 1535 wDexterity *= 5: 100*5 = 500 vs the enemy's 18) acts first, so the
+        // enemy strike that deals 20 to an undefended defense 20 (BaseDamage(36,20)=40 / 2)
+        // deals 6 once fDefending doubles the defense (fight.c 4924-4927: BaseDamage(36,40) = 12 / 2).
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1)]);
+        var session = new ClassicBattleSession(Definition(), random);
+        session.SelectDefend(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.Equal(500, session.Current.ActionQueue.Single(entry => entry.Side == ClassicBattleSide.Player).Dexterity);
+        session.ResolveNextAction();
+        Assert.Null(session.Current.LastAction);
+        Assert.True(session.Current.Players[0].IsDefending);
+        Assert.Equal(2, session.Current.Players[0].Counts.Defense);
+        Assert.Equal(0, session.Current.Players[0].Counts.Attack);
+        Assert.Equal(0, session.Current.Players[0].Counts.Health);
+        session.ResolveNextAction();
+        Assert.Equal(ClassicBattleSide.Enemy, session.Current.LastAction!.Attacker);
+        Assert.Equal(6, session.Current.LastAction.Damage);
+        Assert.Equal(194, session.Current.PlayerHp);
+        // fight.c 1599-1604 (round end) and 1068 (next selection): fDefending lasts its round.
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.False(session.Current.Players[0].IsDefending);
+        Assert.Equal(2, session.Current.Players[0].Counts.Defense);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Defend_does_not_halve_enemy_strikes_before_its_own_action_and_only_within_its_round()
+    {
+        // fDefending is runtime state of the performed action, not of the committed selection:
+        // an enemy that outruns the defender this round still deals the full 20, and only a
+        // later round in which the member's own defend performed first halves the same strike
+        // to 6. Enemy dex 460 -> base speed 478 inside [500*0.9, 500*1.1], so the scripted
+        // rolls pick the order: enemy first in round 1 (501 vs 475), member first in round 2 (525 vs 454).
+        var random = new ScriptedRandom([
+            F(.9f, 1.1f, 1.05f), F(.9f, 1.1f, .95f),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1),
+            F(.9f, 1.1f, .95f), F(.9f, 1.1f, 1.05f),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1)]);
+        var data = Definition();
+        data = data with { Enemies = [data.Enemies[0] with { Dexterity = 460 }] };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectDefend(0);
+        Assert.Equal(ClassicBattleSide.Enemy, session.Current.ActionQueue[0].Side);
+        session.ResolveNextAction();
+        Assert.Equal(20, session.Current.LastAction!.Damage);
+        Assert.Equal(180, session.Current.PlayerHp);
+        Assert.False(session.Current.Players[0].IsDefending);
+        session.ResolveNextAction(); // the member's own defend performs only after the strike;
+        // it is the round's last action, so the same resolve ends the round and clears the flag.
+        Assert.Equal(2, session.Current.Players[0].Counts.Defense);
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.False(session.Current.Players[0].IsDefending);
+        session.SelectDefend(0);
+        Assert.Equal(ClassicBattleSide.Player, session.Current.ActionQueue[0].Side);
+        session.ResolveNextAction();
+        Assert.True(session.Current.Players[0].IsDefending); // in-round: the enemy still acts after
+        session.ResolveNextAction();
+        Assert.Equal(6, session.Current.LastAction!.Damage);
+        Assert.Equal(174, session.Current.PlayerHp);
+        Assert.Equal(4, session.Current.Players[0].Counts.Defense);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Defend_count_survives_the_members_later_attack_and_accumulates_in_the_same_battle()
+    {
+        // fight.c 3753-3755: the attack action grows only rgAttackExp/rgHealthExp — it never
+        // touches rgDefenseExp. The defense track keeps its performed defends (+2 each,
+        // fight.c 4113-4115) until the victory settlement consumes it (battle.c 1229/1280);
+        // PAL_StartBattle (battle.c 1583) is the only reset. So a member that defended round 1
+        // and attacks round 2 still shows its defense count afterwards, and a later defend
+        // resumes from it instead of restarting at zero.
+        var random = new ScriptedRandom([
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1),
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(1, 2, 2), I(0, 5, 1), F(1, 1.125f, 1), I(2, 3, 2),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1),
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1)]);
+        var session = new ClassicBattleSession(Definition(), random);
+        session.SelectDefend(0);
+        session.ResolveNextAction(); // the defend performs: +2 defense, no attack or health count
+        session.ResolveNextAction(); // the enemy strike (halved to 6) ends round 1
+        Assert.Equal(2, session.Current.Players[0].Counts.Defense);
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        session.SelectAttack(7);
+        session.ResolveNextAction(); // the member's plain attack completes: BaseDamage(40,24)=42 +2
+        Assert.True(session.Current.Players[0].Counts.Defense == 2,
+            "Classic combat must keep the performed defense count when the member later attacks in the same battle.");
+        Assert.Equal(1, session.Current.Players[0].Counts.Attack);
+        Assert.Equal(2, session.Current.Players[0].Counts.Health);
+        Assert.Equal(56, session.Current.EnemyHp);
+        session.ResolveNextAction(); // the enemy strike (full 20: no defend this round) ends round 2
+        Assert.Equal(174, session.Current.PlayerHp);
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        session.SelectDefend(0);
+        session.ResolveNextAction(); // a second defend resumes from the preserved count: 2 + 2 = 4
+        Assert.Equal(4, session.Current.Players[0].Counts.Defense);
+        Assert.True(session.Current.Players[0].IsDefending);
+        session.ResolveNextAction(); // the enemy strike is halved again and the round ends
+        Assert.Equal(168, session.Current.PlayerHp);
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Equal(4, session.Current.Players[0].Counts.Defense);
+        Assert.False(session.Current.Players[0].IsDefending);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Dead_members_defend_commit_performs_the_internal_pass_without_effects()
+    {
+        // fight.c 1730-1735: a member dead at its queue slot performs the reference's internal
+        // pass regardless of its committed action, and the pass branch is empty (fight.c
+        // 4409-4410): no strike, no counts, no fDefending, no random. The enemy (dex 999,
+        // speed 1017) kills the 20-HP member first; that member's committed defend never lands.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 1, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1)]);
+        var data = Definition();
+        data = data with
+        {
+            Players = [data.Players[0] with { Hp = 20, MaxHp = 200, Dexterity = 50 },
+                data.Players[0] with { RoleId = 2, Dexterity = 90 }],
+            Enemies = [data.Enemies[0] with { Dexterity = 999 }]
+        };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectDefend(0);
+        session.SelectDefend(1);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        session.ResolveNextAction();
+        Assert.Equal(0, session.Current.Players[0].Hp);
+        Assert.Equal(20, session.Current.LastAction!.Damage);
+        session.ResolveNextAction();
+        Assert.Equal(2, session.Current.Players[1].Counts.Defense);
+        session.ResolveNextAction();
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Equal(1, session.Current.SelectingPlayerIndex);
+        Assert.Equal(0, session.Current.Players[0].Counts.Defense);
+        Assert.False(session.Current.Players[0].IsDefending);
+        Assert.Equal(0, session.Current.Players[0].Counts.Attack);
+        Assert.Equal(ClassicBattleSide.Enemy, session.Current.LastAction!.Attacker);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Defend_selection_rejects_wrong_member_phase_and_finished_battle_without_state_change()
+    {
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(1, 2, 1), I(0, 5, 1), F(1, 1.125f, 1), I(2, 3, 2)]);
+        var session = new ClassicBattleSession(Definition(43), random);
+        ClassicBattleView before = session.Current;
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectDefend(1));
+        Assert.Same(before, session.Current);
+        session.SelectAttack(7);
+        Assert.Throws<InvalidOperationException>(() => session.SelectDefend(0));
+        session.ResolveNextAction();
+        Assert.Equal(ClassicBattlePhase.Won, session.Current.Phase);
+        ClassicBattleView terminal = session.Current;
+        Assert.Throws<InvalidOperationException>(() => session.SelectDefend(0));
+        Assert.Same(terminal, session.Current);
+        random.AssertExhausted();
+    }
+
     private static ClassicBattleDefinition Definition(int enemyHp = 100) => new(
         [new(1, 200, 200, 40, 20, 100)], [new(7, 0, enemyHp, 0, 0, 0, 1)]);
     private sealed record Draw(bool Floating, float From, float To, float Value);

@@ -28,6 +28,8 @@ public partial class Main
     private ClassicBattleAction? storyLastPresentedAction;
     // #51 boss flee: the pending Q press and the newest presented flee attempt.
     private bool storyFlee;
+    // input.c 'd' kKeyDefend: the pending D press in the action menu.
+    private bool storyDefend;
     private ClassicBattleFleeAttempt? storyLastFleeAttempt;
     private Vector2? fleeOrigin;
     private int fleePartyIndex = -1;
@@ -184,6 +186,19 @@ public partial class Main
                     var selectingFlee = lifecycle.Current.Combat.SelectingPlayerIndex
                         ?? throw new InvalidOperationException("Flee menu has no selecting party member.");
                     lifecycle.SelectFlee(selectingFlee);
+                    StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Resolving
+                        ? StoryBattlePresentation.Resolving : StoryBattlePresentation.AttackMenu;
+                    break;
+                }
+                if (storyDefend)
+                {
+                    // input.c 'd' kKeyDefend (uibattle.c 1166-1171): the defend commit carries no
+                    // target menu; the member's pose and count land when the action performs in
+                    // the round (fight.c 4110-4116), never at the commit itself.
+                    storyDefend = false;
+                    var selectingDefender = lifecycle.Current.Combat.SelectingPlayerIndex
+                        ?? throw new InvalidOperationException("Defend menu has no selecting party member.");
+                    lifecycle.SelectDefend(selectingDefender);
                     StoryBattleMode = lifecycle.Current.Combat.Phase == ClassicBattlePhase.Resolving
                         ? StoryBattlePresentation.Resolving : StoryBattlePresentation.AttackMenu;
                     break;
@@ -618,7 +633,7 @@ public partial class Main
         storyView = null; storyRequest = null; storyTeam = null; StoryBattleMode = null; battleConfirm = false; storyCancel = false; resumeStoryDisplay = false;
         enemyPresentation = null; playerPresentation = null; enemyIdle = null; outerDue = false;
         storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
-        storyFlee = false; storyLastFleeAttempt = null; fleeOrigin = null; fleePartyIndex = -1; storyRedStep = -1;
+        storyFlee = false; storyDefend = false; storyLastFleeAttempt = null; fleeOrigin = null; fleePartyIndex = -1; storyRedStep = -1;
         settlementLines = null; settlementStage = 0; settlementPresented = false;
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;

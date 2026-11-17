@@ -143,6 +143,9 @@ internal partial class PalStoryBattleView : Node2D
         var partyEnemies = party ? EnemyDraws(action) : Array.Empty<StoryActorDraw>();
         Vector2 player = visual.Players[0].PlayerPosition, enemy = team.EnemySlots[0].EnemyPosition, fxPosition = Vector2.Zero;
         int pf = StoryEnemyAttackPresentation.RestFrame(combat.PlayerHp, story.BattleContent.Players[0].MaxHp), ef = idleFrames[0];
+        // fight.c 977-980 (UpdateFighters): a defending member holds the defend frame 3 for the
+        // rest of its round; an active presentation below still overrides it.
+        if (pf == 0 && combat.Players[0].IsDefending) pf = 3;
         int playerShift = 0, enemyShift = 0, php = combat.PlayerHp, ehp = combat.EnemyHp;
         int? fx = null;
         bool result = false;
@@ -211,11 +214,16 @@ internal partial class PalStoryBattleView : Node2D
                 && target == i && EnemyPresentation is { } incoming)
                 draws[i] = new(incoming.PlayerFrame, incoming.PlayerPosition, incoming.PlayerColorShift, incoming.DisplayedPlayerHp);
             else
+            {
+                // fight.c 977-980: the defend frame 3 replaces only the plain rest gesture —
+                // dying/dead members keep their own frames and an acting member keeps its pose.
+                int frame = StoryEnemyAttackPresentation.RestFrame(member.Hp, story.BattleContent.Players[i].MaxHp);
+                if (frame == 0 && member.IsDefending) frame = 3;
                 draws[i] = action is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i
                     && playerPresentation is { } acting
                     ? new(acting.PlayerFrame, acting.PlayerPosition, 0, member.Hp)
-                    : new(StoryEnemyAttackPresentation.RestFrame(member.Hp, story.BattleContent.Players[i].MaxHp),
-                        origins[i], 0, member.Hp);
+                    : new(frame, origins[i], 0, member.Hp);
+            }
         }
         return draws;
     }

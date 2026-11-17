@@ -94,6 +94,11 @@ public sealed record ClassicBattlePlayerView(int PartyIndex, int RoleId, int Hp,
     /// <summary>True when this member committed the round's all-target attack selection
     /// (reference sTarget -1); SelectedEnemySlot stays null for such a commitment.</summary>
     public bool SelectedAttackAll { get; init; }
+    /// <summary>fight.c 4114 fDefending: set when this member's defend action performs and cleared
+    /// at the round end / next selection (fight.c 1599-1604, 1068); enemy physical strikes
+    /// against it double the defense word (fight.c 4924-4927) and the pose holds frame 3
+    /// (fight.c 977-980 UpdateFighters).</summary>
+    public bool IsDefending { get; init; }
 }
 public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp)
 {
@@ -120,6 +125,9 @@ public sealed record ClassicBattleCounts(int Attack, int Health)
     /// <summary>Failed escape attempts this battle (fight.c 4171: rgFleeExp.wCount += 2 per attempt);
     /// the attack/health counters grow only on real attack actions.</summary>
     public int Flee { get; init; }
+    /// <summary>Performed defends this battle (fight.c 4113-4115: rgDefenseExp.wCount += 2 at the
+    /// defend action's perform time); a pass never fakes it and a strike never adds it.</summary>
+    public int Defense { get; init; }
 }
 /// <summary>One resolved flee attempt (fight.c 4119-4173): the reference always consumes the
 /// RandomLong(0, defense) draw, and a boss battle fails the escape regardless of the draw.</summary>

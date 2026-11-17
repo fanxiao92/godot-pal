@@ -278,6 +278,17 @@ public partial class Main : Node2D
                         storyCycle = i / 2 == 3 ? 1 : -1;
                         GetViewport().SetInputAsHandled();
                     }
+                    // input.c: 'd' is kKeyDefend (uibattle.c 1166-1171: the main move menu
+                    // commits the defend action directly; no target menu exists for it). The
+                    // exploration east alias carries the same physical key, so the battle
+                    // consumes it inside this branch — the standalone blocks below are
+                    // unreachable for a direction-alias key.
+                    else if (key.Pressed && !key.Echo && key.Keycode == Key.D
+                        && StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                    {
+                        storyDefend = true;
+                        GetViewport().SetInputAsHandled();
+                    }
                     return;
                 }
                 if (dynamicSession is { } dynamic)
