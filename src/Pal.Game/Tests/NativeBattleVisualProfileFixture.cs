@@ -25,10 +25,12 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
     { SourceIdentity = "authored synthetic background", Width = 320, Height = 200, PaletteIndices = new byte[64000], Alpha = Enumerable.Repeat((byte)255, 64000).ToArray() };
     public string[] ExpectedPaths { get; }
 
-    public NativeBattleVisualProfileFixture(bool party = false, bool fiveEnemies = false)
+    public NativeBattleVisualProfileFixture(bool party = false, bool fiveEnemies = false, bool emptySlots = false)
     {
         Party = party;
-        Story = new NativeStoryProfileFixture(party, fiveEnemies: fiveEnemies);
+        if (emptySlots && fiveEnemies)
+            throw new ArgumentException("The empty-slot visual variant is its own three-slot team.", nameof(emptySlots));
+        Story = new NativeStoryProfileFixture(party, fiveEnemies: fiveEnemies, emptyEnemies: emptySlots);
         CheckedStory = NativeStoryProfile.Load(Story.Uri);
         var team = new PalBattleVisualTeam { TeamId = 18, BackgroundUri = Root + "/Background.tres" };
         if (fiveEnemies)
@@ -43,6 +45,17 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
                 new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(212, 56) }
             ];
         }
+        else if (emptySlots)
+        {
+            // #141 mixed runtime slots: the numeric empty slot keeps an overlay binding
+            // (TargetId 0, authored position, slot order) and declares no sprite or frames.
+            team.EnemySlots =
+            [
+                new PalBattleVisualEnemySlot { TargetId = 0, EnemyPosition = new(72, 136) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(128, 104) }
+            ];
+        }
         else if (party)
         {
             // Two story enemy slots share enemy definition id 7; positions use distinct authored slots.
@@ -53,7 +66,8 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
             ];
         }
         else { team.EnemySlots = [new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) }]; }
-        foreach (var slot in team.EnemySlots)
+        // Loaded slots keep strict sprite/frame bindings; the #141 empty slot stays declaration-free.
+        foreach (var slot in team.EnemySlots.Where(slot => slot.TargetId != 0))
         {
             slot.EnemySpriteUri = Root + "/Enemy.tres";
             slot.IdleFrames = 1; slot.IdleAnimSpeed = 0; slot.MagicFrames = 1;

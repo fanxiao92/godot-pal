@@ -41,8 +41,8 @@ public class NativeFirstMandatoryBattleProfileTests
         fixture.Profile.ResourceSha256[secondUri] = Godot.FileAccess.GetSha256(secondUri);
         fixture.Save();
         var loaded = fixture.Load();
-        AssertThat(loaded.Teams[18].EnemySlots[0].EnemySprite.SpriteId).IsEqual(97);
-        AssertThat(loaded.Teams[18].EnemySlots[1].EnemySprite.SpriteId).IsEqual(98);
+        AssertThat(loaded.Teams[18].EnemySlots[0].EnemySprite!.SpriteId).IsEqual(97);
+        AssertThat(loaded.Teams[18].EnemySlots[1].EnemySprite!.SpriteId).IsEqual(98);
         AssertThat(loaded.Teams[18].EnemySlots[0].TargetId).IsEqual(7);
         AssertThat(loaded.Teams[18].EnemySlots[1].TargetId).IsEqual(7);
         AssertThat(loaded.ResourceSha256.ContainsKey(secondUri)).IsTrue();
@@ -146,8 +146,8 @@ public class NativeFirstMandatoryBattleProfileTests
         var restored = NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri);
         foreach (var slot in restored.Visual!.Teams[18].EnemySlots)
         {
-            AssertThat(slot.EnemySprite.SpriteId).IsEqual(97);
-            AssertThat(slot.EnemySprite.Source["identity"].AsString()).IsEqual("ABC97");
+            AssertThat(slot.EnemySprite!.SpriteId).IsEqual(97);
+            AssertThat(slot.EnemySprite!.Source["identity"].AsString()).IsEqual("ABC97");
         }
         // A separate native leaf for slot 1 crosses the frozen proof domain even when
         // slot 0 and both SpriteIds are valid and the complete new byte hashes match.
@@ -168,7 +168,60 @@ public class NativeFirstMandatoryBattleProfileTests
         visual.ResourceSha256[secondUri] = Godot.FileAccess.GetSha256(secondUri);
         NativeProfileFixture.SaveResource(visual, native.VisualUri);
         var secondRestored = NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri);
-        AssertThat(secondRestored.Visual!.Teams[18].EnemySlots[1].EnemySprite.Source["identity"].AsString()).IsEqual("ABC97");
+        AssertThat(secondRestored.Visual!.Teams[18].EnemySlots[1].EnemySprite!.Source["identity"].AsString()).IsEqual("ABC97");
+    }
+
+    [TestCase(Timeout = 280000)]
+    public void FrozenFirstMandatoryChainRejectsNumericEmptyEnemySlots()
+    {
+        // #141 review repair: the frozen chain's empty-slot refusal is a delivered guard, not an
+        // untested declaration. The chain reloads with numeric slot 1 in #140's canonical empty
+        // spelling and an empty overlay slot (TargetId 0, authored position, slot order kept,
+        // no sprite/frame metadata); every earlier stage must accept the mixed team so the
+        // refusal observed here is exactly the frozen ABC-bitmap binding, never a silent drop.
+        using var battleFixture = new NativeBattleProfileFixture();
+        var statics = battleFixture.Static;
+        var palette = ResourceLoader.Load<PalPalette>("res://Samples/AuthoredBattle/Static/Palette.tres",
+            cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+        statics.MapScene.Data.Palette = palette;
+        statics.SavePacked();
+        string staticProfile = statics.ResourceRoot + "/Profile.tres";
+        NativeProfileFixture.SaveResource(statics.Profile, staticProfile);
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(statics.ResourceRoot + "/Palettes"));
+        NativeProfileFixture.SaveResource(palette, statics.ResourceRoot + "/Palettes/Palette.tres");
+        using var fixture = new SyntheticFirstBattleFixture(statics, statics.ResourceRoot, staticProfile, lost: true);
+        var initial = NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri);
+        AssertThat(initial.Visual!.Teams[18].EnemySlots.Count).IsEqual(2);
+        var native = ResourceLoader.Load<PalFirstMandatoryBattleProfile>(fixture.ProfileUri,
+            cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+        var numbers = ResourceLoader.Load<PalBattleContent>(native.BattleContentUri,
+            cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+        var enemy = numbers.Teams.Single(team => team.TeamId == 18).Enemies[1];
+        enemy.Id = 0; enemy.Level = 0; enemy.Hp = 0; enemy.Attack = 0; enemy.Defense = 0; enemy.Dexterity = 0;
+        enemy.PhysicalResistance = 0; enemy.TurnStartScript = 0; enemy.ReadyScript = 0; enemy.BattleEndScript = 0;
+        enemy.MagicId = 0; enemy.DualMove = 0; enemy.AttackEquivItem = 0; enemy.AttackEquivItemRate = 0;
+        enemy.Experience = 0; enemy.Cash = 0; enemy.Statuses = new int[9]; enemy.Poisons = [];
+        enemy.IsEmpty = true;
+        NativeProfileFixture.SaveResource(numbers, native.BattleContentUri);
+        native.ResourceSha256[native.BattleContentUri] = Godot.FileAccess.GetSha256(native.BattleContentUri);
+        var visual = ResourceLoader.Load<PalBattleVisualProfile>(native.VisualUri,
+            cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
+        var emptySlot = visual.Teams.Single().EnemySlots[1];
+        emptySlot.TargetId = 0;
+        emptySlot.EnemySpriteUri = "";
+        emptySlot.IdleFrames = -1; emptySlot.IdleAnimSpeed = -1; emptySlot.MagicFrames = -1;
+        emptySlot.AttackFrames = -1; emptySlot.ActWaitFrames = -1;
+        NativeProfileFixture.SaveResource(visual, native.VisualUri);
+        NativeProfileFixture.SaveResource(native, fixture.ProfileUri);
+        InvalidDataException? failure = null;
+        try { NativeFirstMandatoryBattleProfile.Load(fixture.ProfileUri); }
+        catch (InvalidDataException caught) { failure = caught; }
+        AssertThat(failure is not null)
+            .OverrideFailureMessage("The frozen first-mandatory chain must refuse a numeric empty enemy slot explicitly.").IsTrue();
+        AssertThat(failure!.Message.Contains(native.VisualUri, StringComparison.Ordinal)).IsTrue();
+        AssertThat(failure.Message.Contains(
+            "enemy slot 1 must bind the declared ABC bitmap; empty slots are not part of the frozen first-mandatory profile",
+            StringComparison.Ordinal)).IsTrue();
     }
 
     [TestCase("version")]

@@ -91,11 +91,11 @@ public class StoryRoundtripSceneTests
         var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
         var slots = visual.Teams[18].EnemySlots;
         AssertThat(slots.Select(s => s.TargetId).SequenceEqual(new[] { 7, 7 })).IsTrue();
-        AssertThat(slots.Select(s => s.EnemySprite.SpriteId).SequenceEqual(new[] { 97, 98 })).IsTrue();
-        AssertThat(slots.Select(s => s.EnemySprite.FrameCount).SequenceEqual(new[] { 3, 4 })).IsTrue();
-        AssertThat(slots.Select(s => s.EnemySprite.Frames[0].Width).SequenceEqual(new[] { 2, 3 })).IsTrue();
-        AssertThat(slots[0].EnemySprite.Frames.Select(f => f.Height).SequenceEqual(new[] { 1, 1, 1 })).IsTrue();
-        AssertThat(slots[1].EnemySprite.Frames.Select(f => f.Height).SequenceEqual(new[] { 3, 6, 9, 12 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite!.SpriteId).SequenceEqual(new[] { 97, 98 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite!.FrameCount).SequenceEqual(new[] { 3, 4 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite!.Frames[0].Width).SequenceEqual(new[] { 2, 3 })).IsTrue();
+        AssertThat(slots[0].EnemySprite!.Frames.Select(f => f.Height).SequenceEqual(new[] { 1, 1, 1 })).IsTrue();
+        AssertThat(slots[1].EnemySprite!.Frames.Select(f => f.Height).SequenceEqual(new[] { 3, 6, 9, 12 })).IsTrue();
         AssertThat((slots[0].IdleFrames, slots[0].IdleAnimSpeed, slots[0].MagicFrames, slots[0].AttackFrames, slots[0].ActWaitFrames))
             .IsEqual((1, 0, 1, 1, 0));
         AssertThat((slots[1].IdleFrames, slots[1].IdleAnimSpeed, slots[1].MagicFrames, slots[1].AttackFrames, slots[1].ActWaitFrames))
@@ -278,6 +278,106 @@ public class StoryRoundtripSceneTests
         bool ownedCleaned = !Directory.Exists(ownedInput) && !Directory.Exists(output);
         GD.Print("PAL_HETEROGENEOUS_NEGATIVE_CLEANUP:" + JsonSerializer.Serialize(new { ownedInput, output, ownedCleaned }));
         AssertThat(ownedCleaned).IsTrue();
+    }
+
+    [TestCase(Timeout = 90000)]
+    public async Task PreparedMixedEmptySlotsUseRuntimeIndicesTargetLoadedOnlyAndSettleOnceThroughFreshMain()
+    {
+        // #141 (T13c): a three-player party meets the five-slot team [empty, 7, empty, 7, empty]
+        // through the formal Prepare and normal Main. Empty runtime slots keep identity, order and
+        // position but never draw, target or act; the default target starts at the first alive
+        // slot, cycling crosses empties, and the last real enemy's death settles exactly once
+        // with only the loaded slots' rewards (3+3 exp / 5+5 cash, never the empty slots').
+        using var fixture = new AuthoredStoryFixture("PartyWin", threePlayer: true, mixedEmptySlots: true);
+        string[] before = fixture.Snapshot();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        for (int run = 0; run < 2; run++)
+        {
+            bool first = false;
+            void Observe(Main main)
+            {
+                if (main.StoryBattle is null) return;
+                var draw = main.StoryDrawSnapshot!.Value;
+                if (!first)
+                {
+                    first = true; // First actual completion, not the first matching draw.
+                    AssertThat(main.StoryBattle!.Current.Combat.Enemies.Select(enemy => (enemy.Id, enemy.IsEmpty)).ToArray())
+                        .IsEqual(new[] { (0, true), (7, false), (0, true), (7, false), (0, true) });
+                    AssertThat(draw.PartyEnemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 43, 0, 43, 0 });
+                    AssertThat(draw.PartyEnemies.Select(enemy => enemy.Visible).ToArray())
+                        .IsEqual(new[] { false, true, false, true, false });
+                    AssertThat(draw.PartyEnemies.Select(enemy => enemy.Position).ToArray()).IsEqual(new[] {
+                        new Vector2(72, 136), new(100, 120), new(128, 104), new(156, 88), new(184, 72) });
+                }
+                // Empty runtime slots never draw at any later callback, including while a
+                // loaded neighbour is struck or removed.
+                if (draw.PartyEnemies.Count == 5)
+                    for (int slot = 0; slot < 5; slot += 2)
+                        AssertThat(draw.PartyEnemies[slot].Visible).IsFalse();
+            }
+            Main old;
+            using (var host = new StoryHost(selection,
+                enemySlots: [new(72, 136), new(100, 120), new(128, 104), new(156, 88), new(184, 72)],
+                players: [new(180, 180), new(234, 170), new(270, 146)], updateObserver: Observe))
+            {
+                old = host.Main;
+                AssertThat(old.Failure).IsNull();
+                host.Tap(Key.Enter);
+                await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+                await host.FinishDisplay();
+                var script = old.Dialogue!.Session!;
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+                var battle = old.StoryBattle!;
+                // Member 0 confirms attack; the target menu starts at the first alive slot 1.
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+                AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(1);
+                // Member 1 cycles right across empty slot 2 to the last loaded slot 3.
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                host.Tap(Key.Right);
+                await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+                AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(3);
+                // Member 2 keeps the default first-alive target; its confirm builds the queue.
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+                AssertThat(battle.Current.Combat.Players.Select(player => player.SelectedEnemySlot).ToArray())
+                    .IsEqual(new int?[] { 1, 3, 1 });
+                AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(5);
+                while (script.PendingBattle is not null && old.StoryBattleMode != StoryBattlePresentation.Settlement)
+                {
+                    await host.Wait(() => old.StoryBattleMode is StoryBattlePresentation.Feedback or StoryBattlePresentation.Settlement
+                        || script.PendingBattle is null);
+                    if (script.PendingBattle is null || old.StoryBattleMode == StoryBattlePresentation.Settlement) break;
+                    await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                        || script.PendingBattle is null);
+                }
+                // Every presented action targets a loaded slot; empty slots never act or answer.
+                AssertThat(host.Actions.All(action => action.Attacker == ClassicBattleSide.Player)).IsTrue();
+                AssertThat(host.Actions.All(action => action.TargetIndex is 1 or 3)).IsTrue();
+                AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+                AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0 });
+                AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.IsEmpty).ToArray())
+                    .IsEqual(new[] { true, false, true, false, true });
+                // Both loaded slots' rewards settle exactly once; the empty slots contribute nothing.
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Settlement);
+                AssertThat(old.StorySettlementLine!.Contains(":6", StringComparison.Ordinal)
+                    && old.StorySettlementLine.Contains("10", StringComparison.Ordinal)).IsTrue();
+                host.Tap(Key.Enter);
+                await host.Wait(() => old.StoryBattleMode is null);
+                await host.FinishDisplay();
+                await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+                AssertThat(old.StoryExperienceGranted).IsEqual(6);
+                AssertThat(old.StoryCashGranted).IsEqual(10);
+                AssertThat(old.StoryBattleMode).IsNull();
+                AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+                AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+                AssertThat(old.Failure).IsNull();
+            }
+            AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+            AssertThat(Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.Right)).IsFalse();
+            AssertThat(fixture.Snapshot()).IsEqual(before);
+        }
     }
 
     [TestCase]
@@ -1626,9 +1726,9 @@ public class StoryRoundtripSceneTests
         string[] before = fixture.Snapshot();
         var story = Pal.Game.Profiles.NativeStoryProfile.Load(fixture.StoryUri);
         var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
-        AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemySprite.SpriteId)
+        AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemySprite!.SpriteId)
             .SequenceEqual(new[] { 97, 98 })).IsTrue();
-        AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemySprite.FrameCount)
+        AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemySprite!.FrameCount)
             .SequenceEqual(new[] { 3, 4 })).IsTrue();
         var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
@@ -2429,8 +2529,8 @@ public class StoryRoundtripSceneTests
             party = enemySlots is not null;
             if (party)
             {
-                if (enemySlots!.Length != 2 || players is not { Length: 1 or 2 or 3 })
-                    throw new ArgumentException("Multi-actor hosts require two enemy slots and one to three player origins.");
+                if (enemySlots!.Length is not (2 or 5) || players is not { Length: 1 or 2 or 3 })
+                    throw new ArgumentException("Multi-actor hosts require two or five enemy slots and one to three player origins.");
                 partyEnemies = enemySlots; partyPlayers = players!;
             }
             this.updateObserver = updateObserver;

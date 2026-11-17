@@ -71,11 +71,16 @@ internal partial class PalStoryBattleView : Node2D
                     frames.Add((true, member, frame.Index, 6), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha, 6));
             }
         for (int slot = 0; slot < team.EnemySlots.Count; slot++)
-            foreach (var frame in team.EnemySlots[slot].EnemySprite.Frames)
+        {
+            // #141: a numeric-empty runtime slot owns no sprite, frames or textures; it keeps its
+            // slot position/identity for the party-order arrays and never draws.
+            if (team.EnemySlots[slot].IsEmpty) continue;
+            foreach (var frame in team.EnemySlots[slot].EnemySprite!.Frames)
             {
                 frames.Add((false, slot, frame.Index, 0), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha, enemySlot: slot));
                 frames.Add((false, slot, frame.Index, 6), Texture(frame.Width, frame.Height, frame.Indices, frame.Alpha, 6, enemySlot: slot));
             }
+        }
         // Per-role effect frames: the acting member's own resolved table group (fight.c:2029).
         for (int member = 0; member < visual.Players.Count; member++)
             for (int i = 0; i < visual.Players[member].AttackEffectFrames.Count; i++)

@@ -20,7 +20,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
     internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null,
         bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
         bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false,
-        bool zeroHpPuppetEntry = false)
+        bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -30,6 +30,10 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The three-player derivation requires the two-slot PartyWin author.", nameof(threePlayer));
         if (zeroHpPuppetEntry && scenario != "PartyLoss")
             throw new ArgumentException("The zero-HP puppet entry derivation requires PartyLoss.", nameof(zeroHpPuppetEntry));
+        if (mixedEmptySlots && scenario != "PartyWin")
+            throw new ArgumentException("The mixed empty-slot derivation requires PartyWin.", nameof(mixedEmptySlots));
+        if (mixedEmptySlots && (heterogeneousEnemies || singlePlayerTwoEnemies || zeroHpPuppetEntry))
+            throw new ArgumentException("The mixed empty-slot derivation is its own five-slot author shape.", nameof(mixedEmptySlots));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -52,7 +56,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -98,6 +102,29 @@ internal sealed class AuthoredStoryFixture : IDisposable
                     data["roles"]![0]!["hp"] = 0;
                     data["players"]![0]!["hp"] = 0;
                     data["roles"]![0]!["statuses"]![4] = 1;
+                }
+                if (mixedEmptySlots)
+                {
+                    // #141 (T13c) test-owned mixed runtime slots [empty, 7, empty, 7, empty]: the
+                    // empty rows are #140's canonical all-zero isEmpty spelling; loaded neighbours
+                    // stay duplicate id7 with distinct authored rewards.
+                    JsonNode EmptyRow()
+                    {
+                        var row = team["enemies"]![0]!.DeepClone();
+                        foreach (string field in new[] { "id", "level", "hp", "attack", "defense", "dexterity",
+                            "physicalResistance", "turnStartScript", "readyScript", "battleEndScript", "magicId",
+                            "dualMove", "attackEquivItem", "attackEquivItemRate", "experience", "cash" })
+                            row[field] = 0;
+                        row["statuses"] = new JsonArray(0, 0, 0, 0, 0, 0, 0, 0, 0);
+                        row["poisons"] = new JsonArray(0);
+                        row["isEmpty"] = true;
+                        return row;
+                    }
+                    var first = team["enemies"]![0]!;
+                    var second = team["enemies"]![1]!;
+                    first["experience"] = 3; first["cash"] = 5;
+                    second["experience"] = 3; second["cash"] = 5;
+                    team["enemies"] = new JsonArray(EmptyRow(), first.DeepClone(), EmptyRow(), second.DeepClone(), EmptyRow());
                 }
                 if (removeDualAttack)
                 {
@@ -164,6 +191,22 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 }
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned heterogeneous 97/98 native art and per-slot metadata; not retail data.";
+            }
+            if (mixedEmptySlots)
+            {
+                // The visual binding keeps one overlay entry per runtime slot: empty entries
+                // declare only targetId/enemyPosition; loaded entries keep the full group.
+                var enemies = metadata["visual"]!["teams"]![0]!["enemies"]!.AsArray();
+                var loaded0 = enemies[0]!.DeepClone();
+                var loaded1 = enemies[1]!.DeepClone();
+                loaded0!["enemyPosition"] = new JsonArray(100, 120);
+                loaded1!["enemyPosition"] = new JsonArray(156, 88);
+                metadata["visual"]!["teams"]![0]!["enemies"] = new JsonArray(
+                    new JsonObject { ["targetId"] = 0, ["enemyPosition"] = new JsonArray(72, 136) },
+                    loaded0, new JsonObject { ["targetId"] = 0, ["enemyPosition"] = new JsonArray(128, 104) },
+                    loaded1, new JsonObject { ["targetId"] = 0, ["enemyPosition"] = new JsonArray(184, 72) });
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned mixed empty-slot five-slot derivation (T13c #141); empty runtime slots are authored, not retail data.";
             }
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")

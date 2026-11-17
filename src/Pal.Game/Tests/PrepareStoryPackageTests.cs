@@ -64,6 +64,52 @@ public class PrepareStoryPackageTests
     }
 
     [TestCase]
+    public void MixedEmptySlotsPrepareLoadAndKeepRuntimeSlotOrder()
+    {
+        // #141 (T13c): the author schema and formal Prepare carry mixed runtime slots: the numeric
+        // empty slot (canonical id 0) keeps its overlay position/order with no sprite dependency.
+        using var source = new Preparation(mixed: true);
+        string[] before = source.Snapshot();
+        var result = PrepareStoryPackage.Prepare(source.Input, source.Output);
+        var story = NativeStoryProfile.Load(result.StoryUri, "en");
+        var visual = NativeBattleVisualProfile.Load(result.VisualUri, story);
+        AssertThat(story.BattleContent.EnemyTeams[18].Select(enemy => (enemy.Id, enemy.IsEmpty)).ToArray())
+            .IsEqual(new[] { (0, true), (7, false), (7, false) });
+        AssertThat(story.BattleContent.EnemyTeams[18].Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 43, 44 });
+        var slots = visual.Teams[18].EnemySlots;
+        AssertThat(slots.Select(slot => slot.TargetId).ToArray()).IsEqual(new[] { 0, 7, 7 });
+        AssertThat(slots.Select(slot => slot.IsEmpty).ToArray()).IsEqual(new[] { true, false, false });
+        AssertThat(slots[0].EnemyPosition).IsEqual(new Vector2I(72, 136));
+        AssertThat(slots[0].EnemySprite).IsNull();
+        AssertThat((slots[0].IdleFrames, slots[0].IdleAnimSpeed, slots[0].MagicFrames, slots[0].AttackFrames, slots[0].ActWaitFrames))
+            .IsEqual((0, 0, 0, 0, 0));
+        AssertThat(slots[1].EnemySprite!.SpriteId).IsEqual(97);
+        AssertThat((slots[1].IdleFrames, slots[1].IdleAnimSpeed, slots[1].MagicFrames, slots[1].AttackFrames, slots[1].ActWaitFrames))
+            .IsEqual((1, 0, 1, 1, 0));
+        // The empty slot contributes no dependency: both loaded slots share the one authored sprite leaf.
+        AssertThat(visual.ResourceSha256.Keys.Count(path => path.EndsWith("/Enemy.tres", StringComparison.Ordinal))).IsEqual(1);
+        AssertThat(source.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase("sprite-only")]
+    [TestCase("frames-only")]
+    public void EmptySlotMetadataRejectsPartialPresentationFields(string fault)
+    {
+        // #141: per-slot presentation is one all-or-none group; a half-declared empty entry is a
+        // metadata fault before any output is published, never a silent dense look-alike.
+        using var source = new Preparation(mixed: true);
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!;
+        var slot = (JsonObject)metadata["visual"]!["teams"]![0]!["enemies"]![0]!;
+        if (fault == "sprite-only") slot["enemySpriteUri"] = source.OutputUri + "/Enemy.tres";
+        else slot["idleFrames"] = 1;
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        string[] before = source.Snapshot();
+        Reject(source.Input, source.Output, "enemies[0]: enemy presentation fields must be declared together");
+        AssertThat(source.Snapshot()).IsEqual(before);
+        AssertThat(Directory.Exists(source.Output)).IsFalse();
+    }
+
+    [TestCase]
     public void AuthoredPartyPackagesPrepareAndLoadInBothLanguages()
     {
         // Committed #47 two-player authored inputs through the unchanged public prepare chain;
@@ -480,7 +526,7 @@ public class PrepareStoryPackageTests
                         AssertThat(slots.Select(s => s.EnemyPosition).ToArray()).IsEqual(positions);
                         foreach (var slot in slots)
                         {
-                            AssertThat(slot.EnemySprite.SpriteId).IsEqual(97); // Image identity, not enemy definition 7.
+                            AssertThat(slot.EnemySprite!.SpriteId).IsEqual(97); // Image identity, not enemy definition 7.
                             AssertThat((slot.IdleFrames, slot.IdleAnimSpeed, slot.MagicFrames, slot.AttackFrames, slot.ActWaitFrames))
                                 .IsEqual((1, 2, 1, 1, 0));
                         }
@@ -891,7 +937,12 @@ public class PrepareStoryPackageTests
             }
             File.WriteAllText(source.Metadata, json);
             string[] before = source.Snapshot();
-            Reject(source.Input, source.Output, source.Metadata, "visual.teams[0]: enemies[1]", field);
+            // #141: the six presentation fields are one all-or-none group, so a missing member
+            // rejects by the group diagnostic (still located at the slot path); the identity fields
+            // and every duplicate/type/range fault keep naming the exact field.
+            bool missingPresentation = fault == "missing" && field is not ("targetId" or "enemyPosition");
+            Reject(source.Input, source.Output, source.Metadata, "visual.teams[0]: enemies[1]",
+                missingPresentation ? "enemy presentation fields must be declared together" : field);
             AssertThat(Directory.Exists(source.Output)).IsFalse();
             AssertThat(source.Snapshot()).IsEqual(before);
         }
@@ -918,15 +969,15 @@ public class PrepareStoryPackageTests
         var visual = NativeBattleVisualProfile.Load(result.VisualUri, NativeStoryProfile.Load(result.StoryUri));
         var slots = visual.Teams[18].EnemySlots;
         AssertThat(slots.Select(s => s.TargetId).ToArray()).IsEqual(new[] { 7, 7 });
-        AssertThat(slots.Select(s => s.EnemySprite.SpriteId).ToArray()).IsEqual(new[] { 97, 98 });
-        AssertThat(slots.Select(s => s.EnemySprite.FrameCount).ToArray()).IsEqual(new[] { 3, 4 });
+        AssertThat(slots.Select(s => s.EnemySprite!.SpriteId).ToArray()).IsEqual(new[] { 97, 98 });
+        AssertThat(slots.Select(s => s.EnemySprite!.FrameCount).ToArray()).IsEqual(new[] { 3, 4 });
         AssertThat(slots.Select(s => s.EnemyPosition).ToArray()).IsEqual(new[] { new Vector2I(100, 120), new Vector2I(128, 104) });
         AssertThat((slots[0].IdleFrames, slots[0].IdleAnimSpeed, slots[0].MagicFrames, slots[0].AttackFrames, slots[0].ActWaitFrames))
             .IsEqual((1, 0, 1, 1, 0));
         AssertThat((slots[1].IdleFrames, slots[1].IdleAnimSpeed, slots[1].MagicFrames, slots[1].AttackFrames, slots[1].ActWaitFrames))
             .IsEqual((2, 65535, 0, 2, 65535));
-        AssertThat((slots[0].EnemySprite.Frames[0].Width, slots[0].EnemySprite.Frames[0].Height)).IsEqual((2, 1));
-        AssertThat((slots[1].EnemySprite.Frames[0].Width, slots[1].EnemySprite.Frames[0].Height)).IsEqual((3, 2));
+        AssertThat((slots[0].EnemySprite!.Frames[0].Width, slots[0].EnemySprite!.Frames[0].Height)).IsEqual((2, 1));
+        AssertThat((slots[1].EnemySprite!.Frames[0].Width, slots[1].EnemySprite!.Frames[0].Height)).IsEqual((3, 2));
         AssertThat(visual.ResourceSha256[source.Native.Root + "/Enemy98.tres"])
             .IsEqual(Godot.FileAccess.GetSha256(source.Native.Root + "/Enemy98.tres"));
         AssertThat(source.Snapshot()).IsEqual(before);
@@ -965,13 +1016,28 @@ public class PrepareStoryPackageTests
         public string OutputUri { get; } = "res://Assets/PrepareTests/" + Guid.NewGuid().ToString("N");
         public string Output => ProjectSettings.GlobalizePath(OutputUri);
         public string Metadata => Path.Combine(Input, "story-package.json");
-        public Preparation(bool party = false, bool five = false)
+        public Preparation(bool party = false, bool five = false, bool mixed = false)
         {
-            Native = new NativeBattleVisualProfileFixture(party, five);
+            Native = new NativeBattleVisualProfileFixture(party, five, emptySlots: mixed);
             Directory.CreateDirectory(Path.Combine(Input, "events"));
             foreach (string name in new[] { "index.json", "shared.json", "outcomes.json" })
                 File.Copy(ProjectSettings.GlobalizePath(Native.Root + "/" + name), Path.Combine(Input, "events", name));
             var s = Native.Story.Profile; var v = Native.Profile; var t = Native.Team;
+            // #141: a numeric-empty slot's author entry declares only targetId/enemyPosition;
+            // loaded slots keep the full six-field presentation group.
+            var enemies = new JsonArray();
+            foreach (var slot in t.EnemySlots)
+            {
+                var row = new JsonObject { ["targetId"] = slot.TargetId,
+                    ["enemyPosition"] = new JsonArray(slot.EnemyPosition.X, slot.EnemyPosition.Y) };
+                if (slot.TargetId != 0)
+                {
+                    row["enemySpriteUri"] = slot.EnemySpriteUri;
+                    row["idleFrames"] = 1; row["idleAnimSpeed"] = 0; row["magicFrames"] = 1;
+                    row["attackFrames"] = 1; row["actWaitFrames"] = 0;
+                }
+                enemies.Add(row);
+            }
             File.WriteAllText(Metadata, JsonSerializer.Serialize(new
             {
                 formatVersion = 1, sourceIdentity = "synthetic preparation test; not desktop art",
@@ -982,9 +1048,7 @@ public class PrepareStoryPackageTests
                 visual = new { players = v.Players.Select(p => new { roleId = p.RoleId, playerSpriteUri = p.PlayerSpriteUri,
                         playerPosition = new[] { p.PlayerPosition.X, p.PlayerPosition.Y } }).ToArray(), paletteUri = v.PaletteUri,
                     teams = new[] { new { teamId = t.TeamId, backgroundUri = t.BackgroundUri,
-                        enemies = t.EnemySlots.Select(slot => new { targetId = slot.TargetId, enemySpriteUri = slot.EnemySpriteUri,
-                            enemyPosition = new[] { slot.EnemyPosition.X, slot.EnemyPosition.Y },
-                            idleFrames = 1, idleAnimSpeed = 0, magicFrames = 1, attackFrames = 1, actWaitFrames = 0 }).ToArray() } } }
+                        enemies } } }
             }));
         }
         public string[] Snapshot() => Directory.GetFiles(Input, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)

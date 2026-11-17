@@ -144,7 +144,10 @@ public static class NativeFirstMandatoryBattleProfile
         var team = visual.Teams[closure.VerifiedBattleTeamIds.Single()];
         for (int slot = 0; slot < team.EnemySlots.Count; slot++)
         {
-            var sprite = team.EnemySlots[slot].EnemySprite;
+            // The frozen first-mandatory profile binds the declared ABC bitmap to every enemy slot;
+            // numeric-empty slots are not part of this chain and never reach it half-bound.
+            var sprite = team.EnemySlots[slot].EnemySprite
+                ?? throw new InvalidDataException(native.VisualUri + $": enemy slot {slot} must bind the declared ABC bitmap; empty slots are not part of the frozen first-mandatory profile");
             Require(sprite.SpriteId == native.ImageEnemyId,
                 native.VisualUri + $": enemy slot {slot} sprite must be the declared ABC bitmap " + native.ImageEnemyId);
             string sourceIdentity = sprite.Source.TryGetValue("identity", out var value) && value.VariantType == Variant.Type.String ? value.AsString() : "";

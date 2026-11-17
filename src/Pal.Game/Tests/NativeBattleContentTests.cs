@@ -737,6 +737,128 @@ public class NativeBattleContentTests
     }
 
     [TestCase]
+    public void EmptyEnemySlotsRoundtripThroughNativeWriteSaveLoadAndCreateCore()
+    {
+        // #141 (T13c): PAL_StartBattle's zero source row keeps a real runtime slot (battle.c:1617-1717).
+        // The native transport carries the typed flag symmetrically; first/middle/last empty slots
+        // keep slot order while loaded neighbours keep their identity, HP and rewards.
+        var data = Data();
+        ClassicBattleEnemy Empty() => new(0, 0, 0, 0, 0, 0, 0) { Statuses = new int[9], Poisons = [0], IsEmpty = true };
+        var content = new TriggerBattleContent([data.InitialRole], [data.Player],
+            new Dictionary<int, ClassicBattleGrowthData> { [data.Player.RoleId] = data.Growth },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> {
+                [18] = [Empty(), data.Teams[18] with { Id = 2, Hp = 44 }, Empty(), data.Teams[18] with { Id = 4, Hp = 45 }, Empty()] });
+        InvalidDataException? rejected = null;
+        PalBattleContent? native = null;
+        try { native = NativeBattleContent.Write(content); }
+        catch (InvalidDataException error) { rejected = error; }
+        if (native is null)
+            throw new InvalidDataException("T13c native battle content must round-trip #140 empty enemy slots instead of rejecting them: " + rejected!.Message, rejected);
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/EmptySlots.tres";
+            AssertThat(ResourceSaver.Save(native, uri)).IsEqual(Error.Ok);
+            var loaded = NativeBattleContent.LoadChecked(uri);
+            var team = loaded.Content.EnemyTeams[18];
+            AssertThat(team.Select(enemy => enemy.IsEmpty).ToArray()).IsEqual(new[] { true, false, true, false, true });
+            AssertThat(team.Select(enemy => enemy.Id).ToArray()).IsEqual(new[] { 0, 2, 0, 4, 0 });
+            AssertThat(team.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 44, 0, 45, 0 });
+            // The flag survives transport: no loaded enemy turns empty and no empty slot degrades to a bad id.
+            AssertThat(NativeBattleContent.CreateCore(native).EnemyTeams[18].Select(enemy => (enemy.Id, enemy.IsEmpty)).ToArray())
+                .IsEqual(new[] { (0, true), (2, false), (0, true), (4, false), (0, true) });
+            AssertThat(NativeBattleContent.LoadChecked(uri).Content.EnemyTeams[18].Select(enemy => enemy.IsEmpty).ToArray())
+                .IsEqual(new[] { true, false, true, false, true });
+            // The typed export itself is symmetric: the flag neither drops out of the saved resource
+            // nor turns a loaded neighbour empty.
+            var saved = ResourceLoader.Load<PalBattleContent>(uri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+            AssertThat(saved.Teams[0].Enemies.Select(enemy => enemy.IsEmpty).ToArray()).IsEqual(new[] { true, false, true, false, true });
+            AssertThat(saved.Teams[0].Enemies[1].Id).IsEqual(2);
+            AssertThat(saved.Teams[0].Enemies[3].Hp).IsEqual(45);
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
+    [TestCase]
+    public void ProjectionEmptyZeroRowsTransportMixedRuntimeSlots()
+    {
+        // #141 (T13c): empty-0 receipt rows ride the native seven-word transport and bind the
+        // numeric mixed runtime slots in order; loaded battle ids stay runtime slot + 1 (#210/#140).
+        using var native = NativeBattleContent.Write(MixedEmptyContent(), MixedEmptySource());
+        var checkedResult = NativeBattleContent.CreateChecked(native, "empty-zero-projection.tres");
+        var slots = checkedResult.ProjectedSource!.EnemySlots;
+        AssertThat(string.Join("|", slots.Select(x => $"{x.TeamId},{x.SourceSlot},{x.ObjectId},{x.Disposition},{x.EnemyId},{x.CompactSlot},{x.BattleId}")))
+            .IsEqual("65535,0,0,empty-0,,,|65535,1,97,loaded,0,1,2|65535,2,0,empty-0,,,|65535,3,97,loaded,0,3,4|65535,4,0,empty-0,,,");
+        AssertThat(checkedResult.Content.EnemyTeams[65535].Select(enemy => (enemy.Id, enemy.IsEmpty)).ToArray())
+            .IsEqual(new[] { (0, true), (2, false), (0, true), (4, false), (0, true) });
+        string root = "res://Tests/RuntimeBattleContent/" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(ProjectSettings.GlobalizePath(root));
+        try
+        {
+            string uri = root + "/EmptyZeroProjection.tres";
+            AssertThat(ResourceSaver.Save(native, uri)).IsEqual(Error.Ok);
+            AssertThat(NativeBattleContent.LoadChecked(uri).ProjectedSource!.EnemySlots.Select(row => row.Disposition).ToArray())
+                .IsEqual(new[] { "empty-0", "loaded", "empty-0", "loaded", "empty-0" });
+            AssertThat(NativeBattleContent.Load(uri).EnemyTeams[65535].Select(enemy => enemy.IsEmpty).ToArray())
+                .IsEqual(new[] { true, false, true, false, true });
+        }
+        finally { Directory.Delete(ProjectSettings.GlobalizePath(root), true); }
+    }
+
+    [TestCase("row-loaded-where-empty")]
+    [TestCase("row-empty-where-loaded")]
+    [TestCase("empty-object-id")]
+    [TestCase("empty-extra-enemy")]
+    [TestCase("loaded-battle-mismatch")]
+    [TestCase("content-dense")]
+    public void ProjectionEmptyZeroRowsRejectMisalignedOrMalformedRows(string defect)
+    {
+        // #141: the two empty kinds never merge or swap slots: structural row spelling and the
+        // per-slot numeric binding are both rejected with the EnemySlots diagnostics.
+        using var native = NativeBattleContent.Write(MixedEmptyContent(), MixedEmptySource());
+        switch (defect)
+        {
+            case "row-loaded-where-empty":
+                native.ProjectionEnemySlots[2] = 97; native.ProjectionEnemySlots[3] = 0;
+                native.ProjectionEnemySlots[4] = 0; native.ProjectionEnemySlots[5] = 1; native.ProjectionEnemySlots[6] = 1;
+                break;
+            case "row-empty-where-loaded":
+                native.ProjectionEnemySlots[9] = 0; native.ProjectionEnemySlots[10] = -1;
+                native.ProjectionEnemySlots[11] = -1; native.ProjectionEnemySlots[12] = -1; native.ProjectionEnemySlots[13] = 2;
+                break;
+            case "empty-object-id":
+                native.ProjectionEnemySlots[16] = 7;
+                break;
+            case "empty-extra-enemy":
+                native.ProjectionEnemySlots[3] = 0;
+                break;
+            case "loaded-battle-mismatch":
+                native.ProjectionEnemySlots[26] = 5;
+                break;
+            case "content-dense":
+                native.Teams[0].Enemies = [native.Teams[0].Enemies[1], native.Teams[0].Enemies[3]];
+                break;
+            default: throw new ArgumentException(defect);
+        }
+        AssertProjectionRejected(native, "EnemySlots");
+    }
+
+    private static TriggerBattleContent MixedEmptyContent()
+    {
+        var data = Data();
+        ClassicBattleEnemy Empty() => new(0, 0, 0, 0, 0, 0, 0) { Statuses = new int[9], Poisons = [0], IsEmpty = true };
+        return new TriggerBattleContent([data.InitialRole with { RoleId = 4 }], [data.Player with { RoleId = 4 }],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = data.Growth },
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> {
+                [65535] = [Empty(), data.Teams[18] with { Id = 2 }, Empty(), data.Teams[18] with { Id = 4 }, Empty()] });
+    }
+
+    private static BattleProjectionSourceInfo MixedEmptySource() => ProjectionSource(ProjectionInputs(), [4], [65535], [
+        new(65535, 0, 0, "empty-0"), new(65535, 1, 97, "loaded", 0, 1, 2), new(65535, 2, 0, "empty-0"),
+        new(65535, 3, 97, "loaded", 0, 3, 4), new(65535, 4, 0, "empty-0")]);
+
+    [TestCase]
     public void ProjectionAcceptsFiveLoadedSlotsPerTeam()
     {
         // #210: projection slot rows migrate with the native chain to the 1..5 loaded domain;
@@ -1301,6 +1423,8 @@ public class NativeBattleContentTests
     [TestCase("enemies-overcapacity")]
     [TestCase("enemy-null")]
     [TestCase("enemy-statuses-null")]
+    [TestCase("enemy-empty-nonzero-hp")]
+    [TestCase("enemy-id-zero-dense")]
     [TestCase("enemy-attack")]
     [TestCase("enemy-hp")]
     [TestCase("grid-row-count")]
@@ -1354,6 +1478,8 @@ public class NativeBattleContentTests
             case "enemies-overcapacity": native.Teams[0].Enemies = [native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0], native.Teams[0].Enemies[0]]; break;
             case "enemy-null": native.Teams[0].Enemies = [null!]; break;
             case "enemy-statuses-null": native.Teams[0].Enemies[0].Statuses = null!; break;
+            case "enemy-empty-nonzero-hp": native.Teams[0].Enemies[0].IsEmpty = true; break;
+            case "enemy-id-zero-dense": native.Teams[0].Enemies[0].Id = 0; break;
             case "enemy-attack": native.Teams[0].Enemies[0].Attack = 32768; break;
             case "enemy-hp": native.Teams[0].Enemies[0].Hp = 0; break;
             case "grid-row-count": native.RoleEquipment = Grid(5); break;

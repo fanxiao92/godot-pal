@@ -64,7 +64,7 @@ public static class NativeBattleVisualProfile
             }
             Require(native.Teams is not null && native.Teams.All(x => x is not null), "visual Teams contains null");
             var teams = new Dictionary<int, PalBattleVisualTeam>();
-            var teamSlots = new Dictionary<int, (int TargetId, Vector2I EnemyPosition)[]>();
+            var teamSlots = new Dictionary<int, (int TargetId, Vector2I EnemyPosition, bool IsEmpty)[]>();
             foreach (var team in native.Teams!)
             {
                 Require(teams.TryAdd(team.TeamId, team), "duplicate visual TeamId");
@@ -82,18 +82,30 @@ public static class NativeBattleVisualProfile
                 Require(team.IdleFrames == -1 && team.IdleAnimSpeed == -1 && team.MagicFrames == -1
                     && team.AttackFrames == -1 && team.ActWaitFrames == -1,
                     teamPath + ": legacy team frame metadata cannot be mixed with EnemySlots; prepare per-slot metadata explicitly");
-                var checkedSlots = new (int TargetId, Vector2I EnemyPosition)[slots.Length];
+                var checkedSlots = new (int TargetId, Vector2I EnemyPosition, bool IsEmpty)[slots.Length];
                 for (int slot = 0; slot < slots.Length; slot++)
                 {
                     Require(slots[slot].TargetId == enemies[slot].Id,
                         teamPath + ".EnemySlots[" + slot + "]: visual EnemySlots TargetId must match the story enemy slot Id (not sprite ID)");
                     Position(slots[slot].EnemyPosition);
-                    Require(!string.IsNullOrWhiteSpace(slots[slot].EnemySpriteUri),
-                        teamPath + ".EnemySlots[" + slot + "]: EnemySpriteUri is required");
-                    Require(slots[slot].IdleFrames is > 0 and <= ushort.MaxValue && Word(slots[slot].IdleAnimSpeed)
-                        && Word(slots[slot].MagicFrames) && Word(slots[slot].AttackFrames) && Word(slots[slot].ActWaitFrames),
-                        teamPath + ".EnemySlots[" + slot + "]: invalid or missing enemy frame metadata WORDs");
-                    checkedSlots[slot] = (slots[slot].TargetId, slots[slot].EnemyPosition);
+                    if (enemies[slot].IsEmpty)
+                    {
+                        // #141: the numeric empty runtime slot keeps its overlay binding (TargetId 0,
+                        // authored position, slot order) but never carries sprite or frame metadata;
+                        // emptiness comes from the numeric state, never inferred from a missing sprite.
+                        Require(slots[slot].EnemySpriteUri == "" && slots[slot].IdleFrames == -1 && slots[slot].IdleAnimSpeed == -1
+                            && slots[slot].MagicFrames == -1 && slots[slot].AttackFrames == -1 && slots[slot].ActWaitFrames == -1,
+                            teamPath + ".EnemySlots[" + slot + "]: an empty enemy slot must not declare sprite or frame metadata");
+                    }
+                    else
+                    {
+                        Require(!string.IsNullOrWhiteSpace(slots[slot].EnemySpriteUri),
+                            teamPath + ".EnemySlots[" + slot + "]: EnemySpriteUri is required");
+                        Require(slots[slot].IdleFrames is > 0 and <= ushort.MaxValue && Word(slots[slot].IdleAnimSpeed)
+                            && Word(slots[slot].MagicFrames) && Word(slots[slot].AttackFrames) && Word(slots[slot].ActWaitFrames),
+                            teamPath + ".EnemySlots[" + slot + "]: invalid or missing enemy frame metadata WORDs");
+                    }
+                    checkedSlots[slot] = (slots[slot].TargetId, slots[slot].EnemyPosition, enemies[slot].IsEmpty);
                 }
                 teamSlots.Add(team.TeamId, checkedSlots);
             }
@@ -105,7 +117,7 @@ public static class NativeBattleVisualProfile
                 .Concat(declared.Where(x => x!.AttackEffectSpriteUri != "").Select(x => x!.AttackEffectSpriteUri))
                 .Concat(new[] { native.PaletteUri })
                 .Concat(native.NumberSpriteUri != "" ? new[] { native.NumberSpriteUri } : Array.Empty<string>())
-                .Concat(teams.Values.SelectMany(x => new[] { x.BackgroundUri }.Concat(x.EnemySlots.Select(slot => slot.EnemySpriteUri))))
+                .Concat(teams.Values.SelectMany(x => new[] { x.BackgroundUri }.Concat(x.EnemySlots.Select(slot => slot.EnemySpriteUri).Where(uri => uri != ""))))
                 .Concat(Dependencies(uri)).ToArray();
             Require(!hashes.ContainsKey(uri), "visual root cannot hash itself");
             var dependencies = ContentDependencies(seeds, hashes);
@@ -158,6 +170,9 @@ public static class NativeBattleVisualProfile
                 {
                     try
                     {
+                        if (slot.IsEmpty)
+                            return new CheckedBattleVisualEnemySlot(slot.TargetId, slot.EnemyPosition, null, 0, 0, 0, 0, 0)
+                                { IsEmpty = true };
                         var metadata = team.EnemySlots[ordinal];
                         var sprite = ReadAndValidateSprite(metadata.EnemySpriteUri);
                         Require(Enumerable.Range(0, metadata.IdleFrames + metadata.MagicFrames + metadata.AttackFrames)
@@ -499,6 +514,13 @@ public sealed class CheckedBattleVisualTeam
     }
 }
 
-/// <summary>One ordinal binding. Prepared sprite data may be shared; live presentation state may not.</summary>
-public sealed record CheckedBattleVisualEnemySlot(int TargetId, Vector2I EnemyPosition, PalSprite EnemySprite,
-    int IdleFrames, int IdleAnimSpeed, int MagicFrames, int AttackFrames, int ActWaitFrames);
+/// <summary>One ordinal binding. Prepared sprite data may be shared; live presentation state may not.
+/// A numeric-empty runtime slot keeps its overlay (TargetId 0, authored position, slot order)
+/// with no sprite or frame metadata and never draws, acts or targets.</summary>
+public sealed record CheckedBattleVisualEnemySlot(int TargetId, Vector2I EnemyPosition, PalSprite? EnemySprite,
+    int IdleFrames, int IdleAnimSpeed, int MagicFrames, int AttackFrames, int ActWaitFrames)
+{
+    /// <summary>True only for a numeric-empty runtime slot (wObjectID 0); a killed real enemy
+    /// keeps its slot identity and stays IsEmpty=false, so the two zero-HP kinds never merge.</summary>
+    public bool IsEmpty { get; init; }
+}

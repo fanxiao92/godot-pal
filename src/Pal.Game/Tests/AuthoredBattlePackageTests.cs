@@ -104,7 +104,7 @@ public class AuthoredBattlePackageTests
                 AssertThat(visual.Players[0].PlayerSprite.Frames.Count).IsEqual(12);
                 AssertThat(visual.Players[0].PlayerSprite.Frames[0].Indices[10 * 16 + 6]).IsEqual((byte)4);
                 AssertThat(visual.Players[0].PlayerSprite.Frames[0].Texture.GetImage().GetPixel(6, 10)).IsEqual(new Color(64f / 255, 224f / 255, 240f / 255));
-                AssertThat(visual.Teams[18].EnemySlots[0].EnemySprite.Frames[0].Indices[10 * 24 + 6]).IsEqual((byte)6);
+                AssertThat(visual.Teams[18].EnemySlots[0].EnemySprite!.Frames[0].Indices[10 * 24 + 6]).IsEqual((byte)6);
                 AssertThat(visual.Teams[18].Background.PaletteIndices[0]).IsEqual((byte)1);
                 AssertThat(visual.Teams[18].Background.PaletteIndices[120 * 320 + 32]).IsEqual((byte)3);
                 AssertThat(visual.Teams[18].EnemySlots[0].ActWaitFrames).IsEqual(0);

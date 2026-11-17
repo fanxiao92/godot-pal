@@ -955,7 +955,7 @@ public class NativeBattleVisualProfileTests
         AssertThat(visual.Players[0].PlayerSprite.SpriteId).IsEqual(41);
         var slot = visual.Teams[18].EnemySlots.Single();
         AssertThat(slot.TargetId).IsEqual(7);
-        AssertThat(slot.EnemySprite.SpriteId).IsEqual(97);
+        AssertThat(slot.EnemySprite!.SpriteId).IsEqual(97);
         AssertThat(visual.Players[0].PlayerPosition).IsEqual(new Vector2I(240, 170));
         AssertThat(slot.EnemyPosition).IsEqual(new Vector2I(100, 120));
         AssertThat(slot.ActWaitFrames).IsEqual(0);
@@ -974,6 +974,66 @@ public class NativeBattleVisualProfileTests
         // A mutation of this isolated native instance must not poison a later load of the same URI.
         visual.Players[0].PlayerSprite.Frames[0].Indices[0] = 123;
         AssertThat(f.Load().Players[0].PlayerSprite.Frames[0].Indices[0]).IsEqual((byte)4);
+    }
+
+    [TestCase]
+    public void EmptyNumericSlotsKeepOverlayOrderAndSkipSpriteDependencies()
+    {
+        // #141 (T13c): the numeric empty runtime slot keeps its overlay binding (TargetId 0,
+        // authored position, slot order) with no sprite or frame dependency; loaded neighbours
+        // stay strictly validated and share the one authored sprite leaf.
+        using var f = new NativeBattleVisualProfileFixture(emptySlots: true);
+        var visual = f.Load();
+        var slots = visual.Teams[18].EnemySlots;
+        AssertThat(slots.Select(slot => slot.TargetId).ToArray()).IsEqual(new[] { 0, 7, 7 });
+        AssertThat(slots.Select(slot => slot.IsEmpty).ToArray()).IsEqual(new[] { true, false, false });
+        AssertThat(slots.Select(slot => slot.EnemyPosition).ToArray()).IsEqual(
+            new[] { new Vector2I(72, 136), new Vector2I(100, 120), new Vector2I(128, 104) });
+        AssertThat(slots[0].EnemySprite).IsNull();
+        AssertThat((slots[0].IdleFrames, slots[0].IdleAnimSpeed, slots[0].MagicFrames, slots[0].AttackFrames, slots[0].ActWaitFrames))
+            .IsEqual((0, 0, 0, 0, 0));
+        AssertThat(slots[1].EnemySprite!.SpriteId).IsEqual(97);
+        AssertThat(slots[2].EnemySprite!.SpriteId).IsEqual(97);
+        AssertThat((slots[1].IdleFrames, slots[1].IdleAnimSpeed, slots[1].MagicFrames, slots[1].AttackFrames, slots[1].ActWaitFrames))
+            .IsEqual((1, 0, 1, 1, 0));
+        AssertThat(visual.ResourceSha256.Keys.Count(path => path.EndsWith("/Enemy.tres", StringComparison.Ordinal))).IsEqual(1);
+        AssertThat(visual.ResourceSha256.Keys.Order().SequenceEqual(f.ExpectedPaths.Order())).IsTrue();
+        AssertThat(((IList<CheckedBattleVisualEnemySlot>)slots).IsReadOnly).IsTrue();
+    }
+
+    [TestCase("sprite-on-empty")]
+    [TestCase("frames-on-empty")]
+    [TestCase("target-mismatch-empty")]
+    [TestCase("loaded-missing-sprite")]
+    public void EmptySlotVisualOverlaysRejectWrongBindings(string fault)
+    {
+        // #141: emptiness comes from the numeric state, never inferred from a missing sprite; a
+        // sprite/frame declaration on an empty slot, a nonzero target or a loaded slot without a
+        // sprite stays rejected with the exact overlay diagnostics.
+        using var f = new NativeBattleVisualProfileFixture(emptySlots: true);
+        switch (fault)
+        {
+            case "sprite-on-empty":
+                f.Team.EnemySlots[0].EnemySpriteUri = f.Root + "/Enemy.tres";
+                break;
+            case "frames-on-empty":
+                f.Team.EnemySlots[0].IdleFrames = 1;
+                break;
+            case "target-mismatch-empty":
+                f.Team.EnemySlots[0].TargetId = 7;
+                break;
+            default:
+                f.Team.EnemySlots[1].EnemySpriteUri = "";
+                break;
+        }
+        f.RefreshHashes(); f.Save();
+        string failure = Failure(() => f.Load());
+        AssertThat(failure.Contains(fault switch
+        {
+            "sprite-on-empty" or "frames-on-empty" => "an empty enemy slot must not declare sprite or frame metadata",
+            "target-mismatch-empty" => "TargetId must match the story enemy slot Id",
+            _ => "EnemySpriteUri is required",
+        }, StringComparison.Ordinal)).IsTrue();
     }
 
     private static void NativeSlotFrameMetadataNeverFallsBackToTeam()
@@ -1167,7 +1227,7 @@ public class NativeBattleVisualProfileTests
         AssertThat(ReferenceEquals(team.EnemySlots[0], team.EnemySlots[1])).IsFalse();
         foreach (var slot in team.EnemySlots)
         {
-            AssertThat(slot.EnemySprite.SpriteId).IsEqual(97);
+            AssertThat(slot.EnemySprite!.SpriteId).IsEqual(97);
             AssertThat((slot.IdleFrames, slot.IdleAnimSpeed, slot.MagicFrames, slot.AttackFrames, slot.ActWaitFrames))
                 .IsEqual((1, 0, 1, 1, 0));
         }
@@ -1176,9 +1236,9 @@ public class NativeBattleVisualProfileTests
         AssertThat(team.EnemySlots[1].EnemyPosition).IsEqual(new Vector2I(128, 104));
         AssertThat(team.EnemySlots[1].IdleFrames).IsEqual(1);
         AssertThat(team.EnemySlots[1].IdleAnimSpeed).IsEqual(0);
-        team.EnemySlots[1].EnemySprite.Frames[0].Indices[0] = 123;
+        team.EnemySlots[1].EnemySprite!.Frames[0].Indices[0] = 123;
         var fresh = f.Load();
-        AssertThat(fresh.Teams[18].EnemySlots.All(slot => slot.EnemySprite.Frames[0].Indices[0] == 4)).IsTrue();
+        AssertThat(fresh.Teams[18].EnemySlots.All(slot => slot.EnemySprite!.Frames[0].Indices[0] == 4)).IsTrue();
     }
 
     [TestCase]

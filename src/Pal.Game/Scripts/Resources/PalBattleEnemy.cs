@@ -23,4 +23,8 @@ public partial class PalBattleEnemy : Resource
     [Export] public int Cash { get; set; } = 0;
     [Export] public int[] Statuses { get; set; } = [];
     [Export] public int[] Poisons { get; set; } = [];
+    /// <summary>#141 (battle.c:1617-1717): PAL_StartBattle's zero source row keeps a real runtime
+    /// slot whose wObjectID stays 0. Default false preserves every committed dense resource;
+    /// only an empty slot admits the canonical all-zero spelling (validated with the Core contract).</summary>
+    [Export] public bool IsEmpty { get; set; } = false;
 }

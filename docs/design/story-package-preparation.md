@@ -34,9 +34,12 @@ wrapper 必需且仅一次 `-InputPath/-OutputPath`，可选 `-GodotPath/-Timeou
 ## #136：统一逐槽 author 与原生输出
 
 Prepare 只接受下述当前 schema：team 恰好声明 `teamId/backgroundUri/enemies`，单敌也是一槽。
-每个 `enemies` 项必须完整声明 `targetId/enemyPosition/enemySpriteUri` 及五个帧字段，按数组 ordinal
-与数值战斗敌位一一对应；重复 TargetId 不合并。即使槽声明齐全，team 混写任何旧身份、位置、URI、
-帧字段仍拒绝；旧 scalar-only、缺字段、未知/重复字段也拒绝，不从 team、槽0或引用表推测补值。
+每个 `enemies` 项必须声明 `targetId/enemyPosition`；展示字段 `enemySpriteUri` 与五个帧字段是
+一个全有或全无的组（#141），按数组 ordinal 与数值战斗敌位一一对应；重复 TargetId 不合并。
+数值空敌位（#140 typed isEmpty，TargetId 0）的项只声明 `targetId/enemyPosition`，不写精灵/帧字段；
+其余项必须完整六字段。即使槽声明齐全，team 混写任何旧身份、位置、URI、
+帧字段仍拒绝；旧 scalar-only、缺字段、未知/重复字段也拒绝，不从 team、槽0或引用表推测补值；
+空槽绑定错 TargetId 或携带精灵/帧由正式 loader 在 staging/final 严格回读时拒绝。
 `idleFrames` 为1..65535，其余四个帧字段为0..65535；速度0与动作等待0原样保留，不夹成1。
 输入字段错误定位到 story-package.json、team/slot ordinal 和字段；依赖/hash/实际可寻址帧仍经正式 loader 核对。
 

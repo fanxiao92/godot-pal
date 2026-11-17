@@ -54,11 +54,13 @@ public static class NativeBattleContent
                 var enemies = Items(team.Enemies, "Team.Enemies").Select(ReadEnemy).ToArray();
                 if (!teams.TryAdd(team.TeamId, enemies))
                     throw new InvalidDataException("duplicate TeamId");
-                // Non-projected native reads keep an explicit outer loaded-slot boundary aligned
-                // with Core's reference capacity (palcommon.h MAX_ENEMIES_IN_TEAM = 5): 0 and >5
-                // stay rejected before any RNG or gameplay side effects, with teamId diagnostics.
+                // Native reads keep an explicit outer loaded-slot boundary aligned with Core's
+                // reference capacity (palcommon.h MAX_ENEMIES_IN_TEAM = 5): 0 and >5 stay rejected
+                // before any RNG or gameplay side effects, with teamId diagnostics. #141: the count
+                // covers mixed runtime slots; #140's canonical empty spelling is validated with the
+                // numeric contract, and at least one non-empty enemy is enforced at battle start.
                 if (enemies.Length is < 1 or > 5)
-                    throw new InvalidDataException($"Team {team.TeamId} requires one to five loaded enemy slots");
+                    throw new InvalidDataException($"Team {team.TeamId} requires one to five runtime enemy slots");
             }
             var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
                 Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray());
@@ -75,19 +77,15 @@ public static class NativeBattleContent
     {
         ModernBattleContent.Validate(content);
         projectedSource?.ValidateFor(content);
-        // #140: empty slots stay numeric/Core-only until the native chain migrates (T13c).
-        // PalBattleEnemy has no empty flag, so serializing one here would silently drop the
-        // field and publish a dense look-alike; reject it with the team and slot instead.
-        foreach (var team in content.EnemyTeams)
-            for (int slot = 0; slot < team.Value.Count; slot++)
-                if (team.Value[slot].IsEmpty)
-                    throw new InvalidDataException($"Team {team.Key} enemy slot {slot} is an empty enemy slot; native battle content transports only loaded enemy slots");
+        // #141 (T13c): the native transport carries #140's typed empty runtime slots symmetrically
+        // (PalBattleEnemy.IsEmpty); the old T13b boundary that rejected them before this chain
+        // migrated is intentionally removed, never silently dropping the flag.
         // Without a projection receipt this is the non-projected native/Prepare chain: it keeps
-        // the same explicit outer 1..5 loaded-slot boundary the projection slot rows enforce.
+        // the same explicit outer 1..5 runtime-slot boundary the projection slot rows enforce.
         if (projectedSource is null)
             foreach (var team in content.EnemyTeams)
                 if (team.Value.Count is < 1 or > 5)
-                    throw new InvalidDataException($"Team {team.Key} requires one to five loaded enemy slots");
+                    throw new InvalidDataException($"Team {team.Key} requires one to five runtime enemy slots");
         return new()
         {
             FormatVersion = 1,
@@ -106,7 +104,7 @@ public static class NativeBattleContent
             ProjectionTeamIds = projectedSource?.TeamIds.ToArray() ?? [],
             ProjectionEnemySlots = projectedSource?.EnemySlots.SelectMany(row => new[] { row.TeamId, row.SourceSlot,
                 row.ObjectId, row.EnemyId ?? -1, row.CompactSlot ?? -1, row.BattleId ?? -1,
-                row.Disposition == "loaded" ? 1 : 0 }).ToArray() ?? [],
+                row.Disposition == "loaded" ? 1 : row.Disposition == "empty-0" ? 2 : 0 }).ToArray() ?? [],
             Roles = content.InitialRoles.Values.Select(role => { PalBattleRole native = NativeBattleRoleAdapter.Write(role);
                 native.PanelDeclared = content.PanelDeclaredRoles.Contains(role.RoleId); return native; }).ToArray(),
             Players = content.Players.Select(WritePlayer).ToArray(),
@@ -144,9 +142,9 @@ public static class NativeBattleContent
         var rows = new List<BattleProjectionEnemySlot>();
         for (int i = 0; i < slots.Length; i += 7)
         {
-            if (slots[i + 6] is not 0 and not 1) throw new InvalidDataException("Projection.EnemySlots unknown disposition");
+            if (slots[i + 6] is not (0 or 1 or 2)) throw new InvalidDataException("Projection.EnemySlots unknown disposition");
             int? Optional(int value) => value == -1 ? null : value;
-            rows.Add(new(slots[i], slots[i + 1], slots[i + 2], slots[i + 6] == 1 ? "loaded" : "skip-FFFF",
+            rows.Add(new(slots[i], slots[i + 1], slots[i + 2], slots[i + 6] == 1 ? "loaded" : slots[i + 6] == 2 ? "empty-0" : "skip-FFFF",
                 Optional(slots[i + 3]), Optional(slots[i + 4]), Optional(slots[i + 5])));
         }
         var source = new BattleProjectionSourceInfo(native.ProjectionFormatVersion, native.ProjectionKind, native.ProjectionSnapshotKind,
@@ -211,7 +209,8 @@ public static class NativeBattleContent
         Statuses = Copy(x.Statuses, "Enemy.Statuses"), Poisons = Copy(x.Poisons, "Enemy.Poisons"),
         TurnStartScript = x.TurnStartScript, ReadyScript = x.ReadyScript, BattleEndScript = x.BattleEndScript,
         MagicId = x.MagicId, DualMove = x.DualMove, AttackEquivItem = x.AttackEquivItem, AttackEquivItemRate = x.AttackEquivItemRate,
-        Experience = x.Experience, Cash = x.Cash
+        Experience = x.Experience, Cash = x.Cash,
+        IsEmpty = x.IsEmpty
     };
 
     private static PalBattleEnemy WriteEnemy(ClassicBattleEnemy x) => new()
@@ -220,7 +219,8 @@ public static class NativeBattleContent
         Statuses = x.Statuses.ToArray(), Poisons = x.Poisons.ToArray(),
         TurnStartScript = x.TurnStartScript, ReadyScript = x.ReadyScript, BattleEndScript = x.BattleEndScript,
         MagicId = x.MagicId, DualMove = x.DualMove, AttackEquivItem = x.AttackEquivItem, AttackEquivItemRate = x.AttackEquivItemRate,
-        Experience = x.Experience, Cash = x.Cash
+        Experience = x.Experience, Cash = x.Cash,
+        IsEmpty = x.IsEmpty
     };
 }
 
@@ -300,27 +300,38 @@ public sealed class BattleProjectionSourceInfo
         if (EnemySlots.Count != (long)TeamIds.Count * 5) throw Error("EnemySlots", "requires exactly five rows per team");
         for (int t = 0; t < TeamIds.Count; t++)
         {
-            int compact = 0;
+            // #141: a runtime slot is occupied by every non-skip row. battle.c:1617-1717 keeps the
+            // zero source row as a real runtime slot (wObjectID 0, no enemy-table identity), while
+            // 0xFFFF never reaches i; loaded rows keep battleId = runtime slot + 1 (#210/#140).
+            int runtime = 0, loaded = 0;
             for (int slot = 0; slot < 5; slot++)
             {
                 var row = EnemySlots[t * 5 + slot];
                 if (row.TeamId != TeamIds[t] || row.SourceSlot != slot)
                     throw Error("EnemySlots", "team selection/sourceSlot order or identity mismatch");
-                if (row.Disposition == "skip-FFFF")
+                switch (row.Disposition)
                 {
-                    if (row.ObjectId != 65535 || row.EnemyId.HasValue || row.CompactSlot.HasValue || row.BattleId.HasValue)
-                        throw Error("EnemySlots", "skip-FFFF requires objectId65535 and absent loaded fields");
+                    case "skip-FFFF":
+                        if (row.ObjectId != 65535 || row.EnemyId.HasValue || row.CompactSlot.HasValue || row.BattleId.HasValue)
+                            throw Error("EnemySlots", "skip-FFFF requires objectId65535 and absent loaded fields");
+                        break;
+                    case "empty-0":
+                        if (row.ObjectId != 0 || row.EnemyId.HasValue || row.CompactSlot.HasValue || row.BattleId.HasValue)
+                            throw Error("EnemySlots", "empty-0 requires objectId0 and absent loaded fields");
+                        runtime++;
+                        break;
+                    case "loaded":
+                        if (row.ObjectId is < 1 or > 65534 || row.EnemyId is not (>= 0 and <= 65535)
+                            || row.CompactSlot != runtime || row.BattleId != runtime + 1)
+                            throw Error("EnemySlots", "loaded object/enemy/compactSlot/battleId mismatch");
+                        runtime++;
+                        loaded++;
+                        break;
+                    default:
+                        throw Error("EnemySlots", "unknown disposition");
                 }
-                else if (row.Disposition == "loaded")
-                {
-                    if (row.ObjectId is < 1 or > 65534 || row.EnemyId is not (>= 0 and <= 65535)
-                        || row.CompactSlot != compact || row.BattleId != compact + 1)
-                        throw Error("EnemySlots", "loaded object/enemy/compactSlot/battleId mismatch");
-                    compact++;
-                }
-                else throw Error("EnemySlots", "unknown disposition");
             }
-            if (compact is < 1 or > 5) throw Error("EnemySlots", "requires 1..5 loaded slots per team");
+            if (loaded is < 1 or > 5) throw Error("EnemySlots", "requires 1..5 loaded slots per team");
         }
     }
 
@@ -332,9 +343,23 @@ public sealed class BattleProjectionSourceInfo
         if (!TeamIds.SequenceEqual(content.EnemyTeams.Keys)) throw Error("TeamIds", "native team order or identity mismatch");
         for (int t = 0; t < TeamIds.Count; t++)
         {
-            var loaded = EnemySlots.Skip(t * 5).Take(5).Where(row => row.Disposition == "loaded").ToArray();
-            if (!loaded.Select(row => row.BattleId!.Value).SequenceEqual(content.EnemyTeams[TeamIds[t]].Select(enemy => enemy.Id)))
+            // #141: every non-skip row binds one numeric runtime slot in order: an empty-0 row
+            // binds the numeric empty slot (IsEmpty, canonical id 0) and a loaded row binds the
+            // non-empty enemy's battle id, so the two empty kinds never merge or swap slots.
+            var bound = EnemySlots.Skip(t * 5).Take(5).Where(row => row.Disposition != "skip-FFFF").ToArray();
+            var enemies = content.EnemyTeams[TeamIds[t]];
+            if (bound.Length != enemies.Count)
                 throw Error("EnemySlots", "native enemy IDs or slot count mismatch");
+            for (int slot = 0; slot < bound.Length; slot++)
+            {
+                if (bound[slot].Disposition == "empty-0")
+                {
+                    if (!enemies[slot].IsEmpty || enemies[slot].Id != 0)
+                        throw Error("EnemySlots", "empty-0 row must bind the numeric empty runtime slot");
+                }
+                else if (enemies[slot].IsEmpty || enemies[slot].Id != bound[slot].BattleId)
+                    throw Error("EnemySlots", "loaded row must bind the numeric enemy battle id");
+            }
             ModernBattleContent.ValidatePhysicalBattle(content, TeamIds[t]);
         }
     }

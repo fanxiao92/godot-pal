@@ -528,8 +528,8 @@ public partial class Main
             // UpdateFighters at13 followed by three TRUE tail frames.
             // ShowPlayerAttackAnim reads target height after windup, before its first TRUE approach delay.
             int target = storyRequest!.Lifecycle.Current.Combat.LastAction!.TargetIndex;
-            if (pose == 4) effectEnemyHeight = storyTeam!.EnemySlots[target].EnemySprite.Frames
-                .Single(f => f.Index == enemyIdle![target].Frame).Height;
+            if (pose == 4) effectEnemyHeight = storyTeam!.EnemySlots[target].EnemySprite!
+                .Frames.Single(f => f.Index == enemyIdle![target].Frame).Height;
             if (pose == 13) AdvanceStoryEnemies();
             AdvanceStoryEnemies();
         }

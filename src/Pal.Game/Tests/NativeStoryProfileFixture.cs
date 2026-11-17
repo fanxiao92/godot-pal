@@ -25,11 +25,14 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     public NativeStoryProfileFixture(bool party = false, bool hiddenCurrentGlyph = false, bool currentHookPositive = false,
         bool seedDyingGlyph = false, bool futureDyingWrite = false, bool secondOrderDyingWrite = false,
         bool randomDyingBranch = false, bool titleDyingGlyph = false, bool forceCurrentFriendDeath = false,
-        bool fiveEnemies = false)
+        bool fiveEnemies = false, bool emptyEnemies = false)
     {
         if (fiveEnemies && (hiddenCurrentGlyph || currentHookPositive || futureDyingWrite || secondOrderDyingWrite
             || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
             throw new ArgumentException("The five-enemy-slot variant requires the plain story graph.", nameof(fiveEnemies));
+        if (emptyEnemies && (party || fiveEnemies || hiddenCurrentGlyph || currentHookPositive || futureDyingWrite || secondOrderDyingWrite
+            || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
+            throw new ArgumentException("The empty-slot variant requires the plain single-member story graph.", nameof(emptyEnemies));
         if (forceCurrentFriendDeath && (!currentHookPositive || !secondOrderDyingWrite || randomDyingBranch || titleDyingGlyph))
             throw new ArgumentException("The controlled FriendDeath variant requires only the second-order current-hook graph.", nameof(forceCurrentFriendDeath));
         if (titleDyingGlyph && (!futureDyingWrite || randomDyingBranch || secondOrderDyingWrite))
@@ -95,6 +98,12 @@ internal sealed class NativeStoryProfileFixture : IDisposable
             // #210 five-slot authored team: repeated enemy definition 7 stays five
             // independent slots with per-slot HP, never merged by definition ID.
             Numeric.Teams[0].Enemies = [Enemy(43), Enemy(44), Enemy(45), Enemy(46), Enemy(47)];
+        }
+        if (emptyEnemies)
+        {
+            // #141 mixed runtime slots: PAL_StartBattle's zero row keeps a real empty slot
+            // (canonical id 0 / hp 0, #140) between two loaded id7 neighbours.
+            Numeric.Teams[0].Enemies = [EmptySlot(), Enemy(43), Enemy(44)];
         }
         Save(Numeric.Roles[0], "Role.tres");
         Numeric.Roles = [ResourceLoader.Load<PalBattleRole>(Root + "/Role.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep), .. Numeric.Roles[1..]];
@@ -208,6 +217,7 @@ internal sealed class NativeStoryProfileFixture : IDisposable
         Attack = attack, Defense = defense, Dexterity = 100, Equipment = new int[6], Statuses = new int[9], Poisons = [0] };
     private static PalBattleGrowth Growth(int roleId) => new() { RoleId = roleId, LevelUpExperience = Enumerable.Repeat(100, 100).ToArray(), LevelUpMagics = [] };
     private static PalBattleEnemy Enemy(int hp = 43) => new() { Id = 7, Hp = hp, PhysicalResistance = 1, Statuses = new int[9], Poisons = [0] };
+    private static PalBattleEnemy EmptySlot() => new() { Id = 0, Hp = 0, Statuses = new int[9], Poisons = [0], IsEmpty = true };
     private static PalBattleExperience Experience() => new() { Value = 7, Level = 3, Count = 55 };
 
     public void Dispose()

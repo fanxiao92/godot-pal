@@ -88,7 +88,7 @@ public partial class PrepareStoryPackage : Node
                     .Concat(player.AttackEffectSpriteUri != "" ? new[] { player.AttackEffectSpriteUri } : Array.Empty<string>()))
                 .Concat(new[] { visual.PaletteUri })
                 .Concat(visual.NumberSpriteUri != "" ? new[] { visual.NumberSpriteUri } : Array.Empty<string>())
-                .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri }.Concat(t.EnemySlots.Select(slot => slot.EnemySpriteUri)))).ToArray();
+                .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri }.Concat(t.EnemySlots.Select(slot => slot.EnemySpriteUri).Where(uri => uri != "")))).ToArray();
             foreach (string root in new[] { story.StaticResources, story.DialogueDirectory })
             {
                 string path = DataPath(root, directory: true);
@@ -289,14 +289,33 @@ public partial class PrepareStoryPackage : Node
                     {
                         try
                         {
-                            Properties(enemy, "targetId", "enemyPosition", "enemySpriteUri", "idleFrames", "idleAnimSpeed", "magicFrames", "attackFrames", "actWaitFrames");
-                            return new PalBattleVisualEnemySlot
+                            // #141: per-slot presentation is an all-or-none group. An empty entry
+                            // declares only targetId/enemyPosition and binds the numeric empty
+                            // runtime slot at strict load; a loaded slot still requires all six.
+                            PropertiesWithOptional(enemy,
+                                new[] { "enemySpriteUri", "idleFrames", "idleAnimSpeed", "magicFrames", "attackFrames", "actWaitFrames" },
+                                "targetId", "enemyPosition");
+                            bool presentation = enemy.TryGetProperty("enemySpriteUri", out _);
+                            Require(presentation == enemy.TryGetProperty("idleFrames", out _)
+                                && presentation == enemy.TryGetProperty("idleAnimSpeed", out _)
+                                && presentation == enemy.TryGetProperty("magicFrames", out _)
+                                && presentation == enemy.TryGetProperty("attackFrames", out _)
+                                && presentation == enemy.TryGetProperty("actWaitFrames", out _),
+                                "enemy presentation fields must be declared together");
+                            var binding = new PalBattleVisualEnemySlot
                             {
-                                TargetId = Int(enemy, "targetId"), EnemyPosition = Position(enemy, "enemyPosition"),
-                                EnemySpriteUri = Text(enemy, "enemySpriteUri"), IdleFrames = Word(enemy, "idleFrames", 1),
-                                IdleAnimSpeed = Word(enemy, "idleAnimSpeed"), MagicFrames = Word(enemy, "magicFrames"),
-                                AttackFrames = Word(enemy, "attackFrames"), ActWaitFrames = Word(enemy, "actWaitFrames")
+                                TargetId = Int(enemy, "targetId"), EnemyPosition = Position(enemy, "enemyPosition")
                             };
+                            if (presentation)
+                            {
+                                binding.EnemySpriteUri = Text(enemy, "enemySpriteUri");
+                                binding.IdleFrames = Word(enemy, "idleFrames", 1);
+                                binding.IdleAnimSpeed = Word(enemy, "idleAnimSpeed");
+                                binding.MagicFrames = Word(enemy, "magicFrames");
+                                binding.AttackFrames = Word(enemy, "attackFrames");
+                                binding.ActWaitFrames = Word(enemy, "actWaitFrames");
+                            }
+                            return binding;
                         }
                         catch (InvalidDataException error)
                         { throw new InvalidDataException("enemies[" + slotOrdinal + "]: " + error.Message, error); }

@@ -1,5 +1,19 @@
 # Native battle visual binding（#46）
 
+## #141：数值空敌位的逐槽视觉绑定（M6-A T13c）
+
+数值空敌位（#140 typed `IsEmpty`，canonical id 0）在同一逐槽数组中保留自己的 overlay 绑定：
+`TargetId` 必须等于该敌位 `Id`（即 0）、`EnemyPosition` 仍需显式 SHORT 坐标、槽序不变，但该槽
+不声明也不要求 `EnemySpriteUri` 与五个帧字段，不参与 sprite 依赖/hash 闭包，不创建纹理、不绘制、
+不进入 idle/动作状态与目标选择。空槽声明精灵或帧字段、或携带非零 TargetId 均拒绝；非空槽缺图
+仍按原规则拒绝——空性只来自数值状态，绝不从缺图反推。`CheckedBattleVisualEnemySlot.EnemySprite`
+因此可为空（`IsEmpty=true`），消费者（view/Main/冻结首战链）不得对空槽取纹理；
+`NativeFirstMandatoryBattleProfile` 的冻结 ABC 位图链对空槽显式拒绝，不接受半绑定。
+投影收据槽行新增 `empty-0` disposition（objectId 0、无 loaded 字、占运行时槽；loaded 行仍为
+compactSlot=运行时槽、battleId=运行时槽+1），并逐槽绑定数值空/实有敌，两类空值不互换槽位。
+native 运输层（`PalBattleEnemy.IsEmpty`）对称往返该标志，不再拒绝空槽；1..5 运行时槽边界与
+teamId 诊断保持，全空队在战斗开始前由 Core 拒绝。
+
 ## #136 / #204：checked 逐槽消费边界（中间实现叶）
 
 `CheckedBattleVisualTeam` 只暴露 `TeamId`、`EnemySlots`、`Background`。每个
