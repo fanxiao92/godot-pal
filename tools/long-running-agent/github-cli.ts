@@ -7,7 +7,7 @@ import { githubReader, stateDirectory } from './github.ts';
 import { GitHubHost, type CodingEvent, type GitHubStatus } from './github-host.ts';
 
 export const githubHelp = `GitHub-backed coding loop (human plans, fresh Pi sessions):
-  node tools/long-running-agent/cli.ts run --issue <parent-number-or-URL> [--commit]
+  node tools/long-running-agent/cli.ts run --issue <parent-number-or-URL> [--commit] [--auto-receipt]
   node tools/long-running-agent/cli.ts status --issue <parent-number-or-URL> [--json | --offline]
   node tools/long-running-agent/cli.ts preflight --issue <parent-number-or-URL>
 
@@ -16,6 +16,9 @@ preflight prints a read-only JSON readiness report from state+git only (writer l
 dependency proofs, per-problem repair rounds, current-fingerprint GREEN, blockers, tool whitelist);
 no model, GitHub reads, tests or state writes.
 --commit explicitly permits local per-ticket commits and continuation; never push/merge/close Issues.
+--auto-receipt (run only, off by default) additionally publishes each of this run's own leaf tickets:
+a short acceptance comment with the full local commit SHA and evidence directory, signed "LRA auto-receipt",
+then closes that issue. Never parent tickets, other tickets or body edits; failures warn and never roll back.
 Without --commit, a verified dirty candidate waits for your commit. Run the same command afterward.
 Stopped attempts require --resume; interrupted/unknown owners also require --confirm-quiescent.
 Optional: --cwd <checkout>, --state <directory>, --max-iterations <count>, --provider/--model,
@@ -57,13 +60,13 @@ export function formatStatus(status: GitHubStatus): string {
 export async function githubMain(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, strict: true, options: {
     issue: { type: 'string' }, cwd: { type: 'string' }, state: { type: 'string' }, commit: { type: 'boolean' },
-    resume: { type: 'boolean' }, 'confirm-quiescent': { type: 'boolean' }, offline: { type: 'boolean' }, json: { type: 'boolean' },
+    resume: { type: 'boolean' }, 'confirm-quiescent': { type: 'boolean' }, offline: { type: 'boolean' }, json: { type: 'boolean' }, 'auto-receipt': { type: 'boolean' },
     'max-iterations': { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, 'max-turns': { type: 'string' }, 'session-timeout-ms': { type: 'string' },
     'engine-checks': { type: 'boolean' }, 'godot-path': { type: 'string' }, 'fixed-package-directory': { type: 'string' }, 'extra-corrections': { type: 'string' },
   } });
   const command = positionals[0];
   if (positionals.length !== 1 || !['run', 'status', 'preflight'].includes(command)) throw new Error(githubHelp);
-  const allowed = command === 'status' ? ['issue', 'cwd', 'state', 'offline', 'json'] : command === 'preflight' ? ['issue', 'cwd', 'state', 'engine-checks', 'godot-path', 'fixed-package-directory'] : ['issue', 'cwd', 'state', 'commit', 'resume', 'confirm-quiescent', 'json', 'max-iterations', 'provider', 'model', 'max-turns', 'session-timeout-ms', 'engine-checks', 'godot-path', 'fixed-package-directory', 'extra-corrections'];
+  const allowed = command === 'status' ? ['issue', 'cwd', 'state', 'offline', 'json'] : command === 'preflight' ? ['issue', 'cwd', 'state', 'engine-checks', 'godot-path', 'fixed-package-directory'] : ['issue', 'cwd', 'state', 'commit', 'auto-receipt', 'resume', 'confirm-quiescent', 'json', 'max-iterations', 'provider', 'model', 'max-turns', 'session-timeout-ms', 'engine-checks', 'godot-path', 'fixed-package-directory', 'extra-corrections'];
   if (Object.keys(values).some(key => !allowed.includes(key))) throw new Error(`Inappropriate option for ${command}`);
   if (values['confirm-quiescent'] && !values.resume) throw new Error('--confirm-quiescent requires --resume');
   if (Boolean(values.provider) !== Boolean(values.model)) throw new Error('Use existing Pi configuration, or specify both --provider and --model');
@@ -109,7 +112,7 @@ export async function githubMain(argv: string[]): Promise<number> {
   const controller = new AbortController();
   const stop = () => controller.abort(); process.on('SIGINT', stop); process.on('SIGTERM', stop);
   try {
-    const status = await host.run({ commit: values.commit, maxIterations, resume: values.resume, confirmQuiescent: values['confirm-quiescent'], extraCorrections }, controller.signal);
+    const status = await host.run({ commit: values.commit, maxIterations, resume: values.resume, confirmQuiescent: values['confirm-quiescent'], extraCorrections, autoReceipt: values['auto-receipt'] }, controller.signal);
     console.log(values.json ? JSON.stringify({ type: 'status', ...status }) : `\n${formatStatus(status)}`);
     if (['blocked', 'interrupted', 'owner_unknown'].includes(status.specStatus) || status.rows.some(row => ['blocked', 'interrupted', 'owner_unknown', 'integration_drift'].includes(row.status))) return 1;
     return status.specStatus === 'passed' && status.rows.every(row => ['github_closed', 'local_completed'].includes(row.status)) ? 0 : 2;

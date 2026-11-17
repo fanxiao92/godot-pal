@@ -108,6 +108,10 @@ node tools/long-running-agent/cli.ts run --issue 126
 
 手工改动过候选、父规格/评论变化、旧 gate 缺失或被修改时不会复用旧通过；需要重新核实并显式启动新 attempt。
 
+### 自动验收凭证（--auto-receipt）
+
+`run --commit --auto-receipt` 在每张自身叶票经本地提交完成（host 自动提交、操作者手工提交后重跑 reconcile、或无改动候选）之后、派发下一叶之前，自动通过本机 `gh` 通道为该票发布验收凭证：一条含集成提交全哈希与证据目录、署名 "LRA auto-receipt" 的简短评论，并关闭该 Issue。授权语义：等价于操作者逐票人工发布验收评论并关票，仅覆盖本次 run 实际派发的自身叶票；默认关闭，绝不编辑正文、父票或任何其它票。幂等：每条 record 持有记录级凭证标记（`published`/`failed`），同一完成路径或重跑不会二次发布。失败回退：凭证发布失败不回滚已完成的本地提交记录——终端显示 `receipt_warning`，state 记录 `receipt: failed` 及原因，循环继续下一叶；未获凭证的下游依赖会自然阻塞，回到协调者人工补发。该选项不改变 push/merge 禁令，也不代表 main 合入、完整门禁或里程碑验收。
+
 ## 失败、中断与恢复
 
 不照搬 demo 的无条件自动重试。新记录持久保留 RED 责任：没有声明前拒绝源码写入，声明后、精确 RED 证实前只允许该阶段的测试/fixture/旧契约迁移路径。路径不按生产/测试目录硬编码分类、没有文件数上限，也不是 RED 后的永久授权白名单。`unit_test` / `range_test` 的 `expectedFailure` 必须与冻结声明一致；原生分类器继续负责精确身份/字面诊断匹配。Host 拒绝缺 RED 或只有 RED 之前 GREEN 的变更候选，repair / resume 不重置声明或责任，不能靠 dirty / 新 attempt 豁免。无改动的能力复核仍用当前检查及独立双审，不制造伪 RED。

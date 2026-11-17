@@ -17,6 +17,18 @@ export interface GitHubReader {
   blockers(number: number): GitHubIssue[];
   context(number: number): IssueContext;
 }
+export interface ReceiptWriter { postReceipt(issue: number, receipt: { commit: string; evidenceDirectory: string }): Promise<void> }
+// Default remote channel for --auto-receipt: one short acceptance comment (full commit SHA + evidence
+// directory, signed "LRA auto-receipt") then closing that own leaf issue, both via the existing native gh path.
+export function nativeReceiptWriter(cwd: string): ReceiptWriter {
+  return {
+    async postReceipt(issue, { commit, evidenceDirectory }) {
+      const body = `LRA auto-receipt\n\nVerified local integration commit: ${commit}\nEvidence directory: ${evidenceDirectory}`;
+      native(cwd, 'gh', ['issue', 'comment', String(issue), '--repo', repository, '--body', body]);
+      native(cwd, 'gh', ['issue', 'close', String(issue), '--repo', repository]);
+    },
+  };
+}
 function validateIssue(input: GitHubIssue): GitHubIssue {
   if (!input || !Number.isSafeInteger(input.number) || !input.title || typeof input.html_url !== 'string' || !['open', 'closed'].includes(input.state) || !Array.isArray(input.labels) || !Array.isArray(input.assignees)) throw new Error('Malformed GitHub issue response');
   if (input.html_url.toLowerCase() !== `https://github.com/${repository}/issues/${input.number}`) throw new Error('Cross-repository Issue relationships are not authorized by this runner');

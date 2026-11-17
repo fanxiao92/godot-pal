@@ -12,7 +12,7 @@ import { unitProjects, classifyFailure } from './checks.ts';
 import { GitHubHost, type CodingEvent, type CodingExecutor, type CodingRequest } from './github-host.ts';
 import { codingResourceLoader, codingTools, failureReceipt, GitHubPiExecutor } from './github-agent.ts';
 import { approveCorrection, requireWritable } from './policy.ts';
-import { formatStatus, githubMain, issueNumber } from './github-cli.ts';
+import { formatStatus, githubHelp, githubMain, issueNumber } from './github-cli.ts';
 
 const suite = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-github-coding-'));
 console.log(`Synthetic GitHub workflow evidence retained at ${suite}`);
@@ -771,6 +771,93 @@ test('explicit --commit continuously advances ready dependent leaves without rem
   const status = await f.host().run({ commit: true }, signal());
   assert.equal(status.counts.local_completed, 2); assert.equal(snapshot(f.cwd).dirty, false);
   assert.equal(git(f.cwd, 'rev-list', '--count', 'HEAD').trim(), '3'); assert.equal(f.issues[2].state, 'open'); assert.equal(f.issues[3].state, 'open');
+});
+function receiptWriterFixture(count: number, postReceipt: (issue: number, receipt: { commit: string; evidenceDirectory: string }) => Promise<void>) {
+  const f = fixture(count);
+  const host = () => new GitHubHost(fs.realpathSync(f.cwd), 1, f.state, { reader: f.reader, source: snapshot, agent: { run: request => f.getAgent().run(request) }, receiptWriter: { postReceipt } }, event => f.events.push(event));
+  return { f, host };
+}
+test('--auto-receipt publishes the leaf acceptance receipt and closes the ticket before the next leaf dispatch', async () => {
+  const receipts: { issue: number; commit: string; evidenceDirectory: string }[] = [];
+  const { f, host } = receiptWriterFixture(2, async (issue, receipt) => {
+    f.calls.push(`receipt:${issue}`); receipts.push({ issue, ...receipt });
+    f.issues[issue].state = 'closed';
+    f.issues[issue].comments.push({ body: `LRA auto-receipt\n\nVerified local integration commit: ${receipt.commit}\nEvidence directory: ${receipt.evidenceDirectory}`, html_url: `https://github.com/fanxiao92/godot-pal/issues/${issue}#issuecomment-lra-receipt` });
+  });
+  f.blockers[3] = [2];
+  const agent = f.getAgent();
+  let leaf3Receipts = -1, leaf3DependencyState = '';
+  f.setAgent({ run: async request => {
+    if (request.issue === 3 && request.role === 'implement') {
+      leaf3Receipts = receipts.length; leaf3DependencyState = f.issues[2].state;
+      if (receipts.length) request.verifyDependency(2, receipts[0]!.commit, receipts[0]!.evidenceDirectory);
+    }
+    return agent.run(request);
+  } });
+  const status = await host().run({ commit: true, autoReceipt: true }, signal());
+  assert.equal(status.counts.local_completed, 2);
+  assert.ok(leaf3Receipts >= 1, 'auto-receipt must publish the acceptance receipt before dispatching the next leaf');
+  assert.equal(leaf3DependencyState, 'closed', 'auto-receipt must close its own completed leaf before dispatching the next leaf');
+  assert.equal(receipts.length, 2, 'each own completed leaf publishes exactly one receipt');
+  assert.deepEqual(receipts.map(item => item.issue), [2, 3], 'receipts target only this run\'s own leaves');
+  assert.match(receipts[0]!.commit, /^[0-9a-f]{40}$/, 'the receipt must carry the full integration commit hash');
+  assert.equal(receipts[0]!.commit, host().state()!.records[2]!.commit);
+  assert.equal(receipts[0]!.evidenceDirectory, path.join(f.state, host().state()!.records[2]!.attempts.at(-1)!.directory));
+  assert.equal(host().state()!.records[2]!.receipt?.status, 'published');
+  assert.equal(host().state()!.records[3]!.receipt?.status, 'published');
+  assert.ok(f.events.some(event => event.type === 'receipt' && event.text?.includes('#2')), 'a published receipt must be reported');
+  assert.deepEqual(f.calls, ['2:implement', '2:standards', '2:spec', 'receipt:2', '3:implement', '3:standards', '3:spec', 'receipt:3', '1:spec']);
+});
+test('a default run without --auto-receipt never calls the receipt writer', async () => {
+  const receipts: unknown[] = [];
+  const { f, host } = receiptWriterFixture(1, async (issue, receipt) => { receipts.push({ issue, ...receipt }); });
+  const status = await host().run({ commit: true }, signal());
+  assert.equal(status.counts.local_completed, 1);
+  assert.equal(receipts.length, 0, 'auto-receipt stays off unless explicitly enabled');
+  assert.equal(f.issues[2].state, 'open', 'the default run must not close or comment on GitHub');
+  assert.equal(host().state()!.records[2]!.receipt, undefined);
+  assert.equal(f.events.some(event => event.type === 'receipt' || event.type === 'receipt_warning'), false);
+});
+test('a failing receipt writer keeps the completed record, warns and continues the loop', async () => {
+  const receipts: unknown[] = [];
+  const { f, host } = receiptWriterFixture(2, async (issue, receipt) => {
+    if (issue === 2) throw new Error('synthetic gh failure');
+    receipts.push({ issue, ...receipt }); f.issues[issue].state = 'closed';
+  });
+  f.blockers[3] = [2];
+  const status = await host().run({ commit: true, autoReceipt: true }, signal());
+  assert.equal(status.counts.local_completed, 2, 'a receipt failure must not stop the loop before the next leaf');
+  const failed = host().state()!.records[2]!;
+  assert.equal(failed.phase, 'completed', 'a writer failure must not roll back the locally completed record');
+  assert.equal(failed.receipt?.status, 'failed', 'a writer failure must be recorded without rolling back completion');
+  assert.match(failed.receipt?.error ?? '', /synthetic gh failure/);
+  assert.equal(f.issues[2].state, 'open', 'a failed receipt must not half-close the leaf');
+  assert.ok(f.events.some(event => event.type === 'receipt_warning' && event.text?.includes('#2')), 'a receipt failure must emit a warning');
+  assert.equal(host().state()!.records[3]!.receipt?.status, 'published', 'the next leaf must still receive its own receipt');
+  assert.equal(receipts.length, 1);
+});
+test('completed records never publish a duplicate receipt across repeated runs and completion paths', async () => {
+  const first: unknown[] = [];
+  const a = receiptWriterFixture(1, async (issue, receipt) => { first.push({ issue, ...receipt }); a.f.issues[issue].state = 'closed'; });
+  await a.host().run({ commit: true, autoReceipt: true }, signal());
+  assert.equal(first.length, 1, 'each completed leaf publishes exactly one receipt');
+  await a.host().run({ commit: true, autoReceipt: true }, signal());
+  await a.host().run({ commit: true, autoReceipt: true, resume: true }, signal());
+  assert.equal(first.length, 1, 'repeated runs must not republish a completed record');
+  const second: unknown[] = [];
+  const b = receiptWriterFixture(1, async (issue, receipt) => { second.push({ issue, ...receipt }); b.f.issues[issue].state = 'closed'; });
+  assert.equal((await b.host().run({ autoReceipt: true }, signal())).counts.awaiting_commit, 1, 'no receipt before the local commit exists');
+  assert.equal(second.length, 0);
+  git(b.f.cwd, 'add', 'a.txt'); git(b.f.cwd, 'commit', '--quiet', '-m', 'Explicit operator receipt candidate');
+  assert.equal((await b.host().run({ autoReceipt: true }, signal())).counts.local_completed, 1);
+  assert.equal(second.length, 1, 'the operator-commit finish path publishes exactly once');
+  await b.host().run({ autoReceipt: true }, signal());
+  assert.equal(second.length, 1, 'the manual finish path must not republish either');
+});
+test('--auto-receipt stays a run-only guarded boolean CLI option off by default', async () => {
+  assert.match(githubHelp, /--auto-receipt/);
+  await assert.rejects(githubMain(['status', '--issue', '1', '--auto-receipt']), /Inappropriate/);
+  await assert.rejects(githubMain(['preflight', '--issue', '1', '--auto-receipt']), /Inappropriate/);
 });
 test('max iterations stops cleanly and the same root command resumes subsequent leaves', async () => {
   const f = fixture();

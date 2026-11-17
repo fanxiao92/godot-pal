@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { canonical, changedPaths, hash, parseReport, relativeFile, type ProblemFinding, type Report, type Role, type Source } from './contract.ts';
 import { acquire, atomicJson, git, inside, json, lockFile, noLinks, QuiescenceUnknownError, recoverLock, snapshot } from './io.ts';
-import { approved, contextHash, contextsFor, loadGraph, type GitHubReader, type IssueContext, type IssueGraph } from './github.ts';
+import { approved, contextHash, contextsFor, loadGraph, nativeReceiptWriter, type GitHubReader, type IssueContext, type IssueGraph, type ReceiptWriter } from './github.ts';
 import type { Selection } from './checks.ts';
 import { approveCorrection, attributeValidation, bindEvidenceResolution, bindProblemEvidence, correctionRounds, maxProblemCorrections, requireUnexhausted, requireChangedAfterFailure, requireWritable, scopeWarningFiles, type Correction, type CorrectionLedger } from './policy.ts';
 
@@ -27,13 +27,13 @@ export interface CodingRequest {
   recordEvidenceResolution?: (problemId: string, file: string, sha256: string | undefined, note: string) => string;
 }
 export interface CodingExecutor { run(request: CodingRequest): Promise<Report> }
-export interface GitHubServices { reader: GitHubReader; agent: CodingExecutor; source: typeof snapshot }
+export interface GitHubServices { reader: GitHubReader; agent: CodingExecutor; source: typeof snapshot; receiptWriter?: ReceiptWriter }
 export interface LegacyCorrectionMigration {
   issue: number; stateHash: string; sourceFingerprint: string;
   approval: { file: string; sha256: string };
   mappings: { index: number; findings: ProblemFinding[]; outcome?: 'passed' | 'failed'; notStarted?: { file: string; sha256: string } }[];
 }
-export interface RunOptions { commit?: boolean; maxIterations?: number; resume?: boolean; confirmQuiescent?: boolean; extraCorrections?: number }
+export interface RunOptions { commit?: boolean; maxIterations?: number; resume?: boolean; confirmQuiescent?: boolean; extraCorrections?: number; autoReceipt?: boolean }
 type SourceBinding = Pick<Source, 'head' | 'fingerprint' | 'indexFingerprint' | 'dirty'>;
 const binding = ({ head, fingerprint, indexFingerprint, dirty }: Source): SourceBinding => ({ head, fingerprint, indexFingerprint, dirty });
 export interface GitHubAttempt {
@@ -46,6 +46,8 @@ export interface GitHubAttempt {
 export interface GitHubRecord extends CorrectionLedger {
   phase: 'working' | 'blocked' | 'awaiting_commit' | 'completed'; attempts: GitHubAttempt[]; commit?: string;
   tdd?: RedWorkflow;
+  // Record-level idempotency marker for --auto-receipt: set once per completed record, never republished.
+  receipt?: { status: 'published' | 'failed'; commit: string; error?: string; utc: string };
 }
 export interface GitHubState {
   version: 1; kind: 'github_issue_execution_index'; root: number; cwd: string; integrationHead: string;
@@ -329,11 +331,11 @@ export class GitHubHost {
             const fresh = this.services.source(this.cwd);
             if (!fresh.dirty && fresh.fingerprint === last.candidate.fingerprint && fresh.head !== last.input.head) {
               this.assertFresh(graph, Number(id), last.contextsHash);
-              this.finish(state, Number(id), fresh.head); continue;
+              await this.finish(state, Number(id), fresh.head, options); continue;
             }
             if (record.phase === 'awaiting_commit' && options.commit && fresh.fingerprint === last.candidate.fingerprint && fresh.head === last.input.head) {
               this.assertFresh(graph, Number(id), last.contextsHash);
-              this.commit(state, Number(id)); continue;
+              await this.commit(state, Number(id), options); continue;
             }
             if (record.phase === 'awaiting_commit') {
               if (fresh.fingerprint !== last.candidate.fingerprint || fresh.head !== last.input.head) {
@@ -405,7 +407,7 @@ export class GitHubHost {
     record.phase = 'working'; record.attempts.push(attempt); state.records[issue] = record;
     state.activity = { issue, updatedUtc: new Date().toISOString() };
     const inputFile = path.join(directory, 'input.json');
-    atomicJson(inputFile, { contexts, source: input, original, corrections: record.corrections ?? [], correctionLimitPerProblem: maxProblemCorrections, problemEvidence: record.problemEvidence ?? {}, legacyMigration: record.legacyMigration, commandApproval: { commit: options.commit === true, resume: options.resume === true, confirmQuiescent: options.confirmQuiescent === true } });
+    atomicJson(inputFile, { contexts, source: input, original, corrections: record.corrections ?? [], correctionLimitPerProblem: maxProblemCorrections, problemEvidence: record.problemEvidence ?? {}, legacyMigration: record.legacyMigration, commandApproval: { commit: options.commit === true, resume: options.resume === true, confirmQuiescent: options.confirmQuiescent === true, autoReceipt: options.autoReceipt === true } });
     attempt.inputHash = hash(fs.readFileSync(inputFile));
     this.save(state);
     const pending = new Set(graph.nodes[issue].blockers.filter(blocker => state.records[blocker.number]?.phase !== 'completed').map(blocker => blocker.number));
@@ -560,8 +562,8 @@ export class GitHubHost {
       atomicJson(path.join(directory, 'gate.json'), { candidate, reports, checks: checkHistory, tdd: record.tdd, corrections: record.corrections ?? [], problemEvidence: record.problemEvidence, legacyMigration: record.legacyMigration, dependencyProofs: attempt.dependencyProofs });
       attempt.gateHash = hash(fs.readFileSync(path.join(directory, 'gate.json'))); attempt.summary = reports.implement!.summary;
       attempt.endedUtc = new Date().toISOString(); record.phase = 'awaiting_commit'; delete state.activity; this.save(state);
-      if (!this.services.source(this.cwd).dirty) this.finish(state, issue, input.head);
-      else if (options.commit) this.commit(state, issue);
+      if (!this.services.source(this.cwd).dirty) await this.finish(state, issue, input.head, options);
+      else if (options.commit) await this.commit(state, issue, options);
     } catch (error) {
       record.phase = 'blocked'; attempt.error = error instanceof Error ? error.message : String(error); attempt.endedUtc = new Date().toISOString();
       if (error instanceof QuiescenceUnknownError || attempt.commitStarted) attempt.unknownQuiescence = true;
@@ -652,7 +654,7 @@ export class GitHubHost {
     if (original.fingerprint !== attempt.original.fingerprint || original.fingerprint !== hash(canonical({ files: original.files, modes: original.modes }))) throw new Error('Original source identity mismatch');
     return original;
   }
-  private commit(state: GitHubState, issue: number): void {
+  private async commit(state: GitHubState, issue: number, options: RunOptions): Promise<void> {
     const record = state.records[issue], attempt = record.attempts.at(-1)!;
     const current = this.services.source(this.cwd);
     if (!attempt.candidate || current.head !== attempt.input.head || current.fingerprint !== attempt.candidate.fingerprint || current.indexFingerprint !== attempt.candidate.indexFingerprint) throw new Error('Candidate changed before local commit');
@@ -663,16 +665,32 @@ export class GitHubHost {
       git(this.cwd, 'add', '-A', '--', ...files); git(this.cwd, 'commit', '-m', `Implement #${issue}`);
       const after = this.services.source(this.cwd);
       if (after.dirty || after.fingerprint !== attempt.candidate.fingerprint) throw new Error('Commit hooks changed the frozen candidate');
-      this.finish(state, issue, after.head);
+      await this.finish(state, issue, after.head, options);
     } catch (error) { attempt.unknownQuiescence = true; record.phase = 'blocked'; attempt.error = `Local commit outcome needs reconciliation: ${error instanceof Error ? error.message : String(error)}`; this.save(state); throw error; }
   }
-  private finish(state: GitHubState, issue: number, commit: string): void {
+  private async finish(state: GitHubState, issue: number, commit: string, options?: RunOptions): Promise<void> {
     const record = state.records[issue], attempt = record.attempts.at(-1)!;
     const gate = path.join(this.directory, attempt.directory, 'gate.json');
     if (!attempt.gateHash || hash(fs.readFileSync(gate)) !== attempt.gateHash || !ancestor(this.cwd, attempt.input.head)) throw new Error('Gate/integration identity changed');
     record.phase = 'completed'; record.commit = commit; attempt.unknownQuiescence = false;
     state.integrationHead = commit; delete state.activity; this.save(state);
-    this.output({ type: 'completed', text: `#${issue} locally verified @ ${commit.slice(0, 12)} (GitHub unchanged)` });
+    this.output({ type: 'completed', text: `#${issue} locally verified @ ${commit.slice(0, 12)}${options?.autoReceipt ? ' (auto-receipt enabled)' : ' (GitHub unchanged)'}` });
+    // Publish before the run loop can dispatch the next leaf; the record marker makes it idempotent.
+    if (options?.autoReceipt && !record.receipt) await this.publishReceipt(state, issue, commit, path.join(this.directory, attempt.directory));
+  }
+  private async publishReceipt(state: GitHubState, issue: number, commit: string, evidenceDirectory: string): Promise<void> {
+    const record = state.records[issue]!;
+    try {
+      await (this.services.receiptWriter ?? nativeReceiptWriter(this.cwd)).postReceipt(issue, { commit, evidenceDirectory });
+      record.receipt = { status: 'published', commit, utc: new Date().toISOString() };
+      this.save(state);
+      this.output({ type: 'receipt', text: `#${issue} acceptance receipt published and issue closed (LRA auto-receipt)` });
+    } catch (error) {
+      // A failed remote receipt never rolls back the locally completed record; blocked dependents return to the coordinator.
+      record.receipt = { status: 'failed', commit, error: error instanceof Error ? error.message : String(error), utc: new Date().toISOString() };
+      this.save(state);
+      this.output({ type: 'receipt_warning', text: `#${issue} auto-receipt not published: ${record.receipt.error}; dependents may block until the coordinator publishes the receipt manually` });
+    }
   }
 }
 const repositoryName = () => 'fanxiao92/godot-pal';
