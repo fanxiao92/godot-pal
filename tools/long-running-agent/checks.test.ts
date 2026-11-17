@@ -214,6 +214,36 @@ test('range discovery gate verdicts classify as complete normal failures instead
     return true;
   });
 });
+test('range source-count gate verdicts classify as complete normal failures instead of unknown quiescence', () => {
+  const output = fs.mkdtempSync(path.join(directory, 'source-count-'));
+  fs.mkdirSync(path.join(output, 'range', 'game'), { recursive: true });
+  fs.writeFileSync(path.join(output, 'stdout.log'), 'range wrapper stdout');
+  fs.writeFileSync(path.join(output, 'stderr.log'), '');
+  // Mirrors the real #143 attempt f9eacb62 game-oYuPvv shape: the game discovery command exited cleanly
+  // and GameTestBatches.ps1 threw its batch source-count gate verdict after the command.
+  const complete = { exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'game.discover.stdout.log', stderr: 'game.discover.stderr.log' };
+  const failure = '[range:source-count] Batch scene-realfull full source count differs: 39/40.';
+  const writeReport = (failureText: string, command: object) => fs.writeFileSync(path.join(output, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure: failureText, projects: [], commands: [command] }), 'utf8');
+  const selection = { scope: 'game' as const, batch: 'scene-realfull' as const };
+  // A malformed TRX proves the gate verdict never consults the TRX classifier path.
+  fs.writeFileSync(path.join(output, 'range', 'game', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
+  writeReport(failure, complete);
+  const outcome = classifyFailure(repository, output, selection, 1);
+  assert.equal(outcome.code, 1);
+  assert.equal(outcome.expectedRed, false);
+  assert.equal(outcome.summary, failure);
+  const evidence = JSON.parse(fs.readFileSync(path.join(output, 'failure-classification.json'), 'utf8'));
+  assert.equal(evidence.status, 'classified');
+  assert.equal(evidence.classification, 'gate_failure');
+  assert.deepEqual(evidence.failures, []);
+  assert.equal(classifyFailure(repository, output, { ...selection, expectedFailure: { test: 'Synthetic.Capability', message: 'Expected new capability' } }, 1).expectedRed, false, 'A gate verdict has no expectedFailure RED semantics');
+  // The unprefixed bare text of the real #143 attempt stays unknown quiescence: only the prefixed
+  // verdict thrown by GameTestBatches.ps1 qualifies as an ordinary gate failure.
+  writeReport('Batch scene-realfull full source count differs: 39/40.', complete);
+  assert.throws(() => classifyFailure(repository, output, selection, 1), QuiescenceUnknownError);
+  writeReport(failure, { ...complete, cleanupComplete: false });
+  assert.throws(() => classifyFailure(repository, output, selection, 1), QuiescenceUnknownError);
+});
 test('range completion must come from the selected existing contract, never a wrapper exit alone', () => {
   const output = path.join(directory, 'range'); fs.mkdirSync(output);
   const file = path.join(output, 'range-run.json');

@@ -483,6 +483,42 @@ test('discovery failure feeds the normal repair loop: receipt, pendingFailure an
   assert.equal(record.corrections!.at(-1)!.problemId, 'prepare-discovery-count');
   assert.ok(record.corrections!.at(-1)!.evidence.startsWith(directory), 'the correction binds the original failure evidence directory');
 });
+test('source-count failure feeds the normal repair loop: receipt, pendingFailure and request_correction', async () => {
+  const f = fixture(1); const agent = f.getAgent(); let receipt = '';
+  const failure = '[range:source-count] Batch scene-realfull full source count differs: 39/40.';
+  // Synthetic #143 attempt f9eacb62 game-oYuPvv shape: the game batch source-count gate failed a complete,
+  // deterministic, clean-exit range run before any test execution.
+  const directory = fs.mkdtempSync(path.join(f.directory, 'source-count-'));
+  fs.mkdirSync(path.join(directory, 'range', 'game'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'stdout.log'), 'range wrapper stdout tail');
+  fs.writeFileSync(path.join(directory, 'stderr.log'), '');
+  fs.writeFileSync(path.join(directory, 'range', 'game', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
+  fs.writeFileSync(path.join(directory, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure, projects: [], commands: [{ exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'game.discover.stdout.log', stderr: 'game.discover.stderr.log' }] }), 'utf8');
+  const outcome = classifyFailure(f.cwd, directory, { scope: 'game', batch: 'scene-realfull' }, 1);
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      certifySyntheticRed(request);
+      receipt = failureReceipt(outcome, directory);
+      request.recordCheck({ project: 'game:scene-realfull:all', scope: 'game', directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: outcome.code, expectedRed: outcome.expectedRed });
+      request.recordFailure!(directory, snapshot(f.cwd), outcome.summary);
+      assert.equal(f.host().state()!.records[2].pendingFailure!.summary, failure, 'recordFailure must store the gate failure summary as pendingFailure');
+      assert.throws(() => request.beforeWrite!(), /request_correction/);
+      request.requestCorrection!([finding(request, 'game-batch-source-count')], 'Sync the scene-realfull batch source-count pin with the newly added approved test', 'Approved range gate and game batch partition contract unchanged');
+      return { status: 'blocked', summary: 'Source-count diagnosis recorded through the normal repair loop', evidence: [directory] };
+    }
+    return agent.run(request);
+  } });
+  const result = await f.host().run({}, signal());
+  assert.equal(result.counts.blocked, 1);
+  assert.match(receipt, /"status":"failed"/, 'the failed check receipt keeps the failure status marker');
+  assert.ok(receipt.includes(failure), 'the tool failure receipt must carry the gate failure summary verbatim');
+  assert.doesNotMatch(receipt, /Exact classifier failures/, 'no test case ran; the receipt must not invent classifier failures');
+  const record = f.host().state()!.records[2];
+  assert.equal(record.pendingFailure, undefined, 'request_correction consumed the pendingFailure');
+  assert.equal(record.corrections!.at(-1)!.kind, 'check');
+  assert.equal(record.corrections!.at(-1)!.problemId, 'game-batch-source-count');
+  assert.ok(record.corrections!.at(-1)!.evidence.startsWith(directory), 'the correction binds the original failure evidence directory');
+});
 test('review exhaustion stays blocked across fresh attempts and extras cannot bypass three rounds', async () => {
   const f = fixture(1); const agent = f.getAgent(); let fail = true, revisions = 0;
   f.setAgent({ run: async request => {

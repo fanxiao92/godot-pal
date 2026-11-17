@@ -47,8 +47,9 @@ export function rangeCompleted(directory: string, scope: string): void {
 export class CheckEvidenceError extends Error {}
 // Range quality-gate failure prefixes that a real complete, deterministic, clean-exit attempt has proven to
 // be an ordinary failure. Add each prefix one by one from that real-attempt evidence only; every other
-// prefix keeps unknown quiescence.
-const gateFailurePrefixes = ['warning-delta', 'discovery'] as const;
+// prefix keeps unknown quiescence (source-count: #143 attempt f9eacb62 game-oYuPvv proved the batch
+// source-count gate is a deterministic count pin after a complete clean-exit run).
+const gateFailurePrefixes = ['warning-delta', 'discovery', 'source-count'] as const;
 export function classifyFailure(cwd: string, directory: string, selection: Selection, code: number): CheckOutcome {
   if (code !== 1) throw new QuiescenceUnknownError('Unclassified native exit; not eligible for automatic correction');
   let trx = path.join(directory, 'trx', 'results.trx');
