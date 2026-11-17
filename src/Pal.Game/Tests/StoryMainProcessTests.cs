@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using GdUnit4;
 using Godot;
@@ -14,11 +15,29 @@ public class StoryMainProcessTests
     [TestCase("number", Timeout = 20000)]
     public async Task MissingSelectedReferencePresentationExitsBeforeReady(string missing)
     {
+        if (missing == "idle")
+        {
+            // Per-slot idle speed is required author data, not an optional reference capability.
+            // Since the per-slot presentation group is all-or-none, the partial enemy-slot
+            // declaration is rejected by formal Prepare during fixture construction (same
+            // migration as the StoryRoundtripSceneTests idle branch, with the current group
+            // diagnostic): no story/visual resource is produced, so no process can reach
+            // READY — the original semantics, enforced one stage earlier. The fixture cleans
+            // its failed output.
+            InvalidDataException? rejected = null;
+            try { using var unexpected = new AuthoredStoryFixture("Win", missing); }
+            catch (InvalidDataException error) { rejected = error; }
+            AssertThat(rejected is not null).IsTrue();
+            string diagnostic = rejected!.Message;
+            AssertThat(diagnostic.StartsWith(Path.Combine(Path.GetTempPath(), "pal-story-c-"), StringComparison.Ordinal)).IsTrue();
+            AssertThat(diagnostic.Contains("story-package.json: visual.teams[0]: enemies[0]: enemy presentation fields must be declared together", StringComparison.Ordinal)).IsTrue();
+            return;
+        }
         using var fixture = new AuthoredStoryFixture("Win", missing);
         var result = await MainProcessTests.RunMain("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
         AssertThat(result.ExitCode).IsEqual(1);
-        AssertThat(result.Text.Contains(missing == "effect" ? "attack effect" : missing == "number" ? "NumberSpriteUri" : "IdleAnimSpeed", StringComparison.Ordinal)).IsTrue();
+        AssertThat(result.Text.Contains(missing == "effect" ? "attack effect" : "NumberSpriteUri", StringComparison.Ordinal)).IsTrue();
         AssertThat(result.Text.Contains("selected-profile=" + fixture.StoryUri, StringComparison.Ordinal)).IsTrue();
         AssertThat(result.Text.Contains("PAL_GAME_READY", StringComparison.Ordinal)).IsFalse();
         AssertThat(result.Text.Contains("PAL_MAP_LOADED", StringComparison.Ordinal)).IsFalse();
