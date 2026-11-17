@@ -1611,6 +1611,107 @@ public class StoryRoundtripSceneTests
     }
 
     [TestCase(Timeout = 120000)]
+    public async Task NormalBattleFleeSucceedsWalksOffAndResumesTheFleeBranch()
+    {
+        // T17 (#145): the test-owned non-boss derivation of LostReload (fleeRate 999 vs the
+        // authored dex500 defense sum 524, playerHp 150) always escapes: the enemy slot strikes
+        // first, then the committed Q flee ends the battle Escaped (fight.c 4119-4152 +
+        // battle.c 1519-1527) after its own RandomLong(0, 524) draw, the living member walks
+        // off-screen (battle.c 1458-1528), no victory rewards are granted, and the trigger
+        // resumes at the authored flee branch (script.c 0x0007 operand2 -> message 3), never
+        // the victory dialog (message 2) or the loss branch (message 24).
+        using var fixture = new AuthoredStoryFixture("LostReload", playerHp: 150, fleeEscape: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            AssertThat(battle.Completion).IsNull();
+            // input.c kKeyFlee: two rapid Q presses commit one flee (the second cannot queue a
+            // second attempt behind the committed round).
+            host.Tap(Key.Q);
+            host.Tap(Key.Q);
+            await host.Wait(() => battle.Current.Combat.LastFleeAttempt is not null);
+            bool sawEscapeFailLabel = false, walkedOff = false, removed = false;
+            await host.Wait(() =>
+            {
+                var draw = old.StoryDrawSnapshot;
+                sawEscapeFailLabel |= draw?.FeedbackWord == Pal.Game.Dialogue.PalStoryBattleView.EscapeFailWord;
+                if (draw is { } snapshot && old.StoryBattleMode == StoryBattlePresentation.Feedback)
+                {
+                    Vector2 player = snapshot.PartyPlayers.Count > 0 ? snapshot.PartyPlayers[0].Position : snapshot.PlayerPosition;
+                    walkedOff |= player.X > 240 && player.Y > 170;
+                    removed |= player.X > 9000; // battle.c 1519-1526: pos 9999 removes the escaper
+                }
+                return old.StoryBattleMode != StoryBattlePresentation.Feedback;
+            });
+            AssertThat(sawEscapeFailLabel).IsFalse();
+            AssertThat(walkedOff).IsTrue();
+            AssertThat(removed).IsTrue();
+            await host.Wait(() => script.PendingBattle is null);
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Escaped);
+            var flee = battle.Current.Combat.LastFleeAttempt!;
+            AssertThat(flee.Escaped).IsTrue();
+            AssertThat(flee.FleeRate).IsEqual(999);
+            AssertThat(flee.EnemyFleeDefense).IsEqual(524); // dex500 + (level0+6)*4, fight.c 4128-4137
+            AssertThat(battle.Current.Combat.Players[0].Counts.Flee).IsEqual(0);
+            AssertThat(battle.Current.Roles[0].HiddenExperience["flee"].Count).IsEqual(0);
+            AssertThat(old.StoryCashGranted == 0 && old.StoryExperienceGranted == 0).IsTrue();
+            // The owned Escaped receipt resumes the authored flee branch (message 3), not the
+            // victory dialog (message 2) and not the loss branch (message 24).
+            await host.Wait(() => script.PendingDisplay is not null);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("败");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(old.GetChildren().OfType<Pal.Game.Resources.PalMapScene>().Single().Visible).IsTrue();
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Q)).IsFalse();
+    }
+
+    [TestCase]
+    public void NormalBattleFleeFinalPoseRemovesEveryMemberIncludingTheDead()
+    {
+        // battle.c 1493-1516: only the living walk off; battle.c 1519-1526 then removes EVERY
+        // player from the screen — the dead member stays visible through the walk-off (fight.c
+        // 952-957 keeps drawing it dead) and leaves with the party at the final removal frame.
+        var members = new ClassicBattlePlayerView[]
+        {
+            new(0, 1, 150, new ClassicBattleCounts(0, 0), null),
+            new(1, 2, 0, new ClassicBattleCounts(0, 0), null),
+        };
+        for (int pose = 0; pose < 16; pose++)
+        {
+            var walking = Pal.Game.StoryPlayerEscapePresentation.At(pose, members);
+            AssertThat(walking.Count).IsEqual(1);
+            AssertThat(walking[0].PartyIndex).IsEqual(0);
+            // Two-member column: the leading member steps +4/+6 per pose (battle.c 1485-1492).
+            AssertThat(walking[0].Offset == new Vector2(4 * (pose + 1), 6 * (pose + 1))).IsTrue();
+        }
+        // The final removal pose (Duration 17 -> pose 16) carries both members off the screen.
+        var removal = Pal.Game.StoryPlayerEscapePresentation.At(16, members);
+        AssertThat(removal.Count).IsEqual(2);
+        AssertThat(removal[0].PartyIndex).IsEqual(0);
+        AssertThat(removal[1].PartyIndex).IsEqual(1);
+        AssertThat(removal[0].Offset == new Vector2(9999, 9999)).IsTrue();
+        AssertThat(removal[1].Offset == new Vector2(9999, 9999)).IsTrue();
+    }
+
+    [TestCase(Timeout = 120000)]
     public async Task PartyLossCoversEnemyActionsMemberDeathPassAndLostClosure()
     {
         // PartyLoss: enemy slots (dex500) act before both members; every landed hit kills a
@@ -2983,11 +3084,12 @@ public class StoryRoundtripSceneTests
                         }
                     }
                 }
-                if (!party && pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction
+                if (!party && !Main.StoryEscapeFeedback && pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction
                     && feedbackDraw.FeedbackWord != PalStoryBattleView.EscapeFailWord)
                 {
                     // (#51) The failed-escape feedback carries its own label and no digits; the
-                    // strike-model assertions below apply only to real attack feedback.
+                    // strike-model assertions below apply only to real attack feedback. (#145)
+                    // The successful-escape walk-off likewise presents no strike model.
                     // Author B: idle1/magic1/attack1/wait0. fight.c5078 enqueues after the
                     // last prehit draw (4); Delay(FALSE) waits40 before its first impact UIUpdate (5).
                     int birthPose = feedbackAction.Attacker == ClassicBattleSide.Player ? 7 : 4;
@@ -3047,7 +3149,7 @@ public class StoryRoundtripSceneTests
                         AssertThat(playerDraw.EnemyIdleCounter).IsEqual(expected);
                     }
                 }
-                if (!party && pose is { } enemyPose && combat?.LastAction?.Attacker == ClassicBattleSide.Enemy && draw is { } enemyDraw
+                if (!party && !Main.StoryEscapeFeedback && pose is { } enemyPose && combat?.LastAction?.Attacker == ClassicBattleSide.Enemy && draw is { } enemyDraw
                     && previousPose is { } prevEnemyPose && previousDraw is { } prevEnemyDraw)
                 {
                     int expected = prevEnemyDraw.EnemyIdleCounter;
@@ -3076,8 +3178,10 @@ public class StoryRoundtripSceneTests
                 if (!party && pose is null && previousPose is { } finalPose && draw is { } returnedDraw && previousDraw is { } finalDraw)
                 {
                     // (#51) The authored flee feedback (11 poses, final pose 10) freezes the
-                    // scene instead of the enemy strike's final UpdateFighters tick.
-                    bool fleeEnded = finalPose.Pose == StoryPlayerFleePresentation.Duration - 1;
+                    // scene instead of the enemy strike's final UpdateFighters tick; (#145) the
+                    // successful-escape walk-off (17 poses, final pose 16) freezes it too.
+                    bool fleeEnded = finalPose.Pose == StoryPlayerFleePresentation.Duration - 1
+                        || finalPose.Pose == StoryPlayerEscapePresentation.Duration - 1;
                     int expected = !fleeEnded && previousCombat!.LastAction!.Attacker == ClassicBattleSide.Enemy
                         ? finalDraw.EnemyIdleCounter == 2 ? 1 : 2 : finalDraw.EnemyIdleCounter;
                     AssertThat(returnedDraw.EnemyIdleCounter).IsEqual(expected);
@@ -3098,6 +3202,7 @@ public class StoryRoundtripSceneTests
                         // Even the final pose must finish before feedback releases its action/overlay.
                         AssertThat(unchecked(Main.StoryPresentationTicks - beforePose.PoseStartedAt) >= 40).IsTrue();
                         if (beforePose.Pose != StoryPlayerFleePresentation.Duration - 1
+                            && beforePose.Pose != StoryPlayerEscapePresentation.Duration - 1
                             && previousCombat?.LastAction?.Attacker == ClassicBattleSide.Enemy)
                             AssertThat(beforePose.Pose).IsEqual(enemyImpactPose + 10); // Eleven timed recovery ticks, including impact.
                     }

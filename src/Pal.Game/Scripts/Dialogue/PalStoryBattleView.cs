@@ -34,6 +34,7 @@ internal partial class PalStoryBattleView : Node2D
     private int highlightedSlot;
     private StoryPlayerAttackSnapshot? playerPresentation;
     private StoryPlayerFleeSnapshot? fleePresentation;
+    private IReadOnlyList<StoryPlayerFleeSnapshot>? escapePresentation;
     private int[] idleFrames = [];
     private int[] idleCounters = [];
     private readonly Dictionary<(int Member, int Frame), ImageTexture> effects = new();
@@ -115,7 +116,8 @@ internal partial class PalStoryBattleView : Node2D
     internal void Present(ClassicBattleView combat, StoryBattlePresentation mode, IReadOnlyList<StoryEnemyIdleState> enemyIdle,
         StoryEnemyAttackSnapshot? enemyPresentation = null, StoryPlayerAttackSnapshot? playerPresentation = null,
         IReadOnlyList<StoryNumberDigit>? numberDigits = null, int? feedbackWord = null, int highlightedEnemySlot = 0,
-        string? settlementLine = null, StoryPlayerFleeSnapshot? fleePresentation = null)
+        string? settlementLine = null, StoryPlayerFleeSnapshot? fleePresentation = null,
+        IReadOnlyList<StoryPlayerFleeSnapshot>? escapePresentation = null)
     {
         this.combat = combat; this.mode = mode;
         idleFrames = enemyIdle.Select(idle => idle.Frame).ToArray();
@@ -123,6 +125,7 @@ internal partial class PalStoryBattleView : Node2D
         highlightedSlot = highlightedEnemySlot;
         EnemyPresentation = enemyPresentation; this.playerPresentation = playerPresentation;
         this.fleePresentation = fleePresentation;
+        this.escapePresentation = escapePresentation;
         NumberDigits = numberDigits ?? Array.Empty<StoryNumberDigit>();
         FeedbackWord = feedbackWord;
         SettlementLine = settlementLine;
@@ -157,6 +160,13 @@ internal partial class PalStoryBattleView : Node2D
             pf = fleeing.Frame;
             player = visual.Players[0].PlayerPosition + fleeing.Offset;
         }
+        if (escapePresentation is { } walking && walking.Count > 0)
+        {
+            // battle.c 1458-1528: the successful escape walks every living member off-screen;
+            // the single-pair projection follows the sole member (multi-member draws below).
+            pf = walking[0].Frame;
+            player = visual.Players[0].PlayerPosition + walking[0].Offset;
+        }
         if (EnemyPresentation is { } shown)
         {
             pf = shown.PlayerFrame; ef = shown.EnemyFrame;
@@ -181,6 +191,14 @@ internal partial class PalStoryBattleView : Node2D
             SelectingPlayer = party ? combat.SelectingPlayerIndex : null,
             EnemyVisible = IsEnemyVisible(0),
             PartyBoosts = BoostSums(combat), StruckEnemies = struckEnemies };
+    }
+
+    private StoryPlayerFleeSnapshot? EscapeWalk(int partyIndex)
+    {
+        if (escapePresentation is null) return null;
+        foreach (var walking in escapePresentation)
+            if (walking.PartyIndex == partyIndex) return walking;
+        return null;
     }
 
     // The boost panel exists only while a role-hook boost register actually changed a member's
@@ -210,6 +228,11 @@ internal partial class PalStoryBattleView : Node2D
                 draws[i] = new(3, origins[action.TargetIndex] + new Vector2(-24, -12), 0, member.Hp);
             else if (fleePresentation is { } fleeingMember && fleeingMember.PartyIndex == i)
                 draws[i] = new(fleeingMember.Frame, origins[i] + fleeingMember.Offset, 0, member.Hp);
+            else if (EscapeWalk(i) is { } walking)
+                // battle.c 1493-1516: each living member walks off at its own party-column step;
+                // the dead stay visible at their home positions through the walk-off and leave
+                // the screen with the party at the final removal frame (battle.c 1519-1526).
+                draws[i] = new(walking.Frame, origins[i] + walking.Offset, 0, member.Hp);
             else if (action is { Attacker: ClassicBattleSide.Enemy, TargetIndex: var target, CovererPartyIndex: null }
                 && target == i && EnemyPresentation is { } incoming)
                 draws[i] = new(incoming.PlayerFrame, incoming.PlayerPosition, incoming.PlayerColorShift, incoming.DisplayedPlayerHp);
@@ -351,7 +374,7 @@ internal partial class PalStoryBattleView : Node2D
         }
     }
     public override void _ExitTree() { ReleaseTextures(); }
-    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; SettlementLine = null; fleePresentation = null; }
+    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; SettlementLine = null; fleePresentation = null; escapePresentation = null; }
 }
 
 /// <summary>fight.c 4153-4171: the failed escaper's stepped frame/offset for one pose.</summary>

@@ -33,6 +33,9 @@ public partial class Main
     private ClassicBattleFleeAttempt? storyLastFleeAttempt;
     private Vector2? fleeOrigin;
     private int fleePartyIndex = -1;
+    // battle.c 1458-1528: the successful escape's all-member walk-off feedback (vs. the single
+    // failed escaper's steps); set while the escape feedback presents.
+    private bool fleeEscaped;
     // palette.c PAL_FadeToRed: 32 steps of 75ms; -1 = not started.
     private int storyRedStep = -1;
     private uint storyRedStepAt;
@@ -291,10 +294,12 @@ public partial class Main
                 }
                 if (presentedFlee is { } flee)
                 {
-                    // fight.c 4153-4171: three +4/+2 escape steps, then the failed-escape label
-                    // holds for eight frames (BATTLE_LABEL_ESCAPEFAIL, fight.c 4168).
+                    // fight.c 4153-4171 (failure): three +4/+2 escape steps, then the failed-escape
+                    // label holds for eight frames; battle.c 1458-1528 (success): every living
+                    // member walks off the screen together before the battle releases.
                     storyNumbers.BeginAction(); feedbackBorn = true;
                     var origins = storyVisual!.PlayerOrigins(lifecycle.Current.Combat.Players.Count);
+                    fleeEscaped = flee.Escaped;
                     fleeOrigin = origins[flee.PartyIndex];
                     fleePartyIndex = flee.PartyIndex;
                     enemyPresentation = null; playerPresentation = null;
@@ -342,13 +347,14 @@ public partial class Main
                 var nextPose = poseClock.Advance(now);
                 if (nextPose == poseClock) break;
                 poseClock = nextPose;
-                long poses = fleeOrigin is not null ? StoryPlayerFleePresentation.Duration
+                long poses = fleeOrigin is not null
+                    ? (fleeEscaped ? StoryPlayerEscapePresentation.Duration : StoryPlayerFleePresentation.Duration)
                     : enemyPresentation?.Duration ?? StoryPlayerAttackPresentation.Duration;
                 if (poseClock.Pose < poses) AdvanceStoryGesture(poseClock.Pose);
                 if (poseClock.Pose < poses) break;
                 // Enemy action's final UpdateFighters is not another timed pose (fight.c5137).
                 if (enemyPresentation is not null) AdvanceStoryEnemies();
-                if (fleeOrigin is not null) fleeOrigin = null;
+                if (fleeOrigin is not null) { fleeOrigin = null; fleeEscaped = false; }
                 if (lifecycle.Completion is not null || lifecycle.VictorySettlement is not null || lifecycle.PendingBattleEndScript is not null)
                 {
                     HandleStoryVictoryBoundary();
@@ -406,8 +412,10 @@ public partial class Main
         }
         var shownEnemy = StoryBattleMode == StoryBattlePresentation.Feedback ? enemyPresentation?.At(poseClock.Pose) : null;
         if (shownEnemy is { } shown) shownEnemy = shown with { EnemyFrame = enemyIdle![lifecycle.Current.Combat.LastAction!.ActorIndex].Frame };
-        var fleeSnapshot = StoryBattleMode == StoryBattlePresentation.Feedback && fleeOrigin is { } fleeAt
+        var fleeSnapshot = StoryBattleMode == StoryBattlePresentation.Feedback && fleeOrigin is { } fleeAt && !fleeEscaped
             ? (StoryPlayerFleeSnapshot?)StoryPlayerFleePresentation.At(poseClock.Pose, fleeAt, fleePartyIndex) : null;
+        var escapeSnapshots = StoryBattleMode == StoryBattlePresentation.Feedback && fleeOrigin is not null && fleeEscaped
+            ? StoryPlayerEscapePresentation.At(poseClock.Pose, lifecycle.Current.Combat.Players) : null;
         if (StoryBattleMode == StoryBattlePresentation.Feedback && fleeSnapshot is null)
         {
             var action = lifecycle.Current.Combat.LastAction!;
@@ -448,11 +456,14 @@ public partial class Main
             shownEnemy, StoryBattleMode == StoryBattlePresentation.Feedback ? playerPresentation?.At(poseClock.Pose, effectEnemyHeight) : null,
             storyNumbers.At(now), fleeSnapshot is null ? storyNumbers.LabelAt(now)
                 : poseClock.Pose >= StoryPlayerFleePresentation.LabelPose ? PalStoryBattleView.EscapeFailWord : null,
-            storyTargetSlot, settlementLine, fleeSnapshot);
+            storyTargetSlot, settlementLine, fleeSnapshot, escapeSnapshots);
         return true;
     }
     /// <summary>True while the failed-escape feedback presents (authored: the scene freezes).</summary>
     internal bool StoryFleeFeedback => fleeOrigin is not null;
+    /// <summary>True while the successful-escape walk-off presents (battle.c 1458-1528): every
+    /// living member leaves the screen before the battle releases with its owned receipt.</summary>
+    internal bool StoryEscapeFeedback => fleeOrigin is not null && fleeEscaped;
     /// <summary>palette.c PAL_FadeToRed (script.c 0x004F game-over fade): every palette entry
     /// except the preserved 0x4F text color moves red by 8 per step for 32 steps of 75ms;
     /// this is the step-<paramref name="step"/> palette of that reference convergence.</summary>
@@ -633,7 +644,7 @@ public partial class Main
         storyView = null; storyRequest = null; storyTeam = null; StoryBattleMode = null; battleConfirm = false; storyCancel = false; resumeStoryDisplay = false;
         enemyPresentation = null; playerPresentation = null; enemyIdle = null; outerDue = false;
         storyTargetSlot = 0; storyCycle = 0; storyLastPresentedAction = null;
-        storyFlee = false; storyDefend = false; storyLastFleeAttempt = null; fleeOrigin = null; fleePartyIndex = -1; storyRedStep = -1;
+        storyFlee = false; storyDefend = false; storyLastFleeAttempt = null; fleeOrigin = null; fleePartyIndex = -1; fleeEscaped = false; storyRedStep = -1;
         settlementLines = null; settlementStage = 0; settlementPresented = false;
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
@@ -649,4 +660,35 @@ internal static class StoryPlayerFleePresentation
     internal static StoryPlayerFleeSnapshot At(int pose, Vector2 origin, int partyIndex) =>
         new(partyIndex, pose < LabelPose ? 0 : 1,
             new Vector2(4 * Math.Min(pose + 1, LabelPose), 2 * Math.Min(pose + 1, LabelPose)));
+}
+
+/// <summary>battle.c 1458-1528 PAL_BattlePlayerEscape: every living member walks off together
+/// for sixteen frames (party-column steps +4/+6, +4/+4 or +6/+3, battle.c 1493-1516), then all
+/// players — the dead included — leave the screen (pos 9999, battle.c 1519-1526); poses advance
+/// on the shared 40ms clock. Only the living walk; the dead stay visible at their home
+/// positions through the walk-off (fight.c 952-957 keeps drawing them) and leave with the
+/// party at the final removal frame.</summary>
+internal static class StoryPlayerEscapePresentation
+{
+    internal const long Duration = 17;
+    // The snapshots carry only the relative walk-off offset; the view adds each member's own
+    // visual origin (PlayerOrigins columns) when drawing.
+    internal static IReadOnlyList<StoryPlayerFleeSnapshot> At(int pose, IReadOnlyList<ClassicBattlePlayerView> members)
+    {
+        var walking = new List<StoryPlayerFleeSnapshot>();
+        for (int member = 0; member < members.Count; member++)
+        {
+            if (pose >= Duration - 1)
+            {
+                // battle.c 1519-1526: the removal loop carries EVERY member, dead included.
+                walking.Add(new(member, 0, new Vector2(9999, 9999)));
+                continue;
+            }
+            if (members[member].Hp == 0) continue;
+            (int X, int Y) step = member switch { 0 when members.Count > 1 => (4, 6), 2 => (6, 3), _ => (4, 4) };
+            int steps = Math.Min(pose + 1, 16);
+            walking.Add(new(member, 0, new Vector2(step.X * steps, step.Y * steps)));
+        }
+        return walking;
+    }
 }

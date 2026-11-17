@@ -1,5 +1,15 @@
 # ClassicBattleSession：Core 普攻与整轮选令
 
+## 当前 #145：普通战斗逃跑（T17）
+
+非 boss 战斗的逃跑成功域经同一选令/动作队列接通（fight.c 4119-4152；battle.c 1458-1527 + 774），不新增队列、随机源或第二套状态。公开 seam：`ClassicBattleSession.SelectFlee` → `AttemptFlee` 观察面 `ClassicBattleView.LastFleeAttempt`（`ClassicBattleFleeAttempt.EnemyFleeDefense/Draw/Escaped`）与新终局 `ClassicBattlePhase.Escaped`；经 `TriggerScriptSession.AcknowledgeBattle`（script.c 0x0007 operand[2] → fleeTarget 分支）与正常 Main 表现接通。
+
+- **提交与传播**：`SelectFlee(partyIndex)` 要求 Selecting 且当前选令成员；提交者与其后全部存活成员一起逃跑（CLASSIC kKeyFlee 回喂，fight.c 1965-1978 + 1797-1799）；逃跑减半队列速度（fight.c 1546）。成功即战斗立刻结束于 `Escaped`（主循环中断，队列余项不执行、无胜利现金/经验/物品、无逃跑隐藏经验计数）；失败只消耗该动作并加 2 到 flee 计数。boss 战即使数值够也必败，但抽取照常消费。
+- **判定数学（WORD 累加器）**：def 在 fight.c 3597 声明为 WORD，逐敌 `def += dex` 与 `def += (level+6)*4` 每次存回即 mod 65536（与 AttackEnemy 的 WORD 回绕先例同款），最终仅 `(SHORT)def < 0` 归零后进入 `RandomLong(0, def)`。回归例：单敌 level 65535 → 262164 回绕为 20（fleeRate 25 必逃脱）；双敌 dex −32768 → 逐项回绕为 48（非钳 0、非负上界；其 WORD 回绕队列速度 32786 在 SHORT 嵌套比较下为 −32750 排最后）。既有求和/负 SHORT 例（52、40024）不越界，行为不变。
+- **回执路由**：Escaped 回执按 startBattle operand[2] 路由到 fleeTarget；Lost 仍走 lossTarget；过期/重复/非 owned 回执保持惰性，不二次执行剧情。
+- **Main 表现**：成功逃跑播放 16 姿势队列步进行走（仅活人，battle.c 1493-1516），最终移除帧把全部成员（含死亡——战中死亡成员持续可见，fight.c 952-957）移出画面 (9999, 9999)（battle.c 1519-1526）；随后经自有回执释放战斗并续跑 fleeTarget 剧情。
+- **覆盖**：`ClassicBattleSessionTests` 逃跑族（boss 抽取/必败、有效面板、成功无奖励、边界相等、失败计数、存活敌求和、负 SHORT 钳零、WORD 回绕、后续队员不再尝试、经典提交覆盖）+ `TriggerScriptBattleBindingTests`（fleeTarget 路由与惰性重复回执）+ scene-realfull 两个 `NormalBattleFlee` 测试（正式 Prepare 链 Main 流程与最终帧全员离屏表现）。计数：Core 1473、Game 1015 positives（scene-realfull 44）。敌方逃跑、脚本强制逃跑、战败读档不在本票。
+
 ## 当前 #143：普通攻击全体（T15）
 
 有参考全体攻击能力的队员经同一攻击选令与动作队列提交一次全体目标选令，不新增队列、随机源或第二套状态。能力来源 = 授权玩家字 `ClassicBattlePlayer.AttackAll`（正式 authored/native 链可运输的声明，PLAYERROLES rgwAttackAll；固定参考引擎本身只扫装备效果）∨ 任一非零装备 `AttackAllWord` 寄存器（`PAL_PlayerCanAttackAll`，global.c 2048-2080 原文）。旧拒绝面（玩家字 + 装备字）迁移为能力正例；cooperativeMagic 装备字仍拒绝。

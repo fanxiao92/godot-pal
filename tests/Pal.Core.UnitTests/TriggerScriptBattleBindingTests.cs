@@ -1719,6 +1719,42 @@ public sealed class TriggerScriptBattleBindingTests
         Assert.Equal(90, random.Draws);
     }
 
+    [Fact]
+    public void Escaped_battle_receipt_resumes_the_flee_branch_and_rejects_stale_duplicates()
+    {
+        // script.c 0x0007: kBattleResultFleed jumps operand[2] (the authored flee target); the
+        // duplicate and foreign receipts never re-run the branch, and no victory growth applies.
+        var fixture = Fixture();
+        fixture.Commands[1] = Battle(1, boss: false, flee: "L0004");
+        // The victory continuation (next L0002) parks on the merged 61..62 display; only the
+        // flee branch enters at the trailing end-keep row, so the call completes with no display.
+        var random = new BindingRandom();
+        var script = Script(fixture, random);
+        script.Start("shared", "npc", 28);
+        var request = script.PendingBattle!;
+        Assert.False(request.IsBoss);
+        Assert.Equal(4, request.FleeAddress);
+        Assert.Equal(4, request.LossAddress);
+        Assert.Equal(2, request.NextAddress);
+        request.Lifecycle.SelectFlee(0);
+        Assert.True(request.Lifecycle.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Escaped, request.Lifecycle.Completion!.Outcome);
+        Assert.True(script.AcknowledgeBattle(request.Id, request.Lifecycle.Completion));
+        Assert.Null(script.PendingBattle);
+        // script.c 0x0007: the Fleed receipt jumped operand[2] (L0004, end keep), so the whole
+        // call completes without any display; a misrouted Escaped->next would instead park on
+        // the WaitingForDisplay dialogue that starts at message 61.
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Null(script.PendingDisplay);
+        // Complete() keeps the end-keep command's own position (no reset to CommandAt(0)).
+        Assert.Equal(new TriggerPosition("shared", "L0004", 4), script.CurrentPosition);
+        AssertInert(script, random, () => script.AcknowledgeBattle(request.Id, request.Lifecycle.Completion));
+        AssertInert(script, random, () => script.AcknowledgeBattle(Guid.NewGuid(), request.Lifecycle.Completion));
+        Assert.Equal(100, script.BattleRole!.Hp);
+        Assert.Equal(0, script.BattleRole.HiddenExperience["flee"].Count);
+        Assert.Equal(3, random.Draws);
+    }
+
     private static TriggerBattleContent SlotContent(IReadOnlyList<ClassicBattleEnemy> enemies)
         => new([Role()], [new(1, 100, 150, 40, 20, 100)],
             new Dictionary<int, ClassicBattleGrowthData> { [1] = Growth() },

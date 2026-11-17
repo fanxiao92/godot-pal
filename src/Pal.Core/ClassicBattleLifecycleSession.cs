@@ -103,7 +103,9 @@ public sealed class ClassicBattleLifecycleSession
         Current = View(activeCombat.Current);
     }
 
-    /// <summary>The whole-party boss flee attempt (fight.c 4119-4173); only a boss battle supports it.</summary>
+    /// <summary>The whole-party flee attempt (fight.c 4119-4173): a boss battle always fails but
+    /// still consumes its draw; a normal battle ends Escaped on success, settling with the common
+    /// cleanup only — no victory rewards, growth or enemy post-victory scripts (battle.c 1804-1830).</summary>
     public void SelectFlee(int partyIndex)
     {
         if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");

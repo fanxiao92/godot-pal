@@ -275,7 +275,14 @@ public sealed class TriggerScriptSession
         else _battleRoles = request.Lifecycle.Current.Roles;
         // The reload diagnostic carries the enemy team/context of the battle that actually lost.
         if (completion!.Outcome == ClassicBattlePhase.Lost) _lostBattleContext = (request.EnemyTeamId, request.IsBoss);
-        _address = completion!.Outcome == ClassicBattlePhase.Lost ? request.LossAddress ?? request.NextAddress : request.NextAddress;
+        // script.c 0x0007: kBattleResultLost jumps operand[1] when present, kBattleResultFleed
+        // jumps operand[2] (the authored flee target), and every other result continues at next.
+        _address = completion!.Outcome switch
+        {
+            ClassicBattlePhase.Lost => request.LossAddress ?? request.NextAddress,
+            ClassicBattlePhase.Escaped => request.FleeAddress ?? request.NextAddress,
+            _ => request.NextAddress,
+        };
         PendingBattle = null;
         Continue();
         return true;

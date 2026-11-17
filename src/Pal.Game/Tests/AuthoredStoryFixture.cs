@@ -20,7 +20,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
     internal AuthoredStoryFixture(string scenario, string? missingPresentation = null, int? enemyHp = null,
         bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
         bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false,
-        bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false, bool attackAllMember0 = false)
+        bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false, bool attackAllMember0 = false,
+        bool fleeEscape = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -36,6 +37,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The mixed empty-slot derivation is its own five-slot author shape.", nameof(mixedEmptySlots));
         if (attackAllMember0 && (!mixedEmptySlots || scenario != "PartyWin"))
             throw new ArgumentException("The attack-all derivation is defined on the mixed empty-slot PartyWin shape.", nameof(attackAllMember0));
+        if (fleeEscape && (scenario != "LostReload" || playerHp is null))
+            throw new ArgumentException("The flee-escape derivation is defined on the LostReload author with an explicit playerHp word.", nameof(fleeEscape));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -58,7 +61,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -77,6 +80,13 @@ internal sealed class AuthoredStoryFixture : IDisposable
                     // Both the role snapshot and its player must keep matching HP words.
                     data["roles"]![0]!["hp"] = memberHp;
                     data["players"]![0]!["hp"] = memberHp;
+                }
+                if (fleeEscape)
+                {
+                    // #145 (T17): fleeRate 999 stays above the authored dex500 defense sum (524)
+                    // under every draw, so the non-boss battle's escape always succeeds; the role
+                    // row keeps its authored panels (no declared-panel flowback here).
+                    data["players"]![0]!["fleeRate"] = 999;
                 }
                 if (singlePlayerTwoEnemies)
                 {
@@ -156,6 +166,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
             string numeric = PrepareBattleData.Prepare(numbers, Path.Combine(output, "Numbers"));
             Directory.CreateDirectory(Path.Combine(input, "events"));
             foreach (string path in Directory.GetFiles(Path.Combine(source, "Story/events"))) File.Copy(path, Path.Combine(input, "events", Path.GetFileName(path)));
+            if (fleeEscape) AddFleeEscapeBranch();
             var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "Story/story-package.json")))!;
             if (singlePlayerTwoEnemies)
             {
@@ -229,6 +240,9 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (attackAllMember0)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned attack-all word, member-0 speed word 999 and loaded-slot HP 21 words (T15 #143); authored capability/numeric declarations, not retail data.";
+            if (fleeEscape)
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned non-boss flee derivation (T17 #145): startBattle operand2 re-points to an appended flee branch and the player declares fleeRate 999; authored stream derived, not retail data.";
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")
                 foreach (var player in metadata["visual"]!["players"]!.AsArray())
@@ -249,6 +263,54 @@ internal sealed class AuthoredStoryFixture : IDisposable
         }
         catch { Dispose(); throw; }
     }
+    private void AddFleeEscapeBranch()
+    {
+        // Only this owned authored shape is relocatable (same rule as the HP/MP prefix). The
+        // original author bytes stay read-only; the derivation owns a fresh GUID-owned input.
+        string arenaPath = Path.Combine(input, "events/arena.json");
+        string indexPath = Path.Combine(input, "events/index.json");
+        var arena = JsonNode.Parse(File.ReadAllText(arenaPath))!;
+        var index = JsonNode.Parse(File.ReadAllText(indexPath))!;
+        var commands = arena["commands"]!.AsArray();
+        var battle = commands[3]!;
+        if (commands.Count != 13 || battle["op"]!.GetValue<string>() != "startBattle"
+            || (int)battle["source"]!["operands"]![0]! != 18 || (int)battle["source"]!["operands"]![1]! != 7
+            || (int)battle["source"]!["operands"]![2]! != 0 || battle["isBoss"]!.GetValue<bool>() != true
+            || battle["fleeTarget"] is not null || battle["lossTarget"]!.GetValue<string>() != "L0007"
+            || commands[12]!["op"]!.GetValue<string>() != "end" || commands[12]!["next"] is not null)
+            throw new InvalidDataException("The flee-escape derivation requires the known 13-instruction LostReload author arena shape.");
+        // script.c 0x0007: operand2 is the flee branch, and a nonzero word also makes
+        // fIsBoss = FALSE (PAL_StartBattle(wTeam, !operand2)); the loss target stays L0007.
+        battle["isBoss"] = false;
+        battle["fleeTarget"] = "L0013";
+        battle["source"]!["operands"]![2] = 13;
+        // The previous terminal row stops being the stream's end: its next must now chain to
+        // the appended successor (the next-successor schema rule covers the whole stream).
+        commands[12]!["next"] = "L0013";
+        commands.Add(new JsonObject { ["label"] = "L0013", ["op"] = "setDialog", ["next"] = "L0014",
+            ["source"] = new JsonObject { ["index"] = 13, ["opcode"] = 60, ["operands"] = new JsonArray(0, 0, 0) },
+            ["box"] = "upper", ["portraitId"] = 0, ["color"] = 0, ["rngWord"] = 0 });
+        commands.Add(new JsonObject { ["label"] = "L0014", ["op"] = "showDialog", ["next"] = "L0015",
+            ["source"] = new JsonObject { ["index"] = 14, ["opcode"] = 65535, ["operands"] = new JsonArray(3, 0, 0) },
+            ["messageId"] = 3, ["descriptionLineWord"] = 0 });
+        commands.Add(new JsonObject { ["label"] = "L0015", ["op"] = "end", ["next"] = null,
+            ["source"] = new JsonObject { ["index"] = 15, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) },
+            ["mode"] = "keep" });
+        var bytes = new byte[commands.Count * 8];
+        for (int address = 0; address < commands.Count; address++)
+        {
+            var source = commands[address]!["source"]!;
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8), checked((ushort)source["opcode"]!.GetValue<int>()));
+            for (int word = 0; word < 3; word++)
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8 + 2 + word * 2), checked((ushort)source["operands"]![word]!.GetValue<int>()));
+        }
+        index["source"]!["instructionCount"] = commands.Count;
+        index["source"]!["byteLength"] = bytes.Length;
+        index["source"]!["sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        File.WriteAllText(arenaPath, arena.ToJsonString());
+        File.WriteAllText(indexPath, index.ToJsonString());
+    }
+
     private static void RemoveRequired(JsonObject owner, string field)
     {
         if (!owner.Remove(field)) throw new InvalidOperationException($"Fixture mutation requires existing field: {field}");

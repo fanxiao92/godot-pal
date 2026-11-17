@@ -279,13 +279,159 @@ public sealed class ClassicBattleSessionTests
     }
 
     [Fact]
-    public void Non_boss_flee_is_an_unsupported_domain_and_consumes_nothing()
+    public void Normal_battle_flee_succeeds_and_ends_the_battle_without_rewards()
     {
-        var random = new ScriptedRandom([]);
-        var session = new ClassicBattleSession(Definition(), random);
-        ClassicBattleView before = session.Current;
-        Assert.Throws<InvalidOperationException>(() => session.SelectFlee(0));
-        Assert.Same(before, session.Current);
+        // fight.c 4119-4152 + battle.c 1527: a normal battle's successful escape consumes the
+        // single RandomLong(0, def) draw (def 24: dex 0 + (level0+6)*4), ends the battle at the
+        // fleer's own queue action and grants no rewards and no flee-experience count.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 24, 10)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0] with { FleeRate = 25 }] };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectFlee(0);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 25, 24, 10, true), session.Current.LastFleeAttempt);
+        Assert.NotNull(session.Completion);
+        Assert.Equal(0, session.Current.Counts.Flee);
+        Assert.Equal(0, session.ExperienceGained);
+        Assert.Equal(0, session.CashGained);
+        Assert.False(session.ResolveNextAction());
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Normal_battle_flee_boundary_equality_escapes_at_the_drawn_defense()
+    {
+        // fight.c 4144: str >= RandomLong(0, def); the equal boundary (24 >= 24) is a success.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 24, 24)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0] with { FleeRate = 24 }] };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectFlee(0);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 24, 24, 24, true), session.Current.LastFleeAttempt);
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Current.Phase);
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Completion!.Outcome);
+        Assert.Equal(0, session.Current.Counts.Flee);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Normal_battle_flee_failure_spends_the_action_and_grows_the_flee_track()
+    {
+        // fight.c 4153-4171: a failed normal escape stays in battle (23 < 24), adds 2 to the
+        // flee track and spends only its own action; the enemy strike ends the round normally.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 24, 24),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0] with { FleeRate = 23 }] };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectFlee(0);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 23, 24, 24, false), session.Current.LastFleeAttempt);
+        Assert.Equal(2, session.Current.Players[0].Counts.Flee);
+        Assert.Null(session.Completion);
+        session.ResolveNextAction(); // the enemy strike lands (20 damage); the round reopens selection
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Phase);
+        Assert.Equal(180, session.Current.PlayerHp);
+        Assert.Null(session.Completion);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Normal_battle_flee_defense_sums_every_living_enemy()
+    {
+        // fight.c 4128-4137: def sums each living enemy's dex + (level+6)*4 (24 + 28 here);
+        // the equal boundary 52 >= 52 escapes.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 52, 52)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0] with { FleeRate = 52 }],
+            Enemies = [data.Enemies[0], data.Enemies[0] with { Level = 1 }] };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectFlee(0);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 52, 52, 52, true), session.Current.LastFleeAttempt);
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Current.Phase);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Normal_battle_flee_clamps_a_negative_short_defense_sum_to_zero()
+    {
+        // fight.c 4139-4143: a (SHORT)negative defense sum (two dex-19988 enemies: 2*(19988+24)
+        // = 40024 -> SHORT -25512) becomes 0, so the RandomLong(0, 0) draw equals any panel and
+        // even fleeRate 0 escapes. Both enemies act first (speed 20006 vs the halved 50).
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1),
+            I(0, 0, 0), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1), I(0, 0, 0)]);
+        var data = Definition();
+        data = data with { Enemies = [data.Enemies[0] with { Dexterity = 19988 },
+            data.Enemies[0] with { Dexterity = 19988 }] };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectFlee(0);
+        session.ResolveNextAction(); // first enemy strike (20 damage)
+        session.ResolveNextAction(); // second enemy strike (20 damage)
+        Assert.Equal(160, session.Current.PlayerHp);
+        session.ResolveNextAction(); // the member's attempt: defense clamped to zero
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 0, 0, 0, true), session.Current.LastFleeAttempt);
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Current.Phase);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Normal_battle_flee_defense_accumulates_on_the_word_like_the_reference()
+    {
+        // fight.c 3597 + 4128-4137: def is a WORD accumulator — every dex and (level+6)*4 store
+        // wraps at 65536, so one level-65535 enemy's 262164 wraps to 20: the draw bound is
+        // RandomLong(0, 20), never the unwrapped 262164 of an int sum. The enemy's wrapped queue
+        // speed ((65541*3) mod 65536 = 15) stays under the halved 50, so the member acts first.
+        var highLevel = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 20, 20)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0] with { FleeRate = 25 }],
+            Enemies = [data.Enemies[0] with { Level = 65535 }] };
+        var session = new ClassicBattleSession(data, highLevel);
+        session.SelectFlee(0);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 25, 20, 20, true), session.Current.LastFleeAttempt);
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Completion!.Outcome);
+        highLevel.AssertExhausted();
+
+        // A negative raw sum wraps per store exactly like the reference: 0x8000+24+0x8000+24
+        // = 48 on the WORD — never a pre-wrap negative clamp and never a negative RandomLong
+        // bound. The two enemies' wrapped queue speeds (18-32768 -> 32786) read as SHORT
+        // -32750 in the reference's nested short comparison, so they queue last and the
+        // member's boundary attempt 48 >= 48 ends the battle before any enemy strike.
+        var negativeSum = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 48, 48)]);
+        data = Definition();
+        data = data with { Players = [data.Players[0] with { FleeRate = 48 }],
+            Enemies = [data.Enemies[0] with { Dexterity = -32768 }, data.Enemies[0] with { Dexterity = -32768 }] };
+        session = new ClassicBattleSession(data, negativeSum);
+        session.SelectFlee(0);
+        session.ResolveNextAction(); // the member's attempt: the WORD accumulator holds 48
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 48, 48, 48, true), session.Current.LastFleeAttempt);
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Current.Phase);
+        negativeSum.AssertExhausted();
+    }
+
+    [Fact]
+    public void Normal_battle_flee_success_never_attempts_the_later_fleeing_members()
+    {
+        // fight.c 1965-1978 + battle.c 774: both members committed the flee (the committer's
+        // kKeyFlee re-feed), but the committer's successful attempt ends the battle at his own
+        // queue action; the second member's queued attempt never runs and nobody gains a count.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 24, 0)]);
+        var data = Definition();
+        data = data with { Players = [data.Players[0] with { FleeRate = 5 },
+            data.Players[0] with { RoleId = 2, Dexterity = 90 }] };
+        var session = new ClassicBattleSession(data, random);
+        session.SelectFlee(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        session.ResolveNextAction();
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, 5, 24, 0, true), session.Current.LastFleeAttempt);
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Current.Phase);
+        Assert.Equal(0, session.Current.Players[0].Counts.Flee);
+        Assert.Equal(0, session.Current.Players[1].Counts.Flee);
+        Assert.False(session.ResolveNextAction());
         random.AssertExhausted();
     }
 

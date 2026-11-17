@@ -169,12 +169,11 @@ public sealed class ClassicBattleSession
     }
 
     /// <summary>fight.c 4119-4173: the committer and every later living member flee together
-    /// (CLASSIC fFlee re-feed); a boss attempt always fails but still consumes its draw.</summary>
+    /// (CLASSIC fFlee re-feed); a boss attempt always fails but still consumes its draw, and a
+    /// normal battle's successful attempt ends the whole battle (battle.c 1458-1528).</summary>
     public void SelectFlee(int partyIndex)
     {
         if (Current.Phase != ClassicBattlePhase.Selecting) throw new InvalidOperationException("This battle is not selecting an action.");
-        if (!isBossBattle)
-            throw new InvalidOperationException("Classic combat does not yet support a non-boss flee; the successful-escape domain is unimplemented.");
         if (partyIndex != Current.SelectingPlayerIndex) throw new ArgumentOutOfRangeException(nameof(partyIndex));
         for (int i = partyIndex; i < players.Length; i++)
             if (playerHp[i] > 0 && targets[i] is null) fleeing[i] = true;
@@ -270,6 +269,9 @@ public sealed class ClassicBattleSession
             {
                 AttemptFlee(entry.ActorIndex);
                 actionIndex++;
+                // battle.c 774: the successful escape ended the battle mid-round (kBattleResultFleed);
+                // the remaining queue entries never run and the round never reopens selection.
+                if (Current.Phase == ClassicBattlePhase.Escaped) { Publish(); return true; }
             }
             else if (defendingSelection[entry.ActorIndex])
             {
@@ -515,12 +517,20 @@ public sealed class ClassicBattleSession
 
     /// <summary>fight.c 4119-4173: str = effective flee rate versus every living enemy's
     /// dex + (level+6)*4; the RandomLong(0, defense) draw is consumed even in a boss battle,
-    /// which never escapes. A failed attempt spends the action and adds 2 to the flee track.</summary>
+    /// which never escapes. A failed attempt spends the action and adds 2 to the flee track; a
+    /// successful escape (never in a boss battle) ends the battle immediately.</summary>
     private void AttemptFlee(int partyIndex)
     {
+        // fight.c 3597 + 4128-4137: def is a WORD accumulator — every dex and (level+6)*4 store
+        // wraps at 65536 (the same WORD arithmetic as the attack defense sum below); only the
+        // final (SHORT)def < 0 clamps to zero before the RandomLong(0, def) draw.
         int defense = 0;
         for (int i = 0; i < enemies.Length; i++)
-            if (enemyHp[i] > 0) defense += enemies[i].Dexterity + (enemies[i].Level + 6) * 4;
+            if (enemyHp[i] > 0)
+            {
+                defense = unchecked((ushort)(defense + enemies[i].Dexterity));
+                defense = unchecked((ushort)(defense + (enemies[i].Level + 6) * 4));
+            }
         if ((short)defense < 0) defense = 0;
         int fleeRate = EffectivePanel(players[partyIndex].FleeRate, boostFlee[partyIndex]);
         int draw = random.NextInclusive(0, defense);
@@ -529,6 +539,10 @@ public sealed class ClassicBattleSession
             counts[partyIndex] = counts[partyIndex] with { Flee = unchecked((ushort)(counts[partyIndex].Flee + 2)) };
         Current = Current with { LastFleeAttempt = new(Current.Round, partyIndex, players[partyIndex].RoleId,
             fleeRate, defense, draw, escaped) };
+        if (escaped)
+            // battle.c 1519-1527: PAL_BattlePlayerEscape sets kBattleResultFleed after the walk-off;
+            // the battle main loop then breaks (battle.c 774) without running the remaining queue.
+            Finish(ClassicBattlePhase.Escaped);
     }
 
     /// <summary>fight.c:3753-3755: the attack and health counts grow once per attack action, not

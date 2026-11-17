@@ -676,6 +676,36 @@ public sealed class ClassicBattleLifecycleSessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Escaped_battle_settles_with_cleanup_only_no_rewards_growth_or_recovery()
+    {
+        // battle.c 1804-1830: kBattleResultFleed skips PAL_BattleWon entirely (no cash, growth,
+        // half recovery or enemy post-victory scripts) but still runs the common cleanup and
+        // releases the combat owner with a terminal completion receipt.
+        var role = Role();
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 24, 24)]);
+        var session = new ClassicBattleLifecycleSession(role,
+            new(1, role.Hp, role.MaxHp, 40, 20, 100) { FleeRate = 25 },
+            new(7, 0, 43, 0, 0, 0, 1) { Experience = 120, Cash = 250 }, Growth(), random);
+        session.SelectFlee(0);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Completion!.Outcome);
+        Assert.True(session.OwnsCompletion(session.Completion));
+        Assert.Null(session.VictorySettlement);
+        Assert.Null(session.PendingBattleEndScript);
+        Assert.False(session.Current.IsInBattle);
+        // No victory half-recovery or reward grant: the settled role keeps its battle HP/MP and
+        // level, and a successful escape adds no hidden flee count (fight.c 4171 is failure-only).
+        Assert.Equal(100, session.Current.Role.Hp);
+        Assert.Equal(20, session.Current.Role.Mp);
+        Assert.Equal(2, session.Current.Role.Level);
+        Assert.Equal(0, session.Current.Role.HiddenExperience["flee"].Count);
+        Assert.Equal(0, session.Current.Role.HiddenExperience["attack"].Count);
+        Assert.All(session.Current.Role.Statuses, value => Assert.Equal(0, value));
+        Assert.Throws<InvalidOperationException>(() => session.SelectFlee(0));
+        random.AssertExhausted();
+    }
+
     private static BattleRoleSnapshot Role(int roleId = 1) => new(roleId, 2, 100, 150, 20, 50, new(5, 2, 17),
         new Dictionary<string, BattleExperienceSnapshot> {
             ["health"] = new(7, 3, 55), ["magic"] = new(7, 3, 55), ["attack"] = new(7, 3, 55),

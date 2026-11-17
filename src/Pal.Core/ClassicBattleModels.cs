@@ -50,7 +50,7 @@ public sealed record ClassicBattleEnemy(int Id, int Level, int Hp, int Attack, i
 }
 
 public sealed record ClassicBattleDefinition(IReadOnlyList<ClassicBattlePlayer> Players, IReadOnlyList<ClassicBattleEnemy> Enemies);
-public enum ClassicBattlePhase { Selecting, Resolving, Won, Lost, RoleHook }
+public enum ClassicBattlePhase { Selecting, Resolving, Won, Lost, Escaped, RoleHook }
 public enum ClassicBattleSide { Player, Enemy }
 public enum ClassicBattleHookKind { Dying, FriendDeath }
 /// <summary>One mid-battle role script paused on the fight.c 768-880 post-action check.
@@ -143,7 +143,8 @@ public sealed record ClassicBattleView(ClassicBattlePhase Phase, int Round, int 
     public int? SelectingPlayerIndex { get; init; }
     /// <summary>The role script paused on the post-action check; non-null only in the RoleHook phase.</summary>
     public ClassicBattleRoleHook? PendingRoleHook { get; init; }
-    /// <summary>The newest resolved flee attempt; published once per failed boss escape, replacing any prior attempt.</summary>
+    /// <summary>The newest resolved flee attempt; published once per performed attempt (one per
+    /// committed fleer), replacing any prior attempt.</summary>
     public ClassicBattleFleeAttempt? LastFleeAttempt { get; init; }
     /// <summary>Per-target results of the newest presented strike in hit order (single-element for
     /// single-target and enemy actions); one all-target strike publishes one record per hit slot.</summary>
