@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Godot;
 using Pal.Core;
@@ -107,6 +108,28 @@ public partial class Main
             dialogue.Initialize(display, checkedStory, storyRandom);
             story = checkedStory; storyVisual = checkedVisual; mapScene = map;
             Interaction = interaction; Display = display; Dialogue = dialogue; SelectedLanguage = selected.Language;
+            // #213: the exploration menu host binding. The session resolves the prepared menu,
+            // label and role-name words now, and the font preflight covers every glyph the menu
+            // can draw, so missing content rejects before the scene publishes ready.
+            menu = new ExplorationMenuSession(
+                [new(ExplorationMenuPage.Status, ExplorationMenuSession.StatusEntryWord)],
+                checkedStory.BattleContent.Players.Select(player => new ExplorationMenuMember(player.RoleId,
+                    ExplorationMenuSession.RoleNameWordBase + player.RoleId,
+                    checkedStory.BattleContent.PanelDeclaredRoles.Contains(player.RoleId),
+                    player.Attack, player.MagicPower, player.Defense, player.Dexterity, player.FleeRate)).ToArray(),
+                roleLiveState, BattleEquipmentState.Initialize(checkedStory.BattleContent),
+                checkedStory.BattleContent.GrowthByRole, checkedStory.SelectedWords);
+            PalMenuView.ValidateTexts(checkedStory.Font,
+                Enumerable.Range(0, menu.Entries.Count).Select(menu.EntryLabel)
+                    .Concat(new[]
+                    {
+                        ExplorationMenuSession.LevelWord, ExplorationMenuSession.HpWord, ExplorationMenuSession.MpWord,
+                        ExplorationMenuSession.ExperienceWord, ExplorationMenuSession.AttackPowerWord,
+                        ExplorationMenuSession.MagicPowerWord, ExplorationMenuSession.DefenseWord,
+                        ExplorationMenuSession.DexterityWord, ExplorationMenuSession.FleeRateWord,
+                    }.Select(word => checkedStory.SelectedWords[word]))
+                    .Concat(menu.Party.Select(member => checkedStory.SelectedWords[member.NameWord]))
+                    .Append("0123456789:/"));
             AddChild(map); AddChild(display); AddChild(dialogue);
             display.Failed += DisplayFailed;
             display.ActivePaletteChanged += StoryPaletteChanged;
@@ -648,6 +671,64 @@ public partial class Main
         settlementLines = null; settlementStage = 0; settlementPresented = false;
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
+        ReleaseMenu();
+    }
+
+    // #213 exploration menu host (story-profile context): play.c 551 opens PAL_InGameMenu from
+    // the clean exploring state after the frame's scene update, and the menu loop blocks the
+    // game loop; presses apply at the real update boundary, never inside _Input.
+    private void ApplyMenuInput()
+    {
+        if (menu is null) return;
+        try
+        {
+            if (menu.Mode == ExplorationMenuMode.Closed)
+            {
+                if (menuOpenPressed && MenuOpenableState())
+                {
+                    menu.Open();
+                    menuView = new PalMenuView();
+                    AddChild(menuView);
+                    PresentMenu();
+                    GD.Print("PAL_MENU_OPENED:exploration main menu; world frozen until close");
+                }
+            }
+            else
+            {
+                foreach (ExplorationMenuKey key in pendingMenuKeys) menu.Press(key);
+                if (menu.Mode == ExplorationMenuMode.Closed)
+                {
+                    menuView?.GetParent()?.RemoveChild(menuView);
+                    menuView?.Free();
+                    menuView = null;
+                    GD.Print("PAL_MENU_CLOSED:exploration input resumes on the next update");
+                }
+                else PresentMenu();
+            }
+        }
+        catch (InvalidDataException error) { Fail($"Menu failed: {error.Message}"); }
+        finally
+        {
+            menuOpenPressed = false;
+            pendingMenuKeys.Clear();
+        }
+    }
+
+    private bool MenuOpenableState() => menu is not null && menu.Mode == ExplorationMenuMode.Closed
+        && storyRequest is null && StoryBattleMode is null && activeTrigger is null && firstBattleActiveTrigger is null
+        && !StoryLostTerminal && Interaction is { Phase: NpcInteractionPhase.Exploring }
+        && Dialogue?.Session is not { BlocksSceneUpdates: true };
+
+    private void PresentMenu() => menuView!.Present(menu!, story!.Font, story.Palette.ToArray());
+
+    private void ReleaseMenu()
+    {
+        if (menuView is not null && GodotObject.IsInstanceValid(menuView))
+        {
+            menuView.GetParent()?.RemoveChild(menuView);
+            menuView.Free();
+        }
+        menuView = null; menu = null; menuOpenPressed = false; pendingMenuKeys.Clear();
     }
 }
 

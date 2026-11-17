@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Godot;
@@ -29,6 +30,12 @@ public partial class Main : Node2D
     internal GodotBattleRandom? FirstBattleRandom => firstBattleRandom;
     private DynamicEventWorld? firstBattleWorld;
     private RoleLiveState? roleLiveState;
+    // #213 exploration menu: the story-profile host binds the Core menu session over the shared
+    // live owners; the open menu owns input and freezes exploration updates (uigame.c).
+    private ExplorationMenuSession? menu;
+    private PalMenuView? menuView;
+    private bool menuOpenPressed;
+    private readonly List<ExplorationMenuKey> pendingMenuKeys = new();
     private bool awaitingSceneDraw;
     private bool rendererSubscribed;
     private GameSceneConfiguration? configuration;
@@ -67,6 +74,10 @@ public partial class Main : Node2D
     public string? SelectedLanguage { get; private set; }
     public PalTriggerDialogue? Dialogue { get; private set; }
     public PalDialogueDisplay? Display { get; private set; }
+    /// <summary>The #213 exploration menu session bound to the story-profile host, or null on
+    /// hosts without the formal shared live-state chain (supported context of this leaf).</summary>
+    public ExplorationMenuSession? Menu => menu;
+    internal PalMenuView? MenuView => menuView;
     // Actual Main callback completion; display completion has its own production boundary.
     public event Action? UpdateCompleted;
 
@@ -234,6 +245,14 @@ public partial class Main : Node2D
         }
     }
 
+    private static ExplorationMenuKey DirectionMenuKey(int direction) => direction switch
+    {
+        0 => ExplorationMenuKey.Down,
+        1 => ExplorationMenuKey.Left,
+        2 => ExplorationMenuKey.Up,
+        _ => ExplorationMenuKey.Right,
+    };
+
     private static Color[] Palette(PalSceneData scene) => Enumerable.Range(0, 256).Select(i =>
         new Color(scene.Palette.Rgb[i * 3] / 255f, scene.Palette.Rgb[i * 3 + 1] / 255f, scene.Palette.Rgb[i * 3 + 2] / 255f)).ToArray();
 
@@ -291,6 +310,21 @@ public partial class Main : Node2D
                     }
                     return;
                 }
+                if (menu is { Mode: not ExplorationMenuMode.Closed })
+                {
+                    // The open menu owns direction presses (uigame.c menu loops); releases keep
+                    // the exploration held-key state truthful for the post-close resume.
+                    if (key.Pressed)
+                    {
+                        if (!key.Echo) pendingMenuKeys.Add(DirectionMenuKey(i / 2));
+                        GetViewport().SetInputAsHandled();
+                    }
+                    else if (dynamicSession is { } dynamicRelease) dynamicRelease.Release((ExplorationKey)i);
+                    else if (battle is { } battleRelease) battleRelease.Release((ExplorationKey)i);
+                    else if (Interaction is { } interactionRelease) interactionRelease.Release((ExplorationKey)i);
+                    else input!.Release((ExplorationKey)i);
+                    return;
+                }
                 if (dynamicSession is { } dynamic)
                 {
                     if (key.Pressed) dynamic.Press((ExplorationKey)i, key.Echo);
@@ -314,7 +348,14 @@ public partial class Main : Node2D
             if (key.Pressed && !key.Echo
                 && (key.Keycode is Key.Enter or Key.Space or Key.KpEnter || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right))
             {
-                if (storyRequest is not null)
+                if (menu is { Mode: not ExplorationMenuMode.Closed })
+                {
+                    // The open menu consumes Search as its confirm; the press never reaches the
+                    // exploration search, so closing cannot leak into an NPC trigger (uigame.c).
+                    pendingMenuKeys.Add(ExplorationMenuKey.Confirm);
+                    GetViewport().SetInputAsHandled();
+                }
+                else if (storyRequest is not null)
                 {
                     // The paused role hook's dialogue display consumes input itself; a menu
                     // confirm must not queue behind the script (fight.c 768-880 pause).
@@ -344,6 +385,23 @@ public partial class Main : Node2D
                 storyCancel = true;
                 GetViewport().SetInputAsHandled();
             }
+            // input.c 66-70 kKeyMenu (Escape/Insert/Alt/KP_0): play.c 551 opens the in-game menu
+            // from the clean exploring state after that frame's scene update; the press applies
+            // at the real update boundary and the guard re-checks the mode owner there.
+            if (key.Pressed && !key.Echo && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
+                && storyRequest is null && menu is not null)
+            {
+                if (menu.Mode != ExplorationMenuMode.Closed)
+                {
+                    pendingMenuKeys.Add(ExplorationMenuKey.Cancel);
+                    GetViewport().SetInputAsHandled();
+                }
+                else
+                {
+                    menuOpenPressed = true;
+                    GetViewport().SetInputAsHandled();
+                }
+            }
         }
         catch (Exception error) { Fail($"Exploration input failed: {error.Message}"); }
     }
@@ -370,7 +428,10 @@ public partial class Main : Node2D
             if (awaitingSceneDraw && DisplayServer.GetName() == "headless") StartAfterSceneDraw();
             if (awaitingFirstBattleDraw && DisplayServer.GetName() == "headless") StartFirstBattleAfterSceneDraw();
             if (Failure is not null) return;
-            bool changed = battle?.Update(unchecked((uint)Time.GetTicksMsec()))
+            // play.c PAL_GameLoop: the frame's update runs first, then kKeyMenu opens the menu;
+            // while the menu is open the world stays frozen (PAL_InGameMenu blocks the loop).
+            bool changed = menu is { Mode: not ExplorationMenuMode.Closed } ? false
+                : battle?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? input!.Update(unchecked((uint)Time.GetTicksMsec()));
             // World-wired first-battle call: the parked scene waits and counted movements
@@ -390,6 +451,9 @@ public partial class Main : Node2D
                     CompleteFirstBattleTrigger();
                 }
             }
+            ApplyMenuInput();
+            if (Failure is not null) return;
+            if (menu is { Mode: not ExplorationMenuMode.Closed }) { UpdateCompleted?.Invoke(); return; }
             if (changed) mapScene.UpdateScene(Exploration.Plan);
             // Presentation transitions (redraw/fadeScene/fadeOut) in the world-wired call:
             // redraw the retained scene, then receipt after the delay elapsed.
