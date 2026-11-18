@@ -680,7 +680,9 @@ public sealed class DynamicEventSession
 
     private StaticSceneRules BuildRules() => exploration.Rules.WithObjects(world.Objects.Select(ObjectView));
 
-    private static SceneObject ObjectView(DynamicEventObject obj) => obj.Initial with
+    // #226: internal so the world restore plan reuses the exact projection the live dynamic
+    // session applies — the restored view and the live view can never drift apart.
+    internal static SceneObject ObjectView(DynamicEventObject obj) => obj.Initial with
     {
         X = (ushort)obj.X, Y = (ushort)obj.Y, Direction = (ushort)obj.Direction, CurrentFrame = (ushort)obj.CurrentFrame,
         State = (short)obj.State, VanishTime = (short)obj.VanishTime,
