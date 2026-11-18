@@ -356,6 +356,41 @@ test('RED certification tolerates the engine-generated companion .uid of a decla
   assert.equal(uidRun.counts.awaiting_commit, 1);
   assert.equal(f.host().state()!.records[2].phase, 'awaiting_commit');
 });
+test('RED certification tolerates operator executor-tool repairs made between attempts of the same record', async () => {
+  const f = fixture(1);
+  const toolDeclaration = { ...syntheticDeclaration, paths: ['contract-fixture.txt'] };
+  let implementations = 0;
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      implementations++;
+      request.declareRed!(toolDeclaration);
+      fs.writeFileSync(path.join(f.cwd, 'contract-fixture.txt'), 'declared stage test');
+      if (implementations === 1) return { status: 'blocked', summary: 'Synthetic pause for an operator executor repair', evidence: ['Pausing before RED certification'] };
+      // The operator repaired the executor between attempts: a tracked tool file under
+      // tools/long-running-agent changed after attempts[0] froze the record baseline.
+      // The implementer never wrote it (beforeWrite would reject an undeclared path); the
+      // RED gate must tolerate it so the record can still certify its frozen declaration.
+      fs.mkdirSync(path.join(f.cwd, 'tools/long-running-agent'), { recursive: true });
+      fs.writeFileSync(path.join(f.cwd, 'tools/long-running-agent/github-host.ts'), 'operator executor repair');
+      // An undeclared change outside the executor tool root and the declaration still blocks (pre-RED).
+      fs.writeFileSync(path.join(f.cwd, 'src-outsider.txt'), 'undeclared production change');
+      assert.throws(() => request.beforeCheck!(snapshot(f.cwd), { scope: 'unit', expectedFailure: toolDeclaration.expectedFailure }), /Production changed/);
+      fs.rmSync(path.join(f.cwd, 'src-outsider.txt'));
+      request.beforeCheck!(snapshot(f.cwd), { scope: 'unit', expectedFailure: toolDeclaration.expectedFailure });
+      request.recordCheck({ project: 'synthetic native', directory: path.join(request.directory, 'red'), sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1, expectedRed: true, expectedFailure: toolDeclaration.expectedFailure });
+      fs.writeFileSync(path.join(f.cwd, 'a.txt'), 'production after exact RED');
+      request.beforeCheck!(snapshot(f.cwd));
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+    }
+    return { status: request.role === 'implement' ? 'candidate' : 'passed', summary: 'executor tool repair tolerated at the RED gate', evidence: ['beforeCheck RED gate'] };
+  } });
+  assert.equal((await f.host().run({}, signal())).counts.blocked, 1);
+  const resumed = await f.host().run({ resume: true }, signal());
+  assert.equal(resumed.counts.awaiting_commit, 1);
+  const toolRecord = f.host().state()!.records[2];
+  assert.equal(toolRecord.phase, 'awaiting_commit');
+  assert.equal(toolRecord.attempts.length, 2);
+});
 test('TDD rejects GREEN before RED even for the same source fingerprint', async () => {
   const f = fixture(1);
   f.setAgent({ run: async request => {

@@ -505,7 +505,12 @@ export class GitHubHost {
                 // write (beforeWrite still rejects undeclared paths), so it must not fail the RED gate.
                 // A companion whose script is not declared stays a production change.
                 const declaredCompanionUid = (file: string) => file.endsWith('.uid') && Boolean(declaration?.paths.includes(file.slice(0, -4)));
-                if (changedPaths(original, source).some(file => !declaration?.paths.includes(file) && !declaredCompanionUid(file))) throw new Error('Production changed before certified RED');
+                // Operator executor repairs (engineering rounds) land under the tool root after the
+                // record baseline was frozen by attempts[0]; the implementer cannot write there before
+                // RED (beforeWrite still requires a declared path), so tool-root drift between the
+                // record baseline and the live tree must not fail the RED gate either.
+                const executorToolChange = (file: string) => file.startsWith('tools/long-running-agent/');
+                if (changedPaths(original, source).some(file => !declaration?.paths.includes(file) && !declaredCompanionUid(file) && !executorToolChange(file))) throw new Error('Production changed before certified RED');
                 if (selection?.expectedFailure && (!declaration || canonical(selection.expectedFailure) !== canonical(declaration.expectedFailure))) throw new Error('Native RED must use the frozen declaration');
               }
             },
