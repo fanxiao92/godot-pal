@@ -500,7 +500,12 @@ export class GitHubHost {
               requireChangedAfterFailure(record, source);
               if (record.tdd && !repairMode(record) && !record.tdd.red) {
                 const declaration = record.tdd.declaration;
-                if (changedPaths(original, source).some(file => !declaration?.paths.includes(file))) throw new Error('Production changed before certified RED');
+                // A Godot companion .uid for a script already declared as a RED stage path is engine
+                // output (stabilizeGodotUids before the certifying range check), never an implementer
+                // write (beforeWrite still rejects undeclared paths), so it must not fail the RED gate.
+                // A companion whose script is not declared stays a production change.
+                const declaredCompanionUid = (file: string) => file.endsWith('.uid') && Boolean(declaration?.paths.includes(file.slice(0, -4)));
+                if (changedPaths(original, source).some(file => !declaration?.paths.includes(file) && !declaredCompanionUid(file))) throw new Error('Production changed before certified RED');
                 if (selection?.expectedFailure && (!declaration || canonical(selection.expectedFailure) !== canonical(declaration.expectedFailure))) throw new Error('Native RED must use the frozen declaration');
               }
             },

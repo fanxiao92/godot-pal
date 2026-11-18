@@ -328,6 +328,34 @@ test('TDD stage paths permit migration only, exact RED unlocks production and st
   assert.equal(record.tdd!.required, true); assert.equal(record.tdd!.red!.code, 1);
   assert.deepEqual(record.corrections ?? [], [], 'Certified RED consumes no correction');
 });
+test('RED certification tolerates the engine-generated companion .uid of a declared new Godot script', async () => {
+  const f = fixture(1);
+  const uidDeclaration = { ...syntheticDeclaration, paths: ['src/Pal.Game/Tests/SystemSaveSceneTests.cs'] };
+  f.setAgent({ run: async request => {
+    if (request.role === 'implement') {
+      request.declareRed!(uidDeclaration);
+      fs.mkdirSync(path.join(f.cwd, 'src/Pal.Game/Tests'), { recursive: true });
+      fs.writeFileSync(path.join(f.cwd, 'src/Pal.Game/Tests/SystemSaveSceneTests.cs'), 'declared stage test');
+      // #224 mirror: stabilizeGodotUids runs before the RED-certifying range check and generates the
+      // companion .uid for the untracked declared script; it is engine output, not an implementer write.
+      fs.writeFileSync(path.join(f.cwd, 'src/Pal.Game/Tests/SystemSaveSceneTests.cs.uid'), 'uid://synthetic');
+      // A companion .uid whose script is NOT declared stays a production change (gate still active pre-RED).
+      fs.writeFileSync(path.join(f.cwd, 'src/Pal.Game/Tests/UndeclaredScene.cs.uid'), 'uid://undeclared');
+      assert.throws(() => request.beforeCheck!(snapshot(f.cwd), { scope: 'unit', expectedFailure: uidDeclaration.expectedFailure }), /Production changed/);
+      fs.rmSync(path.join(f.cwd, 'src/Pal.Game/Tests/UndeclaredScene.cs.uid'));
+      request.beforeCheck!(snapshot(f.cwd), { scope: 'unit', expectedFailure: uidDeclaration.expectedFailure });
+      request.recordCheck({ project: 'synthetic native', directory: path.join(request.directory, 'red'), sourceFingerprint: snapshot(f.cwd).fingerprint, code: 1, expectedRed: true, expectedFailure: uidDeclaration.expectedFailure });
+      fs.mkdirSync(path.join(f.cwd, 'src/Pal.Game/Scripts'), { recursive: true });
+      fs.writeFileSync(path.join(f.cwd, 'src/Pal.Game/Scripts/PlayerSaveStorage.cs'), 'production after exact RED');
+      request.beforeCheck!(snapshot(f.cwd));
+      request.recordCheck({ project: 'synthetic Unit', directory: request.directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: 0 });
+    }
+    return { status: request.role === 'implement' ? 'candidate' : 'passed', summary: 'uid companion tolerated at the RED gate', evidence: ['beforeCheck RED gate'] };
+  } });
+  const uidRun = await f.host().run({}, signal());
+  assert.equal(uidRun.counts.awaiting_commit, 1);
+  assert.equal(f.host().state()!.records[2].phase, 'awaiting_commit');
+});
 test('TDD rejects GREEN before RED even for the same source fingerprint', async () => {
   const f = fixture(1);
   f.setAgent({ run: async request => {
