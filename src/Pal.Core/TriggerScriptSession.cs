@@ -1,7 +1,7 @@
 namespace Pal.Core;
 
 public enum TriggerScriptPhase { Ready, WaitingForDisplay, Completed, WaitingForBattle, WaitingForLostReload,
-    WaitingForSceneWait, WaitingForMovement, WaitingForTransition }
+    WaitingForSceneWait, WaitingForMovement, WaitingForTransition, WaitingForShop }
 
 /// <summary>Which call frame a walked address belongs to: the outer event, a paused battle's role
 /// hook (fight.c 768-880) or an enemy post-victory script (battle.c 1334-1337).</summary>
@@ -32,7 +32,8 @@ public sealed class TriggerScriptSession
     public TriggerScriptPhase Phase { get; private set; }
     public bool BlocksSceneUpdates => Phase is TriggerScriptPhase.WaitingForDisplay or TriggerScriptPhase.WaitingForBattle
         or TriggerScriptPhase.WaitingForLostReload or TriggerScriptPhase.WaitingForSceneWait
-        or TriggerScriptPhase.WaitingForMovement or TriggerScriptPhase.WaitingForTransition;
+        or TriggerScriptPhase.WaitingForMovement or TriggerScriptPhase.WaitingForTransition
+        or TriggerScriptPhase.WaitingForShop;
     public Guid CallId { get; private set; }
     /// <summary>The interaction request which actually started this call; null for legacy callers.</summary>
     public Guid? SourceRequestId { get; private set; }
@@ -54,6 +55,10 @@ public sealed class TriggerScriptSession
     /// <summary>The parked presentation transition (0x0005 redraw delay or 0x0073 scene fade);
     /// the world stays frozen until the host acknowledges its own presentation.</summary>
     public TriggerTransitionRequest? PendingTransition { get; private set; }
+    /// <summary>The parked 0x0026/0x0027 shop menu (script.c 1162-1174): the buy menu's authored
+    /// store row, or the sell menu over the player's bag; the host runs the shop over the shared
+    /// cash/inventory owners and receipts exactly this request when the menu closes.</summary>
+    public TriggerShopRequest? PendingShopRequest { get; private set; }
     /// <summary>script.c g_fScriptSuccess: true at each start; markFailed (0x0041) clears it and
     /// the completion receipt carries the flag so callers observe the saved result.</summary>
     public bool ScriptSuccess { get; private set; }
@@ -326,6 +331,18 @@ public sealed class TriggerScriptSession
         return true;
     }
 
+    /// <summary>Receipts the host's closed shop menu exactly once; only the current parked
+    /// request releases the call (uigame.c PAL_BuyMenu/PAL_SellMenu return when the player
+    /// cancels), and stale or premature receipts stay inert.</summary>
+    public bool AcknowledgeShop(Guid requestId)
+    {
+        if (Phase != TriggerScriptPhase.WaitingForShop || PendingShopRequest is not { } request || request.Id != requestId)
+            return false;
+        PendingShopRequest = null;
+        Continue();
+        return true;
+    }
+
     /// <summary>Runs the paused battle's role-hook script with the formal caller semantics (the dying
     /// member's role, or the coverer's role for a friend death). The outer call stays parked on its
     /// startBattle command; preflight covers every random branch before any side effect.</summary>
@@ -416,6 +433,23 @@ public sealed class TriggerScriptSession
                 removalPosition ??= command.Position;
             }
             if (command.Op == "setParty") partyChangePosition ??= command.Position;
+            if (command.Op is "showBuyMenu" or "showSellMenu")
+            {
+                // #217 script.c 0x0026/0x0027: the shop menus park the script while the host runs
+                // PAL_BuyMenu/PAL_SellMenu; the authored shop context and both shared owners must
+                // exist up front, and a buy menu's store row must be declared, so a broken shop
+                // reference rejects before any cash or inventory write.
+                if (battleContent is null || battleContent.ShopObjects.Count == 0)
+                    throw new InvalidDataException($"{command.Position}: {command.Op} requires the authored shop objects.");
+                if (command.Op == "showBuyMenu" && battleContent.Stores.Count == 0)
+                    throw new InvalidDataException($"{command.Position}: showBuyMenu requires the authored store rows and shop objects.");
+                if (!hasCashOwner || !hasInventoryOwner)
+                    throw new InvalidDataException($"{command.Position}: {command.Op} requires explicit cash and inventory owners.");
+                if (command.Op == "showBuyMenu" && !battleContent.Stores.ContainsKey(command.StoreId))
+                    throw new InvalidDataException($"{command.Position}: showBuyMenu store {command.StoreId} is not authored.");
+                pending.Push((Next(command), item.Context));
+                continue;
+            }
             if (command.Op == "end" && command.Mode == "keep") continue;
             if (command.Op == "startBattle" && battleContent is not null && item.Context == TriggerScriptContext.Event)
             {
@@ -871,6 +905,21 @@ public sealed class TriggerScriptSession
                     _address = Next(command);
                     Phase = TriggerScriptPhase.WaitingForTransition;
                     return;
+                case "showBuyMenu" when CashLiveState is not null && InventoryLiveState is not null && _battleContent?.ShopObjects.Count > 0:
+                    // script.c 0x0026: the script blocks inside PAL_BuyMenu until the player
+                    // cancels; the host owns the menu over the shared cash/inventory owners.
+                    if (!_battleContent.Stores.TryGetValue(command.StoreId, out _))
+                        throw new InvalidDataException($"{command.Position}: showBuyMenu store {command.StoreId} is not authored.");
+                    PendingShopRequest = new TriggerShopRequest(Guid.NewGuid(), command.Position, true, command.StoreId);
+                    _address = Next(command);
+                    Phase = TriggerScriptPhase.WaitingForShop;
+                    return;
+                case "showSellMenu" when CashLiveState is not null && InventoryLiveState is not null && _battleContent?.ShopObjects.Count > 0:
+                    // script.c 0x0027: PAL_SellMenu reads the player's bag (no store row).
+                    PendingShopRequest = new TriggerShopRequest(Guid.NewGuid(), command.Position, false, 0);
+                    _address = Next(command);
+                    Phase = TriggerScriptPhase.WaitingForShop;
+                    return;
                 default: throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
             }
         }
@@ -931,6 +980,9 @@ public sealed class TriggerSceneWaitRequest(Guid id, TriggerPosition position, i
 public sealed record TriggerMovementRequest(Guid Id, TriggerPosition Position, int ObjectId, int TargetX, int TargetY, int NextAddress);
 /// <summary>The parked 0x0005 redraw (delay in milliseconds) or 0x0073 scene fade (mode word).</summary>
 public sealed record TriggerTransitionRequest(Guid Id, TriggerPosition Position, string Kind, int Parameter);
+/// <summary>The parked 0x0026/0x0027 shop menu: IsBuy names PAL_BuyMenu over the authored store
+/// row (StoreId = lprgStore index), otherwise PAL_SellMenu over the player's bag (StoreId 0).</summary>
+public sealed record TriggerShopRequest(Guid Id, TriggerPosition Position, bool IsBuy, int StoreId);
 public sealed record TriggerMessageReference(TriggerPosition Position, int StartMessageId, int Span);
 public sealed record TriggerDialogueRequest(Guid Id, TriggerDialogueContext Context, IReadOnlyList<TriggerMessageReference> MessageReferences,
     DialogueMessageBlock Content, DialogueDisplaySession Display);

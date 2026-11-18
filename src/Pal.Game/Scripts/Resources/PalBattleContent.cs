@@ -32,6 +32,17 @@ public partial class PalBattleContent : Resource
     [Export] public int[] MagicMenuCostMp { get; set; } = [];
     [Export] public int[] MagicMenuApplyToAll { get; set; } = [];
     [Export] public int[] MagicMenuUsableOutsideBattle { get; set; } = [];
+    // #217 explicit exploration shop context: shop-object bindings as parallel object/price/
+    // sellable/bitmap word rows (flags travel as 0/1 like the use menu), store rows as nested
+    // row resources (each store's 1..9 item words keep store order), and the shared-wallet
+    // cash seed — InitialCash travels as a signed word with -1 as the absent spelling, because
+    // a real seed may legitimately be 0.
+    [Export] public int[] ShopObjectIds { get; set; } = [];
+    [Export] public int[] ShopObjectPrices { get; set; } = [];
+    [Export] public int[] ShopObjectSellable { get; set; } = [];
+    [Export] public int[] ShopObjectBitmaps { get; set; } = [];
+    [Export] public PalBattleStore[] Stores { get; set; } = [];
+    [Export] public long InitialCash { get; set; } = -1;
 
     // Optional projection provenance, not an authentication or a runtime JSON dependency.
     [Export] public bool ProjectionPresent { get; set; }

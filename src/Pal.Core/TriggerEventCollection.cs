@@ -356,6 +356,19 @@ public sealed class TriggerEventCollection
                     command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.Value = EventJson.Word(node, "entry");
                     break;
+                case "showBuyMenu":
+                    // script.c 0x0026: PAL_MakeScene + PAL_BuyMenu(operand0) — the store table row
+                    // lprgStore[wStoreNum].rgwItems (uigame.c PAL_BuyMenu over the authored stores).
+                    if (opcode != 0x26) throw new InvalidDataException("Invalid showBuyMenu mapping.");
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.StoreId = EventJson.Word(node, "storeId");
+                    break;
+                case "showSellMenu":
+                    // script.c 0x0027: PAL_MakeScene + PAL_SellMenu() — the sold items come from
+                    // the player's bag (kItemFlagSellable rows), not from a store row.
+                    if (opcode != 0x27) throw new InvalidDataException("Invalid showSellMenu mapping.");
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    break;
                 case "setBattlefield":
                     // script.c 0x004A: wNumBattleField = operand0. Retail @09FD sets 24.
                     if (opcode != 0x4a) throw new InvalidDataException("Invalid setBattlefield mapping.");
@@ -588,6 +601,8 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int Role2 { get; set; }
     internal int RunTriggers { get; set; }
     internal int UpdateGestures { get; set; }
+    // #217 script.c 0x0026 showBuyMenu's store-table row word (lprgStore index).
+    internal int StoreId { get; set; }
 }
 
 internal static class EventJson

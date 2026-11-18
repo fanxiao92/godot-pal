@@ -22,7 +22,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
         bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false,
         bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false, bool attackAllMember0 = false,
         bool fleeEscape = false, bool menuEquip = false, bool menuItems = false, bool menuMagic = false,
-        bool menuItemsBitmaps = false, bool menuItemsBitmapsMissingBinding = false)
+        bool menuItemsBitmaps = false, bool menuItemsBitmapsMissingBinding = false,
+        bool menuShop = false, bool menuShopBitmapsMissingBinding = false, bool menuShopEmptyBag = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -54,6 +55,12 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The missing item-bitmap binding derivation requires the PartyWin menu-items author.", nameof(menuItemsBitmapsMissingBinding));
         if (menuItemsBitmaps && menuItemsBitmapsMissingBinding)
             throw new ArgumentException("The item-bitmaps derivations are separate owned story graphs.");
+        if (menuShop && (scenario != "PartyEquip" || !menuEquip))
+            throw new ArgumentException("The shop derivation requires the PartyEquip menu-equip author (buy -> equip -> battle continuity).", nameof(menuShop));
+        if (menuShopBitmapsMissingBinding && !menuShop)
+            throw new ArgumentException("The missing shop-bitmap binding derivation requires the shop author.", nameof(menuShopBitmapsMissingBinding));
+        if (menuShopEmptyBag && !menuShop)
+            throw new ArgumentException("The empty-bag shop derivation requires the shop author (the sell menu of an empty bag).", nameof(menuShopEmptyBag));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -76,7 +83,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape || menuEquip || menuItems || menuMagic)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape || menuEquip || menuItems || menuMagic || menuShop)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -237,6 +244,35 @@ internal sealed class AuthoredStoryFixture : IDisposable
                         new JsonObject { ["objectId"] = 312, ["costMp"] = 3, ["applyToAll"] = false, ["usableOutsideBattle"] = false },
                         new JsonObject { ["objectId"] = 313, ["costMp"] = 6, ["applyToAll"] = false, ["usableOutsideBattle"] = true });
                 }
+                if (menuShop)
+                {
+                    // #217 (M6-B T05): the test-owned shop context — the explicit cash seed, a
+                    // usable heal 300 (consumed through its on-use entry appended below), priced
+                    // shop objects (300/120 sellable, 199/250 sellable, 320/999 unaffordable and
+                    // unsellable, 197/40 sellable, 210/90 owned-but-never-sellable) and store row
+                    // 5 [300, 199, 320]. Independent numbers: cash 600 buys 300+199 (600 -> 230)
+                    // and leaves 320 unreachable; selling one 197 credits 20.
+                    data["cash"] = 600;
+                    data["useMenu"] = new JsonArray(
+                        new JsonObject { ["objectId"] = 300, ["consuming"] = true, ["applyToAll"] = false, ["bitmap"] = 37 });
+                    data["shopObjects"] = new JsonArray(
+                        new JsonObject { ["objectId"] = 300, ["price"] = 120, ["sellable"] = true, ["bitmap"] = 37 },
+                        new JsonObject { ["objectId"] = 199, ["price"] = 250, ["sellable"] = true, ["bitmap"] = 0 },
+                        new JsonObject { ["objectId"] = 320, ["price"] = 999, ["sellable"] = false, ["bitmap"] = 41 },
+                        new JsonObject { ["objectId"] = 197, ["price"] = 40, ["sellable"] = true, ["bitmap"] = 0 },
+                        new JsonObject { ["objectId"] = 210, ["price"] = 90, ["sellable"] = false, ["bitmap"] = 0 });
+                    data["stores"] = new JsonArray(
+                        new JsonObject { ["storeId"] = 5, ["items"] = new JsonArray(300, 199, 320) });
+                    if (menuShopEmptyBag)
+                    {
+                        // Review fix (shop-sell-empty-list-view-crash): itemmenu.c counts an
+                        // empty compressed inventory without rejecting, so uigame.c's sell menu
+                        // of an empty bag is the empty list — the derivation drops every bag
+                        // row while keeping the shop context and its cash seed, and the empty
+                        // sell page must stay presentable in the formal host.
+                        data["inventory"] = new JsonArray();
+                    }
+                }
                 File.WriteAllText(dataPath, data.ToJsonString(), System.Text.Encoding.UTF8);
                 numbers = numericInput;
             }
@@ -246,6 +282,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (fleeEscape) AddFleeEscapeBranch();
             if (menuItems) AddItemUseEntries();
             if (menuMagic) AddMagicUseEntries();
+            if (menuShop) AddShopEntries();
             var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "Story/story-package.json")))!;
             if (singlePlayerTwoEnemies)
             {
@@ -331,6 +368,9 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (menuMagic)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned menu magic context (T04 #216): learned magic slots, cost/flag bindings and magic.wScriptOnUse/wScriptOnSuccess entries; authored inputs, not retail data.";
+            if (menuShop)
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned shop context (T05 #217): explicit cash seed, priced shop objects, store row 5 and the showBuyMenu/showSellMenu arena commands; authored inputs, not retail data.";
             if (menuItemsBitmaps || menuItemsBitmapsMissingBinding)
             {
                 // #218 (M6-B T03b): test-owned BALL item-bitmap sprites — chunk 37 (object 300)
@@ -357,6 +397,36 @@ internal sealed class AuthoredStoryFixture : IDisposable
                         new JsonObject { ["objectId"] = 301, ["uri"] = Root + "/ItemBitmap-41.tres" });
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned BALL item-bitmap sprites (T03b #218): chunks 37/41 as authored test art, not retail ball.mkf data.";
+            }
+            if (menuShop)
+            {
+                // #217 (T05): the shop pages consume the same prepared BALL chain — chunk 37 for
+                // object 300 (shared with its use-menu binding) and chunk 41 for the shop-only
+                // object 320. The missing-binding derivation keeps 300's binding and drops 320's,
+                // so the strict story boundary must reject the shop-side nonzero bitmap word.
+                foreach (var (chunk, width, height) in new[] { (37, 4, 3), (41, 2, 2) })
+                {
+                    var sprite = new Pal.Game.Resources.PalSprite { SpriteId = chunk, FrameCount = 1,
+                        DecodedByteLength = 6 + width * height,
+                        Source = new Godot.Collections.Dictionary { ["archive"] = "ball.mkf", ["chunk"] = chunk,
+                            ["encoding"] = "uncompressed PAL RLE bitmap",
+                            ["frameLayout"] = "single RLE bitmap: optional 0x00000002 header, WORD width/height, RLE runs" } };
+                    sprite.Frames.Add(new Pal.Game.Resources.PalFrame { Index = 0, SourceOffset = 6,
+                        Width = width, Height = height,
+                        Indices = Enumerable.Range(0, width * height).Select(pixel => (byte)(chunk + pixel % 5)).ToArray(),
+                        Alpha = Enumerable.Repeat((byte)255, width * height).ToArray() });
+                    NativeProfileFixture.SaveResource(sprite, Root + $"/ShopBitmap-{chunk}.tres");
+                }
+                metadata["itemBitmaps"] = new JsonArray(
+                    new JsonObject { ["objectId"] = 300, ["uri"] = Root + "/ShopBitmap-37.tres" });
+                if (!menuShopBitmapsMissingBinding)
+                    metadata["itemBitmaps"]!.AsArray().Add(
+                        new JsonObject { ["objectId"] = 320, ["uri"] = Root + "/ShopBitmap-41.tres" });
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned shop BALL bitmaps (T05 #217): chunks 37/41 as authored test art, not retail ball.mkf data.";
+                if (menuShopEmptyBag)
+                    metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                        + " Test-owned empty-bag shop derivation: the bag seed is the empty list for the sell page; authored inputs, not retail data.";
             }
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")
@@ -576,6 +646,82 @@ internal sealed class AuthoredStoryFixture : IDisposable
         commands.Add(new JsonObject { ["label"] = "L0021", ["op"] = "end", ["next"] = null,
             ["source"] = new JsonObject { ["index"] = 21, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) },
             ["mode"] = "keep" });
+        var bytes = new byte[commands.Count * 8];
+        for (int address = 0; address < commands.Count; address++)
+        {
+            var source = commands[address]!["source"]!;
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8), checked((ushort)source["opcode"]!.GetValue<int>()));
+            for (int word = 0; word < 3; word++)
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8 + 2 + word * 2), checked((ushort)source["operands"]![word]!.GetValue<int>()));
+        }
+        index["source"]!["instructionCount"] = commands.Count;
+        index["source"]!["byteLength"] = bytes.Length;
+        index["source"]!["sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        File.WriteAllText(arenaPath, arena.ToJsonString());
+        File.WriteAllText(indexPath, index.ToJsonString());
+    }
+
+    private void AddShopEntries()
+    {
+        // #217 (T05): the test-owned shop arena — the challenge stream gains the two shop
+        // commands between the greeting dialog and the battle (script.c 0x0026/0x0027), and the
+        // item on-use entry for 300 appends after the terminal row like the #215 derivation.
+        // Only this owned authored shape is relocatable; the original author bytes stay
+        // read-only and the derivation owns a fresh GUID-owned input.
+        string arenaPath = Path.Combine(input, "events/arena.json");
+        string indexPath = Path.Combine(input, "events/index.json");
+        var arena = JsonNode.Parse(File.ReadAllText(arenaPath))!;
+        var index = JsonNode.Parse(File.ReadAllText(indexPath))!;
+        var entries = arena["entries"]!.AsArray();
+        var commands = arena["commands"]!.AsArray();
+        if (entries.Count != 1 || entries[0]!["id"]!.GetValue<string>() != "challenge"
+            || commands.Count != 10 || commands[9]!["op"]!.GetValue<string>() != "end"
+            || commands[9]!["mode"]!.GetValue<string>() != "keep" || commands[9]!["next"] is not null
+            || commands[3]!["op"]!.GetValue<string>() != "startBattle" || commands[3]!["isBoss"]!.GetValue<bool>() != true
+            || (int)commands[3]!["source"]!["operands"]![0]! != 18 || commands[3]!["fleeTarget"] is not null
+            || commands[3]!["lossTarget"]!.GetValue<string>() != "L0007"
+            || (int)index["source"]!["instructionCount"]! != 10)
+            throw new InvalidDataException("The shop derivation requires the known ten-instruction PartyEquip author arena shape.");
+        // The previous terminal row stops being the stream's end: its next chains to the first
+        // appended item command (end keep ignores it at runtime, the schema keeps WORD order).
+        commands[9]!["next"] = "L0010";
+        // 300 (single-target heal +30 with a dialogue line): the use-menu binding's on-use entry
+        // (#215 pattern); its heal is the menu->battle continuity input.
+        entries.Add(new JsonObject { ["id"] = "use300", ["owner"] = new JsonObject { ["type"] = "object", ["id"] = 300 },
+            ["slot"] = "item.wScriptOnUse", ["kind"] = "trigger", ["target"] = "L0010", ["sourceAddress"] = 10 });
+        commands.Add(new JsonObject { ["label"] = "L0010", ["op"] = "changeHpMp", ["next"] = "L0011",
+            ["scope"] = 0, ["amount"] = 30,
+            ["source"] = new JsonObject { ["index"] = 10, ["opcode"] = 0x001D, ["operands"] = new JsonArray(0, 30, 0) } });
+        commands.Add(new JsonObject { ["label"] = "L0011", ["op"] = "setDialog", ["next"] = "L0012",
+            ["source"] = new JsonObject { ["index"] = 11, ["opcode"] = 60, ["operands"] = new JsonArray(0, 0, 0) },
+            ["box"] = "upper", ["portraitId"] = 0, ["color"] = 0, ["rngWord"] = 0 });
+        commands.Add(new JsonObject { ["label"] = "L0012", ["op"] = "showDialog", ["next"] = "L0013",
+            ["source"] = new JsonObject { ["index"] = 12, ["opcode"] = 65535, ["operands"] = new JsonArray(25, 0, 0) },
+            ["messageId"] = 25, ["descriptionLineWord"] = 0 });
+        commands.Add(new JsonObject { ["label"] = "L0013", ["op"] = "end", ["next"] = null,
+            ["source"] = new JsonObject { ["index"] = 13, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) },
+            ["mode"] = "keep" });
+        // script.c 0x0026/0x0027 insert between the greeting dialog and the battle: the script
+        // parks on each shop menu and the host receipts it when the player cancels (uigame.c).
+        commands.Insert(3, new JsonObject { ["label"] = "L0003", ["op"] = "showBuyMenu", ["next"] = "L0004",
+            ["storeId"] = 5,
+            ["source"] = new JsonObject { ["index"] = 3, ["opcode"] = 0x26, ["operands"] = new JsonArray(5, 0, 0) } });
+        commands.Insert(4, new JsonObject { ["label"] = "L0004", ["op"] = "showSellMenu", ["next"] = "L0005",
+            ["source"] = new JsonObject { ["index"] = 4, ["opcode"] = 0x27, ["operands"] = new JsonArray(0, 0, 0) } });
+        // Relabel the shifted stream (the battle and its loss branch moved +2) and rewrite the
+        // BYTE index/hash over the final instruction order.
+        for (int address = 0; address < commands.Count; address++)
+        {
+            var command = commands[address]!;
+            command["label"] = $"L{address:D4}";
+            command["source"]!["index"] = address;
+            command["next"] = address == commands.Count - 1 ? null : $"L{address + 1:D4}";
+        }
+        commands[5]!["lossTarget"] = "L0009";
+        // The appended item entry moved +2 with the shop insertions: its target/source address
+        // follow the shifted stream (the entry owns the 300 on-use run at the new index 12).
+        entries[1]!["target"] = "L0012";
+        entries[1]!["sourceAddress"] = 12;
         var bytes = new byte[commands.Count * 8];
         for (int address = 0; address < commands.Count; address++)
         {

@@ -18,6 +18,9 @@ public static partial class ModernBattleContent
         bool equipMenuDeclared = root.TryGetProperty("equipMenu", out JsonElement equipMenuElement);
         bool useMenuDeclared = root.TryGetProperty("useMenu", out JsonElement useMenuElement);
         bool magicMenuDeclared = root.TryGetProperty("magicMenu", out JsonElement magicMenuElement);
+        bool shopObjectsDeclared = root.TryGetProperty("shopObjects", out JsonElement shopObjectsElement);
+        bool storesDeclared = root.TryGetProperty("stores", out JsonElement storesElement);
+        bool cashDeclared = root.TryGetProperty("cash", out JsonElement cashElement);
         var rootKeys = new List<string> { "formatVersion", "roles", "players", "growth", "teams" };
         if (gridDeclared) rootKeys.Add("roleEquipment");
         if (objectsDeclared) rootKeys.Add("equipments");
@@ -25,6 +28,9 @@ public static partial class ModernBattleContent
         if (equipMenuDeclared) rootKeys.Add("equipMenu");
         if (useMenuDeclared) rootKeys.Add("useMenu");
         if (magicMenuDeclared) rootKeys.Add("magicMenu");
+        if (shopObjectsDeclared) rootKeys.Add("shopObjects");
+        if (storesDeclared) rootKeys.Add("stores");
+        if (cashDeclared) rootKeys.Add("cash");
         EventJson.Keys(root, Root, [.. rootKeys]);
         if (Number(root, "formatVersion", Root) != 1)
             throw Error(Root, "unsupported formatVersion");
@@ -72,11 +78,61 @@ public static partial class ModernBattleContent
         var equipMenu = equipMenuDeclared ? EquipMenuBindings(equipMenuElement) : null;
         var useMenu = useMenuDeclared ? UseMenuBindings(useMenuElement) : null;
         var magicMenu = magicMenuDeclared ? MagicMenuBindings(magicMenuElement) : null;
+        var shopObjects = shopObjectsDeclared ? ShopObjectBindings(shopObjectsElement) : null;
+        var stores = storesDeclared ? StoreBindings(storesElement) : null;
+        var initialCash = cashDeclared ? CashSeed(cashElement) : null;
         TriggerBattleContent content;
-        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles, initialInventory, equipMenu, useMenu, magicMenu); }
+        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles, initialInventory, equipMenu, useMenu, magicMenu, shopObjects, stores, initialCash); }
         catch (InvalidDataException error) { throw Error(Root, error.Message); }
         Validate(content);
         return content;
+    }
+
+    /// <summary>Explicit shared-wallet seed (script.c/gpGlobals dwCash is a DWORD); the host
+    /// owns the seeded CashLiveState instance.</summary>
+    private static uint? CashSeed(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt64(out long value)
+            || value < 0 || value > uint.MaxValue)
+            throw Error(Root + ".cash", "expected an integer in 0..4294967295");
+        return (uint)value;
+    }
+
+    /// <summary>Shop-object bindings: the object's item.wPrice WORD, kItemFlagSellable bit and
+    /// item.wBitmap word the buy/sell menus consume (uigame.c PAL_BuyMenu/PAL_SellMenu).</summary>
+    private static IReadOnlyList<BattleShopObjectBinding> ShopObjectBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".shopObjects", "expected an array");
+        var bindings = new List<BattleShopObjectBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".shopObjects[{index++}]";
+            EventJson.Keys(item, path, "objectId", "price", "sellable", "bitmap");
+            bindings.Add(new(Number(item, "objectId", path, 1), Number(item, "price", path),
+                Boolean(item, "sellable", path), Number(item, "bitmap", path)));
+        }
+        return System.Array.AsReadOnly(bindings.ToArray());
+    }
+
+    /// <summary>Store rows: the lprgStore WORD id and its rgwItems list (1..9 object WORDs in
+    /// store order; the reference's 0 terminator is not authored).</summary>
+    private static IReadOnlyList<BattleShopStoreBinding> StoreBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".stores", "expected an array");
+        var stores = new List<BattleShopStoreBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".stores[{index++}]";
+            EventJson.Keys(item, path, "storeId", "items");
+            var items = Array(item, "items", path).ToArray();
+            if (items.Length is < 1 or > 9)
+                throw Error(path + ".items", "expected 1..9 store item WORDs");
+            stores.Add(new(Number(item, "storeId", path, 1),
+                System.Array.AsReadOnly(items.Select((word, i) => Integer(word, path + $".items[{i}]", 1, 65535)).ToArray())));
+        }
+        return System.Array.AsReadOnly(stores.ToArray());
     }
 
     /// <summary>Explicit ordered initial bag rows (WORD item ids, amounts 0..99, slot order kept).

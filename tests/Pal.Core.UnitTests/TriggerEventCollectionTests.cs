@@ -209,8 +209,6 @@ public class TriggerEventCollectionTests
     [Theory]
     [InlineData(0x0021, "{\"op\":\"inflictDamageToEnemy\",\"scope\":65535,\"damage\":65535}")]
     [InlineData(0x0023, "{\"op\":\"removeEquipment\",\"playerRole\":0,\"partWord\":6}")]
-    [InlineData(0x0026, "{\"op\":\"showBuyMenu\",\"storeId\":65535}")]
-    [InlineData(0x0027, "{\"op\":\"showSellMenu\"}")]
     [InlineData(0x0028, "{\"op\":\"applyPoisonToEnemy\",\"scope\":0,\"objectId\":551}")]
     [InlineData(0x0029, "{\"op\":\"applyPoisonToPlayer\",\"scope\":65535,\"objectId\":564}")]
     [InlineData(0x002A, "{\"op\":\"curePoisonByObjectIdForEnemy\",\"scope\":1,\"objectId\":562}")]
@@ -221,6 +219,14 @@ public class TriggerEventCollectionTests
     [InlineData(0x002F, "{\"op\":\"clearPlayerStatus\",\"status\":65535}")]
     public void Status_and_menu_named_content_retains_unsigned_fields_and_no_operand_shapes(int opcode, string semanticJson)
         => AssertContentOnlyLiteral(opcode, semanticJson);
+
+    // #217: showBuyMenu/showSellMenu left the content-only set — they are gated trigger commands
+    // now; without the authored shop context the walk rejects with the shop diagnostic.
+    [Theory]
+    [InlineData(0x0026, "{\"op\":\"showBuyMenu\",\"storeId\":65535}")]
+    [InlineData(0x0027, "{\"op\":\"showSellMenu\"}")]
+    public void Shop_menu_named_content_retains_literal_fields_and_rejects_without_the_shop_context(int opcode, string semanticJson)
+        => AssertNamedLiteral(opcode, semanticJson, "requires the authored shop objects");
 
     [Theory]
     [InlineData(0x0031, "{\"op\":\"changeBattleSprite\",\"battleSprite\":65535}")]
@@ -679,6 +685,9 @@ public class TriggerEventCollectionTests
     }
 
     private static void AssertContentOnlyLiteral(int opcode, string semanticJson)
+        => AssertNamedLiteral(opcode, semanticJson, "content-only");
+
+    private static void AssertNamedLiteral(int opcode, string semanticJson, string rejection)
     {
         var fixture = new EventFixture();
         var semantic = JsonNode.Parse(semanticJson)!.AsObject();
@@ -694,10 +703,10 @@ public class TriggerEventCollectionTests
         Assert.Equal(new[] { 123, 456, 789 }, collection.GetSource(1).Operands);
         var script = new TriggerScriptSession(collection, TriggerScriptSessionTests.Language());
         var error = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 60));
-        Assert.Contains("content-only", error.Message);
+        Assert.Contains(rejection, error.Message);
         Assert.Contains(semantic["op"]!.GetValue<string>(), error.Message);
         Assert.Contains("@0001", error.Message);
-        Assert.Contains("trigger context", error.Message);
+        if (rejection == "content-only") Assert.Contains("trigger context", error.Message);
         Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
         Assert.Null(script.CurrentPosition);
 

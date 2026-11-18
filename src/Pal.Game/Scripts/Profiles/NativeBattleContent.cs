@@ -64,7 +64,8 @@ public static class NativeBattleContent
             }
             var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
                 Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray(),
-                ReadInventory(native), ReadEquipMenu(native), ReadUseMenu(native), ReadMagicMenu(native));
+                ReadInventory(native), ReadEquipMenu(native), ReadUseMenu(native), ReadMagicMenu(native),
+                ReadShopObjects(native), ReadStores(native), ReadCash(native));
             ModernBattleContent.Validate(content);
             return new(content, ReadProjection(native, content));
         }
@@ -126,6 +127,12 @@ public static class NativeBattleContent
             MagicMenuCostMp = content.MagicMenu.Select(binding => binding.CostMp).ToArray(),
             MagicMenuApplyToAll = content.MagicMenu.Select(binding => binding.ApplyToAll ? 1 : 0).ToArray(),
             MagicMenuUsableOutsideBattle = content.MagicMenu.Select(binding => binding.UsableOutsideBattle ? 1 : 0).ToArray(),
+            ShopObjectIds = content.ShopObjects.Values.Select(binding => binding.ObjectId).ToArray(),
+            ShopObjectPrices = content.ShopObjects.Values.Select(binding => binding.Price).ToArray(),
+            ShopObjectSellable = content.ShopObjects.Values.Select(binding => binding.Sellable ? 1 : 0).ToArray(),
+            ShopObjectBitmaps = content.ShopObjects.Values.Select(binding => binding.Bitmap).ToArray(),
+            Stores = content.Stores.Values.Select(store => new PalBattleStore { StoreId = store.StoreId, Items = store.Items.ToArray() }).ToArray(),
+            InitialCash = content.InitialCash is { } cash ? cash : -1,
             Equipments = content.EquipmentObjects.Select(x => new PalBattleEquipment { ObjectId = x.Key,
                 Effects = x.Value.Effects.Select(effect => new PalBattleEquipmentEffect { Attack = effect.Attack, Defense = effect.Defense,
                     Dexterity = effect.Dexterity, BattleSprite = effect.BattleSprite, Statuses = effect.Statuses.ToArray(),
@@ -242,6 +249,41 @@ public static class NativeBattleContent
         return objects.Select((item, index) => new BattleMagicMenuBinding(item, costMp[index],
             Flag(applyToAll[index], "MagicMenuApplyToAll", index),
             Flag(usableOutsideBattle[index], "MagicMenuUsableOutsideBattle", index))).ToArray();
+    }
+
+    // #217: the shop context travels like the other menu contexts — parallel shop-object word
+    // rows, nested store rows and the cash seed (-1 absent, because a real seed may be 0). Core's
+    // long-constructor validation (store closure, use-menu bitmap agreement, WORD ranges) runs
+    // on the read rows exactly like on the authored JSON.
+    private static IReadOnlyList<BattleShopObjectBinding> ReadShopObjects(PalBattleContent native)
+    {
+        int[] objects = Copy(native.ShopObjectIds, "ShopObjectIds");
+        int[] prices = Copy(native.ShopObjectPrices, "ShopObjectPrices");
+        int[] sellable = Copy(native.ShopObjectSellable, "ShopObjectSellable");
+        int[] bitmaps = Copy(native.ShopObjectBitmaps, "ShopObjectBitmaps");
+        if (objects.Length != prices.Length || objects.Length != sellable.Length || objects.Length != bitmaps.Length)
+            throw new InvalidDataException("ShopObject arrays require aligned rows");
+        return objects.Select((item, index) => new BattleShopObjectBinding(item, prices[index],
+            Flag(sellable[index], "ShopObjectSellable", index), bitmaps[index])).ToArray();
+    }
+
+    private static IReadOnlyList<BattleShopStoreBinding> ReadStores(PalBattleContent native)
+    {
+        PalBattleStore[] stores = Items(native.Stores, "Stores");
+        return stores.Select(store => new BattleShopStoreBinding(store.StoreId,
+            Copy(store.Items, "Stores.Items").ToArray())).ToArray();
+    }
+
+    private static uint? ReadCash(PalBattleContent native)
+    {
+        long cash = native.InitialCash;
+        if (cash < 0)
+        {
+            if (cash != -1) throw new InvalidDataException("InitialCash requires 0..4294967295 or the absent -1");
+            return null;
+        }
+        if (cash > uint.MaxValue) throw new InvalidDataException("InitialCash requires 0..4294967295 or the absent -1");
+        return (uint)cash;
     }
 
     private static bool Flag(int word, string field, int index)

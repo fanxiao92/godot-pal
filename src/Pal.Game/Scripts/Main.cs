@@ -36,6 +36,13 @@ public partial class Main : Node2D
     private PalMenuView? menuView;
     private bool menuOpenPressed;
     private readonly List<ExplorationMenuKey> pendingMenuKeys = new();
+    // #217 shop (story-profile context): the Core shop session over the shared cash/inventory
+    // owners; the open shop owns input and freezes exploration updates while the trigger call
+    // parks inside PAL_BuyMenu/PAL_SellMenu (script.c 0x0026/0x0027).
+    internal ExplorationShopSession? shop;
+    internal PalShopView? shopView;
+    internal Guid shopRequestId;
+    private readonly List<ExplorationMenuKey> pendingShopKeys = new();
     private bool awaitingSceneDraw;
     private bool rendererSubscribed;
     private GameSceneConfiguration? configuration;
@@ -78,6 +85,8 @@ public partial class Main : Node2D
     /// hosts without the formal shared live-state chain (supported context of this leaf).</summary>
     public ExplorationMenuSession? Menu => menu;
     internal PalMenuView? MenuView => menuView;
+    internal ExplorationShopSession? Shop => shop;
+    internal PalShopView? ShopView => shopView;
     // Actual Main callback completion; display completion has its own production boundary.
     public event Action? UpdateCompleted;
 
@@ -350,6 +359,21 @@ public partial class Main : Node2D
                     else input!.Release((ExplorationKey)i);
                     return;
                 }
+                if (shop is { Mode: not ExplorationShopMode.Closed })
+                {
+                    // #217: the open shop owns direction presses (uigame.c menu loops); releases
+                    // keep the exploration held-key state truthful for the post-close resume.
+                    if (key.Pressed)
+                    {
+                        if (!key.Echo) pendingShopKeys.Add(DirectionMenuKey(i / 2));
+                        GetViewport().SetInputAsHandled();
+                    }
+                    else if (dynamicSession is { } dynamicRelease) dynamicRelease.Release((ExplorationKey)i);
+                    else if (battle is { } battleRelease) battleRelease.Release((ExplorationKey)i);
+                    else if (Interaction is { } interactionRelease) interactionRelease.Release((ExplorationKey)i);
+                    else input!.Release((ExplorationKey)i);
+                    return;
+                }
                 if (dynamicSession is { } dynamic)
                 {
                     if (key.Pressed) dynamic.Press((ExplorationKey)i, key.Echo);
@@ -392,6 +416,13 @@ public partial class Main : Node2D
                     pendingMenuKeys.Add(ExplorationMenuKey.Confirm);
                     GetViewport().SetInputAsHandled();
                 }
+                else if (shop is { Mode: not ExplorationShopMode.Closed })
+                {
+                    // #217: the open shop consumes Search as its confirm (uigame.c); the press
+                    // never reaches the frozen exploration search.
+                    pendingShopKeys.Add(ExplorationMenuKey.Confirm);
+                    GetViewport().SetInputAsHandled();
+                }
                 else if (storyRequest is not null)
                 {
                     // The paused role hook's dialogue display consumes input itself; a menu
@@ -426,7 +457,15 @@ public partial class Main : Node2D
             // from the clean exploring state after that frame's scene update; the press applies
             // at the real update boundary and the guard re-checks the mode owner there.
             if (key.Pressed && !key.Echo && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
-                && storyRequest is null && menu is not null)
+                && shop is { Mode: not ExplorationShopMode.Closed })
+            {
+                // #217: the open shop consumes kKeyMenu as its cancel (uigame.c's menu loops);
+                // the press never queues an exploration menu open behind the parked trigger.
+                pendingShopKeys.Add(ExplorationMenuKey.Cancel);
+                GetViewport().SetInputAsHandled();
+            }
+            if (key.Pressed && !key.Echo && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
+                && storyRequest is null && menu is not null && shop is not { Mode: not ExplorationShopMode.Closed })
             {
                 if (menu.Mode is not (ExplorationMenuMode.Closed or ExplorationMenuMode.ItemScript
                     or ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess))
@@ -467,8 +506,9 @@ public partial class Main : Node2D
             if (awaitingFirstBattleDraw && DisplayServer.GetName() == "headless") StartFirstBattleAfterSceneDraw();
             if (Failure is not null) return;
             // play.c PAL_GameLoop: the frame's update runs first, then kKeyMenu opens the menu;
-            // while the menu is open the world stays frozen (PAL_InGameMenu blocks the loop).
-            bool changed = menu is { Mode: not ExplorationMenuMode.Closed } ? false
+            // while the menu is open the world stays frozen (PAL_InGameMenu blocks the loop). The
+            // parked shop request freezes the same way (script.c blocks inside PAL_BuyMenu).
+            bool changed = shop is { Mode: not ExplorationShopMode.Closed } || menu is { Mode: not ExplorationMenuMode.Closed } ? false
                 : battle?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? input!.Update(unchecked((uint)Time.GetTicksMsec()));
@@ -489,9 +529,12 @@ public partial class Main : Node2D
                     CompleteFirstBattleTrigger();
                 }
             }
+            ApplyShopInput();
+            if (Failure is not null) return;
             ApplyMenuInput();
             if (Failure is not null) return;
-            if (menu is { Mode: not ExplorationMenuMode.Closed }) { UpdateCompleted?.Invoke(); return; }
+            if (shop is { Mode: not ExplorationShopMode.Closed } || menu is { Mode: not ExplorationMenuMode.Closed })
+            { UpdateCompleted?.Invoke(); return; }
             if (changed) mapScene.UpdateScene(Exploration.Plan);
             // Presentation transitions (redraw/fadeScene/fadeOut) in the world-wired call:
             // redraw the retained scene, then receipt after the delay elapsed.

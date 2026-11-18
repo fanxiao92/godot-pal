@@ -111,26 +111,40 @@ public static class NativeStoryProfile
             // BALL chunk (itemmenu.c/uigame.c read rgObject item.wBitmap from fpBALL for the
             // selected row, so a wrong chunk or archive is a broken binding, never a placeholder).
             // Stories without that context declare no bitmaps; an extra or missing entry rejects.
-            var itemBitmaps = new Dictionary<int, PalSprite>();
+            // #218: every use-menu binding with a nonzero BALL bitmap word resolves exactly one
+            // prepared native item-bitmap sprite now; the sprite identity must carry the binding's
+            // BALL chunk (itemmenu.c/uigame.c read rgObject item.wBitmap from fpBALL for the
+            // selected row, so a wrong chunk or archive is a broken binding, never a placeholder).
+            // #217: the buy/sell pages read the same word (uigame.c PAL_BuyMenu_OnItemChange/
+            // itemmenu.c), so shop objects with a nonzero bitmap join the same coverage; Core
+            // already rejects a use-menu/shop disagreement for one object.
+            var bitmapSources = new List<(int ObjectId, int Bitmap, string Label)>();
             foreach (var binding in content.UseMenu.Where(binding => binding.Bitmap != 0))
+                bitmapSources.Add((binding.ObjectId, binding.Bitmap, "use-menu"));
+            foreach (var binding in content.ShopObjects.Values.Where(binding => binding.Bitmap != 0))
+                if (!bitmapSources.Any(source => source.ObjectId == binding.ObjectId))
+                    bitmapSources.Add((binding.ObjectId, binding.Bitmap, "shop"));
+            var itemBitmaps = new Dictionary<int, PalSprite>();
+            foreach (var (bitmapObjectId, bitmapWord, bitmapLabel) in bitmapSources)
             {
-                string bitmapUri = itemBitmapUris.TryGetValue(binding.ObjectId, out string? bound)
+                string bitmapUri = itemBitmapUris.TryGetValue(bitmapObjectId, out string? bound)
                     ? bound : throw new InvalidDataException(
-                        $"use-menu object {binding.ObjectId} bitmap {binding.Bitmap} has no prepared native item bitmap");
+                        $"{bitmapLabel} object {bitmapObjectId} bitmap {bitmapWord} has no prepared native item bitmap");
                 var sprite = NativeBattleVisualProfile.LoadSprite(bitmapUri);
-                Require(sprite.SpriteId == binding.Bitmap && sprite.FrameCount == 1
+                Require(sprite.SpriteId == bitmapWord && sprite.FrameCount == 1
                     && sprite.Frames.Count == 1 && sprite.Frames[0].Index == 0,
-                    bitmapUri + ": item bitmap must be the single frame of BALL chunk " + binding.Bitmap);
+                    bitmapUri + ": item bitmap must be the single frame of BALL chunk " + bitmapWord);
                 Require(sprite.Source.TryGetValue("archive", out Variant archive) && archive.VariantType == Variant.Type.String
                     && archive.AsString() == "ball.mkf"
                     && sprite.Source.TryGetValue("chunk", out Variant chunk) && chunk.VariantType == Variant.Type.Int
-                    && chunk.AsInt32() == binding.Bitmap,
-                    bitmapUri + ": item bitmap Source must declare the ball.mkf chunk " + binding.Bitmap);
-                itemBitmaps.Add(binding.ObjectId, sprite);
+                    && chunk.AsInt32() == bitmapWord,
+                    bitmapUri + ": item bitmap Source must declare the ball.mkf chunk " + bitmapWord);
+                itemBitmaps.Add(bitmapObjectId, sprite);
             }
-            Require(itemBitmapUris.Keys.ToHashSet().SetEquals(
-                    content.UseMenu.Where(binding => binding.Bitmap != 0).Select(binding => binding.ObjectId)),
-                "ItemBitmaps must cover exactly the use-menu objects with a nonzero bitmap word");
+            Require(itemBitmapUris.Keys.ToHashSet().SetEquals(bitmapSources.Select(source => source.ObjectId)),
+                content.ShopObjects.Values.Any(binding => binding.Bitmap != 0)
+                    ? "ItemBitmaps must cover exactly the use-menu and shop objects with a nonzero bitmap word"
+                    : "ItemBitmaps must cover exactly the use-menu objects with a nonzero bitmap word");
             // Party/multi-enemy capability is bounded by the actually selected closure: the
             // language loop below runs TriggerScriptSession.ValidateEntry, which validates every
             // startBattle team of the selected entry (one to three players and enemy slots) and
@@ -144,6 +158,17 @@ public static class NativeStoryProfile
             var requirements = new Dictionary<string, TriggerEntryRequirements>(StringComparer.Ordinal);
             var itemRequirements = new Dictionary<string, IReadOnlyDictionary<int, TriggerEntryRequirements>>(StringComparer.Ordinal);
             var magicRequirements = new Dictionary<string, IReadOnlyDictionary<int, StoryMagicRequirements>>(StringComparer.Ordinal);
+            // #217: the formal host binds the seed-derived shared owners exactly in the authored
+            // shop context (Main seeds $.cash into the wallet and binds it with the bag to the
+            // trigger executor); the static preflight validates the same entries with the same
+            // owners, so a shop command without its explicit owners rejects here, never only at
+            // runtime. An empty bag seed is still an explicit owner — uigame.c's sell menu of an
+            // empty bag is the empty list — and a missing $.cash keeps the owner absent so the
+            // Core gate rejects with the shop-specific diagnostic.
+            CashLiveState? shopCashOwner = content.ShopObjects.Count > 0 && content.InitialCash is { } cashSeed
+                ? new CashLiveState(cashSeed) : null;
+            InventoryLiveState? shopInventoryOwner = content.ShopObjects.Count > 0
+                ? new InventoryLiveState(content.InitialInventory) : null;
             IReadOnlyDictionary<int, string>? selectedWords = null;
             foreach (string id in new[] { "zh-Hans", "en" })
             {
@@ -153,16 +178,20 @@ public static class NativeStoryProfile
                 {
                     packages.Add(id, resource.ToCorePackage());
                     if (id == language) selectedWords = resource.CopyWords();
-                    requirements.Add(id, TriggerScriptSession.ValidateEntry(events, packages[id], content, native.EntryFileId, native.EntryId));
+                    requirements.Add(id, TriggerScriptSession.ValidateEntry(events, packages[id], content, native.EntryFileId, native.EntryId,
+                        cashLiveState: shopCashOwner, inventoryLiveState: shopInventoryOwner));
                     var perItem = new Dictionary<int, TriggerEntryRequirements>();
                     foreach (var pair in itemUseEntries)
-                        perItem.Add(pair.Key, TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.FileId, pair.Value.Id));
+                        perItem.Add(pair.Key, TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.FileId, pair.Value.Id,
+                            cashLiveState: shopCashOwner, inventoryLiveState: shopInventoryOwner));
                     itemRequirements.Add(id, perItem);
                     var perMagic = new Dictionary<int, StoryMagicRequirements>();
                     foreach (var pair in magicEntries)
                         perMagic.Add(pair.Key, new StoryMagicRequirements(
-                            TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.OnUse.FileId, pair.Value.OnUse.Id),
-                            TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.OnSuccess.FileId, pair.Value.OnSuccess.Id)));
+                            TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.OnUse.FileId, pair.Value.OnUse.Id,
+                                cashLiveState: shopCashOwner, inventoryLiveState: shopInventoryOwner),
+                            TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.OnSuccess.FileId, pair.Value.OnSuccess.Id,
+                                cashLiveState: shopCashOwner, inventoryLiveState: shopInventoryOwner)));
                     magicRequirements.Add(id, perMagic);
                 }
                 catch (InvalidDataException error) { throw new InvalidDataException(resource.ResourcePath + ": " + error.Message, error); }

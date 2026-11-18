@@ -22,6 +22,9 @@ public partial class Main
     private BattleEquipmentState? storyEquipment;
     private PartyPoisonState? storyPoisons;
     private InventoryLiveState? storyInventory;
+    // #217: the shared wallet seeded once from the authored cash word ($.cash); the shop and
+    // the trigger executor's cash commands consume the same owner.
+    private CashLiveState? storyCash;
     internal Func<PalStoryBattleView> StoryBattleViewFactory { get; set; } = () => new PalStoryBattleView();
     private TriggerBattleRequest? storyRequest;
     private bool battleConfirm;
@@ -132,11 +135,20 @@ public partial class Main
             // #216: with an authored magic context the menu gains the magic page; its on-use and
             // on-success entries are checked up front with the story profile.
             bool magicPage = checkedStory.BattleContent.MagicMenu.Count > 0;
+            // #217: with an authored shop context the host seeds the shared wallet once (the
+            // explicit $.cash word; #131's checked immutable initial value) and binds it with the
+            // bag to the trigger executor, so the shop commands park on the same shared owners.
+            bool shopContext = checkedStory.BattleContent.ShopObjects.Count > 0;
+            storyCash = shopContext
+                ? new CashLiveState(checkedStory.BattleContent.InitialCash
+                    ?? throw new InvalidDataException("The authored shop context requires the explicit cash seed (battle-data $.cash)."))
+                : null;
             dialogue.FirstBattleWorld = DynamicEventWorld.ForHost(checkedStory.Exploration.Rules,
                 checkedStory.Exploration.Leader, map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
                 roleLiveState, checkedStory.BattleContent.Players.Select(player => player.RoleId).ToArray());
             dialogue.Initialize(display, checkedStory, storyRandom,
-                equipmentPage ? storyEquipment : null, equipmentPage ? storyPoisons : null);
+                equipmentPage ? storyEquipment : null, equipmentPage ? storyPoisons : null,
+                shopContext ? storyCash : null, shopContext ? storyInventory : null);
             story = checkedStory; storyVisual = checkedVisual; mapScene = map;
             Interaction = interaction; Display = display; Dialogue = dialogue; SelectedLanguage = selected.Language;
             // #213/#214: the exploration menu host binding. The session resolves the prepared menu,
@@ -185,7 +197,19 @@ public partial class Main
                         ? checkedStory.BattleContent.MagicMenu
                             .Select(binding => checkedStory.SelectedWords[binding.ObjectId])
                         : Enumerable.Empty<string>())
+                    .Concat(shopContext
+                        ? new[] { ExplorationShopSession.ConfirmNoWord, ExplorationShopSession.ConfirmYesWord,
+                              ExplorationShopSession.ShopOwnedWord, ExplorationShopSession.ShopPriceWord,
+                              ExplorationShopSession.CashWord }
+                            .Select(word => checkedStory.SelectedWords[word])
+                            .Concat(checkedStory.BattleContent.ShopObjects.Keys
+                                .Select(objectId => checkedStory.SelectedWords[objectId]))
+                        : Enumerable.Empty<string>())
                     .Append("0123456789:/"));
+            if (shopContext)
+                shop = new ExplorationShopSession(checkedStory.BattleContent.Stores,
+                    checkedStory.BattleContent.ShopObjects, storyCash!, storyInventory,
+                    roleLiveState, storyPartyRoleIds, checkedStory.SelectedWords);
             AddChild(map); AddChild(display); AddChild(dialogue);
             display.Failed += DisplayFailed;
             display.ActivePaletteChanged += StoryPaletteChanged;
@@ -727,10 +751,11 @@ public partial class Main
         settlementLines = null; settlementStage = 0; settlementPresented = false;
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
-        storyEquipment = null; storyPoisons = null; storyInventory = null;
+        storyEquipment = null; storyPoisons = null; storyInventory = null; storyCash = null;
         itemUseId = Guid.Empty;
         magicRunId = Guid.Empty;
         ReleaseMenu();
+        ReleaseShop();
     }
 
     // #213 exploration menu host (story-profile context): play.c 551 opens PAL_InGameMenu from
@@ -875,6 +900,61 @@ public partial class Main
                 GD.Print($"PAL_MAGIC_ON_SUCCESS:object={after.ObjectId};success={success}");
             }
         }
+    }
+
+    /// <summary>#217 script.c 0x0026/0x0027: the parked shop request opens the shop over the
+    /// shared owners (uigame.c blocks inside PAL_BuyMenu/PAL_SellMenu) at a real update
+    /// boundary; the closed menu's owned receipt resumes the call. Input isolation and world
+    /// freeze mirror the exploration menu host (#213); the shop never runs inside _Input.</summary>
+    private void ApplyShopInput()
+    {
+        if (story is null) return;
+        try
+        {
+            if (shop is { Mode: not ExplorationShopMode.Closed })
+            {
+                foreach (ExplorationMenuKey key in pendingShopKeys) shop.Press(key);
+                if (shop.Mode == ExplorationShopMode.Closed)
+                {
+                    if (!Dialogue!.AcknowledgeShop(shopRequestId))
+                        throw new InvalidOperationException("The closed shop does not match the active trigger request.");
+                    shopView?.GetParent()?.RemoveChild(shopView);
+                    shopView?.Free();
+                    shopView = null;
+                    GD.Print("PAL_SHOP_CLOSED:trigger input resumes on the next update");
+                }
+                else PresentShop();
+            }
+            else if (Dialogue?.Session?.PendingShopRequest is { } request)
+            {
+                if (shop is null) throw new InvalidDataException("The parked shop request has no bound shop context.");
+                if (request.IsBuy) shop.OpenBuy(request.StoreId);
+                else shop.OpenSell();
+                shopRequestId = request.Id;
+                shopView = new PalShopView();
+                AddChild(shopView);
+                PresentShop();
+                GD.Print($"PAL_SHOP_OPENED:{(request.IsBuy ? "buy" : "sell")};store={(request.IsBuy ? request.StoreId.ToString(System.Globalization.CultureInfo.InvariantCulture) : "bag")}; world frozen until close");
+            }
+        }
+        catch (InvalidDataException error) { Fail($"Shop failed: {error.Message}"); }
+        finally
+        {
+            pendingShopKeys.Clear();
+        }
+    }
+
+    private void PresentShop() => shopView!.Present(shop!, story!.Font, story.Palette.ToArray(), story.ItemBitmaps);
+
+    private void ReleaseShop()
+    {
+        if (shopView is not null && GodotObject.IsInstanceValid(shopView))
+        {
+            shopView.GetParent()?.RemoveChild(shopView);
+            shopView.Free();
+        }
+        shopView = null; shop = null; shopRequestId = Guid.Empty;
+        pendingShopKeys.Clear();
     }
 
     private void PresentMenu() => menuView!.Present(menu!, story!.Font, story.Palette.ToArray(), story.ItemBitmaps);

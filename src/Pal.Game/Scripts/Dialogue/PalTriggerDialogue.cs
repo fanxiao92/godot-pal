@@ -95,7 +95,8 @@ public partial class PalTriggerDialogue : Node
     }
 
     public void Initialize(PalDialogueDisplay display, CheckedStoryProfile story, IBattleRandom random,
-        BattleEquipmentState? equipmentState = null, PartyPoisonState? partyPoisons = null)
+        BattleEquipmentState? equipmentState = null, PartyPoisonState? partyPoisons = null,
+        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null)
     {
         ArgumentNullException.ThrowIfNull(display); ArgumentNullException.ThrowIfNull(story); ArgumentNullException.ThrowIfNull(random);
         if (_display is not null || display.Session is { Current.Phase: not DialogueDisplayPhase.Completed })
@@ -107,19 +108,31 @@ public partial class PalTriggerDialogue : Node
         // trigger battle consumes the current gear (#187 ForSharedRoles) instead of the frozen
         // author snapshot. Without the world host there is no shared role owner to bind, so the
         // shared-owner request itself rejects instead of silently dropping the binding.
+        // #217: the shop host additionally binds the shared wallet and bag so script.c 0x0026/
+        // 0x0027 (and the already-supported owner-gated commands) run over the same owners.
         Session = FirstBattleWorld is { } world
             ? TriggerScriptSession.ForSharedRoles(story.Events, story.Language, story.BattleContent, random,
                 world.RoleLiveState ?? throw new InvalidOperationException("The shared story world must bind its live role owner before trigger initialization."),
-                world, equipmentState: equipmentState, partyPoisons: partyPoisons)
-            : equipmentState is null && partyPoisons is null
+                world, equipmentState: equipmentState, partyPoisons: partyPoisons,
+                cashLiveState: cashLiveState, inventoryLiveState: inventoryLiveState)
+            : equipmentState is null && partyPoisons is null && cashLiveState is null && inventoryLiveState is null
                 ? new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random)
-                : throw new InvalidOperationException("Shared equipment or poison owners require the shared story world host.");
+                : throw new InvalidOperationException("Shared equipment, poison, cash or inventory owners require the shared story world host.");
         _display = display; display.UpdateCompleted += OnDisplayUpdated;
     }
 
     public bool AcknowledgeBattle(Guid requestId, ClassicBattleLifecycleSession.CompletionReceipt? completion)
     {
         if (Session is null || !Session.AcknowledgeBattle(requestId, completion)) return false;
+        BindPendingDisplay();
+        return true;
+    }
+
+    /// <summary>Receipts the host's closed shop menu (script.c 0x0026/0x0027); the resumed call
+    /// may park on a new display, which is bound immediately.</summary>
+    public bool AcknowledgeShop(Guid requestId)
+    {
+        if (Session is null || !Session.AcknowledgeShop(requestId)) return false;
         BindPendingDisplay();
         return true;
     }

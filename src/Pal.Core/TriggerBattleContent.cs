@@ -25,6 +25,21 @@ public sealed record BattleUseMenuBinding(int ObjectId, bool Consuming, bool App
 /// Listing an object declares its exploration context (uigame.c PAL_InGameMagicMenu).</summary>
 public sealed record BattleMagicMenuBinding(int ObjectId, int CostMp, bool ApplyToAll, bool UsableOutsideBattle);
 
+/// <summary>One authored shop-object binding (battle-data.json $.shopObjects): the object's
+/// rgObject item words the shop consumes — item.wPrice (uigame.c PAL_BuyMenu's affordability
+/// gate and PAL_SellMenu's price/2 sale price), the kItemFlagSellable bit (global.h 1&lt;&lt;5) and
+/// the BALL bitmap word item.wBitmap (PAL_BuyMenu_OnItemChange/itemmenu.c draw the selected
+/// row's chunk). An object listed here without the sellable bit is the reference's
+/// owned-but-never-sellable row: listed in the sell menu, never confirmable.</summary>
+public sealed record BattleShopObjectBinding(int ObjectId, int Price, bool Sellable, int Bitmap);
+
+/// <summary>One authored store row (battle-data.json $.stores): the lprgStore WORD id and its
+/// rgwItems list (global.h STORE; MAX_STORE_ITEM 9 per palcommon.h, the reference's trailing 0
+/// terminator is not authored). Items keep store order and each requires a shop-object price
+/// binding — script.c 0x0026 reads lprgStore[storeId].rgwItems, uigame.c PAL_BuyMenu prices
+/// every row from rgObject.</summary>
+public sealed record BattleShopStoreBinding(int StoreId, IReadOnlyList<int> Items);
+
 /// <summary>Role-keyed numeric content; party order is Players and enemy identity is its team slot.
 /// Subsequent battles use settled roles, never the initial player HP.</summary>
 public sealed class TriggerBattleContent
@@ -51,6 +66,13 @@ public sealed class TriggerBattleContent
     public IReadOnlyList<BattleUseMenuBinding> UseMenu { get; }
     /// <summary>Authored magic-menu bindings; empty when the scenario declares no magic page.</summary>
     public IReadOnlyList<BattleMagicMenuBinding> MagicMenu { get; }
+    /// <summary>Authored shop-object bindings; empty when the scenario declares no shop context.</summary>
+    public IReadOnlyDictionary<int, BattleShopObjectBinding> ShopObjects { get; }
+    /// <summary>Authored store rows; empty when the scenario declares no shop context.</summary>
+    public IReadOnlyDictionary<int, BattleShopStoreBinding> Stores { get; }
+    /// <summary>Explicit shared-wallet seed (battle-data.json $.cash); null keeps the legacy
+    /// no-cash-owner capability rejection (#131's checked immutable initial value).</summary>
+    public uint? InitialCash { get; }
 
     [JsonIgnore] public BattleRoleSnapshot InitialRole => Single(InitialRoles.Values);
     [JsonIgnore] public ClassicBattlePlayer Player => Single(Players);
@@ -72,7 +94,10 @@ public sealed class TriggerBattleContent
         IReadOnlyList<InventorySlot>? initialInventory = null,
         IReadOnlyList<BattleEquipMenuBinding>? equipMenu = null,
         IReadOnlyList<BattleUseMenuBinding>? useMenu = null,
-        IReadOnlyList<BattleMagicMenuBinding>? magicMenu = null)
+        IReadOnlyList<BattleMagicMenuBinding>? magicMenu = null,
+        IReadOnlyList<BattleShopObjectBinding>? shopObjects = null,
+        IReadOnlyList<BattleShopStoreBinding>? stores = null,
+        uint? initialCash = null)
     {
         ArgumentNullException.ThrowIfNull(roles); ArgumentNullException.ThrowIfNull(players);
         ArgumentNullException.ThrowIfNull(growth); ArgumentNullException.ThrowIfNull(teams);
@@ -108,6 +133,16 @@ public sealed class TriggerBattleContent
         EquipMenu = CopyEquipMenu(equipMenu, EquipmentObjects);
         UseMenu = CopyUseMenu(useMenu);
         MagicMenu = CopyMagicMenu(magicMenu);
+        var shop = CopyShopObjects(shopObjects);
+        ShopObjects = shop;
+        Stores = CopyStores(stores, shop);
+        InitialCash = initialCash;
+        // rgObject item.wBitmap is one word per object: a use-menu and a shop-object binding of
+        // the same object must agree, or the items page and the shop page would draw different
+        // chunks for the same object (itemmenu.c/uigame.c read the single wBitmap word).
+        foreach (var useBinding in UseMenu)
+            if (ShopObjects.TryGetValue(useBinding.ObjectId, out var shopBinding) && shopBinding.Bitmap != useBinding.Bitmap)
+                throw new InvalidDataException($"$.shopObjects: object {useBinding.ObjectId} bitmap {shopBinding.Bitmap} disagrees with its use-menu bitmap {useBinding.Bitmap}.");
     }
 
     private static IReadOnlyList<InventorySlot> CopyInventory(IReadOnlyList<InventorySlot>? rows)
@@ -146,6 +181,44 @@ public sealed class TriggerBattleContent
             else if (binding.CostMp is < 0 or > 65535)
                 throw new InvalidDataException($"$.magicMenu[{index}].costMp: bindings require a cost WORD 0..65535.");
         return Array.AsReadOnly(bindings.ToArray());
+    }
+
+    private static IReadOnlyDictionary<int, BattleShopObjectBinding> CopyShopObjects(IReadOnlyList<BattleShopObjectBinding>? bindings)
+    {
+        if (bindings is null || bindings.Count == 0) return new Dictionary<int, BattleShopObjectBinding>();
+        var objects = new Dictionary<int, BattleShopObjectBinding>();
+        foreach (var (binding, index) in bindings.Select((x, i) => (x, i)))
+        {
+            if (binding is null || binding.ObjectId is < 1 or > 65535 || !objects.TryAdd(binding.ObjectId, binding))
+                throw new InvalidDataException($"$.shopObjects[{index}]: bindings require unique object WORD ids 1..65535.");
+            if (binding.Price is < 0 or > 65535)
+                throw new InvalidDataException($"$.shopObjects[{index}].price: the item price must be a WORD 0..65535.");
+            if (binding.Bitmap is < 0 or > 65535)
+                throw new InvalidDataException($"$.shopObjects[{index}].bitmap: the BALL bitmap word must be 0..65535.");
+        }
+        return objects;
+    }
+
+    private static IReadOnlyDictionary<int, BattleShopStoreBinding> CopyStores(IReadOnlyList<BattleShopStoreBinding>? stores,
+        IReadOnlyDictionary<int, BattleShopObjectBinding> shopObjects)
+    {
+        var rows = new Dictionary<int, BattleShopStoreBinding>();
+        if (stores is null || stores.Count == 0) return rows;
+        foreach (var (store, index) in stores.Select((x, i) => (x, i)))
+        {
+            if (store is null || store.StoreId is < 1 or > 65535 || !rows.TryAdd(store.StoreId, store))
+                throw new InvalidDataException($"$.stores[{index}]: store rows require unique WORD ids 1..65535.");
+            if (store.Items is null || store.Items.Count is < 1 or > 9)
+                throw new InvalidDataException($"$.stores[{index}].items: a store row lists 1..9 item WORDs (MAX_STORE_ITEM).");
+            foreach (var (item, itemIndex) in store.Items.Select((x, i) => (x, i)))
+            {
+                if (item is < 1 or > 65535)
+                    throw new InvalidDataException($"$.stores[{index}].items[{itemIndex}]: store items are object WORD ids 1..65535.");
+                if (!shopObjects.ContainsKey(item))
+                    throw new InvalidDataException($"$.stores[{index}].items[{itemIndex}]: store item {item} has no authored shop object price.");
+            }
+        }
+        return rows;
     }
 
     private static IReadOnlyList<BattleEquipMenuBinding> CopyEquipMenu(IReadOnlyList<BattleEquipMenuBinding>? bindings,
