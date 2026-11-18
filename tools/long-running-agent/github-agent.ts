@@ -6,7 +6,7 @@ import { Type, type TSchema } from 'typebox';
 import type * as Pi from '@earendil-works/pi-coding-agent';
 import { canonical, hash, parseReport, type Report } from './contract.ts';
 import { atomicJson, git, inside, isIgnored, json, noLinks, QuiescenceUnknownError, snapshot } from './io.ts';
-import { executeCheck, gameBatches, unitProjects, type EngineOptions, type Selection } from './checks.ts';
+import { buildCheck, executeCheck, gameBatches, stabilizeGodotUids, unitProjects, type EngineOptions, type Selection } from './checks.ts';
 import { workspacePath } from './pi.ts';
 import type { CodingExecutor, CodingRequest } from './github-host.ts';
 
@@ -133,6 +133,14 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
       try {
         if (signal.aborted) throw new Error('Session cancelled');
         if (request.pendingDependencies.size) throw new Error('Verify prerequisite integration before running tests');
+        // Validate selection before any engine run, then stabilize Godot-generated `.uid` files
+        // before the before-snapshot so an engine-generated companion is source identity, not
+        // mid-run drift. Only for engine-authorized non-Unit checks; guarded by the same engine
+        // idle check and global lock as a normal engine check.
+        if (engine) {
+          buildCheck(request.cwd, request.directory, selection, engine);
+          if (selection.scope !== 'unit') await stabilizeGodotUids(request.cwd, engine, request.stateDirectory ?? request.directory, signal);
+        }
         const before = snapshot(request.cwd); request.beforeCheck?.(before, selection);
         if (selection.expectedFailure && request.checks.some(check => check.sourceFingerprint === before.fingerprint && check.code !== 0)) throw new Error('Cannot retroactively declare RED for an already observed failure');
         if (selection.scope === 'unit') { sourcePath(request, selection.project!); sourcePath(request, 'tests/unit.runsettings'); }

@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { native } from './io.ts';
-import { rangeCompleted, classifyFailure, CheckEvidenceError } from './checks.ts';
+import { spawnSync } from 'node:child_process';
+import { rangeCompleted, classifyFailure, CheckEvidenceError, godotProjectRoot, missingUidScripts, runGodotImport, stabilizeGodotUids, uidChangeViolation } from './checks.ts';
 import { QuiescenceUnknownError } from './io.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -296,4 +297,81 @@ test('offline CI guard wires strict typing and regressions separately from the g
   assert.match(workflow, /npm --prefix tools\/long-running-agent test/);
   assert.match(workflow, /PAL_PI_SDK_ROOT/);
   assert.doesNotMatch(workflow, /cli\.ts run|GODOT_BIN|api[_-]?key/i);
+});
+
+test('missingUidScripts scans only the Godot project root and skips deleted committed uids', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-uid-scan-'));
+  spawnSync('git', ['init', '-q'], { cwd: repo, shell: false });
+  const project = path.join(repo, 'src', 'Pal.Game');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'project.godot'), '');
+  // New untracked script without .uid -> reported for stabilization.
+  fs.writeFileSync(path.join(project, 'new.cs'), '');
+  // Tracked script whose committed .uid was deleted -> NOT reported (deletion must stay visible).
+  fs.writeFileSync(path.join(project, 'old.cs'), '');
+  fs.writeFileSync(path.join(project, 'old.cs.uid'), 'uid://old');
+  spawnSync('git', ['add', 'src/Pal.Game/old.cs', 'src/Pal.Game/old.cs.uid'], { cwd: repo, shell: false });
+  fs.rmSync(path.join(project, 'old.cs.uid'));
+  // Script outside the Godot project root -> ignored (Godot never gives it a uid).
+  fs.mkdirSync(path.join(repo, 'tests'));
+  fs.writeFileSync(path.join(repo, 'tests', 'x.cs'), '');
+  assert.equal(godotProjectRoot(repo), project);
+  assert.deepEqual(missingUidScripts(repo, project), ['src/Pal.Game/new.cs']);
+});
+
+test('runGodotImport rejects a start failure through the async runCheck path', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-uid-import-'));
+  await assert.rejects(() => runGodotImport(dir, path.join(dir, 'no-such-godot-binary'), dir, new AbortController().signal), /ENOENT|failed to start/);
+});
+test('stabilizeGodotUids is a no-op without a Godot project root or with no missing uid', async () => {
+  const noProject = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-uid-noproj-'));
+  const engine = { godotPath: path.join(noProject, 'no-godot'), fixedPackageDirectory: noProject };
+  await assert.doesNotReject(() => stabilizeGodotUids(noProject, engine, noProject, new AbortController().signal));
+  const complete = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-uid-complete-'));
+  const project = path.join(complete, 'src', 'Pal.Game');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'project.godot'), '');
+  fs.writeFileSync(path.join(project, 'a.cs'), '');
+  fs.writeFileSync(path.join(project, 'a.cs.uid'), 'uid://a');
+  await assert.doesNotReject(() => stabilizeGodotUids(complete, engine, complete, new AbortController().signal));
+});
+
+test('abnormal range failures (exit 2) surface failureKind and failure text instead of a bare message', () => {
+  const output = fs.mkdtempSync(path.join(directory, 'range-attr-'));
+  fs.mkdirSync(path.join(output, 'range', 'game'), { recursive: true });
+  fs.writeFileSync(path.join(output, 'stdout.log'), 'range wrapper stdout');
+  fs.writeFileSync(path.join(output, 'stderr.log'), '');
+  // Mirrors scripts/Test-Range.ps1 abnormal-session: exitCode 2, status 'incomplete', outputComplete false,
+  // failureKind OutputDrainTimeout (the #213 shape that previously yielded only the generic message).
+  const abnormal = { exitKnown: true, rootExited: true, outputComplete: false, cleanupComplete: true, exitCode: 1, failureKind: 'OutputDrainTimeout', stdout: 'game.stdout.log', stderr: 'game.stderr.log' };
+  const failure = '[range:abnormal-session] game.test lacks successful root/EOF/cleanup completion; failureKind=OutputDrainTimeout. Stop; retain.';
+  fs.writeFileSync(path.join(output, 'range', 'range-run.json'), JSON.stringify({ status: 'incomplete', failure, projects: [], commands: [abnormal] }), 'utf8');
+  const selection = { scope: 'game' as const, batch: 'scene-dialogue' as const };
+  assert.throws(() => classifyFailure(repository, output, selection, 2), (error: unknown) => {
+    assert.ok(error instanceof QuiescenceUnknownError);
+    assert.match((error as Error).message, /OutputDrainTimeout/);
+    assert.match((error as Error).message, /abnormal-session/);
+    assert.match((error as Error).message, /outputComplete=false/);
+    assert.match((error as Error).message, /status=incomplete/);
+    return true;
+  });
+});
+
+test('uidChangeViolation flags a rebuilt deleted uid and a rewritten existing uid', () => {
+  const before = new Map<string, string | null>([['a.uid', null], ['b.uid', 'h1'], ['c.uid', 'h2']]);
+  // Import rebuilt the deleted a.uid and left b/c untouched -> violation on a.uid.
+  assert.equal(uidChangeViolation(before, new Map([['a.uid', 'hA'], ['b.uid', 'h1'], ['c.uid', 'h2']])), 'a.uid');
+  // Import rewrote c.uid -> violation on c.uid.
+  assert.equal(uidChangeViolation(before, new Map([['a.uid', null], ['b.uid', 'h1'], ['c.uid', 'h2b']])), 'c.uid');
+  // Nothing changed -> no violation (normal stabilization of untracked scripts is not a tracked uid).
+  assert.equal(uidChangeViolation(before, new Map([['a.uid', null], ['b.uid', 'h1'], ['c.uid', 'h2']])), undefined);
+});
+
+test('missingUidScripts fails loudly when git cannot determine tracking (not a repo)', () => {
+  const notRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-uid-notgit-'));
+  const project = path.join(notRepo, 'src', 'Pal.Game');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'project.godot'), '');
+  fs.writeFileSync(path.join(project, 'a.cs'), '');
+  assert.throws(() => missingUidScripts(notRepo, project), /git ls-files failed|Cannot determine tracking/);
 });
