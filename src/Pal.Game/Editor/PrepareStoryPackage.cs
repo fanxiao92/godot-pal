@@ -83,7 +83,7 @@ public partial class PrepareStoryPackage : Node
             story.EventsIndex = uri + "/Events/index.json";
             string[] storySeeds = new[] { story.StaticResources + "/Scenes/Scene.tscn", story.StaticProfile, story.BattleContentUri,
                 story.DialogueDirectory + "/Font.tres", story.DialogueDirectory + "/Language.zh-Hans.tres", story.DialogueDirectory + "/Language.en.tres",
-                story.DialogueDirectory + "/Prompt-00.tres", story.DialogueDirectory + "/Prompt-01.tres", story.DialogueDirectory + "/Prompt-02.tres" }.Concat(story.Portraits.Values).ToArray();
+                story.DialogueDirectory + "/Prompt-00.tres", story.DialogueDirectory + "/Prompt-01.tres", story.DialogueDirectory + "/Prompt-02.tres" }.Concat(story.Portraits.Values).Concat(story.ItemBitmaps.Values).ToArray();
             string[] visualSeeds = visual.Players.SelectMany(player => new[] { player.PlayerSpriteUri }
                     .Concat(player.AttackEffectSpriteUri != "" ? new[] { player.AttackEffectSpriteUri } : Array.Empty<string>()))
                 .Concat(new[] { visual.PaletteUri })
@@ -235,7 +235,7 @@ public partial class PrepareStoryPackage : Node
 
     private static (PalStoryProfile Story, PalBattleVisualProfile Visual) ReadMetadata(JsonElement root)
     {
-        Properties(root, "formatVersion", "sourceIdentity", "staticResources", "staticProfile", "bundleSha256", "entryFileId", "entryId", "ownerId", "entryAddress", "battleContentUri", "dialogueDirectory", "portraits", "visual");
+        PropertiesWithOptional(root, new[] { "itemBitmaps" }, "formatVersion", "sourceIdentity", "staticResources", "staticProfile", "bundleSha256", "entryFileId", "entryId", "ownerId", "entryAddress", "battleContentUri", "dialogueDirectory", "portraits", "visual");
         Require(Int(root, "formatVersion") == 1, "story package formatVersion must be 1");
         var story = new PalStoryProfile { FormatVersion = 1, SourceIdentity = Text(root, "sourceIdentity"), StaticResources = Text(root, "staticResources"),
             StaticProfile = Text(root, "staticProfile"), BundleSha256 = Text(root, "bundleSha256"), EntryFileId = Text(root, "entryFileId"), EntryId = Text(root, "entryId"),
@@ -246,6 +246,20 @@ public partial class PrepareStoryPackage : Node
             Properties(portrait, "id", "uri"); int id = Int(portrait, "id");
             Require(id is > 0 and <= ushort.MaxValue && !story.Portraits.ContainsKey(id), "invalid or duplicate portrait ID");
             story.Portraits.Add(id, Text(portrait, "uri"));
+        }
+        // #218: the optional BALL item-bitmap bindings (object WORD -> prepared sprite URI).
+        // NativeStoryProfile requires them to cover exactly the use-menu bindings with a
+        // nonzero bitmap word, so stories without an item context simply omit the key.
+        if (root.TryGetProperty("itemBitmaps", out JsonElement itemBitmapsElement))
+        {
+            Require(itemBitmapsElement.ValueKind == JsonValueKind.Array, "itemBitmaps must be an array");
+            foreach (var bitmap in itemBitmapsElement.EnumerateArray())
+            {
+                Properties(bitmap, "objectId", "uri"); int id = Int(bitmap, "objectId");
+                Require(id is > 0 and <= ushort.MaxValue && !story.ItemBitmaps.ContainsKey(id),
+                    "invalid or duplicate item bitmap object ID");
+                story.ItemBitmaps.Add(id, Text(bitmap, "uri"));
+            }
         }
         var v = root.GetProperty("visual");
         PropertiesWithOptional(v, new[] { "numberSpriteUri" }, "players", "paletteUri", "teams");

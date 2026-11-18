@@ -38,6 +38,11 @@ public sealed partial class PalMenuView : Node2D
     private string[] useTargetLines = [];
     private string[] useTargetStatLines = [];
     private int selectedUseRole;
+    // #218 item bitmaps: the prepared native BALL sprites keyed by use-menu object and the
+    // selected row's resolved frame; resolution happens in Present so a missing binding fails
+    // before any partial frame is submitted, exactly like the glyph prevalidation.
+    private IReadOnlyDictionary<int, PalSprite>? itemBitmaps;
+    private (int ObjectId, int Bitmap, PalFrame Frame)? presentedItemBitmap;
     // #216 magic page: composed row texts are validated here and only drawn afterwards.
     private string[] magicCasterLines = [];
     private bool[] magicCasterAlive = [];
@@ -50,6 +55,12 @@ public sealed partial class PalMenuView : Node2D
     private int selectedMagicTarget;
 
     internal ExplorationMenuMode Mode => menu?.Mode ?? ExplorationMenuMode.Closed;
+
+    /// <summary>The selected item row's presented BALL bitmap (object id, bitmap word, frame
+    /// size); null while no item row is selected or the binding carries the reference's
+    /// empty-chunk word 0 (PAL_MKFReadChunk returns no bitmap, so no picture is drawn).</summary>
+    internal (int ObjectId, int Bitmap, int Width, int Height)? PresentedItemBitmap =>
+        presentedItemBitmap is { } bitmap ? (bitmap.ObjectId, bitmap.Bitmap, bitmap.Frame.Width, bitmap.Frame.Height) : null;
 
     /// <summary>Preflight for every text the current menu state would draw. Throws with the font's
     /// resource path when any rune has no glyph, mirroring the dialogue display's prevalidation.</summary>
@@ -70,7 +81,8 @@ public sealed partial class PalMenuView : Node2D
 
     /// <summary>Publishes the session's current state for drawing. Composition and glyph validation
     /// happen here so an unrenderable state fails before any partial frame is submitted.</summary>
-    public void Present(ExplorationMenuSession menu, PalDialogueFont font, Color[] palette)
+    public void Present(ExplorationMenuSession menu, PalDialogueFont font, Color[] palette,
+        IReadOnlyDictionary<int, PalSprite>? itemBitmaps = null)
     {
         ArgumentNullException.ThrowIfNull(menu);
         ArgumentNullException.ThrowIfNull(palette);
@@ -78,6 +90,7 @@ public sealed partial class PalMenuView : Node2D
         this.menu = menu;
         this.font = font;
         this.palette = palette.ToArray();
+        this.itemBitmaps = itemBitmaps;
         selectedEntry = menu.SelectedEntry;
         entryLabels = Enumerable.Range(0, menu.Entries.Count).Select(menu.EntryLabel).ToArray();
         statusLines = [];
@@ -91,6 +104,7 @@ public sealed partial class PalMenuView : Node2D
         useHeaderText = "";
         useTargetLines = [];
         useTargetStatLines = [];
+        presentedItemBitmap = null;
         magicCasterLines = [];
         magicCasterAlive = [];
         magicLines = [];
@@ -138,12 +152,17 @@ public sealed partial class PalMenuView : Node2D
         else if (menu.Mode is ExplorationMenuMode.Items or ExplorationMenuMode.ItemScript)
         {
             // itemmenu.c: the usable stock list with available amounts; the equipped appendix
-            // rows mark their equipment origin instead of counting it as stock.
+            // rows mark their equipment origin instead of counting it as stock. The selected
+            // row's BALL bitmap resolves now (PAL_MKFReadChunk+PAL_RLEBlitToSurface of the
+            // item's wBitmap chunk; the empty-chunk word 0 draws no picture).
             var rows = menu.ItemsView();
             selectedUseItem = menu.SelectedEquipItem;
             useItemLines = rows.Select(row =>
                 (row.Equipped ? "* " : "") + row.Name + (row.Equipped ? "" : $" X{row.Amount}")).ToArray();
             nameText = useItemLines.Length > 0 ? useItemLines[Math.Clamp(selectedUseItem, 0, useItemLines.Length - 1)] : "";
+            presentedItemBitmap = rows.Count > 0
+                ? ResolveItemBitmap(rows[Math.Clamp(selectedUseItem, 0, rows.Count - 1)].ObjectId,
+                    rows[Math.Clamp(selectedUseItem, 0, rows.Count - 1)].Bitmap) : null;
         }
         else if (menu.Mode == ExplorationMenuMode.MagicCasters)
         {
@@ -181,7 +200,8 @@ public sealed partial class PalMenuView : Node2D
         else if (menu.Mode == ExplorationMenuMode.ItemTargets)
         {
             // uigame.c PAL_ItemUseMenu: the item header, the party rows and the selected member's
-            // live HP/MP words (the reference draws the full stat box while picking).
+            // live HP/MP words (the reference draws the full stat box while picking), with the
+            // item's BALL bitmap picture beside the rows.
             var selection = menu.ItemTargetsView();
             selectedUseRole = menu.SelectedUseRole;
             useHeaderText = selection.Name;
@@ -189,6 +209,7 @@ public sealed partial class PalMenuView : Node2D
             var target = selection.Targets[Math.Clamp(selectedUseRole, 0, selection.Targets.Count - 1)];
             useTargetStatLines = [$"{selection.HpLabel}:{target.Hp}/{target.MaxHp}",
                 $"{selection.MpLabel}:{target.Mp}/{target.MaxMp}"];
+            presentedItemBitmap = ResolveItemBitmap(selection.ObjectId, selection.Bitmap);
         }
         ValidateTexts(font!, entryLabels.Concat(statusLines).Concat(rightLines).Append(nameText)
             .Concat(equipItemLines).Append(equipSelectionText).Concat(equipRoleLines).Concat(equipGearLines)
@@ -246,12 +267,18 @@ public sealed partial class PalMenuView : Node2D
         if (menu.Mode is ExplorationMenuMode.Items or ExplorationMenuMode.ItemScript)
         {
             // itemmenu.c: the usable stock list with available amounts; equipped appendix rows
-            // carry the * marker and no stock count.
+            // carry the * marker and no stock count. The selected row's item box draws the
+            // object's BALL bitmap (PAL_RLEBlitToSurface with the active screen palette).
             for (int index = 0; index < useItemLines.Length; index++)
             {
                 bool selected = index == selectedUseItem;
                 DrawBitmapText(useItemLines[index], 16, 12 + index * 18, selected ? 5 : 0x4F);
                 if (selected) DrawRect(new Rect2(8, 20 + index * 18, 6, 6), PaletteColor(5));
+            }
+            if (presentedItemBitmap is { } itemBitmap)
+            {
+                DrawRect(new Rect2(236, 26, 48, itemBitmap.Frame.Height + 8), PaletteColor(0x4F), width: 1);
+                DrawItemBitmap(itemBitmap.Frame, 240, 30);
             }
             return;
         }
@@ -268,6 +295,12 @@ public sealed partial class PalMenuView : Node2D
             }
             for (int index = 0; index < useTargetStatLines.Length; index++)
                 DrawBitmapText(useTargetStatLines[index], 150, 34 + index * 16, 0x4F);
+            // uigame.c PAL_ItemUseMenu: the item's BALL bitmap picture beside the party rows.
+            if (presentedItemBitmap is { } targetBitmap)
+            {
+                DrawRect(new Rect2(146, 96, 48, targetBitmap.Frame.Height + 8), PaletteColor(0x4F), width: 1);
+                DrawItemBitmap(targetBitmap.Frame, 150, 100);
+            }
             return;
         }
         if (menu.Mode == ExplorationMenuMode.MagicCasters)
@@ -317,6 +350,33 @@ public sealed partial class PalMenuView : Node2D
             DrawBitmapText(statusLines[index], 16, 30 + index * 18, 0x4F);
         for (int index = 0; index < rightLines.Length; index++)
             DrawBitmapText(rightLines[index], 150, 30 + index * 16, 0x4F);
+    }
+
+    /// <summary>Resolves one use-menu row's BALL bitmap through the prepared native chain.
+    /// The empty-chunk word 0 draws no picture (itemmenu.c/uigame.c's read guard); any other
+    /// word must have its prepared chunk bound — a missing binding fails closed instead of
+    /// drawing a placeholder.</summary>
+    private (int ObjectId, int Bitmap, PalFrame Frame)? ResolveItemBitmap(int objectId, int bitmap)
+    {
+        if (bitmap == 0) return null;
+        if (itemBitmaps is null || !itemBitmaps.TryGetValue(objectId, out PalSprite? sprite))
+            throw new InvalidDataException($"Use-menu object {objectId} bitmap {bitmap} has no prepared native item bitmap.");
+        var frame = sprite.Frames.FirstOrDefault(candidate => candidate.Index == 0)
+            ?? throw new InvalidDataException($"BALL chunk {bitmap} has no frame for use-menu object {objectId}.");
+        return (objectId, bitmap, frame);
+    }
+
+    private void DrawItemBitmap(PalFrame frame, int x, int y)
+    {
+        // PAL_RLEBlitToSurface: every visible pixel is one palette index of the active screen
+        // palette; transparent (alpha 0) pixels leave the underlying box untouched.
+        for (int row = 0; row < frame.Height; row++)
+            for (int column = 0; column < frame.Width; column++)
+            {
+                int pixel = row * frame.Width + column;
+                if (frame.Alpha[pixel] == 0) continue;
+                DrawRect(new Rect2(x + column, y + row, 1, 1), PaletteColor(frame.Indices[pixel]));
+            }
     }
 
     private int DrawBitmapText(string text, int x, int y, int colorIndex)

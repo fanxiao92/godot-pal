@@ -398,6 +398,69 @@ public class NativeStoryProfileTests
     }
 
     [TestCase("clean")]
+    [TestCase("sprite-id")]
+    [TestCase("source-archive")]
+    [TestCase("source-chunk")]
+    [TestCase("extra-binding")]
+    public void ItemBitmapsCarryTheBoundBallChunkIdentityOrRejectAtTheStoryBoundary(string fault)
+    {
+        // #218: the native story load's BALL item-bitmap boundary. A use-menu binding with a
+        // nonzero bitmap word must resolve exactly one prepared sprite whose WORD identity IS
+        // that binding's ball.mkf chunk (itemmenu.c/uigame.c read rgObject item.wBitmap from
+        // fpBALL for the selected row), and the bindings must cover exactly the nonzero-bitmap
+        // objects: a wrong SpriteId, a wrong Source archive/chunk or an extra entry rejects —
+        // never a placeholder picture and never a silent skip.
+        using var fixture = new NativeStoryProfileFixture(useMenu: true);
+        // The plain use-menu binding gains the nonzero BALL chunk word 37 (object 300); the
+        // authored sprite and metadata binding are test-owned literals, like AuthoredStoryFixture.
+        fixture.Numeric.UseMenuBitmaps = [37];
+        fixture.Save(fixture.Numeric, "Numeric.tres");
+        fixture.RefreshHashes();
+        PalSprite ItemBitmap(int spriteId, int chunk, string archive)
+        {
+            var sprite = new PalSprite { SpriteId = spriteId, FrameCount = 1, DecodedByteLength = 10,
+                Source = new Godot.Collections.Dictionary { ["archive"] = archive, ["chunk"] = chunk,
+                    ["encoding"] = "uncompressed PAL RLE bitmap",
+                    ["frameLayout"] = "single RLE bitmap: optional 0x00000002 header, WORD width/height, RLE runs" } };
+            sprite.Frames.Add(new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 2,
+                Indices = [37, 38, 39, 40], Alpha = [255, 255, 255, 255] });
+            return sprite;
+        }
+        void Bind(int objectId, string name, PalSprite sprite)
+        {
+            fixture.Save(sprite, name);
+            fixture.Profile.ItemBitmaps.Add(objectId, fixture.Root + "/" + name);
+            fixture.Profile.ResourceSha256.Add(fixture.Root + "/" + name,
+                Godot.FileAccess.GetSha256(fixture.Root + "/" + name));
+        }
+        Bind(300, "ItemBitmap-37.tres", fault switch
+        {
+            "sprite-id" => ItemBitmap(99, 37, "ball.mkf"),
+            "source-archive" => ItemBitmap(37, 37, "fire.mkf"),
+            "source-chunk" => ItemBitmap(37, 41, "ball.mkf"),
+            _ => ItemBitmap(37, 37, "ball.mkf"),
+        });
+        if (fault == "extra-binding")
+            // Object 302 keeps the reference's empty-chunk word 0 (no binding required); a
+            // prepared-but-unbound entry must not survive the exact-coverage union either.
+            Bind(302, "ItemBitmap-extra.tres", ItemBitmap(9, 9, "ball.mkf"));
+        fixture.SaveProfile();
+        if (fault == "clean")
+        {
+            var profile = NativeStoryProfile.Load(fixture.Uri, "zh-Hans");
+            AssertThat(profile.ItemBitmaps.Keys.Order().SequenceEqual(new[] { 300 })).IsTrue();
+            var bitmap = profile.ItemBitmaps[300];
+            AssertThat((bitmap.SpriteId, bitmap.FrameCount, bitmap.Frames[0].Index)).IsEqual((37, 1, 0));
+            AssertThat((bitmap.Source["archive"].AsString(), bitmap.Source["chunk"].AsInt32())).IsEqual(("ball.mkf", 37));
+            return;
+        }
+        string expected = fault == "sprite-id" ? "item bitmap must be the single frame of BALL chunk 37"
+            : fault == "extra-binding" ? "ItemBitmaps must cover exactly the use-menu objects with a nonzero bitmap word"
+            : "item bitmap Source must declare the ball.mkf chunk 37";
+        AssertThat(Failure(() => NativeStoryProfile.Load(fixture.Uri, "zh-Hans")).Contains(expected)).IsTrue();
+    }
+
+    [TestCase("clean")]
     [TestCase("no-on-use-entry")]
     [TestCase("no-on-success-entry")]
     [TestCase("duplicate-entry")]

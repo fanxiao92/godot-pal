@@ -877,7 +877,7 @@ public partial class Main
         }
     }
 
-    private void PresentMenu() => menuView!.Present(menu!, story!.Font, story.Palette.ToArray());
+    private void PresentMenu() => menuView!.Present(menu!, story!.Font, story.Palette.ToArray(), story.ItemBitmaps);
 
     private void ReleaseMenu()
     {

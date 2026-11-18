@@ -48,12 +48,24 @@ public static class NativeStoryProfile
             var eventPaths = index.RootElement.GetProperty("files").EnumerateArray()
                 .Select(id => directory + "/" + id.GetString() + ".json").Prepend(native.EventsIndex).ToArray();
             foreach (string path in eventPaths) CheckFile(path, hashes);
+            // #218: the object WORD -> prepared sprite URI table validates up front (the seeds
+            // concat below consumes it); the content-dependent coverage/identity checks run
+            // after the battle content loads.
+            var itemBitmapUris = new Dictionary<int, string>();
+            if (native.ItemBitmaps is not null)
+                foreach (var pair in native.ItemBitmaps)
+                {
+                    Require(pair.Key is > 0 and <= ushort.MaxValue && !string.IsNullOrWhiteSpace(pair.Value)
+                        && itemBitmapUris.TryAdd(pair.Key, pair.Value),
+                        "ItemBitmaps requires unique nonzero WORD object IDs with native sprite URIs");
+                    NativeExplorationProfile.ValidateUri(pair.Value);
+                }
             string sceneUri = native.StaticResources + "/Scenes/Scene.tscn";
             string dialogue = native.DialogueDirectory;
             string[] seeds = new[] { sceneUri, native.StaticProfile, native.BattleContentUri,
                 dialogue + "/Font.tres", dialogue + "/Language.zh-Hans.tres", dialogue + "/Language.en.tres",
                 dialogue + "/Prompt-00.tres", dialogue + "/Prompt-01.tres", dialogue + "/Prompt-02.tres" }
-                .Concat(portraitUris.Values).ToArray();
+                .Concat(portraitUris.Values).Concat(itemBitmapUris.Values).ToArray();
             var dependencies = ContentDependencies(seeds, hashes);
             dependencies.UnionWith(eventPaths);
             Require(dependencies.SetEquals(hashes.Keys), "ResourceSha256 must cover exactly complete events and native content dependencies (no missing or extra keys)");
@@ -94,6 +106,31 @@ public static class NativeStoryProfile
                     $"magic-menu object {binding.ObjectId} requires exactly one enabled magic.wScriptOnSuccess trigger entry");
                 magicEntries.Add(binding.ObjectId, new StoryMagicEntries(onUse[0], onSuccess[0]));
             }
+            // #218: every use-menu binding with a nonzero BALL bitmap word resolves exactly one
+            // prepared native item-bitmap sprite now; the sprite identity must carry the binding's
+            // BALL chunk (itemmenu.c/uigame.c read rgObject item.wBitmap from fpBALL for the
+            // selected row, so a wrong chunk or archive is a broken binding, never a placeholder).
+            // Stories without that context declare no bitmaps; an extra or missing entry rejects.
+            var itemBitmaps = new Dictionary<int, PalSprite>();
+            foreach (var binding in content.UseMenu.Where(binding => binding.Bitmap != 0))
+            {
+                string bitmapUri = itemBitmapUris.TryGetValue(binding.ObjectId, out string? bound)
+                    ? bound : throw new InvalidDataException(
+                        $"use-menu object {binding.ObjectId} bitmap {binding.Bitmap} has no prepared native item bitmap");
+                var sprite = NativeBattleVisualProfile.LoadSprite(bitmapUri);
+                Require(sprite.SpriteId == binding.Bitmap && sprite.FrameCount == 1
+                    && sprite.Frames.Count == 1 && sprite.Frames[0].Index == 0,
+                    bitmapUri + ": item bitmap must be the single frame of BALL chunk " + binding.Bitmap);
+                Require(sprite.Source.TryGetValue("archive", out Variant archive) && archive.VariantType == Variant.Type.String
+                    && archive.AsString() == "ball.mkf"
+                    && sprite.Source.TryGetValue("chunk", out Variant chunk) && chunk.VariantType == Variant.Type.Int
+                    && chunk.AsInt32() == binding.Bitmap,
+                    bitmapUri + ": item bitmap Source must declare the ball.mkf chunk " + binding.Bitmap);
+                itemBitmaps.Add(binding.ObjectId, sprite);
+            }
+            Require(itemBitmapUris.Keys.ToHashSet().SetEquals(
+                    content.UseMenu.Where(binding => binding.Bitmap != 0).Select(binding => binding.ObjectId)),
+                "ItemBitmaps must cover exactly the use-menu objects with a nonzero bitmap word");
             // Party/multi-enemy capability is bounded by the actually selected closure: the
             // language loop below runs TriggerScriptSession.ValidateEntry, which validates every
             // startBattle team of the selected entry (one to three players and enemy slots) and
@@ -167,7 +204,7 @@ public static class NativeStoryProfile
                 // Detect byte changes during validation, not future edits/import-cache or GPU changes.
                 foreach (string path in hashes.Keys) CheckFile(path, hashes);
                 return new(native.StaticResources, native.StaticProfile, native.BundleSha256, native.SourceIdentity,
-                    entry, events, packages[language], content, requirements[language], exploration, font, prompts, portraits, palette, hashes, packedScene, selectedWords!, itemUseEntries, magicEntries);
+                    entry, events, packages[language], content, requirements[language], exploration, font, prompts, portraits, palette, hashes, packedScene, selectedWords!, itemUseEntries, magicEntries, itemBitmaps);
             }
             finally { node?.Free(); }
         }
@@ -214,6 +251,10 @@ public sealed class CheckedStoryProfile
     /// authored magic-menu object; the story adapter runs both in order for each exploration
     /// cast (uigame.c PAL_InGameMagicMenu's two PAL_RunTriggerScript calls).</summary>
     public IReadOnlyDictionary<int, StoryMagicEntries> MagicUseEntries { get; }
+    /// <summary>#218: the prepared native BALL item-bitmap sprite per use-menu object with a
+    /// nonzero bitmap word (fail-closed coverage validated at load; the item pages draw the
+    /// selected row's frame with the active scene palette).</summary>
+    public IReadOnlyDictionary<int, PalSprite> ItemBitmaps { get; }
     public TriggerEventCollection Events { get; }
     public DialogueLanguagePackage Language { get; }
     public TriggerBattleContent BattleContent { get; }
@@ -230,13 +271,15 @@ public sealed class CheckedStoryProfile
         TriggerEntryRequirements requirements, CheckedExplorationProfile exploration, PalDialogueFont font,
         PalDialogueIndexedImage[] prompts, Dictionary<int, PalDialogueIndexedImage> portraits, Color[] palette, Dictionary<string, string> hashes, PackedScene scene, IReadOnlyDictionary<int, string> selectedWords,
         Dictionary<int, TriggerEventEntry>? itemUseEntries = null,
-        Dictionary<int, StoryMagicEntries>? magicEntries = null)
+        Dictionary<int, StoryMagicEntries>? magicEntries = null,
+        Dictionary<int, PalSprite>? itemBitmaps = null)
     {
         Scene = scene; SelectedWords = selectedWords;
         StaticResources = staticResources; StaticProfile = staticProfile; BundleSha256 = bundleSha256; SourceIdentity = sourceIdentity;
         Entry = entry; Events = events; Language = language; BattleContent = battleContent; Requirements = requirements;
         ItemUseEntries = new ReadOnlyDictionary<int, TriggerEventEntry>(itemUseEntries ?? new Dictionary<int, TriggerEventEntry>());
         MagicUseEntries = new ReadOnlyDictionary<int, StoryMagicEntries>(magicEntries ?? new Dictionary<int, StoryMagicEntries>());
+        ItemBitmaps = new ReadOnlyDictionary<int, PalSprite>(itemBitmaps ?? new Dictionary<int, PalSprite>());
         Exploration = exploration; Font = font; Prompts = Array.AsReadOnly(prompts.ToArray());
         Portraits = new ReadOnlyDictionary<int, PalDialogueIndexedImage>(new Dictionary<int, PalDialogueIndexedImage>(portraits));
         Palette = Array.AsReadOnly(palette.ToArray());

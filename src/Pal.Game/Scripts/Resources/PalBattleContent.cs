@@ -20,10 +20,12 @@ public partial class PalBattleContent : Resource
     [Export] public int[] EquipMenuParts { get; set; } = [];
     [Export] public int[] EquipMenuRoleMasks { get; set; } = [];
     // #215 explicit exploration use context: use-menu bindings as parallel object/consuming/
-    // apply-to-all word rows (bool[] is not a Godot-exportable collection, so flags travel as 0/1).
+    // apply-to-all/bitmap word rows (bool[] is not a Godot-exportable collection, so flags travel
+    // as 0/1; #218 adds the BALL bitmap word item.wBitmap — 0 is the empty-chunk no-draw word).
     [Export] public int[] UseMenuObjects { get; set; } = [];
     [Export] public int[] UseMenuConsuming { get; set; } = [];
     [Export] public int[] UseMenuApplyToAll { get; set; } = [];
+    [Export] public int[] UseMenuBitmaps { get; set; } = [];
     // #216 explicit exploration magic context: magic-menu bindings as parallel object/cost/
     // apply-to-all/usable-outside-battle word rows (flags travel as 0/1 like the use menu).
     [Export] public int[] MagicMenuObjects { get; set; } = [];

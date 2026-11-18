@@ -70,9 +70,12 @@ internal sealed class NativeStoryProfileFixture : IDisposable
         if (useMenu)
         {
             // #215: one authored use-menu binding — object 300, consuming, single-target.
+            // #218: the plain story graph keeps the reference's empty-chunk bitmap word 0
+            // (no item picture); bitmap-consuming variants live in the menu scene fixtures.
             Numeric.UseMenuObjects = [300];
             Numeric.UseMenuConsuming = [1];
             Numeric.UseMenuApplyToAll = [0];
+            Numeric.UseMenuBitmaps = [0];
         }
         if (useMagic)
         {

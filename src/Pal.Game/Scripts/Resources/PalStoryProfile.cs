@@ -20,5 +20,9 @@ public partial class PalStoryProfile : Resource
     [Export] public string DialogueDirectory { get; set; } = "";
     [Export] public string SourceIdentity { get; set; } = "";
     [Export] public Dictionary<int, string> Portraits { get; set; } = new();
+    // #218 BALL item bitmaps: object WORD -> prepared native item-bitmap sprite URI (the
+    // export-battle-images ball package -> PrepareItemBitmaps chain). Coverage must match the
+    // use-menu bindings with a nonzero bitmap word exactly; stories without that context stay empty.
+    [Export] public Dictionary<int, string> ItemBitmaps { get; set; } = new();
     [Export] public Dictionary<string, string> ResourceSha256 { get; set; } = new();
 }

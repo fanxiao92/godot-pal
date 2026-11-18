@@ -121,8 +121,9 @@ public static partial class ModernBattleContent
         return System.Array.AsReadOnly(bindings.ToArray());
     }
 
-    /// <summary>Use-menu bindings: object plus its kItemFlagConsuming and kItemFlagApplyToAll
-    /// words. Listing declares the exploration-usable category (kItemFlagUsable).</summary>
+    /// <summary>Use-menu bindings: object plus its kItemFlagConsuming, kItemFlagApplyToAll
+    /// and BALL bitmap (item.wBitmap) words. Listing declares the exploration-usable
+    /// category (kItemFlagUsable); 0 is the reference's empty-chunk no-draw word.</summary>
     private static IReadOnlyList<BattleUseMenuBinding> UseMenuBindings(JsonElement element)
     {
         if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".useMenu", "expected an array");
@@ -131,8 +132,9 @@ public static partial class ModernBattleContent
         foreach (JsonElement item in element.EnumerateArray())
         {
             string path = Root + $".useMenu[{index++}]";
-            EventJson.Keys(item, path, "objectId", "consuming", "applyToAll");
-            bindings.Add(new(Number(item, "objectId", path, 1), Boolean(item, "consuming", path), Boolean(item, "applyToAll", path)));
+            EventJson.Keys(item, path, "objectId", "consuming", "applyToAll", "bitmap");
+            bindings.Add(new(Number(item, "objectId", path, 1), Boolean(item, "consuming", path),
+                Boolean(item, "applyToAll", path), Number(item, "bitmap", path)));
         }
         return System.Array.AsReadOnly(bindings.ToArray());
     }

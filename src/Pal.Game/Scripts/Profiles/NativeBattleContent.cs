@@ -121,6 +121,7 @@ public static class NativeBattleContent
             UseMenuObjects = content.UseMenu.Select(binding => binding.ObjectId).ToArray(),
             UseMenuConsuming = content.UseMenu.Select(binding => binding.Consuming ? 1 : 0).ToArray(),
             UseMenuApplyToAll = content.UseMenu.Select(binding => binding.ApplyToAll ? 1 : 0).ToArray(),
+            UseMenuBitmaps = content.UseMenu.Select(binding => binding.Bitmap).ToArray(),
             MagicMenuObjects = content.MagicMenu.Select(binding => binding.ObjectId).ToArray(),
             MagicMenuCostMp = content.MagicMenu.Select(binding => binding.CostMp).ToArray(),
             MagicMenuApplyToAll = content.MagicMenu.Select(binding => binding.ApplyToAll ? 1 : 0).ToArray(),
@@ -222,10 +223,12 @@ public static class NativeBattleContent
         int[] objects = Copy(native.UseMenuObjects, "UseMenuObjects");
         int[] consuming = Copy(native.UseMenuConsuming, "UseMenuConsuming");
         int[] applyToAll = Copy(native.UseMenuApplyToAll, "UseMenuApplyToAll");
-        if (objects.Length != consuming.Length || objects.Length != applyToAll.Length)
+        int[] bitmaps = Copy(native.UseMenuBitmaps, "UseMenuBitmaps");
+        if (objects.Length != consuming.Length || objects.Length != applyToAll.Length || objects.Length != bitmaps.Length)
             throw new InvalidDataException("UseMenu arrays require aligned rows");
         return objects.Select((item, index) => new BattleUseMenuBinding(item,
-            Flag(consuming[index], "UseMenuConsuming", index), Flag(applyToAll[index], "UseMenuApplyToAll", index))).ToArray();
+            Flag(consuming[index], "UseMenuConsuming", index), Flag(applyToAll[index], "UseMenuApplyToAll", index),
+            bitmaps[index])).ToArray();
     }
 
     private static IReadOnlyList<BattleMagicMenuBinding> ReadMagicMenu(PalBattleContent native)

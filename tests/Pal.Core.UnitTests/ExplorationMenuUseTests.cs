@@ -19,9 +19,9 @@ public sealed class ExplorationMenuUseTests
         // Ordered bag rows with their amounts; battles never consume this seed.
         Assert.Equal([(300, 2), (301, 1), (302, 1)],
             content.InitialInventory.Select(row => (row.ItemId, row.Amount)).ToArray());
-        // Bindings keep authored order with their consuming/apply-to-all words.
-        Assert.Equal([(300, true, false), (301, true, true), (302, true, false)],
-            content.UseMenu.Select(binding => (binding.ObjectId, binding.Consuming, binding.ApplyToAll)).ToArray());
+        // Bindings keep authored order with their consuming/apply-to-all and BALL bitmap words.
+        Assert.Equal([(300, true, false, 37), (301, true, true, 41), (302, true, false, 0)],
+            content.UseMenu.Select(binding => (binding.ObjectId, binding.Consuming, binding.ApplyToAll, binding.Bitmap)).ToArray());
         // Legacy data without the sections stays valid and empty.
         var legacy = ModernBattleContent.Parse(Data().ToJsonString());
         Assert.Empty(legacy.UseMenu);
@@ -30,10 +30,10 @@ public sealed class ExplorationMenuUseTests
         Assert.Contains("unknown field 'throwable'", Reject("typo", "unknown field").Message);
         Assert.Contains("expected boolean", Reject("consumingString", "expected boolean").Message);
         Assert.Contains("unique object WORD ids", Reject("duplicateBinding", "unique").Message);
-        Assert.Contains("require unique object WORD ids", Assert.Throws<InvalidDataException>(
-            () => new TriggerBattleContent(content.InitialRoles.Values.ToArray(), content.Players,
-                content.GrowthByRole, content.EnemyTeams,
-                useMenu: [new BattleUseMenuBinding(300, true, false), new BattleUseMenuBinding(300, false, true)])).Message);
+        Assert.Contains("unique object WORD ids", Reject("duplicateBinding", "unique").Message);
+        Assert.Contains("expected integer in 0..65535", Reject("bitmapString", "expected integer").Message);
+        Assert.Contains("$.useMenu[0].bitmap", Reject("bitmapRange", "expected integer in 0..65535").Message);
+        Assert.Contains("missing field 'bitmap'", Reject("bitmapMissing", "missing field").Message);
     }
 
     [Fact]
@@ -126,6 +126,33 @@ public sealed class ExplorationMenuUseTests
         Assert.Throws<InvalidOperationException>(() => Menu().menu.ItemsView());
         Assert.Throws<InvalidOperationException>(() => Menu().menu.ItemTargetsView());
         Assert.Throws<InvalidOperationException>(() => Menu().menu.Press(ExplorationMenuKey.Confirm));
+    }
+
+    [Fact]
+    public void Item_bitmap_word_binds_the_ball_chunk_identity_through_both_item_pages()
+    {
+        // #218: the authored binding carries rgObject item.wBitmap — the BALL chunk the item
+        // pages draw (itemmenu.c/uigame.c); 0 is the reference's empty-chunk no-draw word.
+        var content = ModernBattleContent.Parse(UseContextData().ToJsonString());
+        Assert.Equal([(300, 37), (301, 41), (302, 0)],
+            content.UseMenu.Select(binding => (binding.ObjectId, binding.Bitmap)).ToArray());
+        // The projection keeps the binding's bitmap word on every listed row — stock rows and
+        // the equipped appendix alike (itemmenu.c reads the selected row's object bitmap).
+        var (menu, _, _) = Menu();
+        menu.Open();
+        menu.Press(ExplorationMenuKey.Down);
+        menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal([(300, 37), (301, 41), (901, 252), (901, 252)],
+            menu.ItemsView().Select(row => (row.ObjectId, row.Bitmap)).ToArray());
+        // The target page exposes the same item bitmap word (uigame.c PAL_ItemUseMenu draws
+        // the item picture beside the party rows while picking).
+        menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(37, menu.ItemTargetsView().Bitmap);
+        // Direct constructions keep the WORD domain: an out-of-range bitmap rejects up front.
+        Assert.Contains("$.useMenu[0].bitmap", Assert.Throws<InvalidDataException>(()
+            => new TriggerBattleContent(content.InitialRoles.Values.ToArray(), content.Players,
+                content.GrowthByRole, content.EnemyTeams,
+                useMenu: [new BattleUseMenuBinding(300, true, false, 65536)])).Message);
     }
 
     [Fact]
@@ -243,8 +270,11 @@ public sealed class ExplorationMenuUseTests
             case "objectId0": data["useMenu"]![0]!["objectId"] = 0; break;
             case "typo": data["useMenu"]![0]!["throwable"] = true; break;
             case "consumingString": data["useMenu"]![0]!["consuming"] = "yes"; break;
+            case "bitmapString": data["useMenu"]![0]!["bitmap"] = "yes"; break;
+            case "bitmapRange": data["useMenu"]![0]!["bitmap"] = 65536; break;
+            case "bitmapMissing": data["useMenu"]![0]!.AsObject().Remove("bitmap"); break;
             case "duplicateBinding": ((JsonArray)data["useMenu"]!).Add(
-                new JsonObject { ["objectId"] = 300, ["consuming"] = false, ["applyToAll"] = false }); break;
+                new JsonObject { ["objectId"] = 300, ["consuming"] = false, ["applyToAll"] = false, ["bitmap"] = 0 }); break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation));
         }
         return Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
@@ -277,12 +307,13 @@ public sealed class ExplorationMenuUseTests
             [901] = "头带",
         };
         if (missingItemWord) words.Remove(901);
-        // 300 heals one member (consuming), 301 the party (consuming, apply-to-all), 901 is the
-        // equipped usable appendix object (non-consuming); role1 wears one copy of 901.
+        // 300 heals one member (consuming, BALL chunk 37), 301 the party (consuming,
+        // apply-to-all, chunk 41), 901 is the equipped usable appendix object (non-consuming,
+        // chunk 252); role1 wears one copy of 901.
         IReadOnlyList<BattleUseMenuBinding>? useMenu = noUseMenu ? null
-            : duplicateBinding ? [new BattleUseMenuBinding(300, true, false), new BattleUseMenuBinding(300, false, true)]
-            : [new BattleUseMenuBinding(300, true, false), new BattleUseMenuBinding(301, true, true),
-               new BattleUseMenuBinding(901, false, false)];
+            : duplicateBinding ? [new BattleUseMenuBinding(300, true, false, 37), new BattleUseMenuBinding(300, false, true, 41)]
+            : [new BattleUseMenuBinding(300, true, false, 37), new BattleUseMenuBinding(301, true, true, 41),
+               new BattleUseMenuBinding(901, false, false, 252)];
         int[][] grid = [[0, 0, 0, 0, 0, 0], role1Equipment, [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]];
         var equipmentObjects = new Dictionary<int, BattleEquipmentObject>
         {
@@ -332,9 +363,9 @@ public sealed class ExplorationMenuUseTests
             new JsonObject { ["itemId"] = 301, ["amount"] = 1 },
             new JsonObject { ["itemId"] = 302, ["amount"] = 1 });
         data["useMenu"] = new JsonArray(
-            new JsonObject { ["objectId"] = 300, ["consuming"] = true, ["applyToAll"] = false },
-            new JsonObject { ["objectId"] = 301, ["consuming"] = true, ["applyToAll"] = true },
-            new JsonObject { ["objectId"] = 302, ["consuming"] = true, ["applyToAll"] = false });
+            new JsonObject { ["objectId"] = 300, ["consuming"] = true, ["applyToAll"] = false, ["bitmap"] = 37 },
+            new JsonObject { ["objectId"] = 301, ["consuming"] = true, ["applyToAll"] = true, ["bitmap"] = 41 },
+            new JsonObject { ["objectId"] = 302, ["consuming"] = true, ["applyToAll"] = false, ["bitmap"] = 0 });
         return data;
     }
 

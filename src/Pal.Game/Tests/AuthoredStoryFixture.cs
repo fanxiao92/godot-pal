@@ -21,7 +21,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
         bool removeDualAttack = false, int? playerHp = null, int? partyHpMpPrefixAmount = null,
         bool singlePlayerTwoEnemies = false, bool heterogeneousEnemies = false, bool threePlayer = false,
         bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false, bool attackAllMember0 = false,
-        bool fleeEscape = false, bool menuEquip = false, bool menuItems = false, bool menuMagic = false)
+        bool fleeEscape = false, bool menuEquip = false, bool menuItems = false, bool menuMagic = false,
+        bool menuItemsBitmaps = false, bool menuItemsBitmapsMissingBinding = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -47,6 +48,12 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The menu-magic context derivation requires the PartyWin author.", nameof(menuMagic));
         if (menuMagic && menuItems)
             throw new ArgumentException("The menu-magic and menu-items derivations are separate owned story graphs.", nameof(menuMagic));
+        if (menuItemsBitmaps && (!menuItems || scenario != "PartyWin" || menuMagic))
+            throw new ArgumentException("The item-bitmaps derivation requires the PartyWin menu-items author.", nameof(menuItemsBitmaps));
+        if (menuItemsBitmapsMissingBinding && (!menuItems || scenario != "PartyWin" || menuMagic))
+            throw new ArgumentException("The missing item-bitmap binding derivation requires the PartyWin menu-items author.", nameof(menuItemsBitmapsMissingBinding));
+        if (menuItemsBitmaps && menuItemsBitmapsMissingBinding)
+            throw new ArgumentException("The item-bitmaps derivations are separate owned story graphs.");
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -203,15 +210,17 @@ internal sealed class AuthoredStoryFixture : IDisposable
                     // #215 (M6-B T03): the test-owned item-use context — usable bag rows and
                     // per-object consuming/apply-to-all bindings. 300 heals one member +30 with a
                     // real dialogue line, 301 heals the party +10, 302 marks the script failed;
-                    // all three are consuming so the success flag decides every removal.
+                    // all three are consuming so the success flag decides every removal. #218
+                    // adds the BALL bitmap words: chunks 37/41 draw on the item pages, 302 keeps
+                    // the reference's empty-chunk word 0 (no picture).
                     data["inventory"] = new JsonArray(
                         new JsonObject { ["itemId"] = 300, ["amount"] = 2 },
                         new JsonObject { ["itemId"] = 301, ["amount"] = 1 },
                         new JsonObject { ["itemId"] = 302, ["amount"] = 1 });
                     data["useMenu"] = new JsonArray(
-                        new JsonObject { ["objectId"] = 300, ["consuming"] = true, ["applyToAll"] = false },
-                        new JsonObject { ["objectId"] = 301, ["consuming"] = true, ["applyToAll"] = true },
-                        new JsonObject { ["objectId"] = 302, ["consuming"] = true, ["applyToAll"] = false });
+                        new JsonObject { ["objectId"] = 300, ["consuming"] = true, ["applyToAll"] = false, ["bitmap"] = 37 },
+                        new JsonObject { ["objectId"] = 301, ["consuming"] = true, ["applyToAll"] = true, ["bitmap"] = 41 },
+                        new JsonObject { ["objectId"] = 302, ["consuming"] = true, ["applyToAll"] = false, ["bitmap"] = 0 });
                 }
                 if (menuMagic)
                 {
@@ -322,6 +331,33 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (menuMagic)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned menu magic context (T04 #216): learned magic slots, cost/flag bindings and magic.wScriptOnUse/wScriptOnSuccess entries; authored inputs, not retail data.";
+            if (menuItemsBitmaps || menuItemsBitmapsMissingBinding)
+            {
+                // #218 (M6-B T03b): test-owned BALL item-bitmap sprites — chunk 37 (object 300)
+                // is a 4x3 bitmap and chunk 41 (object 301) a 2x2 one, authored with the ball
+                // chain's literal Source identity; object 302 keeps the empty-chunk word 0.
+                // The missing-binding derivation saves the sprites but omits the metadata
+                // bindings, so the strict story boundary must reject the nonzero bitmap word.
+                foreach (var (chunk, width, height) in new[] { (37, 4, 3), (41, 2, 2) })
+                {
+                    var sprite = new Pal.Game.Resources.PalSprite { SpriteId = chunk, FrameCount = 1,
+                        DecodedByteLength = 6 + width * height,
+                        Source = new Godot.Collections.Dictionary { ["archive"] = "ball.mkf", ["chunk"] = chunk,
+                            ["encoding"] = "uncompressed PAL RLE bitmap",
+                            ["frameLayout"] = "single RLE bitmap: optional 0x00000002 header, WORD width/height, RLE runs" } };
+                    sprite.Frames.Add(new Pal.Game.Resources.PalFrame { Index = 0, SourceOffset = 6,
+                        Width = width, Height = height,
+                        Indices = Enumerable.Range(0, width * height).Select(pixel => (byte)(chunk + pixel % 5)).ToArray(),
+                        Alpha = Enumerable.Repeat((byte)255, width * height).ToArray() });
+                    NativeProfileFixture.SaveResource(sprite, Root + $"/ItemBitmap-{chunk}.tres");
+                }
+                if (menuItemsBitmaps)
+                    metadata["itemBitmaps"] = new JsonArray(
+                        new JsonObject { ["objectId"] = 300, ["uri"] = Root + "/ItemBitmap-37.tres" },
+                        new JsonObject { ["objectId"] = 301, ["uri"] = Root + "/ItemBitmap-41.tres" });
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned BALL item-bitmap sprites (T03b #218): chunks 37/41 as authored test art, not retail ball.mkf data.";
+            }
             if (partyHpMpPrefixAmount is { } prefixAmount) AddPartyHpMpPrefix(prefixAmount, metadata);
             if (missingPresentation == "effect")
                 foreach (var player in metadata["visual"]!["players"]!.AsArray())

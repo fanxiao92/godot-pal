@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using GdUnit4;
@@ -327,7 +328,7 @@ public class MenuSceneTests
         // Independent numbers: PartyWin authors role0 HP100/MP20, role1 HP95/MP20 (max 150/50);
         // the test-owned scripts heal +30 (single, with a real dialogue line), +10 party-wide and
         // a markFailed no-op; consumption follows kItemFlagConsuming AND script success only.
-        using var fixture = new AuthoredStoryFixture("PartyWin", menuItems: true);
+        using var fixture = new AuthoredStoryFixture("PartyWin", menuItems: true, menuItemsBitmaps: true);
         var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1", "--story-language", "zh-Hans");
         using var host = new MenuHost(selection);
@@ -440,6 +441,79 @@ public class MenuSceneTests
             AssertThat(string.Join(";", session.ItemsView()
                 .Select(row => $"{row.ObjectId}:{row.Name}:{row.Amount}")))
                 .IsEqual(string.Join(";", expected.Select(row => $"{row.ObjectId}:{row.Name}:{row.Amount}")));
+    }
+
+    [TestCase("zh-Hans", Timeout = 120000)]
+    [TestCase("en", Timeout = 120000)]
+    public async Task ItemPagesDrawThePreparedBallBitmapOfTheSelectedRow(string language)
+    {
+        // #218: the items page and the item target page draw the selected item's BALL bitmap
+        // from the explicitly prepared native chain (itemmenu.c/uigame.c read rgObject
+        // item.wBitmap from fpBALL for the selected row). The authored test art is 4x3 for
+        // chunk 37 (object 300) and 2x2 for chunk 41 (object 301); object 302 keeps the
+        // empty-chunk word 0 that draws no picture, and the bitmap identity stays the same
+        // in both supported languages while the names localize.
+        using var fixture = new AuthoredStoryFixture("PartyWin", menuItems: true, menuItemsBitmaps: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1", "--story-language", language);
+        using var host = new MenuHost(selection);
+        host.AssertHealthy();
+        await host.Wait(() => host.Updates.Count > 0);
+        var menu = host.Main.Menu!;
+
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Items);
+        AssertThat(host.Main.MenuView!.PresentedItemBitmap).IsEqual((300, 37, 4, 3));
+
+        // itemmenu.c redraws the box for the newly selected row: the cursor moves follow the
+        // binding's bitmap word, ending on the empty-chunk row with no picture at all.
+        host.Tap(Key.Down);
+        await host.Wait(() => host.Main.MenuView!.PresentedItemBitmap!.Value.Bitmap == 41);
+        AssertThat(host.Main.MenuView!.PresentedItemBitmap).IsEqual((301, 41, 2, 2));
+        host.Tap(Key.Down);
+        await host.Wait(() => host.Main.MenuView!.PresentedItemBitmap is null);
+
+        // uigame.c PAL_ItemUseMenu keeps the item picture beside the party rows while picking
+        // (301 is apply-to-all and skips the page, so the 300 target page is the observable).
+        host.Tap(Key.Up);
+        host.Tap(Key.Up);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemTargets);
+        AssertThat(host.Main.MenuView!.PresentedItemBitmap).IsEqual((300, 37, 4, 3));
+
+        // The committed run parks the same bitmap behind the script's dialogue; after the
+        // run completes, cancelling back to the item list re-resolves the selected row.
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemScript);
+        AssertThat(host.Main.MenuView!.PresentedItemBitmap).IsEqual((300, 37, 4, 3));
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.ItemTargets);
+        AssertThat(host.Main.MenuView!.PresentedItemBitmap).IsEqual((300, 37, 4, 3));
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Items);
+        AssertThat(host.Main.MenuView!.PresentedItemBitmap).IsEqual((300, 37, 4, 3));
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+        AssertThat(host.Main.MenuView).IsNull();
+    }
+
+    [TestCase(Timeout = 60000)]
+    public void StoryLoadRejectsAnItemBitmapContextWithoutItsPreparedNativeBinding()
+    {
+        // #218 fail-closed: a use-menu binding's nonzero bitmap word without its prepared
+        // native item bitmap rejects at the strict story boundary (prepare/load) — no
+        // placeholder image and no silent skip can ever reach the menu pages.
+        AuthoredStoryFixture? fixture = null;
+        string failure = "";
+        try { fixture = new AuthoredStoryFixture("PartyWin", menuItems: true, menuItemsBitmapsMissingBinding: true); }
+        catch (InvalidDataException error) { failure = error.Message; }
+        finally { fixture?.Dispose(); }
+        AssertThat(failure.Contains("use-menu object 300 bitmap 37")).IsTrue();
+        AssertThat(failure.Contains("has no prepared native item bitmap")).IsTrue();
     }
 
     [TestCase(Timeout = 180000)]

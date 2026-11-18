@@ -13,9 +13,11 @@ public sealed record BattleEquipMenuBinding(int ObjectId, int Part, int Equipabl
 }
 
 /// <summary>One authored use-menu binding (battle-data.json $.useMenu): the object, its
-/// kItemFlagConsuming and kItemFlagApplyToAll words. Listing an object declares
-/// kItemFlagUsable for the exploration host (play.c PAL_GameUseItem).</summary>
-public sealed record BattleUseMenuBinding(int ObjectId, bool Consuming, bool ApplyToAll);
+/// kItemFlagConsuming and kItemFlagApplyToAll words, and the item's BALL bitmap word
+/// (rgObject item.wBitmap, the chunk itemmenu.c/uigame.c read from fpBALL for the
+/// selected row; 0 is the reference's empty-chunk no-draw word). Listing an object
+/// declares kItemFlagUsable for the exploration host (play.c PAL_GameUseItem).</summary>
+public sealed record BattleUseMenuBinding(int ObjectId, bool Consuming, bool ApplyToAll, int Bitmap);
 
 /// <summary>One authored magic-menu binding (battle-data.json $.magicMenu): the magic object,
 /// its lprgMagic[wMagicNumber].wCostMP and the two kMagicFlag words the exploration menu
@@ -129,6 +131,8 @@ public sealed class TriggerBattleContent
         foreach (var (binding, index) in bindings.Select((x, i) => (x, i)))
             if (binding is null || binding.ObjectId is < 1 or > 65535 || !seen.Add(binding.ObjectId))
                 throw new InvalidDataException($"$.useMenu[{index}]: bindings require unique object WORD ids 1..65535.");
+            else if (binding.Bitmap is < 0 or > 65535)
+                throw new InvalidDataException($"$.useMenu[{index}].bitmap: the BALL bitmap word must be 0..65535.");
         return Array.AsReadOnly(bindings.ToArray());
     }
 

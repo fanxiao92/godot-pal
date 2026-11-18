@@ -37,19 +37,23 @@ public sealed record ExplorationMenuEquipSelection(int ObjectId, int Part, strin
     IReadOnlyList<ExplorationMenuEquipRole> Roles);
 
 /// <summary>One items-page row (itemmenu.c PAL_ItemSelectMenu over usable stock): the object, its
-/// name word text, the consuming/apply-to-all words and the listed amount. Stock rows carry the
+/// name word text, the consuming/apply-to-all words, the item's BALL bitmap word
+/// (item.wBitmap; 0 is the reference's empty-chunk no-draw word — the selected row's
+/// box draws no picture) and the listed amount. Stock rows carry the
 /// available amount (nAmount − nAmountInUse); equipped appendix rows (amount 0 / in-use −1 in the
 /// reference) carry zero and never count equipment copies as usable stock.</summary>
 public sealed record ExplorationMenuUseRow(int ObjectId, string Name, bool Consuming, bool ApplyToAll,
-    bool Equipped, int Amount);
+    int Bitmap, bool Equipped, int Amount);
 
 /// <summary>One party row of the item target page (uigame.c PAL_ItemUseMenu): the shared live
 /// vitals the reference draws while the player picks whom to use the item on.</summary>
 public sealed record ExplorationMenuItemTarget(int RoleId, string Name, int Hp, int MaxHp, int Mp, int MaxMp);
 
-/// <summary>The item target-selection page for one item: the object, the party rows and the
-/// resolved HP/MP label words the reference's stat box draws.</summary>
-public sealed record ExplorationMenuItemTargetView(int ObjectId, string Name,
+/// <summary>The item target-selection page for one item: the object, the item's BALL bitmap
+/// word (item.wBitmap; uigame.c PAL_ItemUseMenu draws the item picture beside the party
+/// rows while picking), the party rows and the resolved HP/MP label words the reference's
+/// stat box draws.</summary>
+public sealed record ExplorationMenuItemTargetView(int ObjectId, string Name, int Bitmap,
     IReadOnlyList<ExplorationMenuItemTarget> Targets, string HpLabel, string MpLabel);
 
 /// <summary>play.c PAL_GameUseItem's one committed script run: the object plus the caller word
@@ -729,7 +733,7 @@ public sealed class ExplorationMenuSession
         if (Mode != ExplorationMenuMode.ItemTargets)
             throw new InvalidOperationException("The item target selection is not open.");
         var binding = UseBinding(ItemSelection);
-        return new(binding.ObjectId, Word(binding.ObjectId),
+        return new(binding.ObjectId, Word(binding.ObjectId), binding.Bitmap,
             Party.Select(member =>
             {
                 var role = roles.Roles[member.RoleId];
@@ -876,14 +880,16 @@ public sealed class ExplorationMenuSession
         {
             int available = Available(binding.ObjectId);
             if (available > 0)
-                rows.Add(new(binding.ObjectId, Word(binding.ObjectId), binding.Consuming, binding.ApplyToAll, false, available));
+                rows.Add(new(binding.ObjectId, Word(binding.ObjectId), binding.Consuming, binding.ApplyToAll,
+                    binding.Bitmap, false, available));
         }
         foreach (var member in Party)
             foreach (int objectId in roles.Roles[member.RoleId].Equipment)
                 if (objectId != 0 && useMenu.Any(binding => binding.ObjectId == objectId))
                 {
                     var binding = UseBinding(objectId);
-                    rows.Add(new(objectId, Word(objectId), binding.Consuming, binding.ApplyToAll, true, 0));
+                    rows.Add(new(objectId, Word(objectId), binding.Consuming, binding.ApplyToAll,
+                        binding.Bitmap, true, 0));
                 }
         return rows;
     }

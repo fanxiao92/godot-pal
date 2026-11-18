@@ -142,3 +142,23 @@ pal-extract export-battle-images --input <directory> --archive <abc|ball|f|fbp|f
 - 两层独立验证：`tests/Pal.Prepare.Tests/FireEffectsPrepareProcessTests.cs` 真实 Godot 进程（argv/标记/退出/重复运行拒绝、输入只读、输出文件集）；`src/Pal.Game/Tests/PrepareFireEffectsTests.cs` GdUnit 公开会话（字面往返 + checked 加载 + 13 个发布前拒绝例，预期全部来自人工字节夹具）。
 - Ledger 同步（按当前源码事实）：`Get-PrepareTestCount` 102→115（editor publish 例 + repair 新增 12 个 wrapper/argv 真实进程用例，合计 13 个 fire 进程用例）；native-map 728→742（新增 `PrepareFireEffectsTests`）；库存 1018→1032；game 正例 1015→1029（committable 1014→1028）。同步同时修正 `GameBatches.Tests.ps1` 的存量滞后基线（core 1465→1473、库存 1016→1018→本轮 1032、scene-realfull 42→44/41→43、committable 1012→1014→本轮 1028、补齐两个 `NormalBattleFlee*` 用例身份）。
 - 仍不包含：FIRE 动画时序/法术播放、通用图像导入框架、音视频或场景调色板循环（M7）；真实 FIRE 资源仅本地显式准备，不入库不上传。
+
+## M6-B T03b：BALL 的显式原生准备与物品页消费（#218）
+
+### 入口与产物
+
+- 公开静态 `Pal.Game.Editor.PrepareItemBitmaps.Prepare(string inputDirectory, string outputDirectory) -> IReadOnlyDictionary<int, string>`；headless Editor 场景 `res://Editor/PrepareItemBitmaps.tscn`（`--ball-input <目录> --ball-output <新建或空目录>`，成功标记 `PAL_PREPARE_ITEM_BITMAPS:<映射条数>`）与 wrapper `scripts/Prepare-ItemBitmaps.ps1`（参数/链接/进程守卫与 FIRE wrapper 同形）。运行时不调用该节点；正常 Main 只消费已准备资源。
+- 消费一个完整的 export-battle-images **ball** 包（#93 交付的 CLI 解码链，v1 形状不变）：输出 `Sprites/<chunk>.tres`（既有 `PalSprite`/`PalFrame`，`SpriteId` = 原 BALL chunk 号 = item.wBitmap 身份，`FrameCount` 恒 1，`Source` = `{archive: ball.mkf, chunk, encoding: uncompressed PAL RLE bitmap, frameLayout: single RLE bitmap: optional 0x00000002 header, WORD width/height, RLE runs}`）与 `Textures/<chunk>/0.tres`（既有原生 `ImageTexture`，取自包内 PNG）；返回 chunk → sprite URI 映射。不新增纹理格式、UID/模型或平行 loader；空 chunk（真实数据 chunk 0）不发布；chunk 号是物品位图身份，不重编号。
+
+### 菜单绑定与消费
+
+- authored `battle-data.json` 的 `$.useMenu` 每行新增必填 `bitmap`（WORD 0..65535）：rgObject item.wBitmap。0 = 参考 `PAL_MKFReadChunk(...) > 0` 的空 chunk 分支，物品页不画图；Core `BattleUseMenuBinding.Bitmap` 贯穿 typed 传输（`PalBattleContent.UseMenuBitmaps` 平行数组，失配拒绝）并投影到 `ExplorationMenuUseRow.Bitmap` / `ExplorationMenuItemTargetView.Bitmap`。
+- `PalStoryProfile.ItemBitmaps`（object WORD → sprite URI，story-package.json 可选 `itemBitmaps: [{objectId, uri}]`）在 `NativeStoryProfile.Load` 严格核对：覆盖恰为 `bitmap != 0` 的 use 绑定集合，每个 sprite 经 `NativeBattleVisualProfile.LoadSprite` 读回且 `SpriteId`/`Source.archive=ball.mkf`/`Source.chunk` 必须等于绑定位图字；缺失/多余/坏身份在故事加载即拒绝（fail-closed，无占位图）。未准备位图的条目不要求预准备（未列出的 use 对象不受影响）。
+- `PalMenuView` 在物品页/物品目标页（含脚本挂起态）绘制选中行的位图（authored 布局，活动场景调色板逐像素，透明像素跳过，等同 `PAL_RLEBlitToSurface`）；内部探针 `PresentedItemBitmap` 暴露 (object, bitmap, 尺寸) 供测试观察。两种已支持语言下位图身份一致，名称/数量仍随语言包。
+
+### 校验、安全与登记
+
+- 发布前严格校验完整 ball 包（index.json 逐字段、compression 恒 rle/empty、frameCount/decodedFrameCount 恒 1、帧平面长度、PNG 可解码且尺寸一致、实际文件集与声明集精确相等）；路径/链接/只读/失败清理边界与 FIRE prepare 同形；发布后用包数据构造 expected 走 `LoadSprite(uri, expected, resourceSha256)` 逐字段读回。
+- 两层独立验证：`tests/Pal.Prepare.Tests/ItemBitmapsPrepareProcessTests.cs` 真实 Godot 进程（editor/wrapper argv/标记/退出/预检，13 例）；`src/Pal.Game/Tests/PrepareItemBitmapsTests.cs` GdUnit 公开会话（字面往返 + checked 加载 + 12 个发布前拒绝例）。菜单消费由 `MenuSceneTests` 新用例（两语言理论 + 缺绑定 fail-closed 拒绝）经正式 Main/SceneRunner 覆盖；Core 投影由 `ExplorationMenuUseTests` 新用例覆盖。
+- Ledger 同步（按当前源码事实）：`Get-PrepareTestCount` 115→128；native-map 754→772（新增 `PrepareItemBitmapsTests` 13 例与 `NativeStoryProfileTests.ItemBitmapsCarryTheBoundBallChunkIdentityOrRejectAtTheStoryBoundary` 的 5 个 story 边界身份/精确覆盖反例）；scene-dialogue 115→118；库存 1051→1072；game 正例 1048→1069（committable 1047→1068）；core 1489→1490。`GameBatches.Tests.ps1` 对应字面同步（full 批次串 85/118/…/772/44、committable 变体 …772/43、两份 PASS 摘要 1069/1068 与 ball 进程类 13 例钉）。
+- 仍不包含：商店侧图像消费（#217 消费同一链）、真实 BALL 资源准备入库（仅本地显式准备）、GPU/人工桌面像素验收与远端 CI。
