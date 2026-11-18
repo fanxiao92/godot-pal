@@ -6,10 +6,12 @@ using Pal.Game.Dialogue;
 
 namespace Pal.Game.Tests;
 
-/// <summary>Real-process observer of the #51 lost-reload terminal: drives the shipped story
-/// Main through search, the failed boss flee, the lost failure branch and the 0x004E boundary
-/// with real input events, then quits through the normal process exit. NOT GPU pixels, manual
-/// desktop acceptance or a substitute for the SceneRunner roundtrip.</summary>
+/// <summary>Real-process observer of the #228 defeat-reload boundary: drives the shipped
+/// story Main through search, the failed boss flee, the lost failure branch and the 0x004E
+/// request with real input events, observes the registered request close in the explicit
+/// no-current-slot failure terminal (this independent run never saved), then quits through
+/// the normal process exit. NOT GPU pixels, manual desktop acceptance or a substitute for
+/// the SceneRunner roundtrip.</summary>
 public partial class ObserveStoryLost : Node
 {
     private Main main = null!;
@@ -43,14 +45,18 @@ public partial class ObserveStoryLost : Node
             Tap(Key.Enter); // advance the centered loss text
             if (!await Wait(() => main.StoryLostTerminal, 900)) { Fail("lost terminal not reached"); return; }
             if (main.StoryLostReloadDiagnostics != 1) { Fail("diagnostic count is not 1"); return; }
+            // #228: this independent run never saved, so the registered request closes in the
+            // explicit no-current-slot failure terminal at the next production boundary.
+            if (!await Wait(() => main.StoryLostReloadFailure == "no-current-slot", 300)) { Fail("no-current-slot failure terminal not reached"); return; }
             if (main.StoryCashGranted != 0 || main.StoryExperienceGranted != 0) { Fail("lost run granted rewards"); return; }
             await Frames(150); // the red fade keeps stepping as presentation while business is stopped
             Tap(Key.Enter);
-            Tap(Key.Q); // terminal input stays inert; no re-print, no return to exploration
+            Tap(Key.Q); // terminal input stays inert; no re-registration, no re-attempt, no exploration
             await Frames(30);
             if (main.StoryLostReloadDiagnostics != 1) { Fail("terminal printed again"); return; }
+            if (main.StoryLostReloadFailure != "no-current-slot") { Fail("terminal re-attempted the reload"); return; }
             if (main.Interaction!.Phase != NpcInteractionPhase.Trigger) { Fail("exploration resumed from the terminal"); return; }
-            GD.Print("PAL_STORY_LOST_OBSERVED:terminal=1; diagnostic=PAL_LOST_RELOAD_TODO once; inert input; exit=normal");
+            GD.Print("PAL_STORY_LOST_OBSERVED:terminal=1; reload=failed:no-current-slot; inert input; exit=normal");
             GetTree().Quit(0);
         }
         catch (Exception error) { Fail(error.ToString()); }

@@ -51,10 +51,24 @@ public partial class Main : Node2D
     public string? Failure { get; private set; }
     public event Action<string>? Failed;
     /// <summary>True once the 0x004E lost-reload boundary parked the story call: business
-    /// advancement stops for the rest of this run, distinct from an unexpected Failure.</summary>
+    /// advancement stops while the registered defeat-reload request waits for its processing
+    /// boundary or the run stays in its closable failure terminal, distinct from an
+    /// unexpected <see cref="Failure"/>.</summary>
     public bool StoryLostTerminal { get; private set; }
-    /// <summary>How many lost-reload diagnostics this Main printed; the boundary prints exactly once.</summary>
+    /// <summary>How many lost-reload requests this Main registered; the boundary registers
+    /// exactly once per parked request (#148 Decision 28).</summary>
     public int StoryLostReloadDiagnostics { get; private set; }
+    /// <summary>The located reason the defeat recovery closed in its failure terminal (#228;
+    /// #148 Decision 30, Stories 44/45/48): null before any request failed and after a
+    /// successful reload. Distinct from <see cref="Failure"/> (unexpected host errors) and
+    /// from the formal menu's own save/load failure receipts — the three never collapse into
+    /// one state.</summary>
+    public string? StoryLostReloadFailure { get; private set; }
+    // #228: the registered defeat-reload request's one-shot processing state. The request's
+    // own committed boundary only marks it due; repeats, stale parked requests and old
+    // session receipts never re-switch, and the failure terminal never auto-retries.
+    private bool lostReloadDue;
+    private bool lostReloadDone;
 
     /// <summary>Configure once before entering the tree. The host owns this node, including on failure.
     /// Initialization occurs in _Ready; failed or removed scenes must be freed, not reused.</summary>
@@ -492,9 +506,11 @@ public partial class Main : Node2D
             ObserveStoryLostTerminal();
             if (StoryLostTerminal)
             {
-                // The failure terminal only advances its presentation (red fade); no event,
-                // battle or exploration business runs and no reward path can trigger.
+                // The failure terminal only advances its presentation (red fade) while the
+                // registered request waits for its processing boundary; no event, battle or
+                // exploration business runs and no reward path can trigger.
                 AdvanceStoryRedFade(unchecked((uint)Time.GetTicksMsec()));
+                AdvanceLostReload();
                 UpdateCompleted?.Invoke();
                 return;
             }
@@ -652,7 +668,10 @@ public partial class Main : Node2D
     private void DisplayFailed(Exception error) => Fail($"Dialogue update failed: {error.Message}");
 
     /// <summary>Observes the failure branch's formal state: starts the red fade when the
-    /// 0x004F transition lands, and enters the 0x004E failure terminal exactly once.</summary>
+    /// 0x004F transition lands, and registers the completed failure story's 0x004E request
+    /// exactly once (#228; #148 Decision 28) — this boundary never rebuilds inside the
+    /// script stack; <see cref="AdvanceLostReload"/> processes the request at the next
+    /// production update boundary.</summary>
     private void ObserveStoryLostTerminal()
     {
         if (story is not null && storyRedStep < 0 && Dialogue?.Session?.FadedToRed == true)
@@ -661,15 +680,69 @@ public partial class Main : Node2D
             storyRedStepAt = presentationNow;
         }
         if (StoryLostTerminal || Dialogue?.Session?.PendingLostReload is not { } request) return;
-        // TODO(#51): implement the real script.c 0x004E save-slot reload (PAL_FadeOut(1) then
-        // PAL_ReloadInNextTick): no save system exists yet, so this run stays in the lost
-        // terminal state (red screen, no business advancement) until the window closes.
         StoryLostTerminal = true;
         StoryLostReloadDiagnostics++;
+        lostReloadDue = false;
+        lostReloadDone = false;
+        StoryLostReloadFailure = null;
         string team = request.EnemyTeamId is { } enemyTeam ? enemyTeam.ToString(System.Globalization.CultureInfo.InvariantCulture) : "none";
         string music = Dialogue.Session.Music is { } state ? state.MusicId.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unchanged";
-        GD.Print($"PAL_LOST_RELOAD_TODO:{request.Position}; team={team}; boss={request.IsBoss}; caller={Dialogue.Session.Caller}; music={music}; "
-            + "save-slot reload not implemented; lost terminal until window close");
+        GD.Print($"PAL_LOST_RELOAD_REQUESTED:{request.Position}; team={team}; boss={request.IsBoss}; caller={Dialogue.Session.Caller}; music={music}; "
+            + $"recoverySlot={(CurrentRecoverySlot is { } slot ? slot : 0)}; processing=next-production-boundary");
+    }
+
+    /// <summary>#228 (parent #148 Decisions 28–30, Stories 41–48): processes the registered
+    /// defeat-reload request exactly once, at the committed production boundary after its
+    /// registration — never re-entering the script stack that parked it. With a current
+    /// recovery slot it runs the same #227 chain (real slot read, #223 validation against
+    /// this context's content identity, candidate/commit through CommitLoadedSession; no
+    /// defeat-specific deserializer): a completed switch retires the lost terminal with its
+    /// red presentation and resumes the rebuilt session. Without a current slot — or when
+    /// the file, the archive or the preparation fails — the run closes in this closable
+    /// terminal with one located reason: the original session, the recovery slot and every
+    /// live owner stay untouched, nothing is refilled, no new game is faked and nothing
+    /// auto-retries.</summary>
+    private void AdvanceLostReload()
+    {
+        if (lostReloadDone) return;
+        if (!lostReloadDue)
+        {
+            // Decision 28: the request's own committed boundary only registered it; the
+            // reload happens in the next production update.
+            lostReloadDue = true;
+            return;
+        }
+        lostReloadDone = true;
+        if (CurrentRecoverySlot is not { } slot || storySaveStorage is null)
+        {
+            LostReloadFailed("no-current-slot");
+            return;
+        }
+        byte[]? bytes;
+        try { bytes = storySaveStorage.ReadSlot(slot); }
+        catch (InvalidDataException error) { LostReloadFailed(error.Message); return; }
+        if (bytes is null) { LostReloadFailed("slot-missing"); return; }
+        PlayerSaveV1 save;
+        try { save = PlayerSaveJson.Decode(bytes, SaveContentIdentity!); }
+        catch (InvalidDataException error) { LostReloadFailed(error.Message); return; }
+        try { CommitLoadedSession(slot, save); }
+        catch (InvalidDataException error) { LostReloadFailed(error.Message); return; }
+        // Decision 29: the same chain rebuilt the session over the saved snapshot; the
+        // terminal, its red presentation and the failed world retire with the old session.
+        StoryLostTerminal = false;
+        storyRedStep = -1;
+        storyRedStepAt = 0;
+        story!.Exploration.SetPalette(mapScene!.Data, story.Palette.ToArray());
+        mapScene.UpdateScene(Exploration!.Plan);
+        GD.Print($"PAL_LOST_RELOAD_COMPLETED:slot={slot};savedTimes={storySaveCount};recoverySlot={CurrentRecoverySlot}");
+    }
+
+    private void LostReloadFailed(string reason)
+    {
+        // Story 44/48: one located reason in the closable terminal; the original session and
+        // the current recovery slot stay exactly as they were (Stories 30/40).
+        StoryLostReloadFailure = reason;
+        GD.Print($"PAL_LOST_RELOAD_FAILED:reason={reason};recoverySlot={(CurrentRecoverySlot is { } kept ? kept : 0)};terminal=closable;no-retry");
     }
 
     protected void Fail(string message)

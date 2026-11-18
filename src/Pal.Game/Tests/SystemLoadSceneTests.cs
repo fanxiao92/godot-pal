@@ -226,6 +226,265 @@ public class SystemLoadSceneTests
         }
     }
 
+    [TestCase(Timeout = 120000)]
+    public async Task Lost_reload_reads_the_recovery_slot_and_switches_the_session_at_the_next_production_boundary()
+    {
+        // #228 (parent #148 Stories 41-43, Decisions 28-29): the completed failure story parks
+        // the call at requestReload; the host registers that request once and reloads the
+        // current recovery slot through the same #227 read/decode/commit chain at the NEXT
+        // committed production boundary — never re-entering the script stack that parked it.
+        // The saved panel expectations are the authored sample words plus the fixture's
+        // explicit playerHp word (level 2 / hp 150 / maxHp 150 / mp 20 / maxMp 50), never a
+        // value produced by the chain under test (Testing Decision 13).
+        using var fixture = new AuthoredStoryFixture("LostReload", playerHp: 150);
+        string saveRoot = "user://lost-reload-tests-" + Guid.NewGuid().ToString("N");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1", "--story-language", "en",
+            "--save-directory", saveRoot);
+        using var host = new LoadHost(selection);
+        try
+        {
+            host.AssertHealthy();
+            await host.Wait(() => host.Updates.Count > 0);
+            var menu = host.Main.Menu!;
+            string identity = host.Main.SaveContentIdentity!;
+            AssertThat(host.Main.CurrentRecoverySlot).IsNull(); // Story 37: no default slot
+
+            await SaveThroughFormalMenu(host, slot: 2);
+            AssertThat(host.Main.CurrentRecoverySlot).IsEqual(2);
+            var dialogueBefore = host.Main.Dialogue;
+            var interactionBefore = host.Main.Interaction;
+            // Synchronous UpdateCompleted sampling (the #227 boundary proof): every committed
+            // update records whether the lost session still owns the host and whether the
+            // terminal holds — a same-frame re-entry or a delayed switch both show up here.
+            var samples = new System.Collections.Generic.List<(bool OldSession, bool Terminal)>();
+            host.Main.UpdateCompleted += () =>
+                samples.Add((ReferenceEquals(host.Main.Dialogue, dialogueBefore), host.Main.StoryLostTerminal));
+
+            await DriveActualDefeat(host);
+
+            // Registration boundary (Decision 28): the request's own committed update only
+            // parked the terminal — it never rebuilt anything inside the script stack.
+            int registered = samples.FindIndex(sample => sample.Terminal);
+            AssertThat(registered >= 0).IsTrue();
+            AssertThat(samples[registered].OldSession).IsTrue();
+            // Processing happens at the NEXT committed boundary: after a bounded window of
+            // further boundaries, the consecutive sample must already show the switched session.
+            int boundary = host.Updates.Count;
+            await host.Wait(() => host.Updates.Count >= boundary + 5);
+            AssertThat(samples[registered + 1].OldSession).OverrideFailureMessage(
+                "#228 lost reload: the registered requestReload must process at the next committed production boundary (read the current recovery slot and switch the rebuilt session); this run stayed parked in the retired PAL_LOST_RELOAD_TODO terminal.").IsFalse();
+            AssertThat(samples[registered + 1].Terminal).IsFalse();
+
+            // Story 43 / Testing Decision 13: the new session is a rebuilt identity over the
+            // saved snapshot — the terminal, its red presentation and the failed world retire,
+            // and the recovery slot stays this session's actually selected one (Decision 27).
+            AssertThat(host.Main.StoryLostTerminal).IsFalse();
+            AssertThat(ReferenceEquals(dialogueBefore, host.Main.Dialogue)).IsFalse();
+            AssertThat(ReferenceEquals(interactionBefore, host.Main.Interaction)).IsFalse();
+            AssertThat(host.Main.CurrentRecoverySlot).IsEqual(2);
+            AssertThat((host.Main.Exploration!.Leader.X, host.Main.Exploration.Leader.Y)).IsEqual(((short)320, (short)320));
+            AssertThat(host.Main.Interaction!.Phase).IsEqual(NpcInteractionPhase.Exploring);
+            AssertThat(host.Main.StoryRedFadeStep).IsEqual(-1);
+
+            // Story 32: the rebuilt menu consumes the same true state — the saved role panel,
+            // not the dead lost world (every member fell to 0 hp before the reload).
+            var status = await OpenStatusFromRememberedCursor(host);
+            AssertThat((status.Level, status.Hp, status.MaxHp, status.Mp, status.MaxMp)).IsEqual((2, 150, 150, 20, 50));
+            // uigame.c PAL_PlayerStatus: every status-page exit closes the whole menu
+            // (PAL_InGameMenu case 1 continues with 'goto out') — close before the next flow.
+            host.Tap(Key.Escape);
+            await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+
+            // The loaded lineage continues (#227's continuity): the next save through the
+            // rebuilt session writes savedTimes 2 — a fresh story context would restart at 1.
+            await SaveThroughFormalMenu(host, slot: 3);
+            AssertThat(PlayerSaveJson.Decode(host.Main.SaveStorage!.ReadSlot(3)!, identity).SavedTimes).IsEqual(2);
+
+            // Story 46: stale requests and old receipts never re-switch — many committed
+            // boundaries later the rebuilt session is still the one true session.
+            var reloaded = host.Main.Dialogue;
+            int settled = host.Updates.Count;
+            await host.Wait(() => host.Updates.Count >= settled + 10);
+            AssertThat(ReferenceEquals(reloaded, host.Main.Dialogue)).IsTrue();
+            AssertThat(host.Main.StoryLostTerminal).IsFalse();
+            AssertThat(host.Main.Failure).IsNull();
+        }
+        finally
+        {
+            CleanupNamespace(saveRoot);
+        }
+    }
+
+    [TestCase("corrupt-archive", Timeout = 120000)]
+    [TestCase("missing-file", Timeout = 120000)]
+    [TestCase("incompatible-archive", Timeout = 120000)]
+    [TestCase("foreign-content-identity", Timeout = 120000)]
+    [TestCase("preparation-failure", Timeout = 120000)]
+    public async Task Lost_reload_failure_keeps_the_lost_session_closable_and_never_retries(string kind)
+    {
+        // #228 (parent #148 Decision 30, Stories 44/45/48; Testing Decision 13's rejection
+        // classes): a defeat recovery that cannot complete closes in the closable failure
+        // terminal with one located reason — the original lost session, the recovery slot
+        // and every live owner stay untouched, and the terminal never auto-retries or fakes
+        // a resume. The corrupt archive's located reason is the #223 codec's own pre-decode
+        // diagnostic (independent of this host path); the missing file names the slot fact;
+        // the incompatible archive is an independent JSON-text fixture carrying an unknown
+        // formatVersion that no constructor policy could produce; the foreign content
+        // identity is a well-formed save bound to other gameplay content; and the
+        // preparation failure is a domain-valid save whose crafted inventory id is outside
+        // the prepared item closure, so the #225 restore plan rejects fail-closed inside
+        // the defeat path's own CommitLoadedSession catch — never a leaked host failure.
+        // The no-current-slot class stays with the real-process no-slot regressions
+        // (ObserveStoryLost / StoryMainProcessTests). This is the defeat-recovery state —
+        // the formal menu's own save/load failures keep their separate receipts (Story 48).
+        using var fixture = new AuthoredStoryFixture("LostReload", playerHp: 150);
+        string saveRoot = "user://lost-reload-failure-tests-" + Guid.NewGuid().ToString("N");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1", "--story-language", "en",
+            "--save-directory", saveRoot);
+        using var host = new LoadHost(selection);
+        try
+        {
+            host.AssertHealthy();
+            await host.Wait(() => host.Updates.Count > 0);
+            await SaveThroughFormalMenu(host, slot: 2);
+            AssertThat(host.Main.CurrentRecoverySlot).IsEqual(2);
+            var storage = host.Main.SaveStorage!;
+            string identity = host.Main.SaveContentIdentity!;
+            if (kind == "corrupt-archive")
+            {
+                // A corrupted slot-2 file this test owns (never a real player's slot).
+                using (var file = FileAccess.Open(storage.SlotPath(2), FileAccess.ModeFlags.Write))
+                    file!.StoreBuffer(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xFF, 0xFE });
+            }
+            else if (kind == "missing-file")
+            {
+                DirAccess.RemoveAbsolute(storage.SlotPath(2));
+            }
+            else
+            {
+                // Each remaining class rewrites slot 2 from the actually saved snapshot with
+                // exactly one independent violation (Testing Decision 3's fixed-format text
+                // fixtures and literal expectations — never values produced by the chain
+                // under test).
+                var saved = PlayerSaveJson.Decode(storage.ReadSlot(2)!, identity);
+                byte[] bytes;
+                if (kind == "incompatible-archive")
+                {
+                    // An independent foreign-version file: the encoded JSON with only the
+                    // version literal replaced, so the rejection exercises the real header
+                    // policy instead of any constructor-produced snapshot.
+                    bytes = System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8
+                        .GetString(PlayerSaveJson.EncodeToUtf8(saved))
+                        .Replace("\"formatVersion\":1,", "\"formatVersion\":2,", StringComparison.Ordinal));
+                }
+                else
+                {
+                    PlayerSaveV1 crafted = kind == "foreign-content-identity"
+                        ? new PlayerSaveV1(saved.FormatVersion, saved.SaveSlot, saved.SavedTimes,
+                            "foreign-gameplay-content", saved.Roles, saved.PartyRoleIds,
+                            saved.Inventory, saved.Cash, saved.World)
+                        : new PlayerSaveV1(saved.FormatVersion, saved.SaveSlot, saved.SavedTimes,
+                            saved.ContentIdentity, saved.Roles, saved.PartyRoleIds,
+                            saved.Inventory.Append(new PlayerSaveInventorySlot(4242, 1, 0)).ToArray(),
+                            saved.Cash, saved.World);
+                    bytes = PlayerSaveJson.EncodeToUtf8(crafted);
+                }
+                using (var file = FileAccess.Open(storage.SlotPath(2), FileAccess.ModeFlags.Write))
+                    file!.StoreBuffer(bytes);
+            }
+            var dialogueBefore = host.Main.Dialogue;
+
+            await DriveActualDefeat(host);
+            await host.Wait(() => host.Main.StoryLostReloadFailure is not null);
+            string reason = host.Main.StoryLostReloadFailure!;
+            // Each class checks its own located reason (Story 44): the codec's, the version
+            // policy's, the identity binding's or the restore closure's diagnostic — the
+            // missing file is the only exact-form slot fact.
+            string expectedReason = kind switch
+            {
+                "missing-file" => "slot-missing",
+                "incompatible-archive" => "version 2 is unknown and never migrates",
+                "foreign-content-identity" => "is not the prepared context",
+                "preparation-failure" => "is not in the prepared item closure",
+                _ => "not valid UTF-8",
+            };
+            if (kind == "missing-file")
+                AssertThat(reason).IsEqual(expectedReason);
+            else
+                AssertThat(reason.Contains(expectedReason, StringComparison.Ordinal)).IsTrue();
+            AssertThat(host.Main.StoryLostTerminal).IsTrue(); // the closable terminal holds
+            AssertThat(ReferenceEquals(dialogueBefore, host.Main.Dialogue)).IsTrue(); // the lost session is kept
+            AssertThat(host.Main.CurrentRecoverySlot).IsEqual(2); // never switched away
+            AssertThat(host.Main.Interaction!.Phase).IsEqual(NpcInteractionPhase.Trigger); // no business advanced
+            AssertThat(host.Main.Failure).IsNull(); // a located rejection, not a host crash
+
+            // Stories 45/46: closable and inert — real input and many more committed boundaries
+            // change nothing: one registration, the same single failure, no retry, no resume.
+            int boundary = host.Updates.Count;
+            host.Tap(Key.Enter);
+            host.Tap(Key.Q);
+            await host.Wait(() => host.Updates.Count >= boundary + 20);
+            AssertThat(host.Main.StoryLostReloadFailure).IsEqual(reason);
+            AssertThat(host.Main.StoryLostReloadDiagnostics).IsEqual(1);
+            AssertThat(host.Main.StoryLostTerminal).IsTrue();
+            AssertThat(host.Main.Interaction!.Phase).IsEqual(NpcInteractionPhase.Trigger);
+        }
+        finally
+        {
+            CleanupNamespace(saveRoot);
+        }
+    }
+
+    /// <summary>Drives the actual defeat through the formal chain (the ObserveStoryLost input
+    /// sequence at real SceneRunner update boundaries): the search starts the pre-battle
+    /// dialogue, the committed attack rounds trade into the killing enemy strike, the centered
+    /// loss text advances and the completed failure story parks the call at requestReload.
+    /// Never a private callback, a state shortcut or an injected Lost (Testing Decision 12).</summary>
+    private static async Task DriveActualDefeat(LoadHost host)
+    {
+        host.Tap(Key.Enter); // the search that starts the checked selected trigger
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is
+            { Display.Current.Phase: DialogueDisplayPhase.WaitingForAdvance });
+        host.Tap(Key.Enter); // advance the pre-battle text into the action menu
+        await host.Wait(() => host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.AttackMenu);
+        ulong deadline = Time.GetTicksMsec() + 60000;
+        while (host.Main.Dialogue!.Session?.PendingLostReload is null && Time.GetTicksMsec() < deadline)
+        {
+            var session = host.Main.Dialogue!.Session!;
+            if (session.PendingDisplay is { Display.Current.Phase: DialogueDisplayPhase.WaitingForAdvance })
+                host.Tap(Key.Enter); // the centered loss text
+            else if (host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.AttackMenu)
+                host.Tap(Key.Enter); // commit the selecting member's attack
+            else if (host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.TargetMenu)
+                host.Tap(Key.Enter); // confirm the first alive target
+            await host.Wait(() => true);
+        }
+        await host.Wait(() => host.Main.StoryLostTerminal);
+    }
+
+    /// <summary>Opens the status page from the remembered main-menu cursor (uigame.c keeps
+    /// iCurMenuItem across close/reopen — a save visit parks it on the SYSTEM entry) and
+    /// returns the live status projection. Browses by the observed cursor, never an assumed
+    /// fresh position; the caller continues from the open status page.</summary>
+    private static async Task<Pal.Core.ExplorationMenuStatusView> OpenStatusFromRememberedCursor(LoadHost host)
+    {
+        var menu = host.Main.Menu!;
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        for (int step = 0; step < menu.Entries.Count && menu.SelectedEntry != 0; step++)
+        {
+            host.Tap(Key.Up);
+            await host.Wait(() => true);
+        }
+        AssertThat(menu.SelectedEntry).IsEqual(0);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Status);
+        return menu.StatusView();
+    }
+
     /// <summary>Saves one slot through the formal menu chain (open → system → SAVE → confirm).
     /// Every layer is entered by its observed cursor: the reference keeps the main-menu and
     /// system-item cursors across close/reopen (uigame.c iCurMenuItem), so a revisit must

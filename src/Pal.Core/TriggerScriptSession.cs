@@ -766,9 +766,11 @@ public sealed class TriggerScriptSession
                     _address = Next(command);
                     break;
                 case "requestReload":
-                    // TODO(#51): implement the real 0x004E save-slot reload (PAL_FadeOut(1) then
-                    // PAL_ReloadInNextTick); without a save system the call parks in this terminal
-                    // phase and the host prints its one lost-reload diagnostic.
+                    // #228: the completed failure story parks here (script.c 0x004E: the
+                    // PAL_FadeOut(1)/PAL_ReloadInNextTick pair); the host registers the request
+                    // and reloads the current recovery slot through the #227 chain at the next
+                    // production boundary. The parked call itself is never acknowledged — a
+                    // completed reload retires it together with its whole old session.
                     PendingLostReload = new(command.Position, _lostBattleContext?.EnemyTeamId, _lostBattleContext?.IsBoss ?? false);
                     Phase = TriggerScriptPhase.WaitingForLostReload;
                     return;
