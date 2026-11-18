@@ -1,7 +1,7 @@
 namespace Pal.Core;
 
 public enum ExplorationMenuMode { Closed, MainMenu, Status, EquipItems, EquipRoles, Items, ItemTargets, ItemScript,
-    MagicCasters, MagicList, MagicTargets, MagicOnUse, MagicOnSuccess }
+    MagicCasters, MagicList, MagicTargets, MagicOnUse, MagicOnSuccess, SystemMenu }
 
 /// <summary>Menu verbs as the fixed reference maps them (input.c: direction keys navigate,
 /// Search=confirm, Menu=cancel). The host translates its physical keys into these verbs.</summary>
@@ -9,8 +9,9 @@ public enum ExplorationMenuKey { Up, Down, Left, Right, Confirm, Cancel }
 
 /// <summary>Deliverable menu pages; #213 binds the read-only status page, #214 the equipment
 /// page and #215 the items page on the same session. Later operative pages arrive with their
-/// own M6-B leaves.</summary>
-public enum ExplorationMenuPage { Status, Equipment, Items, Magic }
+/// own M6-B leaves; #222 declares the system layer (uigame.c PAL_SystemMenu) as the formal
+/// entry into M6-C save mode — the slot-selection UI itself belongs to the later C leaf.</summary>
+public enum ExplorationMenuPage { Status, Equipment, Items, Magic, System }
 
 /// <summary>One main-menu entry: the page Confirm opens and its label WORD.</summary>
 public sealed record ExplorationMenuEntry(ExplorationMenuPage Page, int WordId);
@@ -125,6 +126,11 @@ public sealed class ExplorationMenuSession
     public const int ItemsEntryWord = 60026;
     /// <summary>Magic main-menu entry word (#216; reference GAMEMENU_LABEL_MAGIC).</summary>
     public const int MagicEntryWord = 60027;
+    /// <summary>System main-menu entry word (#222; reference GAMEMENU_LABEL_SYSTEM). Confirm on
+    /// this entry opens the system-menu layer (uigame.c PAL_SystemMenu), the formal M6-C entry
+    /// into save mode. Hosts author the word in their prepared language package before adding
+    /// the entry, exactly like the equipment/items/magic entries before it.</summary>
+    public const int SystemEntryWord = 60028;
 
     private readonly RoleLiveState roles;
     private readonly BattleEquipmentState equipment;
@@ -358,6 +364,14 @@ public sealed class ExplorationMenuSession
                             SelectedMagic = 0;
                             if (Party.Count == 1) EnterMagicList();
                             else Mode = ExplorationMenuMode.MagicCasters;
+                        }
+                        else if (Entries[SelectedEntry].Page == ExplorationMenuPage.System)
+                        {
+                            // uigame.c PAL_InGameMenu's system item opens PAL_SystemMenu; the
+                            // world stays frozen while the system layer owns input. #222 declares
+                            // this the formal M6-C entry into save mode; the slot-selection and
+                            // confirmation UI inside the system layer belongs to the later C leaf.
+                            Mode = ExplorationMenuMode.SystemMenu;
                         }
                         break;
                     case ExplorationMenuKey.Cancel:
@@ -653,6 +667,12 @@ public sealed class ExplorationMenuSession
             }
             case ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess:
                 // Host-owned parking; the guard above already rejected the key.
+                break;
+            case ExplorationMenuMode.SystemMenu:
+                // uigame.c PAL_SystemMenu: kKeyMenu returns to the in-game main menu. Every other
+                // key stays inert in this leaf — the save/load slot UI inside the system layer
+                // arrives with its own C leaf and owns its keys then.
+                if (key == ExplorationMenuKey.Cancel) Mode = ExplorationMenuMode.MainMenu;
                 break;
         }
     }
