@@ -529,6 +529,13 @@ public partial class Main : Node2D
                     CompleteFirstBattleTrigger();
                 }
             }
+            // #224: the world tracks the committed exploration leader (the dynamic host does
+            // this after every walk), and the save gate's boundary advances exactly once per
+            // committed production update — both before any input application, so a confirmed
+            // save's request and its capture share this same boundary (#148 Decision 7).
+            if (storyWorld is not null && Interaction?.Current is { } committedState)
+                storyWorld.PublishLeader(committedState.Leader);
+            storySaveGate?.NotifyProductionUpdateCommitted();
             ApplyShopInput();
             if (Failure is not null) return;
             ApplyMenuInput();

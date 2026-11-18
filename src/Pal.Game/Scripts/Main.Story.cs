@@ -25,6 +25,26 @@ public partial class Main
     // #217: the shared wallet seeded once from the authored cash word ($.cash); the shop and
     // the trigger executor's cash commands consume the same owner.
     private CashLiveState? storyCash;
+    // #224 (M6-C leaf 4; parent #148): the story host's save chain — the #222 gate over the
+    // shared live owners, the #223 codec and the controlled five-slot user:// storage adapter.
+    // The gate's request identity binds to one committed production update boundary, and the
+    // whole chain for a confirmed slot runs inside that same boundary.
+    private DynamicEventWorld? storyWorld;
+    private ExplorationSaveGate? storySaveGate;
+    private PlayerSaveStorage? storySaveStorage;
+    private int storySaveCount;
+    /// <summary>The session's current recovery slot (#148 Decision 27): null in an independent
+    /// context; only a completed save switches it in this leaf — browsing, rejection, write
+    /// failure and cancellation never do (a completed read joins with its own C leaf).</summary>
+    public int? CurrentRecoverySlot { get; private set; }
+    /// <summary>The gameplay content identity this session's saves bind to (#221 matrix D1):
+    /// the scene bundle hash folded with every verified resource hash, independent of
+    /// run-specific resource paths so the same content in another directory keeps its identity
+    /// and a different language package never misjudges gameplay identity (#148 Decision 15).</summary>
+    public string? SaveContentIdentity { get; private set; }
+    /// <summary>The formal chain's controlled storage adapter (tests read slots back through
+    /// this exact production instance; no second save chain exists anywhere).</summary>
+    internal PlayerSaveStorage? SaveStorage => storySaveStorage;
     internal Func<PalStoryBattleView> StoryBattleViewFactory { get; set; } = () => new PalStoryBattleView();
     private TriggerBattleRequest? storyRequest;
     private bool battleConfirm;
@@ -118,7 +138,12 @@ public partial class Main
             storyRandom = new GodotBattleRandom(selected.BattleSeed);
             display = new PalDialogueDisplay();
             dialogue = new PalTriggerDialogue();
-            roleLiveState = new RoleLiveState(checkedStory.BattleContent.InitialRoles.Values.ToArray());
+            // #224: the live role owner carries the complete six-row table the frozen v1
+            // contract saves (reference rgPlayerRoles; #221 D2) — authored rows plus empty
+            // records for the unused role ids. Party, menu and battle consumers stay
+            // authored-roles-driven; the padded rows only complete the save's role domain.
+            roleLiveState = new RoleLiveState(Enumerable.Range(0, PlayerSaveContract.RoleCount).Select(roleId =>
+                checkedStory.BattleContent.InitialRoles.TryGetValue(roleId, out var authored) ? authored : EmptyRole(roleId)).ToArray());
             storyEquipment = BattleEquipmentState.Initialize(checkedStory.BattleContent);
             storyInventory = new InventoryLiveState(checkedStory.BattleContent.InitialInventory);
             int[] storyPartyRoleIds = checkedStory.BattleContent.Players.Select(player => player.RoleId).ToArray();
@@ -138,14 +163,27 @@ public partial class Main
             // #217: with an authored shop context the host seeds the shared wallet once (the
             // explicit $.cash word; #131's checked immutable initial value) and binds it with the
             // bag to the trigger executor, so the shop commands park on the same shared owners.
+            // #224: a context without the authored seed keeps a zero wallet bound to the save
+            // chain only — its money cannot change (no shop/trigger binding exists), so the v1
+            // cash domain records exactly the authored-or-zero owner state.
             bool shopContext = checkedStory.BattleContent.ShopObjects.Count > 0;
-            storyCash = shopContext
-                ? new CashLiveState(checkedStory.BattleContent.InitialCash
-                    ?? throw new InvalidDataException("The authored shop context requires the explicit cash seed (battle-data $.cash)."))
-                : null;
-            dialogue.FirstBattleWorld = DynamicEventWorld.ForHost(checkedStory.Exploration.Rules,
+            uint cashSeed = 0;
+            if (shopContext)
+                cashSeed = checkedStory.BattleContent.InitialCash
+                    ?? throw new InvalidDataException("The authored shop context requires the explicit cash seed (battle-data $.cash).");
+            storyCash = new CashLiveState(cashSeed);
+            // #224: the save chain binds the same shared owners the A/B sessions use; the world
+            // instance is the one the trigger executor mutates, so the snapshot reads exactly
+            // the live world. The content identity folds the bundle and resource hashes only.
+            storyWorld = DynamicEventWorld.ForHost(checkedStory.Exploration.Rules,
                 checkedStory.Exploration.Leader, map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
-                roleLiveState, checkedStory.BattleContent.Players.Select(player => player.RoleId).ToArray());
+                roleLiveState, storyPartyRoleIds);
+            dialogue.FirstBattleWorld = storyWorld;
+            storySaveGate = new ExplorationSaveGate(roleLiveState, storyInventory, storyCash, storyWorld);
+            storySaveStorage = new PlayerSaveStorage(selected.SaveDirectory);
+            SaveContentIdentity = "story:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(checkedStory.BundleSha256 + ";"
+                    + string.Join(";", checkedStory.ResourceSha256.Values.Order()))));
             dialogue.Initialize(display, checkedStory, storyRandom,
                 equipmentPage ? storyEquipment : null, equipmentPage ? storyPoisons : null,
                 shopContext ? storyCash : null, shopContext ? storyInventory : null);
@@ -163,6 +201,10 @@ public partial class Main
             if (equipmentPage) menuEntries.Add(new(ExplorationMenuPage.Equipment, ExplorationMenuSession.EquipmentEntryWord));
             if (itemsPage) menuEntries.Add(new(ExplorationMenuPage.Items, ExplorationMenuSession.ItemsEntryWord));
             if (magicPage) menuEntries.Add(new(ExplorationMenuPage.Magic, ExplorationMenuSession.MagicEntryWord));
+            // #222/#224: the formal M6-C system entry (uigame.c GAMEMENU_LABEL_SYSTEM, the
+            // reference's always-present last item) opens the system-menu save layer for every
+            // story context; its label word resolves with the other entries below.
+            menuEntries.Add(new(ExplorationMenuPage.System, ExplorationMenuSession.SystemEntryWord));
             menu = new ExplorationMenuSession(
                 menuEntries,
                 checkedStory.BattleContent.Players.Select(player => new ExplorationMenuMember(player.RoleId,
@@ -230,6 +272,15 @@ public partial class Main
             throw;
         }
     }
+    /// <summary>One empty unused role record (#224): level 0, no vitals, seven zero growth
+    /// tracks and zero panels — the reference's unallocated rgPlayerRoles row.</summary>
+    private static BattleRoleSnapshot EmptyRole(int roleId) => new(roleId, 0, 0, 0, 0, 0,
+        new BattleExperienceSnapshot(0, 0, 0),
+        PlayerSaveContract.HiddenExperienceTrackNames.ToDictionary(track => track,
+            _ => new BattleExperienceSnapshot(0, 0, 0)),
+        new int[BattleEquipmentState.SlotCount], new int[PlayerSaveContract.MaxLearnedMagics],
+        new int[BattleEquipmentState.StatusCount], 0, 0, 0, 0, 0, 0);
+
     private void StoryPaletteChanged(Color[] colors)
     {
         if (Failure is not null || exited || story is null || mapScene is null) return;
@@ -752,6 +803,7 @@ public partial class Main
         storyNumbers.Clear(); feedbackBorn = false;
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
         storyEquipment = null; storyPoisons = null; storyInventory = null; storyCash = null;
+        storySaveGate = null; storySaveStorage = null; storyWorld = null; storySaveCount = 0; CurrentRecoverySlot = null;
         itemUseId = Guid.Empty;
         magicRunId = Guid.Empty;
         ReleaseMenu();
@@ -798,6 +850,11 @@ public partial class Main
                     foreach (ExplorationMenuKey key in pendingMenuKeys) menu.Press(key);
                     if (menu.Mode == ExplorationMenuMode.ItemScript) AdvanceItemUse();
                     else if (menu.Mode is ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess) AdvanceMagicCast();
+                    else if (menu.Mode == ExplorationMenuMode.SystemMenu && menu.PendingSave is { } pendingSave)
+                        // #224: the confirmed save's whole chain completes inside this same
+                        // committed production update boundary (the parked layer owns input
+                        // until the receipt; duplicates never issue a second).
+                        CompleteMenuSave(pendingSave);
                 }
                 if (menu.Mode == ExplorationMenuMode.Closed)
                 {
@@ -900,6 +957,38 @@ public partial class Main
                 GD.Print($"PAL_MAGIC_ON_SUCCESS:object={after.ObjectId};success={success}");
             }
         }
+    }
+
+    /// <summary>#224 (parent #148 Decision 22/27): the confirmed save's whole chain completes
+    /// inside this one committed production update boundary — fresh #222 gate request → one-shot
+    /// stable capture → #223 v1 encode → protected five-slot write through the real FileAccess
+    /// user:// adapter. Only the completed outcome reports (Story 9); success switches the
+    /// session's current recovery slot, and rejection or failure keep it and every live owner
+    /// untouched (the gate is side-effect free; the adapter keeps the old valid slot).</summary>
+    private void CompleteMenuSave(ExplorationMenuSaveRequest pending)
+    {
+        var gate = storySaveGate!;
+        var activity = new ExplorationSaveActivity(storyRequest?.Lifecycle, Dialogue?.Session,
+            Display?.Session, Interaction, menu);
+        var outcome = gate.TryCapture(gate.CreateRequest(), activity, pending.Slot,
+            storySaveCount + 1, SaveContentIdentity!);
+        if (!outcome.Captured)
+        {
+            menu!.CompleteSave(pending.Id, succeeded: false);
+            GD.Print($"PAL_SAVE_REJECTED:slot={pending.Slot};reason={outcome.Rejection}");
+            return;
+        }
+        var write = storySaveStorage!.WriteSlot(pending.Slot, PlayerSaveJson.EncodeToUtf8(outcome.Save!));
+        if (!write.Published)
+        {
+            menu!.CompleteSave(pending.Id, succeeded: false);
+            GD.Print($"PAL_SAVE_FAILED:slot={pending.Slot};reason={write.Reason};oldSlotPreserved={(storySaveStorage.SlotExists(pending.Slot) ? 1 : 0)}");
+            return;
+        }
+        storySaveCount++;
+        CurrentRecoverySlot = pending.Slot; // #148 Decision 27: only a completed save switches it
+        menu!.CompleteSave(pending.Id, succeeded: true);
+        GD.Print($"PAL_SAVE_COMPLETED:slot={pending.Slot};savedTimes={storySaveCount};recoverySlot={CurrentRecoverySlot}");
     }
 
     /// <summary>#217 script.c 0x0026/0x0027: the parked shop request opens the shop over the

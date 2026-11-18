@@ -154,6 +154,14 @@ public sealed class DynamicEventWorld
     /// <summary>Host hook over the internal initializer: publish one role's HP/MP words.</summary>
     public void InitializePartyVitals(int roleId, int hp, int maxHp, int mp, int maxMp) => InitializeVitals(roleId, hp, maxHp, mp, maxMp);
 
+    /// <summary>#224 host hook: publish the exploration session's current committed leader words
+    /// into the world, exactly like the dynamic host tracks it after every walk ("the walk moved
+    /// the party; the world tracks it"). Story-profile hosts whose exploration lives in another
+    /// session call this once per committed production update so the world's leader — the v1
+    /// save's leader domain — stays the current one instead of the static construction position.
+    /// Pure word publication: no object, script or tick advances here.</summary>
+    public void PublishLeader(StaticLeader leader) => Leader = leader ?? throw new ArgumentNullException(nameof(leader));
+
     internal DynamicEventWorld(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport)
     {
         objects = rules.Objects.Select(o => new DynamicEventObject(o)).ToArray().AsReadOnly();

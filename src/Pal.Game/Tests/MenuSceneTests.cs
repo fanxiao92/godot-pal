@@ -46,6 +46,10 @@ public class MenuSceneTests
         await host.AwaitUpdates(3);
         AssertThat(ReferenceEquals(host.Main.Exploration, frozen)).IsTrue();
         host.Release(Key.Down);
+        // #224: the menu always carries the system entry after the status item now, so the
+        // frozen-check Down moved the remembered cursor onto it — one Up returns to the status
+        // item (the former single-entry menu simply wrapped onto itself here).
+        host.Tap(Key.Up);
 
         // Search enters the status page at member 0 with live shared-state values.
         host.Tap(Key.Enter);
@@ -194,7 +198,7 @@ public class MenuSceneTests
         // The menu gains the equipment entry exactly for the authored equip context.
         host.Tap(Key.Escape);
         await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
-        AssertThat(menu.Entries.Count).IsEqual(2);
+        AssertThat(menu.Entries.Count).IsEqual(3); // 状态/防身/系统（#222/#224 恒有系统项）
         AssertThat(menu.EntryLabel(1)).IsEqual("防身");
         host.Tap(Key.Down);
         host.Tap(Key.Enter);
@@ -340,7 +344,7 @@ public class MenuSceneTests
         // with available amounts in binding order (itemmenu.c compresses the rest away).
         host.Tap(Key.Escape);
         await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
-        AssertThat(menu.Entries.Count).IsEqual(2);
+        AssertThat(menu.Entries.Count).IsEqual(3); // 状态/ITEMS/系统（#222/#224 恒有系统项）
         AssertThat(menu.EntryLabel(1)).IsEqual("ITEMS");
         host.Tap(Key.Down);
         host.Tap(Key.Enter);
@@ -537,7 +541,7 @@ public class MenuSceneTests
         // party (uigame.c PAL_ReadMenu items; dead members stay listed but disabled).
         host.Tap(Key.Escape);
         await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
-        AssertThat(menu.Entries.Count).IsEqual(2);
+        AssertThat(menu.Entries.Count).IsEqual(3); // 状态/法术/系统（#222/#224 恒有系统项）
         AssertThat(menu.EntryLabel(1)).IsEqual("法术");
         host.Tap(Key.Down);
         host.Tap(Key.Enter);
@@ -674,6 +678,7 @@ public class MenuSceneTests
             ExplorationMenuSession.FleeRateWord, ExplorationMenuSession.RoleNameWordBase,
             ExplorationMenuSession.RoleNameWordBase + 1, ExplorationMenuSession.EquipmentEntryWord,
             ExplorationMenuSession.ItemsEntryWord, ExplorationMenuSession.MagicEntryWord,
+            ExplorationMenuSession.SystemEntryWord,
             ExplorationMenuSession.PartWordBase, ExplorationMenuSession.PartWordBase + 1,
             ExplorationMenuSession.PartWordBase + 2, ExplorationMenuSession.PartWordBase + 3,
             ExplorationMenuSession.PartWordBase + 4, ExplorationMenuSession.PartWordBase + 5,

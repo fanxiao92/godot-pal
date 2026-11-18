@@ -7,9 +7,10 @@ Checkpoint C adds an explicit **normal Main** mode, not a second fixture battle 
 ```
 --story-profile <res:// URI> --battle-visual-profile <res:// URI>
 [--story-language zh-Hans|en] [--battle-seed <unsigned decimal ulong>]
+[--save-directory <relative user:// namespace>]
 ```
 
-Both profiles are mandatory. This mode is exclusive with M2, M3 and frozen M4 selections. Duplicates, missing values, unknown flags, mixed modes, invalid URIs/languages and non-decimal/overflow seeds are rejected. `GameSceneConfiguration.FromArguments` is shared by shipped `GameStartup` and embedded Main. Old selections retain their existing parser and diagnostics.
+Both profiles are mandatory. This mode is exclusive with M2, M3 and frozen M4 selections. Duplicates, missing values, unknown flags, mixed modes, invalid URIs/languages and non-decimal/overflow seeds are rejected. `--save-directory` (#224) defaults to `user://saves` and must name one controlled relative `user://` namespace — no `..` traversal, backslash separator, trailing slash, second scheme or length over 160 — anything else is rejected before the save namespace is ever touched. `GameSceneConfiguration.FromArguments` is shared by shipped `GameStartup` and embedded Main. Old selections retain their existing parser and diagnostics.
 
 Main strictly loads Story and Visual and requires reference-presentation and UI capabilities before instantiating the map, creating sessions/RNG or publishing scene children. Base-format-valid old visuals without effect/speed now fail normal Story startup explicitly; format loading remains compatible. `CheckedStoryProfile` retains the same `IgnoreDeep`-loaded PackedScene it validated; Main instantiates it without reloading its URI. Native Resources remain mutable isolated prepared instances, consumed read-only by convention, **not deep-immutable objects**. Hashes bind complete native data, including both language files and the font, not engine/code/cache or authorship.
 

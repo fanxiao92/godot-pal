@@ -233,10 +233,26 @@ public sealed class ExplorationSaveGateTests
         menu.Press(ExplorationMenuKey.Down);
         menu.Press(ExplorationMenuKey.Confirm);
         Assert.Equal(ExplorationMenuMode.SystemMenu, menu.Mode);
-        // The declared layer keeps every other key inert: the slot selection/confirmation UI
-        // inside it belongs to the later C leaf and owns its keys then.
+        // #224 replaces #222's provisional "every other key stays inert" leaf contract with the
+        // frozen five-slot save flow: browsing only moves the remembered slot cursor (Stories
+        // 3/4 — no request, no write, no switch), and Confirm parks exactly one pending save
+        // request until the host's receipt (Story 12 — a duplicate confirm never a second).
+        Assert.Equal(1, menu.SelectedSaveSlot);
         menu.Press(ExplorationMenuKey.Up);
+        Assert.Equal(PlayerSaveContract.LastSlot, menu.SelectedSaveSlot); // PAL_ReadMenu wraps up
+        menu.Press(ExplorationMenuKey.Down);
+        Assert.Equal(1, menu.SelectedSaveSlot);
+        Assert.Null(menu.PendingSave);
         menu.Press(ExplorationMenuKey.Confirm);
+        var pending = menu.PendingSave;
+        Assert.NotNull(pending);
+        Assert.Equal(1, pending!.Slot);
+        Assert.Throws<InvalidOperationException>(() => menu.Press(ExplorationMenuKey.Confirm));
+        Assert.Throws<InvalidOperationException>(() => menu.Press(ExplorationMenuKey.Up));
+        Assert.Throws<InvalidOperationException>(() => menu.Press(ExplorationMenuKey.Cancel));
+        Assert.Same(pending, menu.PendingSave); // the parked request is unchanged by the rejected keys
+        menu.CompleteSave(pending.Id, succeeded: false); // a failed write returns browsing identically
+        Assert.Null(menu.PendingSave);
         Assert.Equal(ExplorationMenuMode.SystemMenu, menu.Mode);
 
         // kKeyMenu returns to the in-game main menu, and the system entry keeps its place:

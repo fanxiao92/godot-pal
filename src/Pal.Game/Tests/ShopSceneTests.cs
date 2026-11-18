@@ -155,7 +155,7 @@ public class ShopSceneTests
         // (the bag copy), then use 300 on 小侠 through its checked on-use script entry.
         host.Tap(Key.Escape);
         await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
-        AssertThat(menu.Entries.Count).IsEqual(3); // 状态/防身/ITEMS
+        AssertThat(menu.Entries.Count).IsEqual(4); // 状态/防身/ITEMS/系统（#222/#224 恒有系统项）
         host.Tap(Key.Down);
         host.Tap(Key.Enter);
         await host.Wait(() => menu.Mode == ExplorationMenuMode.EquipItems);
