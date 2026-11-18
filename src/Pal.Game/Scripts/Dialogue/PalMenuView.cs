@@ -38,6 +38,16 @@ public sealed partial class PalMenuView : Node2D
     private string[] useTargetLines = [];
     private string[] useTargetStatLines = [];
     private int selectedUseRole;
+    // #216 magic page: composed row texts are validated here and only drawn afterwards.
+    private string[] magicCasterLines = [];
+    private bool[] magicCasterAlive = [];
+    private int selectedMagicCaster;
+    private string[] magicLines = [];
+    private int selectedMagicRow;
+    private string magicHeaderText = "";
+    private string[] magicTargetLines = [];
+    private string[] magicTargetStatLines = [];
+    private int selectedMagicTarget;
 
     internal ExplorationMenuMode Mode => menu?.Mode ?? ExplorationMenuMode.Closed;
 
@@ -81,6 +91,12 @@ public sealed partial class PalMenuView : Node2D
         useHeaderText = "";
         useTargetLines = [];
         useTargetStatLines = [];
+        magicCasterLines = [];
+        magicCasterAlive = [];
+        magicLines = [];
+        magicHeaderText = "";
+        magicTargetLines = [];
+        magicTargetStatLines = [];
         if (menu.Mode == ExplorationMenuMode.Status)
         {
             var view = menu.StatusView();
@@ -129,6 +145,39 @@ public sealed partial class PalMenuView : Node2D
                 (row.Equipped ? "* " : "") + row.Name + (row.Equipped ? "" : $" X{row.Amount}")).ToArray();
             nameText = useItemLines.Length > 0 ? useItemLines[Math.Clamp(selectedUseItem, 0, useItemLines.Length - 1)] : "";
         }
+        else if (menu.Mode == ExplorationMenuMode.MagicCasters)
+        {
+            // uigame.c PAL_InGameMagicMenu's caster select: the whole party with its live alive
+            // flag — dead members stay listed but disabled, so the cursor never highlights one.
+            var rows = menu.MagicCastersView();
+            selectedMagicCaster = menu.SelectedMagicCaster;
+            magicCasterAlive = rows.Select(row => row.Alive).ToArray();
+            magicCasterLines = rows.Select(row => row.Name).ToArray();
+        }
+        else if (menu.Mode is ExplorationMenuMode.MagicList or ExplorationMenuMode.MagicOnUse
+            or ExplorationMenuMode.MagicOnSuccess)
+        {
+            // magicmenu.c: the caster's learned magics with their lprgMagic costs; the parked
+            // script modes keep the same list behind the cast's dialogue.
+            var rows = menu.MagicListView();
+            magicLines = rows.Select(row => $"{row.Name} {row.CostMp}").ToArray();
+            int index = 0;
+            for (int row = 0; row < rows.Count; row++)
+                if (rows[row].ObjectId == menu.SelectedMagic) { index = row; break; }
+            selectedMagicRow = index;
+        }
+        else if (menu.Mode == ExplorationMenuMode.MagicTargets)
+        {
+            // uigame.c's player loop: the magic header, the party rows and the selected member's
+            // live HP/MP words (the reference draws the full stat box while picking).
+            var selection = menu.MagicTargetsView();
+            selectedMagicTarget = menu.SelectedMagicTarget;
+            magicHeaderText = selection.Name;
+            magicTargetLines = selection.Targets.Select(target => target.Name).ToArray();
+            var target = selection.Targets[Math.Clamp(selectedMagicTarget, 0, selection.Targets.Count - 1)];
+            magicTargetStatLines = [$"{selection.HpLabel}:{target.Hp}/{target.MaxHp}",
+                $"{selection.MpLabel}:{target.Mp}/{target.MaxMp}"];
+        }
         else if (menu.Mode == ExplorationMenuMode.ItemTargets)
         {
             // uigame.c PAL_ItemUseMenu: the item header, the party rows and the selected member's
@@ -143,7 +192,9 @@ public sealed partial class PalMenuView : Node2D
         }
         ValidateTexts(font!, entryLabels.Concat(statusLines).Concat(rightLines).Append(nameText)
             .Concat(equipItemLines).Append(equipSelectionText).Concat(equipRoleLines).Concat(equipGearLines)
-            .Concat(useItemLines).Append(useHeaderText).Concat(useTargetLines).Concat(useTargetStatLines));
+            .Concat(useItemLines).Append(useHeaderText).Concat(useTargetLines).Concat(useTargetStatLines)
+            .Concat(magicCasterLines).Concat(magicLines).Append(magicHeaderText)
+            .Concat(magicTargetLines).Concat(magicTargetStatLines));
         QueueRedraw();
     }
 
@@ -217,6 +268,48 @@ public sealed partial class PalMenuView : Node2D
             }
             for (int index = 0; index < useTargetStatLines.Length; index++)
                 DrawBitmapText(useTargetStatLines[index], 150, 34 + index * 16, 0x4F);
+            return;
+        }
+        if (menu.Mode == ExplorationMenuMode.MagicCasters)
+        {
+            // uigame.c's caster select: the party rows; a dead selected member keeps the plain
+            // label color (the reference's disabled item), and the cursor only highlights when
+            // the selection can actually confirm.
+            for (int index = 0; index < magicCasterLines.Length; index++)
+            {
+                bool selected = index == selectedMagicCaster;
+                bool alive = magicCasterAlive.Length > index && magicCasterAlive[index];
+                DrawBitmapText(magicCasterLines[index], 16, 12 + index * 18, selected && alive ? 5 : 0x4F);
+                if (selected) DrawRect(new Rect2(8, 20 + index * 18, 6, 6), PaletteColor(alive ? 5 : 0x4F));
+            }
+            return;
+        }
+        if (menu.Mode is ExplorationMenuMode.MagicList or ExplorationMenuMode.MagicOnUse
+            or ExplorationMenuMode.MagicOnSuccess)
+        {
+            // magicmenu.c: the learned-magic list with each magic's cost word; the parked script
+            // modes draw the same list behind the cast's dialogue.
+            for (int index = 0; index < magicLines.Length; index++)
+            {
+                bool selected = index == selectedMagicRow;
+                DrawBitmapText(magicLines[index], 16, 12 + index * 18, selected ? 5 : 0x4F);
+                if (selected) DrawRect(new Rect2(8, 20 + index * 18, 6, 6), PaletteColor(5));
+            }
+            return;
+        }
+        if (menu.Mode == ExplorationMenuMode.MagicTargets)
+        {
+            // uigame.c's player loop: the magic header, the party rows and the selected member's
+            // live HP/MP words.
+            DrawBitmapText(magicHeaderText, 16, 8, 5);
+            for (int index = 0; index < magicTargetLines.Length; index++)
+            {
+                bool selected = index == selectedMagicTarget;
+                DrawBitmapText(magicTargetLines[index], 16, 34 + index * 18, selected ? 5 : 0x4F);
+                if (selected) DrawRect(new Rect2(8, 42 + index * 18, 6, 6), PaletteColor(5));
+            }
+            for (int index = 0; index < magicTargetStatLines.Length; index++)
+                DrawBitmapText(magicTargetStatLines[index], 150, 34 + index * 16, 0x4F);
             return;
         }
         DrawBitmapText(nameText, 16, 8, 5);

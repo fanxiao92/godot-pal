@@ -75,6 +75,25 @@ public static class NativeStoryProfile
                     $"use-menu object {binding.ObjectId} requires exactly one enabled item.wScriptOnUse trigger entry");
                 itemUseEntries.Add(binding.ObjectId, matches[0]);
             }
+            // #216: every authored magic-menu binding resolves exactly one enabled
+            // magic.wScriptOnUse AND magic.wScriptOnSuccess entry now; a listed magic without
+            // either script rejects before the scene binds (uigame.c PAL_InGameMagicMenu runs
+            // both entries in order per cast).
+            var magicEntries = new Dictionary<int, StoryMagicEntries>();
+            foreach (var binding in content.MagicMenu)
+            {
+                var onUse = events.Entries.Where(e =>
+                    e.OwnerType == "object" && e.OwnerId == binding.ObjectId
+                    && e.Slot == "magic.wScriptOnUse" && e.Kind == "trigger").ToArray();
+                Require(onUse.Length == 1 && onUse[0].SourceAddress != 0,
+                    $"magic-menu object {binding.ObjectId} requires exactly one enabled magic.wScriptOnUse trigger entry");
+                var onSuccess = events.Entries.Where(e =>
+                    e.OwnerType == "object" && e.OwnerId == binding.ObjectId
+                    && e.Slot == "magic.wScriptOnSuccess" && e.Kind == "trigger").ToArray();
+                Require(onSuccess.Length == 1 && onSuccess[0].SourceAddress != 0,
+                    $"magic-menu object {binding.ObjectId} requires exactly one enabled magic.wScriptOnSuccess trigger entry");
+                magicEntries.Add(binding.ObjectId, new StoryMagicEntries(onUse[0], onSuccess[0]));
+            }
             // Party/multi-enemy capability is bounded by the actually selected closure: the
             // language loop below runs TriggerScriptSession.ValidateEntry, which validates every
             // startBattle team of the selected entry (one to three players and enemy slots) and
@@ -87,6 +106,7 @@ public static class NativeStoryProfile
             var packages = new Dictionary<string, DialogueLanguagePackage>(StringComparer.Ordinal);
             var requirements = new Dictionary<string, TriggerEntryRequirements>(StringComparer.Ordinal);
             var itemRequirements = new Dictionary<string, IReadOnlyDictionary<int, TriggerEntryRequirements>>(StringComparer.Ordinal);
+            var magicRequirements = new Dictionary<string, IReadOnlyDictionary<int, StoryMagicRequirements>>(StringComparer.Ordinal);
             IReadOnlyDictionary<int, string>? selectedWords = null;
             foreach (string id in new[] { "zh-Hans", "en" })
             {
@@ -101,13 +121,21 @@ public static class NativeStoryProfile
                     foreach (var pair in itemUseEntries)
                         perItem.Add(pair.Key, TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.FileId, pair.Value.Id));
                     itemRequirements.Add(id, perItem);
+                    var perMagic = new Dictionary<int, StoryMagicRequirements>();
+                    foreach (var pair in magicEntries)
+                        perMagic.Add(pair.Key, new StoryMagicRequirements(
+                            TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.OnUse.FileId, pair.Value.OnUse.Id),
+                            TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.OnSuccess.FileId, pair.Value.OnSuccess.Id)));
+                    magicRequirements.Add(id, perMagic);
                 }
                 catch (InvalidDataException error) { throw new InvalidDataException(resource.ResourcePath + ": " + error.Message, error); }
             }
             var requiredPortraits = requirements.Values.SelectMany(x => x.PortraitIds)
-                .Concat(itemRequirements.Values.SelectMany(x => x.Values.SelectMany(item => item.PortraitIds))).ToHashSet();
+                .Concat(itemRequirements.Values.SelectMany(x => x.Values.SelectMany(item => item.PortraitIds)))
+                .Concat(magicRequirements.Values.SelectMany(x => x.Values.SelectMany(magic => magic.OnUse.PortraitIds.Concat(magic.OnSuccess.PortraitIds))))
+                .ToHashSet();
             Require(requiredPortraits.SetEquals(portraits.Keys),
-                "Portraits must cover exactly the selected and item-use entries' nonzero portrait IDs");
+                "Portraits must cover exactly the selected, item-use and magic entries' nonzero portrait IDs");
 
             var packedScene = LoadResource<PackedScene>(sceneUri);
             Node? node = null;
@@ -124,10 +152,13 @@ public static class NativeStoryProfile
                 Require(scene.Palette is not null && scene.Palette.Rgb is { Length: 768 }, "story requires the native 256-color scene palette");
                 byte[] rgb = scene.Palette!.Rgb;
                 var palette = Enumerable.Range(0, 256).Select(i => new Color(rgb[i * 3] / 255f, rgb[i * 3 + 1] / 255f, rgb[i * 3 + 2] / 255f)).ToArray();
-                // Both supported languages stay validated together (#215 adds the item entries to
-                // the same boundary); the unselected language must never lose glyph coverage.
+                // Both supported languages stay validated together (#215 adds the item entries and
+                // #216 the magic on-use/on-success pairs to the same boundary); the unselected
+                // language must never lose glyph coverage.
                 foreach (var requirement in requirements.Values
-                    .Concat(itemRequirements.Values.SelectMany(languageItems => languageItems.Values)))
+                    .Concat(itemRequirements.Values.SelectMany(languageItems => languageItems.Values))
+                    .Concat(magicRequirements.Values.SelectMany(languageMagics => languageMagics.Values
+                        .SelectMany(entries => new[] { entries.OnUse, entries.OnSuccess }))))
                 foreach (var display in requirement.DisplayBlocks)
                 {
                     try { PalDialogueDisplay.ValidateContent(display.Content, DialogueTextTokenizer.DefaultColor, font, null, prompts, palette); }
@@ -136,7 +167,7 @@ public static class NativeStoryProfile
                 // Detect byte changes during validation, not future edits/import-cache or GPU changes.
                 foreach (string path in hashes.Keys) CheckFile(path, hashes);
                 return new(native.StaticResources, native.StaticProfile, native.BundleSha256, native.SourceIdentity,
-                    entry, events, packages[language], content, requirements[language], exploration, font, prompts, portraits, palette, hashes, packedScene, selectedWords!, itemUseEntries);
+                    entry, events, packages[language], content, requirements[language], exploration, font, prompts, portraits, palette, hashes, packedScene, selectedWords!, itemUseEntries, magicEntries);
             }
             finally { node?.Free(); }
         }
@@ -179,6 +210,10 @@ public sealed class CheckedStoryProfile
     /// <summary>#215: the resolved item.wScriptOnUse entry per authored use-menu object; the story
     /// adapter runs these entries for the exploration item-use flow (play.c PAL_GameUseItem).</summary>
     public IReadOnlyDictionary<int, TriggerEventEntry> ItemUseEntries { get; }
+    /// <summary>#216: the resolved magic.wScriptOnUse / magic.wScriptOnSuccess entry pair per
+    /// authored magic-menu object; the story adapter runs both in order for each exploration
+    /// cast (uigame.c PAL_InGameMagicMenu's two PAL_RunTriggerScript calls).</summary>
+    public IReadOnlyDictionary<int, StoryMagicEntries> MagicUseEntries { get; }
     public TriggerEventCollection Events { get; }
     public DialogueLanguagePackage Language { get; }
     public TriggerBattleContent BattleContent { get; }
@@ -194,15 +229,25 @@ public sealed class CheckedStoryProfile
         TriggerEventEntry entry, TriggerEventCollection events, DialogueLanguagePackage language, TriggerBattleContent battleContent,
         TriggerEntryRequirements requirements, CheckedExplorationProfile exploration, PalDialogueFont font,
         PalDialogueIndexedImage[] prompts, Dictionary<int, PalDialogueIndexedImage> portraits, Color[] palette, Dictionary<string, string> hashes, PackedScene scene, IReadOnlyDictionary<int, string> selectedWords,
-        Dictionary<int, TriggerEventEntry>? itemUseEntries = null)
+        Dictionary<int, TriggerEventEntry>? itemUseEntries = null,
+        Dictionary<int, StoryMagicEntries>? magicEntries = null)
     {
         Scene = scene; SelectedWords = selectedWords;
         StaticResources = staticResources; StaticProfile = staticProfile; BundleSha256 = bundleSha256; SourceIdentity = sourceIdentity;
         Entry = entry; Events = events; Language = language; BattleContent = battleContent; Requirements = requirements;
         ItemUseEntries = new ReadOnlyDictionary<int, TriggerEventEntry>(itemUseEntries ?? new Dictionary<int, TriggerEventEntry>());
+        MagicUseEntries = new ReadOnlyDictionary<int, StoryMagicEntries>(magicEntries ?? new Dictionary<int, StoryMagicEntries>());
         Exploration = exploration; Font = font; Prompts = Array.AsReadOnly(prompts.ToArray());
         Portraits = new ReadOnlyDictionary<int, PalDialogueIndexedImage>(new Dictionary<int, PalDialogueIndexedImage>(portraits));
         Palette = Array.AsReadOnly(palette.ToArray());
         ResourceSha256 = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(hashes, StringComparer.Ordinal));
     }
 }
+
+/// <summary>#216: the resolved script-entry pair per authored magic-menu object — the
+/// magic.wScriptOnUse entry the host runs first and the magic.wScriptOnSuccess entry it runs
+/// only after the on-use run survived (uigame.c 807-841).</summary>
+public sealed record StoryMagicEntries(TriggerEventEntry OnUse, TriggerEventEntry OnSuccess);
+
+/// <summary>The two entries' validated requirements for one language boundary.</summary>
+public sealed record StoryMagicRequirements(TriggerEntryRequirements OnUse, TriggerEntryRequirements OnSuccess);

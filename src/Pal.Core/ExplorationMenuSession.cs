@@ -1,6 +1,7 @@
 namespace Pal.Core;
 
-public enum ExplorationMenuMode { Closed, MainMenu, Status, EquipItems, EquipRoles, Items, ItemTargets, ItemScript }
+public enum ExplorationMenuMode { Closed, MainMenu, Status, EquipItems, EquipRoles, Items, ItemTargets, ItemScript,
+    MagicCasters, MagicList, MagicTargets, MagicOnUse, MagicOnSuccess }
 
 /// <summary>Menu verbs as the fixed reference maps them (input.c: direction keys navigate,
 /// Search=confirm, Menu=cancel). The host translates its physical keys into these verbs.</summary>
@@ -9,7 +10,7 @@ public enum ExplorationMenuKey { Up, Down, Left, Right, Confirm, Cancel }
 /// <summary>Deliverable menu pages; #213 binds the read-only status page, #214 the equipment
 /// page and #215 the items page on the same session. Later operative pages arrive with their
 /// own M6-B leaves.</summary>
-public enum ExplorationMenuPage { Status, Equipment, Items }
+public enum ExplorationMenuPage { Status, Equipment, Items, Magic }
 
 /// <summary>One main-menu entry: the page Confirm opens and its label WORD.</summary>
 public sealed record ExplorationMenuEntry(ExplorationMenuPage Page, int WordId);
@@ -57,6 +58,33 @@ public sealed record ExplorationMenuItemTargetView(int ObjectId, string Name,
 /// receipts exactly this request.</summary>
 public sealed record ExplorationMenuItemUseRequest(Guid Id, int ObjectId, bool ApplyToAll, int TargetRoleId);
 
+/// <summary>One caster-select row (uigame.c PAL_InGameMagicMenu's PAL_ReadMenu items over the
+/// party): the shared live member and its alive flag — dead members (rgwHP == 0) stay listed
+/// but disabled, so Search never confirms them.</summary>
+public sealed record ExplorationMenuMagicCaster(int RoleId, string Name, bool Alive);
+
+/// <summary>One magic-list row (magicmenu.c PAL_MagicSelectionMenuInit): the learned magic
+/// object, its name word text, its lprgMagic cost and the enabled flag — enabled only when the
+/// magic is usable outside battle and its cost fits the caster's current live MP. Disabled
+/// rows stay listed and reachable by the cursor; Search never confirms them.</summary>
+public sealed record ExplorationMenuMagicRow(int ObjectId, string Name, int CostMp, bool Enabled);
+
+/// <summary>One member row of the magic target page (uigame.c PAL_InGameMagicMenu's player
+/// loop): the shared live vitals the reference draws while picking whom to cast on.</summary>
+public sealed record ExplorationMenuMagicTarget(int RoleId, string Name, int Hp, int MaxHp, int Mp, int MaxMp);
+
+/// <summary>The magic target-selection page for one single-target magic: the object, the party
+/// rows and the resolved HP/MP label words the reference's stat box draws.</summary>
+public sealed record ExplorationMenuMagicTargetView(int ObjectId, string Name,
+    IReadOnlyList<ExplorationMenuMagicTarget> Targets, string HpLabel, string MpLabel);
+
+/// <summary>uigame.c PAL_InGameMagicMenu's committed cast: the object plus the caller word each
+/// PAL_RunTriggerScript receives — the selected target's role id for single-target magics, or
+/// the literal 0 for apply-to-all magics (unlike the item flow's 0xFFFF keep-caller word). The
+/// host runs the magic's on-use and on-success script entries in order and receipts this cast
+/// twice; the caster's MP moves only after both runs survived (never battle's deduct-first).</summary>
+public sealed record ExplorationMenuMagicCast(Guid Id, int ObjectId, bool ApplyToAll, int CasterRoleId, int TargetRoleId);
+
 /// <summary>One live poison slot with its resolved object-name word text.</summary>
 public sealed record ExplorationMenuPoison(int PoisonId, string Name);
 
@@ -91,6 +119,8 @@ public sealed class ExplorationMenuSession
     public const int PartWordBase = 60020;
     /// <summary>Items main-menu entry word (#215).</summary>
     public const int ItemsEntryWord = 60026;
+    /// <summary>Magic main-menu entry word (#216; reference GAMEMENU_LABEL_MAGIC).</summary>
+    public const int MagicEntryWord = 60027;
 
     private readonly RoleLiveState roles;
     private readonly BattleEquipmentState equipment;
@@ -101,6 +131,7 @@ public sealed class ExplorationMenuSession
     private readonly IReadOnlyDictionary<int, BattleEquipmentObject>? equipmentObjects;
     private InventoryLiveState? inventory;
     private readonly IReadOnlyList<BattleUseMenuBinding>? useMenu;
+    private readonly IReadOnlyList<BattleMagicMenuBinding>? magicMenu;
 
     public ExplorationMenuSession(IReadOnlyList<ExplorationMenuEntry> entries, IReadOnlyList<ExplorationMenuMember> party,
         RoleLiveState roles, BattleEquipmentState equipment, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth,
@@ -108,7 +139,8 @@ public sealed class ExplorationMenuSession
         IReadOnlyList<BattleEquipMenuBinding>? equipMenu = null,
         IReadOnlyDictionary<int, BattleEquipmentObject>? equipmentObjects = null,
         InventoryLiveState? inventory = null,
-        IReadOnlyList<BattleUseMenuBinding>? useMenu = null)
+        IReadOnlyList<BattleUseMenuBinding>? useMenu = null,
+        IReadOnlyList<BattleMagicMenuBinding>? magicMenu = null)
     {
         ArgumentNullException.ThrowIfNull(roles);
         ArgumentNullException.ThrowIfNull(equipment);
@@ -202,6 +234,25 @@ public sealed class ExplorationMenuSession
             this.useMenu = Array.AsReadOnly(useMenu.ToArray());
             this.inventory = inventory;
         }
+        if (entries.Any(entry => entry.Page == ExplorationMenuPage.Magic))
+        {
+            // The magic page needs the authored magic context up front: one binding per magic
+            // object with its cost and kMagicFlag words (uigame.c PAL_InGameMagicMenu over
+            // magicmenu.c PAL_MagicSelectionMenuInit). Every listed object's name word resolves
+            // now so a missing word rejects before any menu state exists.
+            if (magicMenu is null || magicMenu.Count == 0)
+                throw new InvalidDataException("The magic page requires authored magic-menu bindings.");
+            var bound = new HashSet<int>();
+            foreach (var binding in magicMenu)
+            {
+                if (binding is null || binding.ObjectId is < 1 or > 65535 || !bound.Add(binding.ObjectId))
+                    throw new InvalidDataException("Magic-menu bindings require unique object WORD ids 1..65535.");
+                if (binding.CostMp is < 0 or > 65535)
+                    throw new InvalidDataException($"Magic-menu binding for object {binding.ObjectId} requires a cost WORD 0..65535.");
+                Word(binding.ObjectId);
+            }
+            this.magicMenu = Array.AsReadOnly(magicMenu.ToArray());
+        }
     }
 
     public ExplorationMenuMode Mode { get; private set; }
@@ -223,6 +274,21 @@ public sealed class ExplorationMenuSession
     /// <summary>The committed item script run awaiting the host's receipt (play.c PAL_GameUseItem's
     /// PAL_RunTriggerScript call); non-null only in ItemScript mode.</summary>
     public ExplorationMenuItemUseRequest? PendingItemUse { get; private set; }
+    /// <summary>The remembered magic caster cursor (uigame.c PAL_InGameMagicMenu's static w);
+    /// it survives closes and reopens. A single-member party never uses the select (w stays 0).</summary>
+    public int SelectedMagicCaster { get; private set; }
+    /// <summary>The remembered magic cursor (uigame.c's wMagic): the last selected magic object
+    /// WORD, reset to 0 on every entry into the magic menu and kept across casts within it.</summary>
+    public int SelectedMagic { get; private set; }
+    /// <summary>The magic target cursor (uigame.c's local wPlayer): a fresh 0 for each newly
+    /// selected single-target magic, kept across that magic's repeat casts.</summary>
+    public int SelectedMagicTarget { get; private set; }
+    /// <summary>The committed on-use script run awaiting the host's receipt; non-null only in
+    /// MagicOnUse mode.</summary>
+    public ExplorationMenuMagicCast? PendingMagicUse { get; private set; }
+    /// <summary>The committed on-success script run awaiting the host's receipt; non-null only
+    /// in MagicOnSuccess mode (the same cast the on-use receipt advanced).</summary>
+    public ExplorationMenuMagicCast? PendingMagicSuccess { get; private set; }
     public IReadOnlyList<ExplorationMenuEntry> Entries { get; }
     public IReadOnlyList<ExplorationMenuMember> Party { get; }
 
@@ -244,6 +310,8 @@ public sealed class ExplorationMenuSession
         if (Mode == ExplorationMenuMode.Closed) throw new InvalidOperationException("The menu is closed.");
         if (Mode == ExplorationMenuMode.ItemScript)
             throw new InvalidOperationException("The pending item script owns input.");
+        if (Mode is ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess)
+            throw new InvalidOperationException("The pending magic script owns input.");
         switch (Mode)
         {
             case ExplorationMenuMode.MainMenu:
@@ -276,6 +344,16 @@ public sealed class ExplorationMenuSession
                             // the same remembered inventory cursor (gpGlobals->iCurInvMenuItem).
                             Mode = ExplorationMenuMode.Items;
                             ClampUseCursor();
+                        }
+                        else if (Entries[SelectedEntry].Page == ExplorationMenuPage.Magic)
+                        {
+                            // uigame.c PAL_InGameMagicMenu: wMagic resets on every entry; a
+                            // single-member party skips the caster select entirely (w = 0,
+                            // 'goto start_magicmenu') — even a dead sole member, mirroring the
+                            // reference, which checks cost and flags but never HP here.
+                            SelectedMagic = 0;
+                            if (Party.Count == 1) EnterMagicList();
+                            else Mode = ExplorationMenuMode.MagicCasters;
                         }
                         break;
                     case ExplorationMenuKey.Cancel:
@@ -463,6 +541,115 @@ public sealed class ExplorationMenuSession
             case ExplorationMenuMode.ItemScript:
                 // Host-owned parking; the guard above already rejected the key.
                 break;
+            case ExplorationMenuMode.MagicCasters:
+            {
+                // uigame.c 675-724: one PAL_ReadMenu item per party member; dead members
+                // (rgwHP == 0) stay listed but disabled, so Search never confirms them. The
+                // static caster cursor survives closes (ui.c PAL_ReadMenu wraps both ways).
+                switch (key)
+                {
+                    case ExplorationMenuKey.Up or ExplorationMenuKey.Left:
+                        SelectedMagicCaster = (SelectedMagicCaster + Party.Count - 1) % Party.Count;
+                        break;
+                    case ExplorationMenuKey.Down or ExplorationMenuKey.Right:
+                        SelectedMagicCaster = (SelectedMagicCaster + 1) % Party.Count;
+                        break;
+                    case ExplorationMenuKey.Confirm:
+                        if (roles.Roles[Party[SelectedMagicCaster].RoleId].Hp > 0)
+                            EnterMagicList();
+                        break;
+                    case ExplorationMenuKey.Cancel:
+                        // PAL_ReadMenu kKeyMenu cancels the select; PAL_InGameMagicMenu returns
+                        // and uigame.c PAL_InGameMenu case 2 'goto out' closes the whole menu.
+                        Mode = ExplorationMenuMode.Closed;
+                        break;
+                }
+                break;
+            }
+            case ExplorationMenuMode.MagicList:
+            {
+                // magicmenu.c PAL_MagicSelectionMenuUpdate: moves clamp at both list ends
+                // without wrap (the vertical grid-line width is the host word package's layout,
+                // 32/dwWordLength, which this pure projection does not own — each direction key
+                // steps one row with the reference's clamp); kKeySearch confirms enabled rows
+                // only and kKeyMenu returns 0.
+                var rows = MagicRows();
+                if (rows.Count == 0)
+                {
+                    // Zero learned magics make the reference read rgMagicItem[-1] (undefined
+                    // behavior); this projection defines only the cancel path and keeps every
+                    // other key inert rather than claiming undefined behavior as faithful.
+                    if (key == ExplorationMenuKey.Cancel) Mode = ExplorationMenuMode.Closed;
+                    break;
+                }
+                int index = -1;
+                for (int row = 0; row < rows.Count; row++)
+                    if (rows[row].ObjectId == SelectedMagic) { index = row; break; }
+                if (index < 0) index = 0; // a missing/unset default lands on the first row
+                SelectedMagic = rows[index].ObjectId; // the cursor property always names its row
+                switch (key)
+                {
+                    case ExplorationMenuKey.Up or ExplorationMenuKey.Left:
+                        if (index > 0) SelectedMagic = rows[index - 1].ObjectId;
+                        break;
+                    case ExplorationMenuKey.Down or ExplorationMenuKey.Right:
+                        if (index < rows.Count - 1) SelectedMagic = rows[index + 1].ObjectId;
+                        break;
+                    case ExplorationMenuKey.Confirm:
+                    {
+                        var row = rows[index];
+                        if (!row.Enabled) break; // disabled rows never confirm
+                        if (MagicBinding(row.ObjectId).ApplyToAll)
+                        {
+                            // uigame.c 740-743: an apply-to-all magic never opens the player
+                            // select; the scripts run once with the literal caller word 0.
+                            PendingMagicUse = new(Guid.NewGuid(), row.ObjectId, true,
+                                Party[SelectedMagicCaster].RoleId, 0);
+                            Mode = ExplorationMenuMode.MagicOnUse;
+                        }
+                        else
+                        {
+                            SelectedMagicTarget = 0; // a fresh wPlayer local per selected magic
+                            Mode = ExplorationMenuMode.MagicTargets;
+                        }
+                        break;
+                    }
+                    case ExplorationMenuKey.Cancel:
+                        // wMagic = 0 breaks the loop; the magic menu exits and uigame.c case 2
+                        // 'goto out' closes the whole menu.
+                        Mode = ExplorationMenuMode.Closed;
+                        break;
+                }
+                break;
+            }
+            case ExplorationMenuMode.MagicTargets:
+            {
+                // uigame.c 765-803: Left/Up and Right/Down step without wrap over the party —
+                // every member stays selectable, including dead ones (revives); kKeyMenu breaks
+                // back to the magic selection and kKeySearch commits the cast on the selected
+                // member with that member's role id as the script caller word.
+                switch (key)
+                {
+                    case ExplorationMenuKey.Up or ExplorationMenuKey.Left:
+                        if (SelectedMagicTarget > 0) SelectedMagicTarget--;
+                        break;
+                    case ExplorationMenuKey.Down or ExplorationMenuKey.Right:
+                        if (SelectedMagicTarget < Party.Count - 1) SelectedMagicTarget++;
+                        break;
+                    case ExplorationMenuKey.Confirm:
+                        PendingMagicUse = new(Guid.NewGuid(), SelectedMagic, false,
+                            Party[SelectedMagicCaster].RoleId, Party[SelectedMagicTarget].RoleId);
+                        Mode = ExplorationMenuMode.MagicOnUse;
+                        break;
+                    case ExplorationMenuKey.Cancel:
+                        EnterMagicList();
+                        break;
+                }
+                break;
+            }
+            case ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess:
+                // Host-owned parking; the guard above already rejected the key.
+                break;
         }
     }
 
@@ -575,6 +762,95 @@ public sealed class ExplorationMenuSession
         else Mode = ExplorationMenuMode.ItemTargets;
     }
 
+    /// <summary>The caster-select rows (uigame.c PAL_InGameMagicMenu's PAL_ReadMenu items): the
+    /// whole party in party order with its live alive flag; dead members stay listed but are
+    /// never confirmable.</summary>
+    public IReadOnlyList<ExplorationMenuMagicCaster> MagicCastersView()
+    {
+        if (Mode != ExplorationMenuMode.MagicCasters)
+            throw new InvalidOperationException("The magic caster selection is not open.");
+        return Party.Select(member =>
+        {
+            var role = roles.Roles[member.RoleId];
+            return new ExplorationMenuMagicCaster(member.RoleId, Word(member.NameWord), role.Hp > 0);
+        }).ToArray();
+    }
+
+    /// <summary>The magic list for the selected caster (magicmenu.c PAL_MagicSelectionMenuInit):
+    /// every learned magic of the shared live caster role in slot order, sorted by object WORD
+    /// ascending; enabled only when the magic is usable outside battle and its cost fits the
+    /// caster's current live MP. A learned magic without an authored binding rejects instead of
+    /// listing a placeholder.</summary>
+    public IReadOnlyList<ExplorationMenuMagicRow> MagicListView()
+    {
+        if (Mode is not (ExplorationMenuMode.MagicList or ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess))
+            throw new InvalidOperationException("The magic page is not open.");
+        return MagicRows();
+    }
+
+    /// <summary>The member-selection page for the selected single-target magic: the shared live
+    /// party vitals the reference draws while picking whom to cast on.</summary>
+    public ExplorationMenuMagicTargetView MagicTargetsView()
+    {
+        if (Mode != ExplorationMenuMode.MagicTargets)
+            throw new InvalidOperationException("The magic target selection is not open.");
+        return new(SelectedMagic, Word(SelectedMagic),
+            Party.Select(member =>
+            {
+                var role = roles.Roles[member.RoleId];
+                return new ExplorationMenuMagicTarget(member.RoleId, Word(member.NameWord),
+                    role.Hp, role.MaxHp, role.Mp, role.MaxMp);
+            }).ToArray(), Word(HpWord), Word(MpWord));
+    }
+
+    /// <summary>Host receipt for the committed on-use run (uigame.c 810-818): a failed on-use
+    /// skips the on-success run and the MP deduction; the flow itself continues — the target
+    /// select reopens for single-target magics (repeat use) and the apply-to-all branch returns
+    /// to the magic selection loop. A survived on-use advances the same cast to the on-success
+    /// phase; nothing is deducted yet.</summary>
+    public void CompleteMagicUse(Guid requestId, bool onUseSucceeded)
+    {
+        if (Mode != ExplorationMenuMode.MagicOnUse || PendingMagicUse is not { } cast || cast.Id != requestId)
+            throw new InvalidOperationException("The pending magic use does not match the completed script call.");
+        PendingMagicUse = null;
+        if (!onUseSucceeded)
+        {
+            if (cast.ApplyToAll) EnterMagicList();
+            else Mode = ExplorationMenuMode.MagicTargets;
+            return;
+        }
+        PendingMagicSuccess = cast;
+        Mode = ExplorationMenuMode.MagicOnSuccess;
+    }
+
+    /// <summary>Host receipt for the committed on-success run (uigame.c 816-834): only when both
+    /// scripts survived does the caster's shared live MP pay the cost — uigame.c's raw rgwMP
+    /// WORD subtraction, deducted from the caster, never battle's deduct-first order and never
+    /// a general refund of the scripts' executed effects. The apply-to-all branch returns to the
+    /// magic selection loop; a single-target loop reopens while the caster can still pay the
+    /// cost and otherwise ends at the magic list.</summary>
+    public void CompleteMagicSuccess(Guid requestId, bool onSuccessSucceeded)
+    {
+        if (Mode != ExplorationMenuMode.MagicOnSuccess || PendingMagicSuccess is not { } cast || cast.Id != requestId)
+            throw new InvalidOperationException("The pending magic success does not match the completed script call.");
+        var binding = MagicBinding(cast.ObjectId);
+        var caster = roles.Roles[cast.CasterRoleId];
+        if (onSuccessSucceeded)
+            roles.SetVitals(cast.CasterRoleId, caster.Hp, unchecked((ushort)(caster.Mp - binding.CostMp)));
+        PendingMagicSuccess = null;
+        if (cast.ApplyToAll)
+        {
+            EnterMagicList();
+            return;
+        }
+        // uigame.c 824-834: the exhaustion cancel (wPlayer = MENUITEM_VALUE_CANCELLED) is nested
+        // inside the on-success branch's deduction, so only a successful, deducted cast can
+        // end the target loop by exhaustion; every other run reopens the target select — even
+        // when an executed script already spent the caster's live MP below the cost.
+        if (onSuccessSucceeded && roles.Roles[cast.CasterRoleId].Mp < binding.CostMp) EnterMagicList();
+        else Mode = ExplorationMenuMode.MagicTargets;
+    }
+
     /// <summary>The bound equip-menu rows whose stock is owned, in authored binding order.</summary>
     private IReadOnlyList<BattleEquipMenuBinding> Stock() =>
         equipMenu!.Where(binding => inventory!.GetAmount(binding.ObjectId) > 0).ToArray();
@@ -625,6 +901,38 @@ public sealed class ExplorationMenuSession
     private BattleUseMenuBinding UseBinding(int objectId) =>
         useMenu!.SingleOrDefault(binding => binding.ObjectId == objectId)
             ?? throw new InvalidDataException($"Use-menu object {objectId} has no binding.");
+
+    /// <summary>The caster's learned magics (magicmenu.c reads rgwMagic[i][role]) resolved to
+    /// their authored bindings and sorted by object WORD ascending (its bubble sort); the
+    /// enabled flag recomputes from the caster's current live MP on every read.</summary>
+    private IReadOnlyList<ExplorationMenuMagicRow> MagicRows()
+    {
+        var caster = roles.Roles[Party[SelectedMagicCaster].RoleId];
+        var rows = new List<ExplorationMenuMagicRow>();
+        foreach (int magicId in caster.Magics)
+        {
+            if (magicId == 0) continue;
+            var binding = MagicBinding(magicId);
+            rows.Add(new(magicId, Word(magicId), binding.CostMp,
+                binding.UsableOutsideBattle && binding.CostMp <= caster.Mp));
+        }
+        rows.Sort((left, right) => left.ObjectId.CompareTo(right.ObjectId));
+        return rows;
+    }
+
+    /// <summary>Enters the magic selection loop (PAL_MagicSelectionMenu's reopened default):
+    /// the remembered cursor resolves to its row, or to the first row when unset or gone.</summary>
+    private void EnterMagicList()
+    {
+        Mode = ExplorationMenuMode.MagicList;
+        var rows = MagicRows();
+        if (rows.Count > 0 && !rows.Any(row => row.ObjectId == SelectedMagic))
+            SelectedMagic = rows[0].ObjectId;
+    }
+
+    private BattleMagicMenuBinding MagicBinding(int objectId) =>
+        magicMenu!.SingleOrDefault(binding => binding.ObjectId == objectId)
+            ?? throw new InvalidDataException($"Magic-menu object {objectId} has no binding.");
 
     private void ClampUseCursor()
     {

@@ -442,6 +442,148 @@ public class MenuSceneTests
                 .IsEqual(string.Join(";", expected.Select(row => $"{row.ObjectId}:{row.Name}:{row.Amount}")));
     }
 
+    [TestCase(Timeout = 180000)]
+    public async Task MagicPageCastsThroughTheRealScriptContextAndFeedsTheNextBattle()
+    {
+        // #216: the exploration magic-cast chain on the formal story Main (uigame.c
+        // PAL_InGameMagicMenu over magicmenu.c PAL_MagicSelectionMenu). Independent numbers:
+        // PartyWin authors role0 HP100/MP20, role1 HP95/MP20 (max 150/50); the test-owned
+        // scripts heal +30 (single, with a real dialogue line), +10 party-wide and a markFailed
+        // no-op on-success; the caster's MP pays the cost only after both script gates
+        // survived (never battle's deduct-first order).
+        using var fixture = new AuthoredStoryFixture("PartyWin", menuMagic: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1", "--story-language", "zh-Hans");
+        using var host = new MenuHost(selection);
+        host.AssertHealthy();
+        await host.Wait(() => host.Updates.Count > 0);
+        var menu = host.Main.Menu!;
+
+        // The authored magic context gains the magic entry; the caster select lists the whole
+        // party (uigame.c PAL_ReadMenu items; dead members stay listed but disabled).
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        AssertThat(menu.Entries.Count).IsEqual(2);
+        AssertThat(menu.EntryLabel(1)).IsEqual("法术");
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicCasters);
+        AssertThat(string.Join(",", menu.MagicCastersView().Select(row => $"{row.RoleId}:{row.Name}:{row.Alive}")))
+            .IsEqual("0:大侠:True,1:小侠:True");
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicList);
+
+        // magicmenu.c: the caster's learned magics sorted by object WORD; enabled only when the
+        // magic is usable outside battle and its cost fits the caster's current live MP.
+        AssertRows(menu, [(310, "回生术", 5, true), (311, "大回生术", 4, true), (312, "快攻术", 3, false), (313, "吉运术", 6, true)]);
+        AssertThat(menu.SelectedMagic).IsEqual(310);
+
+        // A battle-only row stays reachable by the cursor but never confirms
+        // (kMagicFlagUsableOutsideBattle clear).
+        host.Tap(Key.Down);
+        host.Tap(Key.Down); // 312
+        host.Tap(Key.Enter);
+        await host.AwaitUpdates(2);
+        AssertThat(menu.Mode).IsEqual(ExplorationMenuMode.MagicList);
+        AssertThat(menu.PendingMagicUse).IsNull();
+
+        // 310 on 小侠: the target page reads the live shared vitals (uigame.c stat box); the
+        // committed cast runs the checked on-use script (with its real dialogue line) through
+        // the real Dialogue host, then the on-success entry; only then does the caster's MP
+        // pay the cost (uigame.c 810-834, never deduct-first).
+        host.Tap(Key.Up);
+        host.Tap(Key.Up); // 312 -> 311 -> 310
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicTargets);
+        var targets = menu.MagicTargetsView();
+        AssertThat((targets.ObjectId, targets.Name)).IsEqual((310, "回生术"));
+        AssertThat((targets.Targets[1].Hp, targets.Targets[1].Mp)).IsEqual((95, 20));
+        host.Tap(Key.Down);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicOnUse);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        // The on-success entry (no dialogue) completes on the next real boundaries; the target
+        // select reopens for another cast while the caster can still pay (20-5=15 >= 5).
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicOnSuccess);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicTargets);
+        var healed = menu.MagicTargetsView();
+        AssertThat((healed.Targets[0].Hp, healed.Targets[1].Hp)).IsEqual((100, 125));
+        AssertThat((healed.Targets[0].Mp, healed.Targets[1].Mp)).IsEqual((15, 50)); // caster paid 5; 小侠 +30 MP capped
+        // kKeyMenu breaks the target loop; the list reopens at the same magic.
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicList);
+        AssertThat(menu.SelectedMagic).IsEqual(310);
+
+        // 313's on-use ends successfully, but its on-success marks the script failed: the
+        // deduction gate never opens, and per uigame.c the exhaustion exit belongs to the
+        // successful branch only — the target select reopens even below the cost.
+        host.Tap(Key.Down);
+        host.Tap(Key.Down);
+        host.Tap(Key.Down); // 313
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicTargets);
+        host.Tap(Key.Enter); // member 0 (大侠) commits the cast
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicOnUse);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicOnSuccess);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicTargets);
+        AssertThat(menu.MagicTargetsView().Targets[0].Mp).IsEqual(15); // markFailed: no deduction
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicList);
+
+        // 311 is apply-to-all: no target page — the cast commits straight from the list with
+        // the literal caller word 0 (never the item flow's 0xFFFF), heals the party once and
+        // the loop returns to the list (the menu stays open, unlike the item apply-to-all).
+        host.Tap(Key.Up);
+        host.Tap(Key.Up); // 311
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicOnUse);
+        var all = menu.PendingMagicUse!;
+        AssertThat((all.ObjectId, all.ApplyToAll, all.CasterRoleId, all.TargetRoleId)).IsEqual((311, true, 0, 0));
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MagicList);
+        // 100+10 HP / 15+10-4 = 21 caster MP; 小侠 125+10 HP, MP stays capped; the live MP
+        // re-enables every exploration-usable row against the new cost frontier.
+        AssertRows(menu, [(310, "回生术", 5, true), (311, "大回生术", 4, true), (312, "快攻术", 3, false), (313, "吉运术", 6, true)]);
+
+        // kKeyMenu closes the whole menu; the executed casts' MP and the scripts' heals stay
+        // committed in the shared live owners (no rollback).
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+        AssertThat(host.Main.MenuView).IsNull();
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
+        // The remembered main-menu cursor stayed on the magic entry (iCurMainMenuItem survives
+        // closes); step back to the status entry before confirming.
+        host.Tap(Key.Up);
+        host.Tap(Key.Enter);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Status);
+        var hero = menu.StatusView();
+        AssertThat((hero.Hp, hero.Mp)).IsEqual((110, 21));
+        host.Tap(Key.Right);
+        await host.Wait(() => menu.StatusMemberIndex == 1);
+        var second = menu.StatusView();
+        AssertThat((second.Hp, second.Mp)).IsEqual((135, 50));
+        host.Tap(Key.Escape);
+        await host.Wait(() => menu.Mode == ExplorationMenuMode.Closed);
+
+        // Story 75: the subsequent formal battle opens from the same shared owners — the menu
+        // heals and the menu-deducted MP are the battle's opening state (cross-menu
+        // consumption; no second state copy anywhere).
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+        await host.FinishDisplay();
+        await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu, timeoutMs: 30000);
+        var roles = host.Main.StoryBattle!.Current.Roles;
+        AssertThat((roles[0].Hp, roles[0].Mp)).IsEqual((110, 21));
+        AssertThat((roles[1].Hp, roles[1].Mp)).IsEqual((135, 50));
+
+        void AssertRows(ExplorationMenuSession session,
+            (int ObjectId, string Name, int CostMp, bool Enabled)[] expected) =>
+            AssertThat(string.Join(";", session.MagicListView()
+                .Select(row => $"{row.ObjectId}:{row.Name}:{row.CostMp}:{row.Enabled}")))
+                .IsEqual(string.Join(";", expected.Select(row => $"{row.ObjectId}:{row.Name}:{row.CostMp}:{row.Enabled}")));
+    }
+
     [TestCase(Timeout = 30000)]
     public void PreparedLanguagesCoverEveryMenuWordGlyphInBothLanguages()
     {
@@ -457,11 +599,11 @@ public class MenuSceneTests
             ExplorationMenuSession.DefenseWord, ExplorationMenuSession.DexterityWord,
             ExplorationMenuSession.FleeRateWord, ExplorationMenuSession.RoleNameWordBase,
             ExplorationMenuSession.RoleNameWordBase + 1, ExplorationMenuSession.EquipmentEntryWord,
-            ExplorationMenuSession.ItemsEntryWord,
+            ExplorationMenuSession.ItemsEntryWord, ExplorationMenuSession.MagicEntryWord,
             ExplorationMenuSession.PartWordBase, ExplorationMenuSession.PartWordBase + 1,
             ExplorationMenuSession.PartWordBase + 2, ExplorationMenuSession.PartWordBase + 3,
             ExplorationMenuSession.PartWordBase + 4, ExplorationMenuSession.PartWordBase + 5,
-            170, 197, 199, 210, 237, 248, 300, 301, 302,
+            170, 197, 199, 210, 237, 248, 300, 301, 302, 310, 311, 312, 313,
         ];
         foreach (string language in new[] { "zh-Hans", "en" })
         {

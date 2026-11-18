@@ -40,6 +40,11 @@ public partial class Main
     // checked entry address its owned receipt must return to) while the menu parks in ItemScript.
     private Guid itemUseId;
     private int itemUseEntryAddress;
+    // #216 uigame.c PAL_InGameMagicMenu 807-841: the magic cast's current script run (the cast's
+    // request id and the checked entry address its owned receipt must return to) while the menu
+    // parks in MagicOnUse/MagicOnSuccess; the id resets between the on-use and on-success runs.
+    private Guid magicRunId;
+    private int magicRunEntryAddress;
     private ClassicBattleFleeAttempt? storyLastFleeAttempt;
     private Vector2? fleeOrigin;
     private int fleePartyIndex = -1;
@@ -124,6 +129,9 @@ public partial class Main
             // #215: with an authored use context the menu gains the items page; its on-use
             // entries are checked up front with the story profile.
             bool itemsPage = checkedStory.BattleContent.UseMenu.Count > 0;
+            // #216: with an authored magic context the menu gains the magic page; its on-use and
+            // on-success entries are checked up front with the story profile.
+            bool magicPage = checkedStory.BattleContent.MagicMenu.Count > 0;
             dialogue.FirstBattleWorld = DynamicEventWorld.ForHost(checkedStory.Exploration.Rules,
                 checkedStory.Exploration.Leader, map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
                 roleLiveState, checkedStory.BattleContent.Players.Select(player => player.RoleId).ToArray());
@@ -142,6 +150,7 @@ public partial class Main
             };
             if (equipmentPage) menuEntries.Add(new(ExplorationMenuPage.Equipment, ExplorationMenuSession.EquipmentEntryWord));
             if (itemsPage) menuEntries.Add(new(ExplorationMenuPage.Items, ExplorationMenuSession.ItemsEntryWord));
+            if (magicPage) menuEntries.Add(new(ExplorationMenuPage.Magic, ExplorationMenuSession.MagicEntryWord));
             menu = new ExplorationMenuSession(
                 menuEntries,
                 checkedStory.BattleContent.Players.Select(player => new ExplorationMenuMember(player.RoleId,
@@ -151,7 +160,7 @@ public partial class Main
                 roleLiveState, storyEquipment,
                 checkedStory.BattleContent.GrowthByRole, checkedStory.SelectedWords, storyPoisons,
                 checkedStory.BattleContent.EquipMenu, checkedStory.BattleContent.EquipmentObjects, storyInventory,
-                checkedStory.BattleContent.UseMenu);
+                checkedStory.BattleContent.UseMenu, checkedStory.BattleContent.MagicMenu);
             PalMenuView.ValidateTexts(checkedStory.Font,
                 Enumerable.Range(0, menu.Entries.Count).Select(menu.EntryLabel)
                     .Concat(new[]
@@ -170,6 +179,10 @@ public partial class Main
                         : Enumerable.Empty<string>())
                     .Concat(itemsPage
                         ? checkedStory.BattleContent.UseMenu
+                            .Select(binding => checkedStory.SelectedWords[binding.ObjectId])
+                        : Enumerable.Empty<string>())
+                    .Concat(magicPage
+                        ? checkedStory.BattleContent.MagicMenu
                             .Select(binding => checkedStory.SelectedWords[binding.ObjectId])
                         : Enumerable.Empty<string>())
                     .Append("0123456789:/"));
@@ -716,6 +729,7 @@ public partial class Main
         storyRandom?.Dispose(); storyRandom = null; story = null; storyVisual = null;
         storyEquipment = null; storyPoisons = null; storyInventory = null;
         itemUseId = Guid.Empty;
+        magicRunId = Guid.Empty;
         ReleaseMenu();
     }
 
@@ -747,10 +761,18 @@ public partial class Main
                     // parked view re-presents behind the script's dialogue.
                     AdvanceItemUse();
                 }
+                else if (menu.Mode is ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess)
+                {
+                    // #216: the pending cast's on-use/on-success run advances on this real update
+                    // boundary (uigame.c runs both PAL_RunTriggerScript calls inside the cast);
+                    // the parked view re-presents the magic list behind the script's dialogue.
+                    AdvanceMagicCast();
+                }
                 else
                 {
                     foreach (ExplorationMenuKey key in pendingMenuKeys) menu.Press(key);
                     if (menu.Mode == ExplorationMenuMode.ItemScript) AdvanceItemUse();
+                    else if (menu.Mode is ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess) AdvanceMagicCast();
                 }
                 if (menu.Mode == ExplorationMenuMode.Closed)
                 {
@@ -800,6 +822,58 @@ public partial class Main
             Display!.ZIndex = 0;
             menu.CompleteItemUse(request.Id, success);
             GD.Print($"PAL_ITEM_USED:object={request.ObjectId};caller={request.TargetRoleId};success={success}");
+        }
+    }
+
+    /// <summary>#216 uigame.c PAL_InGameMagicMenu 807-841: the committed cast's two script runs
+    /// execute in order on the production trigger executor with the selected target's role as
+    /// their caller word (or the apply-to-all literal 0 — never the item flow's 0xFFFF keep-
+    /// caller word). The parked menu keeps the magic list behind the script's dialogue and only
+    /// the owned, entry-stable receipts complete each run with its saved success flag; the
+    /// caster's MP moves inside the Core receipt after both gates survived.</summary>
+    private void AdvanceMagicCast()
+    {
+        if (menu!.PendingMagicUse is { } cast)
+        {
+            if (magicRunId == Guid.Empty)
+            {
+                var entry = story!.MagicUseEntries.TryGetValue(cast.ObjectId, out var bound)
+                    ? bound.OnUse : throw new InvalidDataException($"Magic-menu object {cast.ObjectId} has no checked on-use entry.");
+                Display!.ZIndex = 200;
+                Dialogue!.Start(entry.FileId, entry.Id, cast.ApplyToAll ? 0 : cast.TargetRoleId, cast.Id);
+                magicRunId = cast.Id;
+                magicRunEntryAddress = entry.SourceAddress;
+            }
+            else if (Dialogue!.Session is { Phase: TriggerScriptPhase.Completed } session
+                && session.SourceRequestId == magicRunId && session.ReturnEntry == magicRunEntryAddress)
+            {
+                bool success = session.ScriptSuccess;
+                magicRunId = Guid.Empty;
+                Display!.ZIndex = 0;
+                menu.CompleteMagicUse(cast.Id, success);
+                GD.Print($"PAL_MAGIC_ON_USE:object={cast.ObjectId};caller={(cast.ApplyToAll ? 0 : cast.TargetRoleId)};success={success}");
+            }
+        }
+        else if (menu.PendingMagicSuccess is { } after)
+        {
+            if (magicRunId == Guid.Empty)
+            {
+                var entry = story!.MagicUseEntries.TryGetValue(after.ObjectId, out var bound)
+                    ? bound.OnSuccess : throw new InvalidDataException($"Magic-menu object {after.ObjectId} has no checked on-success entry.");
+                Display!.ZIndex = 200;
+                Dialogue!.Start(entry.FileId, entry.Id, after.ApplyToAll ? 0 : after.TargetRoleId, after.Id);
+                magicRunId = after.Id;
+                magicRunEntryAddress = entry.SourceAddress;
+            }
+            else if (Dialogue!.Session is { Phase: TriggerScriptPhase.Completed } session
+                && session.SourceRequestId == magicRunId && session.ReturnEntry == magicRunEntryAddress)
+            {
+                bool success = session.ScriptSuccess;
+                magicRunId = Guid.Empty;
+                Display!.ZIndex = 0;
+                menu.CompleteMagicSuccess(after.Id, success);
+                GD.Print($"PAL_MAGIC_ON_SUCCESS:object={after.ObjectId};success={success}");
+            }
         }
     }
 

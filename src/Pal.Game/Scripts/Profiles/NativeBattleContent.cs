@@ -64,7 +64,7 @@ public static class NativeBattleContent
             }
             var content = new TriggerBattleContent(roles, players, growth, teams, ReadGrid(native.RoleEquipment), ReadEquipments(native.Equipments),
                 Items(native.Roles, "Roles").Where(role => role.PanelDeclared).Select(role => role.RoleId).ToArray(),
-                ReadInventory(native), ReadEquipMenu(native), ReadUseMenu(native));
+                ReadInventory(native), ReadEquipMenu(native), ReadUseMenu(native), ReadMagicMenu(native));
             ModernBattleContent.Validate(content);
             return new(content, ReadProjection(native, content));
         }
@@ -121,6 +121,10 @@ public static class NativeBattleContent
             UseMenuObjects = content.UseMenu.Select(binding => binding.ObjectId).ToArray(),
             UseMenuConsuming = content.UseMenu.Select(binding => binding.Consuming ? 1 : 0).ToArray(),
             UseMenuApplyToAll = content.UseMenu.Select(binding => binding.ApplyToAll ? 1 : 0).ToArray(),
+            MagicMenuObjects = content.MagicMenu.Select(binding => binding.ObjectId).ToArray(),
+            MagicMenuCostMp = content.MagicMenu.Select(binding => binding.CostMp).ToArray(),
+            MagicMenuApplyToAll = content.MagicMenu.Select(binding => binding.ApplyToAll ? 1 : 0).ToArray(),
+            MagicMenuUsableOutsideBattle = content.MagicMenu.Select(binding => binding.UsableOutsideBattle ? 1 : 0).ToArray(),
             Equipments = content.EquipmentObjects.Select(x => new PalBattleEquipment { ObjectId = x.Key,
                 Effects = x.Value.Effects.Select(effect => new PalBattleEquipmentEffect { Attack = effect.Attack, Defense = effect.Defense,
                     Dexterity = effect.Dexterity, BattleSprite = effect.BattleSprite, Statuses = effect.Statuses.ToArray(),
@@ -222,6 +226,19 @@ public static class NativeBattleContent
             throw new InvalidDataException("UseMenu arrays require aligned rows");
         return objects.Select((item, index) => new BattleUseMenuBinding(item,
             Flag(consuming[index], "UseMenuConsuming", index), Flag(applyToAll[index], "UseMenuApplyToAll", index))).ToArray();
+    }
+
+    private static IReadOnlyList<BattleMagicMenuBinding> ReadMagicMenu(PalBattleContent native)
+    {
+        int[] objects = Copy(native.MagicMenuObjects, "MagicMenuObjects");
+        int[] costMp = Copy(native.MagicMenuCostMp, "MagicMenuCostMp");
+        int[] applyToAll = Copy(native.MagicMenuApplyToAll, "MagicMenuApplyToAll");
+        int[] usableOutsideBattle = Copy(native.MagicMenuUsableOutsideBattle, "MagicMenuUsableOutsideBattle");
+        if (objects.Length != costMp.Length || objects.Length != applyToAll.Length || objects.Length != usableOutsideBattle.Length)
+            throw new InvalidDataException("MagicMenu arrays require aligned rows");
+        return objects.Select((item, index) => new BattleMagicMenuBinding(item, costMp[index],
+            Flag(applyToAll[index], "MagicMenuApplyToAll", index),
+            Flag(usableOutsideBattle[index], "MagicMenuUsableOutsideBattle", index))).ToArray();
     }
 
     private static bool Flag(int word, string field, int index)

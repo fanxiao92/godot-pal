@@ -24,6 +24,12 @@ public partial class PalBattleContent : Resource
     [Export] public int[] UseMenuObjects { get; set; } = [];
     [Export] public int[] UseMenuConsuming { get; set; } = [];
     [Export] public int[] UseMenuApplyToAll { get; set; } = [];
+    // #216 explicit exploration magic context: magic-menu bindings as parallel object/cost/
+    // apply-to-all/usable-outside-battle word rows (flags travel as 0/1 like the use menu).
+    [Export] public int[] MagicMenuObjects { get; set; } = [];
+    [Export] public int[] MagicMenuCostMp { get; set; } = [];
+    [Export] public int[] MagicMenuApplyToAll { get; set; } = [];
+    [Export] public int[] MagicMenuUsableOutsideBattle { get; set; } = [];
 
     // Optional projection provenance, not an authentication or a runtime JSON dependency.
     [Export] public bool ProjectionPresent { get; set; }

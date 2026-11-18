@@ -17,6 +17,12 @@ public sealed record BattleEquipMenuBinding(int ObjectId, int Part, int Equipabl
 /// kItemFlagUsable for the exploration host (play.c PAL_GameUseItem).</summary>
 public sealed record BattleUseMenuBinding(int ObjectId, bool Consuming, bool ApplyToAll);
 
+/// <summary>One authored magic-menu binding (battle-data.json $.magicMenu): the magic object,
+/// its lprgMagic[wMagicNumber].wCostMP and the two kMagicFlag words the exploration menu
+/// consumes — kMagicFlagUsableOutsideBattle (global.h 1&lt;&lt;0) and kMagicFlagApplyToAll (1&lt;&lt;4).
+/// Listing an object declares its exploration context (uigame.c PAL_InGameMagicMenu).</summary>
+public sealed record BattleMagicMenuBinding(int ObjectId, int CostMp, bool ApplyToAll, bool UsableOutsideBattle);
+
 /// <summary>Role-keyed numeric content; party order is Players and enemy identity is its team slot.
 /// Subsequent battles use settled roles, never the initial player HP.</summary>
 public sealed class TriggerBattleContent
@@ -41,6 +47,8 @@ public sealed class TriggerBattleContent
     public IReadOnlyList<BattleEquipMenuBinding> EquipMenu { get; }
     /// <summary>Authored use-menu bindings; empty when the scenario declares no items page.</summary>
     public IReadOnlyList<BattleUseMenuBinding> UseMenu { get; }
+    /// <summary>Authored magic-menu bindings; empty when the scenario declares no magic page.</summary>
+    public IReadOnlyList<BattleMagicMenuBinding> MagicMenu { get; }
 
     [JsonIgnore] public BattleRoleSnapshot InitialRole => Single(InitialRoles.Values);
     [JsonIgnore] public ClassicBattlePlayer Player => Single(Players);
@@ -61,7 +69,8 @@ public sealed class TriggerBattleContent
         IReadOnlyCollection<int>? panelDeclaredRoles = null,
         IReadOnlyList<InventorySlot>? initialInventory = null,
         IReadOnlyList<BattleEquipMenuBinding>? equipMenu = null,
-        IReadOnlyList<BattleUseMenuBinding>? useMenu = null)
+        IReadOnlyList<BattleUseMenuBinding>? useMenu = null,
+        IReadOnlyList<BattleMagicMenuBinding>? magicMenu = null)
     {
         ArgumentNullException.ThrowIfNull(roles); ArgumentNullException.ThrowIfNull(players);
         ArgumentNullException.ThrowIfNull(growth); ArgumentNullException.ThrowIfNull(teams);
@@ -96,6 +105,7 @@ public sealed class TriggerBattleContent
         InitialInventory = CopyInventory(initialInventory);
         EquipMenu = CopyEquipMenu(equipMenu, EquipmentObjects);
         UseMenu = CopyUseMenu(useMenu);
+        MagicMenu = CopyMagicMenu(magicMenu);
     }
 
     private static IReadOnlyList<InventorySlot> CopyInventory(IReadOnlyList<InventorySlot>? rows)
@@ -119,6 +129,18 @@ public sealed class TriggerBattleContent
         foreach (var (binding, index) in bindings.Select((x, i) => (x, i)))
             if (binding is null || binding.ObjectId is < 1 or > 65535 || !seen.Add(binding.ObjectId))
                 throw new InvalidDataException($"$.useMenu[{index}]: bindings require unique object WORD ids 1..65535.");
+        return Array.AsReadOnly(bindings.ToArray());
+    }
+
+    private static IReadOnlyList<BattleMagicMenuBinding> CopyMagicMenu(IReadOnlyList<BattleMagicMenuBinding>? bindings)
+    {
+        if (bindings is null || bindings.Count == 0) return Array.Empty<BattleMagicMenuBinding>();
+        var seen = new HashSet<int>();
+        foreach (var (binding, index) in bindings.Select((x, i) => (x, i)))
+            if (binding is null || binding.ObjectId is < 1 or > 65535 || !seen.Add(binding.ObjectId))
+                throw new InvalidDataException($"$.magicMenu[{index}]: bindings require unique object WORD ids 1..65535.");
+            else if (binding.CostMp is < 0 or > 65535)
+                throw new InvalidDataException($"$.magicMenu[{index}].costMp: bindings require a cost WORD 0..65535.");
         return Array.AsReadOnly(bindings.ToArray());
     }
 

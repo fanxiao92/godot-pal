@@ -224,8 +224,8 @@ public class NativeStoryProfileTests
         string expected;
         switch (fault)
         {
-            case "missing-map": fixture.Profile.Portraits.Remove(10); fixture.Profile.ResourceSha256.Remove(fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected and item-use entries"; break;
-            case "extra-map": fixture.Profile.Portraits.Add(11, fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected and item-use entries"; break;
+            case "missing-map": fixture.Profile.Portraits.Remove(10); fixture.Profile.ResourceSha256.Remove(fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected, item-use and magic entries"; break;
+            case "extra-map": fixture.Profile.Portraits.Add(11, fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected, item-use and magic entries"; break;
             case "zero-map": fixture.Profile.Portraits.Add(0, fixture.Root + "/Portrait-10.tres"); expected = "nonzero WORD"; break;
             case "portrait": fixture.Save(new PalDialogueIndexedImage { SourceIdentity = "bad", Width = 2, Height = 1, PaletteIndices = [1], Alpha = [255] }, "Portrait-10.tres"); fixture.RefreshHashes(); expected = "Portrait-10.tres"; break;
             case "prompt": fixture.Save(new PalDialogueIndexedImage { Width = 1, Height = 1, PaletteIndices = [1], Alpha = [255] }, "Prompt-02.tres"); fixture.RefreshHashes(); expected = "Prompt-02.tres"; break;
@@ -391,7 +391,74 @@ public class NativeStoryProfileTests
         }
         string expected = fault is "no-entry" or "duplicate-entry" or "disabled-entry"
             ? "requires exactly one enabled item.wScriptOnUse"
-            : fault == "glyph" ? "U+0045" : "exactly the selected and item-use entries";
+            : fault == "glyph" ? "U+0045" : "exactly the selected, item-use and magic entries";
+        string error = Failure(() => NativeStoryProfile.Load(fixture.Uri, "zh-Hans"));
+        AssertThat(error.Contains(expected)).IsTrue();
+        if (fault == "glyph") AssertThat(error.Contains("Font.tres") && error.Contains("json#L")).IsTrue();
+    }
+
+    [TestCase("clean")]
+    [TestCase("no-on-use-entry")]
+    [TestCase("no-on-success-entry")]
+    [TestCase("duplicate-entry")]
+    [TestCase("disabled-entry")]
+    [TestCase("glyph")]
+    public void MagicMenuObjectsResolveBothEntriesAndJoinBothLanguageBoundaries(string fault)
+    {
+        // #216: the native story load's magic-cast boundary. Every authored magic-menu object
+        // must resolve exactly one enabled magic.wScriptOnUse AND magic.wScriptOnSuccess
+        // trigger entry, and those entries join the both-language display-glyph loop and the
+        // exact portrait coverage union — the unselected language must never lose coverage.
+        using var fixture = new NativeStoryProfileFixture(useMagic: true);
+        const string onUseEntry =
+            "{\"id\":\"use310OnUse\",\"owner\":{\"type\":\"object\",\"id\":310},\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}";
+        const string onSuccessEntry =
+            "{\"id\":\"use310OnSuccess\",\"owner\":{\"type\":\"object\",\"id\":310},\"slot\":\"magic.wScriptOnSuccess\",\"kind\":\"trigger\",\"target\":\"L0010\",\"sourceAddress\":16}";
+        if (fault == "glyph")
+        {
+            // Only the magic entries' EN line uses 'E'; zh stays the selected language.
+            fixture.Font.Glyphs.Remove(fixture.Font.Glyphs.Single(glyph => glyph.Codepoint == 69));
+            fixture.Save(fixture.Font, "Font.tres");
+            fixture.RefreshHashes();
+            fixture.SaveProfile();
+        }
+        else if (fault != "clean")
+        {
+            switch (fault)
+            {
+                case "no-on-use-entry":
+                    fixture.Edit("shared.json", "," + onUseEntry, "");
+                    break;
+                case "no-on-success-entry":
+                    fixture.Edit("shared.json", "," + onSuccessEntry, "");
+                    break;
+                case "duplicate-entry":
+                    fixture.Edit("shared.json", onUseEntry, onUseEntry + ","
+                        + "{\"id\":\"use310OnUseB\",\"owner\":{\"type\":\"object\",\"id\":310},\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}");
+                    break;
+                default:
+                    fixture.Edit("shared.json", "\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}",
+                        "\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":null,\"sourceAddress\":0}");
+                    break;
+            }
+            fixture.RefreshHashes();
+            fixture.SaveProfile();
+        }
+        if (fault == "clean")
+        {
+            var profile = NativeStoryProfile.Load(fixture.Uri, "zh-Hans");
+            AssertThat(profile.MagicUseEntries.Keys.Order().SequenceEqual(new[] { 310 })).IsTrue();
+            AssertThat((profile.MagicUseEntries[310].OnUse.Id, profile.MagicUseEntries[310].OnUse.SourceAddress)).IsEqual(("use310OnUse", 13));
+            AssertThat((profile.MagicUseEntries[310].OnSuccess.Id, profile.MagicUseEntries[310].OnSuccess.SourceAddress)).IsEqual(("use310OnSuccess", 16));
+            AssertThat(profile.BattleContent.MagicMenu.SequenceEqual(new[]
+                { new BattleMagicMenuBinding(310, 5, false, true) })).IsTrue();
+            AssertThat(profile.Portraits.Keys.Order().SequenceEqual(new[] { 7, 8, 9, 10, 11 })).IsTrue();
+            return;
+        }
+        string expected = fault is "no-on-use-entry" or "duplicate-entry" or "disabled-entry"
+            ? "requires exactly one enabled magic.wScriptOnUse"
+            : fault == "no-on-success-entry" ? "requires exactly one enabled magic.wScriptOnSuccess"
+            : "U+0045";
         string error = Failure(() => NativeStoryProfile.Load(fixture.Uri, "zh-Hans"));
         AssertThat(error.Contains(expected)).IsTrue();
         if (fault == "glyph") AssertThat(error.Contains("Font.tres") && error.Contains("json#L")).IsTrue();

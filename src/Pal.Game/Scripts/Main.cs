@@ -322,6 +322,19 @@ public partial class Main : Node2D
                     else input!.Release((ExplorationKey)i);
                     return;
                 }
+                if (menu is { Mode: ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess })
+                {
+                    // #216: the pending magic cast's on-use/on-success script owns the frame
+                    // (uigame.c blocks inside PAL_RunTriggerScript): direction presses never
+                    // reach the frozen world and never queue menu keys; releases keep held-key
+                    // state truthful for the resume.
+                    if (key.Pressed) GetViewport().SetInputAsHandled();
+                    else if (dynamicSession is { } dynamicRelease) dynamicRelease.Release((ExplorationKey)i);
+                    else if (battle is { } battleRelease) battleRelease.Release((ExplorationKey)i);
+                    else if (Interaction is { } interactionRelease) interactionRelease.Release((ExplorationKey)i);
+                    else input!.Release((ExplorationKey)i);
+                    return;
+                }
                 if (menu is { Mode: not ExplorationMenuMode.Closed })
                 {
                     // The open menu owns direction presses (uigame.c menu loops); releases keep
@@ -366,6 +379,12 @@ public partial class Main : Node2D
                     // press propagates to it untouched and never queues a menu confirm or reaches
                     // the frozen exploration search.
                 }
+                else if (menu is { Mode: ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess })
+                {
+                    // #216: the magic cast's script display owns Search while a run is pending;
+                    // the press propagates to it untouched and never queues a menu confirm or
+                    // reaches the frozen exploration search.
+                }
                 else if (menu is { Mode: not ExplorationMenuMode.Closed })
                 {
                     // The open menu consumes Search as its confirm; the press never reaches the
@@ -409,7 +428,8 @@ public partial class Main : Node2D
             if (key.Pressed && !key.Echo && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
                 && storyRequest is null && menu is not null)
             {
-                if (menu.Mode is not (ExplorationMenuMode.Closed or ExplorationMenuMode.ItemScript))
+                if (menu.Mode is not (ExplorationMenuMode.Closed or ExplorationMenuMode.ItemScript
+                    or ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess))
                 {
                     pendingMenuKeys.Add(ExplorationMenuKey.Cancel);
                     GetViewport().SetInputAsHandled();

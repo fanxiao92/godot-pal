@@ -17,12 +17,14 @@ public static partial class ModernBattleContent
         bool inventoryDeclared = root.TryGetProperty("inventory", out JsonElement inventoryElement);
         bool equipMenuDeclared = root.TryGetProperty("equipMenu", out JsonElement equipMenuElement);
         bool useMenuDeclared = root.TryGetProperty("useMenu", out JsonElement useMenuElement);
+        bool magicMenuDeclared = root.TryGetProperty("magicMenu", out JsonElement magicMenuElement);
         var rootKeys = new List<string> { "formatVersion", "roles", "players", "growth", "teams" };
         if (gridDeclared) rootKeys.Add("roleEquipment");
         if (objectsDeclared) rootKeys.Add("equipments");
         if (inventoryDeclared) rootKeys.Add("inventory");
         if (equipMenuDeclared) rootKeys.Add("equipMenu");
         if (useMenuDeclared) rootKeys.Add("useMenu");
+        if (magicMenuDeclared) rootKeys.Add("magicMenu");
         EventJson.Keys(root, Root, [.. rootKeys]);
         if (Number(root, "formatVersion", Root) != 1)
             throw Error(Root, "unsupported formatVersion");
@@ -69,8 +71,9 @@ public static partial class ModernBattleContent
         var initialInventory = inventoryDeclared ? InventoryRows(inventoryElement) : null;
         var equipMenu = equipMenuDeclared ? EquipMenuBindings(equipMenuElement) : null;
         var useMenu = useMenuDeclared ? UseMenuBindings(useMenuElement) : null;
+        var magicMenu = magicMenuDeclared ? MagicMenuBindings(magicMenuElement) : null;
         TriggerBattleContent content;
-        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles, initialInventory, equipMenu, useMenu); }
+        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles, initialInventory, equipMenu, useMenu, magicMenu); }
         catch (InvalidDataException error) { throw Error(Root, error.Message); }
         Validate(content);
         return content;
@@ -130,6 +133,24 @@ public static partial class ModernBattleContent
             string path = Root + $".useMenu[{index++}]";
             EventJson.Keys(item, path, "objectId", "consuming", "applyToAll");
             bindings.Add(new(Number(item, "objectId", path, 1), Boolean(item, "consuming", path), Boolean(item, "applyToAll", path)));
+        }
+        return System.Array.AsReadOnly(bindings.ToArray());
+    }
+
+    /// <summary>Magic-menu bindings: the magic object, its lprgMagic cost WORD and the
+    /// kMagicFlagApplyToAll / kMagicFlagUsableOutsideBattle words the exploration magic menu
+    /// consumes (uigame.c PAL_InGameMagicMenu over magicmenu.c PAL_MagicSelectionMenu).</summary>
+    private static IReadOnlyList<BattleMagicMenuBinding> MagicMenuBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".magicMenu", "expected an array");
+        var bindings = new List<BattleMagicMenuBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".magicMenu[{index++}]";
+            EventJson.Keys(item, path, "objectId", "costMp", "applyToAll", "usableOutsideBattle");
+            bindings.Add(new(Number(item, "objectId", path, 1), Number(item, "costMp", path),
+                Boolean(item, "applyToAll", path), Boolean(item, "usableOutsideBattle", path)));
         }
         return System.Array.AsReadOnly(bindings.ToArray());
     }
