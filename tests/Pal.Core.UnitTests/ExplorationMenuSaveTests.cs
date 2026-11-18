@@ -17,6 +17,10 @@ public sealed class ExplorationMenuSaveTests
         menu.Open();
         menu.Press(ExplorationMenuKey.Down);
         menu.Press(ExplorationMenuKey.Confirm);
+        // #227: the system entry now opens the reference system-item layer; confirming its
+        // SAVE row enters the five-slot layer with the save intent (#224's migrated path).
+        Assert.Equal(ExplorationMenuMode.SystemItems, menu.Mode);
+        menu.Press(ExplorationMenuKey.Confirm);
         Assert.Equal(ExplorationMenuMode.SystemMenu, menu.Mode);
 
         // Stories 3/4: browsing (every direction pair, both wraps included) only moves the
@@ -64,6 +68,9 @@ public sealed class ExplorationMenuSaveTests
         menu.Open();
         menu.Press(ExplorationMenuKey.Down);
         menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemItems, menu.Mode);
+        menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemMenu, menu.Mode);
         menu.Press(ExplorationMenuKey.Down); // browse to slot 2
         menu.Press(ExplorationMenuKey.Down); // browse to slot 3
         menu.Press(ExplorationMenuKey.Confirm);
@@ -87,15 +94,21 @@ public sealed class ExplorationMenuSaveTests
         menu.CompleteSave(second.Id, succeeded: true);
         Assert.Null(menu.PendingSave);
 
-        // kKeyMenu returns to the main menu; the remembered slot cursor survives closes exactly
-        // like the main-menu cursor (gpGlobals->iCurMainMenuItem), which still sits on the
-        // system entry — a re-entered layer confirms the same slot without a move.
+        // kKeyMenu returns to the main menu via the system items; the remembered slot cursor
+        // survives closes exactly like the main-menu cursor (gpGlobals->iCurMainMenuItem),
+        // which still sits on the system entry — a re-entered layer confirms the same item
+        // and slot without a move.
+        menu.Press(ExplorationMenuKey.Cancel);
+        Assert.Equal(ExplorationMenuMode.SystemItems, menu.Mode);
         menu.Press(ExplorationMenuKey.Cancel);
         Assert.Equal(ExplorationMenuMode.MainMenu, menu.Mode);
         menu.Press(ExplorationMenuKey.Cancel);
         Assert.Equal(ExplorationMenuMode.Closed, menu.Mode);
         menu.Open();
         Assert.Equal(1, menu.SelectedEntry);
+        menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemItems, menu.Mode);
+        Assert.Equal(0, menu.SelectedSystemItem); // the remembered SAVE row
         menu.Press(ExplorationMenuKey.Confirm);
         Assert.Equal(ExplorationMenuMode.SystemMenu, menu.Mode);
         Assert.Equal(1, menu.SelectedSaveSlot);
@@ -137,6 +150,8 @@ public sealed class ExplorationMenuSaveTests
         {
             [ExplorationMenuSession.StatusEntryWord] = "状态",
             [ExplorationMenuSession.SystemEntryWord] = "系统",
+            [ExplorationMenuSession.SaveItemWord] = "存档",
+            [ExplorationMenuSession.LoadItemWord] = "读取",
             [ExplorationMenuSession.HpWord] = "生命",
             [ExplorationMenuSession.ExperienceWord] = "经验",
             [ExplorationMenuSession.LevelWord] = "等级",

@@ -364,8 +364,8 @@ exit $exitCode
             $publicNames = @($oldPublic + $party + $party3 + $zeroHp + $mixedEmptySlots + $cancelRevert + $attackAllMember + $attackAllPresentation + $defendCommit + $fleeWalk + $fleePose + $firstBattleNames)
             $publicFilter = 'FullyQualifiedName~Pal.Game.Tests.SyntheticFirstBattleClosureTests.|FullyQualifiedName~' + $party + '|FullyQualifiedName~' + $party3 + '|FullyQualifiedName~' + $zeroHp + '|FullyQualifiedName~' + $mixedEmptySlots + '|FullyQualifiedName~' + $cancelRevert + '|FullyQualifiedName~' + $attackAllMember + '|FullyQualifiedName~' + $attackAllPresentation + '|FullyQualifiedName~' + $defendCommit + '|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.NormalBattleFlee|FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_'
             $dialogue = @($candidate.batches | Where-Object name -CEQ 'scene-dialogue')[0]
-            Assert ($dialogue.count -eq 125 -and $dialogue.sessionTimeoutMs -eq 120000) 'Dialogue membership changes, not its session budget.'
-            Assert ($dialogue.filter -ceq '(FullyQualifiedName~Pal.Game.Tests.ExplorationSceneTests.|FullyQualifiedName~Pal.Game.Tests.NpcInteractionHostTests.|FullyQualifiedName~Pal.Game.Tests.DialogueDisplayFixtureTests.|FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.|FullyQualifiedName~Pal.Game.Tests.MenuSceneTests.|FullyQualifiedName~Pal.Game.Tests.ShopSceneTests.|FullyQualifiedName~Pal.Game.Tests.SystemSaveSceneTests.)&FullyQualifiedName!~Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') 'Dialogue must exclude only the full first-battle method prefix, with the whole class union grouped.'
+            Assert ($dialogue.count -eq 128 -and $dialogue.sessionTimeoutMs -eq 300000) 'Dialogue membership and its #227 full save/load session budget are pinned together.'
+            Assert ($dialogue.filter -ceq '(FullyQualifiedName~Pal.Game.Tests.ExplorationSceneTests.|FullyQualifiedName~Pal.Game.Tests.NpcInteractionHostTests.|FullyQualifiedName~Pal.Game.Tests.DialogueDisplayFixtureTests.|FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.|FullyQualifiedName~Pal.Game.Tests.MenuSceneTests.|FullyQualifiedName~Pal.Game.Tests.ShopSceneTests.|FullyQualifiedName~Pal.Game.Tests.SystemSaveSceneTests.|FullyQualifiedName~Pal.Game.Tests.SystemLoadSceneTests.)&FullyQualifiedName!~Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') 'Dialogue must exclude only the full first-battle method prefix, with the whole class union grouped.'
             Assert-AdapterCaseOwners $candidate $firstBattleNames "$scope moved first-battle identities"
             if ($scope -ceq 'full') {
                 $publicNames += $privateReal
@@ -418,9 +418,9 @@ public class Fixture
         Assert ($hostReference.Count -eq 1 -and $hostReference[0].ReferenceOutputAssembly -ceq 'false' -and $hostReference[0].Private -ceq 'false') 'Prepare must retain its isolated build-only Game host reference.'
         Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Explicit test scheduling must still finish Prepare before Game.'
     }
-    Case 'real source partitions 85/125/2/5/6/3/4/30/772/44, preserves controls and solution test projects' {
-        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '85,125,2,5,6,3,4,30,772,44') 'Wrong batch sizes/order.'
-        Assert ($plan.inventory.Count -eq 1079 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+    Case 'real source partitions 85/128/2/5/6/3/4/30/772/44, preserves controls and solution test projects' {
+        Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '85,128,2,5,6,3,4,30,772,44') 'Wrong batch sizes/order.'
+        Assert ($plan.inventory.Count -eq 1082 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
         $enemySourceCase = 'Pal.Game.Tests.NativeFirstMandatoryBattleProfileTests.BoundEnemySpriteSourceMustMatchFrozenArchiveEvenWithFreshHashes'
         foreach ($scope in @('full', 'committable')) {
             $candidate = Get-GameBatchPlan $repository -Scope $scope
@@ -648,11 +648,11 @@ public class Fixture
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
             'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
         $expectedProjects = @{
-            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 1521, 0)
+            core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 1534, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 536, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 419, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 128, 0)
-            game = @('src/Pal.Game/Pal.Game.csproj', 1076, 0)
+            game = @('src/Pal.Game/Pal.Game.csproj', 1079, 0)
         }
         foreach ($project in $plan.projects) {
             $expectedProject = $expectedProjects[$project.name]
@@ -660,7 +660,7 @@ public class Fixture
         }
         Assert ($plan.batches[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.StoryMainProcessTests.|FullyQualifiedName~Pal.Game.Tests.MainProcessTests.|FullyQualifiedName~Pal.Game.Tests.ExplorationProcessTests.') 'Filter boundary lost.'
         $longSessions = @($plan.batches | Where-Object { [int]$_.sessionTimeoutMs -gt 120000 } | ForEach-Object name)
-        Assert (($longSessions -join ',') -ceq 'native-map,scene-realfull') 'Only native-map and scene-realfull may pin sessions beyond the shared 120s wall.'
+        Assert (($longSessions -join ',') -ceq 'scene-dialogue,native-map,scene-realfull') 'Only the #227 full save/load dialogue flows, native-map and scene-realfull may pin sessions beyond the shared 120s wall.'
         Assert-ExactTestNames @($plan.batches.expected) @($plan.inventory | Where-Object class -NE 'FailureControlTests' | ForEach-Object name) 'all source positives'
     }
     Case 'projection source methods preserve exact native-map ownership in both scopes' {
@@ -756,7 +756,7 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1521 passed; CLI unit 536 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 128 passed; Godot source/discovery 1079; positives 1076 as serial 85/125/2/5/6/3/4/30/772/44 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1534 passed; CLI unit 536 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 128 passed; Godot source/discovery 1082; positives 1079 as serial 85/128/2/5/6/3/4/30/772/44 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }
@@ -766,10 +766,10 @@ public class Fixture
         $realfull = @($plan.batches | Where-Object name -CEQ 'scene-realfull')
         Assert ($realfull.Count -eq 1 -and $realfull[0].count -eq 43) 'scene-realfull must drop exactly its local-only real positive.'
         Assert ($realfull[0].filter -ceq 'FullyQualifiedName~Pal.Game.Tests.SyntheticFirstBattleClosureTests.|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.PartyThreePlayersPickTargetsByCyclingExecuteQueueAndWin|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.ZeroHpPuppetMemberEntersAtOneHpStaysDeadAndSettlesByIdentity|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.PreparedMixedEmptySlotsUseRuntimeIndicesTargetLoadedOnlyAndSettleOnceThroughFreshMain|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.PreparedThreePlayersCancelTargetsRevertEarlierSelectionsAndSettleOnce|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.AttackAllMemberCommitsWithoutTargetMenuStrikesBothLoadedSlotsAndSettlesOnce|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.AttackAllPresentation|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.PreparedThreePlayersDefendCommitPoseCountsAndSettleOnce|FullyQualifiedName~Pal.Game.Tests.StoryRoundtripSceneTests.NormalBattleFlee|FullyQualifiedName~Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') 'Committable scene-realfull filter must exclude the private-asset class.'
-        Assert (($plan.batches | ForEach-Object count) -join ',' -ceq '85,125,2,5,6,3,4,30,772,43') 'Wrong committable batch sizes/order.'
+        Assert (($plan.batches | ForEach-Object count) -join ',' -ceq '85,128,2,5,6,3,4,30,772,43') 'Wrong committable batch sizes/order.'
         $game = @($plan.projects | Where-Object name -CEQ 'game')[0]
-        Assert ($game.passed -eq 1075) 'Committable game positives must drop the local-only case.'
-        Assert ($plan.inventory.Count -eq 1079) 'Committable scope keeps the real class compiled and discoverable.'
+        Assert ($game.passed -eq 1078) 'Committable game positives must drop the local-only case.'
+        Assert ($plan.inventory.Count -eq 1082) 'Committable scope keeps the real class compiled and discoverable.'
         Assert-ExactTestNames @($plan.localOnly) @('Pal.Game.Tests.RealFirstBattleFlowTests.Real_phases_search_pages_engagement_and_bounded_damage_trajectory') 'Local-only positive identity'
         Assert-ExactTestNames @($plan.batches.expected) @($plan.inventory | Where-Object { $_.class -NE 'FailureControlTests' -and $_.name -cnotin $plan.localOnly } | ForEach-Object name) 'committable partition'
     }
@@ -782,7 +782,7 @@ public class Fixture
     }
     Case 'committable gate PASS summary declares scope and the private-asset boundary' {
         $summary = Get-GatePassSummary (Get-GameBatchPlan $repository -Scope committable)
-        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1521 passed; CLI unit 536 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 128 passed; Godot source/discovery 1079; positives 1075 as serial 85/125/2/5/6/3/4/30/772/43 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
+        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1534 passed; CLI unit 536 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 128 passed; Godot source/discovery 1082; positives 1078 as serial 85/128/2/5/6/3/4/30/772/43 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
         Assert ($summary -ceq $expected) "Wrong committable gate PASS summary: $summary"
         Assert ($summary -cmatch 'committable-scope full gate') 'Committable identity missing.'
         Assert ($summary -cmatch 'local-only real-asset positives excluded') 'Private-asset boundary missing.'

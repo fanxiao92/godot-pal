@@ -1,7 +1,11 @@
 namespace Pal.Core;
 
 public enum ExplorationMenuMode { Closed, MainMenu, Status, EquipItems, EquipRoles, Items, ItemTargets, ItemScript,
-    MagicCasters, MagicList, MagicTargets, MagicOnUse, MagicOnSuccess, SystemMenu }
+    MagicCasters, MagicList, MagicTargets, MagicOnUse, MagicOnSuccess, SystemItems, SystemMenu }
+
+/// <summary>The intent one confirmed system item opens the shared slot layer with (#227;
+/// uigame.c PAL_SystemMenu's SAVE row runs PAL_SaveGame and its LOAD row runs PAL_ReloadInNextTick).</summary>
+public enum ExplorationSystemIntent { Save, Load }
 
 /// <summary>Menu verbs as the fixed reference maps them (input.c: direction keys navigate,
 /// Search=confirm, Menu=cancel). The host translates its physical keys into these verbs.</summary>
@@ -109,6 +113,13 @@ public sealed record ExplorationMenuStatusView(
 /// confirm included — can issue a second (#148 Story 12).</summary>
 public sealed record ExplorationMenuSaveRequest(Guid Id, int Slot);
 
+/// <summary>One committed load request from the system layer (#227; uigame.c PAL_SystemMenu's
+/// LOAD row over the same PAL_SaveSlotMenu): the request identity and the selected manual slot.
+/// Exactly one exists per confirmed read; while it exists the layer is parked and no key — a
+/// duplicate confirm included — can issue a second. The host completes the whole read/validate/
+/// candidate/switch chain inside that committed production update boundary (#148 Decision 31).</summary>
+public sealed record ExplorationMenuLoadRequest(Guid Id, int Slot);
+
 /// <summary>Exploration menu state machine per the fixed reference (uigame.c PAL_InGameMenu /
 /// PAL_PlayerStatus, ui.c PAL_ReadMenu). Pure projection of the shared live state owners; the
 /// session never mutates roles, equipment registers, poisons or the language package.</summary>
@@ -133,12 +144,17 @@ public sealed class ExplorationMenuSession
     /// <summary>Magic main-menu entry word (#216; reference GAMEMENU_LABEL_MAGIC).</summary>
     public const int MagicEntryWord = 60027;
     /// <summary>System main-menu entry word (#222/#224; reference GAMEMENU_LABEL_SYSTEM). Confirm on
-    /// this entry opens the system-menu layer (uigame.c PAL_SystemMenu → PAL_SaveSlotMenu), the
-    /// formal M6-C entry into the five-slot save flow. Word 60032: 60028/60029 stay the shop
-    /// confirm pair and 60030/60031 the shop price words (#217), so the system label takes the
-    /// next free id; hosts author the word in their prepared language package before adding
-    /// the entry, exactly like the equipment/items/magic entries before it.</summary>
+    /// this entry opens the system-menu layer (uigame.c PAL_SystemMenu), the formal M6-C entry
+    /// into the five-slot save flow. Word 60032: 60028/60029 stay the shop confirm pair and
+    /// 60030/60031 the shop price words (#217), so the system label takes the next free id;
+    /// hosts author the word in their prepared language package before adding the entry, exactly
+    /// like the equipment/items/magic entries before it.</summary>
     public const int SystemEntryWord = 60032;
+    /// <summary>The system layer's SAVE item word (#227; uigame.c SYSMENU_LABEL_SAVE) and its LOAD
+    /// item word (SYSMENU_LABEL_LOAD) — the two M6-C rows of the reference's system menu; the
+    /// music/sound/quit/battle-mode rows stay outside this milestone's scope. Hosts author both
+    /// words alongside the system entry label; the menu resolves them at construction.</summary>
+    public const int SaveItemWord = 60033, LoadItemWord = 60034;
 
     private readonly RoleLiveState roles;
     private readonly BattleEquipmentState equipment;
@@ -202,6 +218,13 @@ public sealed class ExplorationMenuSession
         }
         Entries = Array.AsReadOnly(entries.ToArray());
         Party = Array.AsReadOnly(party.ToArray());
+        if (entries.Any(entry => entry.Page == ExplorationMenuPage.System))
+        {
+            // #227: the system layer's SAVE/LOAD item rows (uigame.c PAL_SystemMenu) resolve now —
+            // a missing item word rejects before any menu state exists, exactly like the labels.
+            Word(SaveItemWord);
+            Word(LoadItemWord);
+        }
         if (entries.Any(entry => entry.Page == ExplorationMenuPage.Equipment))
         {
             // The equipment page requires the whole shared equip context up front: bindings over
@@ -308,15 +331,30 @@ public sealed class ExplorationMenuSession
     /// in MagicOnSuccess mode (the same cast the on-use receipt advanced).</summary>
     public ExplorationMenuMagicCast? PendingMagicSuccess { get; private set; }
     /// <summary>The committed save request awaiting the host's receipt (#224); non-null only while
-    /// the system layer is parked on one confirmed slot. The host completes the whole save chain
+    /// the slot layer is parked on one confirmed save. The host completes the whole save chain
     /// inside that committed production update boundary; the session itself never touches
     /// storage, so both receipt outcomes look identical here (#148 Decision 27).</summary>
     public ExplorationMenuSaveRequest? PendingSave { get; private set; }
     /// <summary>The remembered save-slot cursor (uigame.c PAL_SaveSlotMenu's static selection):
     /// one of the five manual slots {<see cref="PlayerSaveContract.FirstSlot"/>}..
     /// {<see cref="PlayerSaveContract.LastSlot"/>}, starts at 1 and survives closes; browsing only
-    /// moves it — never a file, never a switch (#148 Stories 3/4).</summary>
+    /// moves it — never a file, never a switch (#148 Stories 3/4). Both system intents share it.</summary>
     public int SelectedSaveSlot { get; private set; } = PlayerSaveContract.FirstSlot;
+    /// <summary>The remembered system-item cursor (uigame.c gpGlobals->iCurSystemMenuItem): row 0
+    /// (SAVE) or 1 (LOAD), starts at SAVE and survives closes exactly like the main-menu cursor.</summary>
+    public int SelectedSystemItem { get; private set; }
+    /// <summary>The intent the current slot layer was opened with (#227): SAVE confirms write a
+    /// slot; LOAD confirms read one. Meaningful only while <see cref="Mode"/> is
+    /// <see cref="ExplorationMenuMode.SystemMenu"/>.</summary>
+    public ExplorationSystemIntent SystemIntent { get; private set; }
+    /// <summary>The committed load request awaiting the host's receipt (#227); non-null only while
+    /// the slot layer is parked on one confirmed read. The host completes the whole chain inside
+    /// that committed production update boundary; the session itself never touches storage, so
+    /// both receipt outcomes leave the layer identical here (#148 Decision 27).</summary>
+    public ExplorationMenuLoadRequest? PendingLoad { get; private set; }
+    /// <summary>The system layer's item rows (#227): SAVE and LOAD only — the reference's
+    /// music/sound/quit/battle-mode items stay outside M6-C's scope.</summary>
+    public int SystemItemCount => 2;
     public IReadOnlyList<ExplorationMenuEntry> Entries { get; }
     public IReadOnlyList<ExplorationMenuMember> Party { get; }
 
@@ -325,6 +363,14 @@ public sealed class ExplorationMenuSession
         if (index is < 0 || index >= Entries.Count) throw new ArgumentOutOfRangeException(nameof(index));
         return Word(Entries[index].WordId);
     }
+
+    /// <summary>One system-item row's label text (#227): index 0 is the SAVE row, 1 the LOAD row.</summary>
+    public string SystemItemLabel(int index) => index switch
+    {
+        0 => Word(SaveItemWord),
+        1 => Word(LoadItemWord),
+        _ => throw new ArgumentOutOfRangeException(nameof(index)),
+    };
 
     /// <summary>uigame.c: kKeyMenu during exploration opens the in-game main menu at the remembered cursor.</summary>
     public void Open()
@@ -340,8 +386,8 @@ public sealed class ExplorationMenuSession
             throw new InvalidOperationException("The pending item script owns input.");
         if (Mode is ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess)
             throw new InvalidOperationException("The pending magic script owns input.");
-        if (Mode == ExplorationMenuMode.SystemMenu && PendingSave is not null)
-            throw new InvalidOperationException("The pending save owns input.");
+        if (Mode == ExplorationMenuMode.SystemMenu && (PendingSave is not null || PendingLoad is not null))
+            throw new InvalidOperationException("A pending save or load owns input.");
         switch (Mode)
         {
             case ExplorationMenuMode.MainMenu:
@@ -388,10 +434,10 @@ public sealed class ExplorationMenuSession
                         else if (Entries[SelectedEntry].Page == ExplorationMenuPage.System)
                         {
                             // uigame.c PAL_InGameMenu's system item opens PAL_SystemMenu; the
-                            // world stays frozen while the system layer owns input. #222 declares
-                            // this the formal M6-C entry into save mode; the slot-selection and
-                            // confirmation UI inside the system layer belongs to the later C leaf.
-                            Mode = ExplorationMenuMode.SystemMenu;
+                            // world stays frozen while the system layer owns input. #222 declared
+                            // this the formal M6-C entry; #227 restores the reference's item rows
+                            // so a load intent can be chosen before the shared slot list opens.
+                            Mode = ExplorationMenuMode.SystemItems;
                         }
                         break;
                     case ExplorationMenuKey.Cancel:
@@ -688,13 +734,37 @@ public sealed class ExplorationMenuSession
             case ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess:
                 // Host-owned parking; the guard above already rejected the key.
                 break;
+            case ExplorationMenuMode.SystemItems:
+                // uigame.c PAL_SystemMenu: the item list wraps both ways (ui.c PAL_ReadMenu);
+                // kKeySearch opens the chosen item's flow — SAVE (#224) or LOAD (#227) — over the
+                // shared five-slot layer, and kKeyMenu returns to the in-game main menu. M6-C
+                // authors exactly the SAVE and LOAD rows; the reference's remaining system items
+                // stay outside this milestone's scope.
+                switch (key)
+                {
+                    case ExplorationMenuKey.Up or ExplorationMenuKey.Left:
+                        SelectedSystemItem = (SelectedSystemItem + SystemItemCount - 1) % SystemItemCount;
+                        break;
+                    case ExplorationMenuKey.Down or ExplorationMenuKey.Right:
+                        SelectedSystemItem = (SelectedSystemItem + 1) % SystemItemCount;
+                        break;
+                    case ExplorationMenuKey.Confirm:
+                        SystemIntent = SelectedSystemItem == 0 ? ExplorationSystemIntent.Save : ExplorationSystemIntent.Load;
+                        Mode = ExplorationMenuMode.SystemMenu;
+                        break;
+                    case ExplorationMenuKey.Cancel:
+                        Mode = ExplorationMenuMode.MainMenu;
+                        break;
+                }
+                break;
             case ExplorationMenuMode.SystemMenu:
-                // uigame.c PAL_SystemMenu/PAL_SaveSlotMenu: Up/Left and Down/Right wrap the five
-                // manual slots and only move the remembered cursor — browsing never writes and
-                // never switches anything (#148 Stories 3/4). kKeySearch confirms the selected
-                // slot as exactly one pending save request and parks the layer until the host's
-                // receipt; a duplicate confirm or key echo can never issue a second (Story 12).
-                // kKeyMenu returns to the in-game main menu.
+                // uigame.c PAL_SaveSlotMenu over the intent chosen on the system items: Up/Left and
+                // Down/Right wrap the five manual slots and only move the remembered cursor —
+                // browsing never reads or writes and never switches anything (#148 Stories 3/4,
+                // 35). kKeySearch confirms the selected slot as exactly one pending request of
+                // the layer's intent (a save write or a load read) and parks the layer until the
+                // host's receipt; a duplicate confirm or key echo can never issue a second
+                // (Story 12; Decision 31). kKeyMenu returns to the system items.
                 switch (key)
                 {
                     case ExplorationMenuKey.Up or ExplorationMenuKey.Left:
@@ -706,10 +776,13 @@ public sealed class ExplorationMenuSession
                             ? PlayerSaveContract.FirstSlot : SelectedSaveSlot + 1;
                         break;
                     case ExplorationMenuKey.Confirm:
-                        PendingSave = new(Guid.NewGuid(), SelectedSaveSlot);
+                        if (SystemIntent == ExplorationSystemIntent.Save)
+                            PendingSave = new(Guid.NewGuid(), SelectedSaveSlot);
+                        else
+                            PendingLoad = new(Guid.NewGuid(), SelectedSaveSlot);
                         break;
                     case ExplorationMenuKey.Cancel:
-                        Mode = ExplorationMenuMode.MainMenu;
+                        Mode = ExplorationMenuMode.SystemItems;
                         break;
                 }
                 break;
@@ -925,6 +998,20 @@ public sealed class ExplorationMenuSession
             throw new InvalidOperationException("The pending save does not match the completed request.");
         _ = succeeded; // both outcomes leave the layer identical; the host owns the outcome effects
         PendingSave = null;
+    }
+
+    /// <summary>Host receipt for the confirmed load (#227): only the owned request id completes
+    /// the parking, and the completed read — success or failure alike — returns the layer to slot
+    /// browsing. A failed read leaves the original session and the current recovery slot
+    /// untouched and the player can cancel back to the gameplay exactly as it was (#148 Stories
+    /// 30/35); a successful switch retires the whole old session — this host of the retired
+    /// session included — so the receipt only ever re-opens browsing for the kept session.</summary>
+    public void CompleteLoad(Guid requestId, bool succeeded)
+    {
+        if (Mode != ExplorationMenuMode.SystemMenu || PendingLoad is not { } request || request.Id != requestId)
+            throw new InvalidOperationException("The pending load does not match the completed request.");
+        _ = succeeded; // both outcomes leave the layer identical; the host owns the outcome effects
+        PendingLoad = null;
     }
 
     /// <summary>The bound equip-menu rows whose stock is owned, in authored binding order.</summary>

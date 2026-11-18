@@ -18,11 +18,14 @@ public sealed record PlayerSaveWorldRestoreContent(
 
 /// <summary>The world-domain restore candidate: a freshly constructed shared-owner
 /// <see cref="DynamicEventWorld"/> seeded from one decoded v1 snapshot's world domain, plus the
-/// rebuilt <see cref="ExplorationSession"/> view over it. The candidate commit/switch (old
-/// session retirement) is a later leaf's boundary (c7): this record is a plan's output, not a
-/// live session swap, and constructing it never advanced a script, a world tick or gameplay
-/// randomness (#148 Decision 24).</summary>
+/// rebuilt <see cref="ExplorationSession"/> view over it. <see cref="Rules"/> is the exact
+/// world-projected rule set that view was built from — the host's rebuilt exploration owner
+/// (its interaction session) consumes it instead of re-deriving the projection (#227). The
+/// candidate commit/switch (old session retirement) is a later leaf's boundary (c7): this
+/// record is a plan's output, not a live session swap, and constructing it never advanced a
+/// script, a world tick or gameplay randomness (#148 Decision 24).</summary>
 public sealed record PlayerSaveWorldRestoreCandidate(
+    StaticSceneRules Rules,
     DynamicEventWorld World,
     ExplorationSession Exploration,
     TriggerMusicState? Music);
@@ -118,10 +121,10 @@ public static class PlayerSaveWorldRestorePlan
         // DynamicEventSession applies, the saved leader, a fresh BuildPlan and a brand-new
         // scheduling basis: no old absolute deadline is restored and shutdown downtime never
         // replays (Decision 16; the first due update commits exactly once at any new tick).
-        var exploration = new ExplorationSession(
-            content.SceneRules.WithObjects(world.Objects.Select(DynamicEventSession.ObjectView)), leader);
+        var restoredRules = content.SceneRules.WithObjects(world.Objects.Select(DynamicEventSession.ObjectView));
+        var exploration = new ExplorationSession(restoredRules, leader);
 
-        return new(world, exploration,
+        return new(restoredRules, world, exploration,
             saved.Music is { } music ? new TriggerMusicState(music.MusicId, music.Mode) : null);
     }
 

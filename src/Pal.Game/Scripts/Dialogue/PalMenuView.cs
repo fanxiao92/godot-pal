@@ -57,6 +57,10 @@ public sealed partial class PalMenuView : Node2D
     // remembered cursor; composed row texts are validated like every other page.
     private string[] saveSlotLines = [];
     private int selectedSaveSlot;
+    // #227 system items: the reference system menu's SAVE/LOAD rows (uigame.c PAL_SystemMenu)
+    // with the remembered cursor; composed row texts are validated like every other page.
+    private string[] systemItemLines = [];
+    private int selectedSystemItem;
 
     internal ExplorationMenuMode Mode => menu?.Mode ?? ExplorationMenuMode.Closed;
 
@@ -117,6 +121,8 @@ public sealed partial class PalMenuView : Node2D
         magicTargetStatLines = [];
         saveSlotLines = [];
         selectedSaveSlot = menu.SelectedSaveSlot;
+        systemItemLines = [];
+        selectedSystemItem = menu.SelectedSystemItem;
         if (menu.Mode == ExplorationMenuMode.Status)
         {
             var view = menu.StatusView();
@@ -203,6 +209,13 @@ public sealed partial class PalMenuView : Node2D
             magicTargetStatLines = [$"{selection.HpLabel}:{target.Hp}/{target.MaxHp}",
                 $"{selection.MpLabel}:{target.Mp}/{target.MaxMp}"];
         }
+        else if (menu.Mode == ExplorationMenuMode.SystemItems)
+        {
+            // uigame.c PAL_SystemMenu: the M6-C item rows (SAVE/LOAD) with the remembered cursor;
+            // the reference's remaining system items stay outside this milestone's scope.
+            selectedSystemItem = menu.SelectedSystemItem;
+            systemItemLines = Enumerable.Range(0, menu.SystemItemCount).Select(menu.SystemItemLabel).ToArray();
+        }
         else if (menu.Mode == ExplorationMenuMode.SystemMenu)
         {
             // uigame.c PAL_SaveSlotMenu: the five manual slots with the remembered cursor; the
@@ -228,7 +241,8 @@ public sealed partial class PalMenuView : Node2D
             .Concat(equipItemLines).Append(equipSelectionText).Concat(equipRoleLines).Concat(equipGearLines)
             .Concat(useItemLines).Append(useHeaderText).Concat(useTargetLines).Concat(useTargetStatLines)
             .Concat(magicCasterLines).Concat(magicLines).Append(magicHeaderText)
-            .Concat(magicTargetLines).Concat(magicTargetStatLines).Concat(saveSlotLines));
+            .Concat(magicTargetLines).Concat(magicTargetStatLines).Concat(saveSlotLines)
+            .Concat(systemItemLines));
         QueueRedraw();
     }
 
@@ -250,6 +264,17 @@ public sealed partial class PalMenuView : Node2D
         }
         DrawRect(new Rect2(0, 0, 320, 200), palette[0], filled: true);
         DrawRect(new Rect2(2, 2, 316, 196), PaletteColor(0x4F), width: 1);
+        if (menu.Mode == ExplorationMenuMode.SystemItems)
+        {
+            // uigame.c PAL_SystemMenu: the M6-C SAVE/LOAD item rows with the remembered cursor.
+            for (int index = 0; index < systemItemLines.Length; index++)
+            {
+                bool selected = index == selectedSystemItem;
+                DrawBitmapText(systemItemLines[index], 16, 12 + index * 18, selected ? 5 : 0x4F);
+                if (selected) DrawRect(new Rect2(8, 20 + index * 18, 6, 6), PaletteColor(5));
+            }
+            return;
+        }
         if (menu.Mode == ExplorationMenuMode.SystemMenu)
         {
             // uigame.c PAL_SaveSlotMenu: the five manual slot rows with the remembered cursor.

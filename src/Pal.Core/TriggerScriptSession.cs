@@ -214,6 +214,19 @@ public sealed class TriggerScriptSession
 
     public void Start(string fileId, string entryId, int caller) => StartCall(fileId, entryId, caller, null);
 
+    /// <summary>#227 host hook (matrix D13): seed a freshly constructed session's music owner
+    /// from one restored world candidate — the last setMusic words the loaded save carried —
+    /// so a subsequent save captures them instead of losing them through the round-trip. Only
+    /// a resting session accepts the seed; a running call's music stays its own executed
+    /// transition (script.c 0x0043), never a host-written word.</summary>
+    public void RestoreMusic(TriggerMusicState music)
+    {
+        ArgumentNullException.ThrowIfNull(music);
+        if (Phase != TriggerScriptPhase.Ready)
+            throw new InvalidOperationException("Only a resting trigger session accepts a restored music owner.");
+        Music = music;
+    }
+
     public void Start(string fileId, string entryId, int caller, Guid sourceRequestId)
     {
         if (sourceRequestId == Guid.Empty) throw new ArgumentException("A source request ID must be nonempty.", nameof(sourceRequestId));

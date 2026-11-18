@@ -19,11 +19,14 @@ public sealed class ExplorationSaveGateTests
         gate.NotifyProductionUpdateCommitted();
 
         // The formal system-menu entry: the main menu's System item (uigame.c PAL_InGameMenu)
-        // opens the system-menu layer, the only layer a save request can originate from.
+        // opens the system-menu layer; #227's SAVE row enters the slot layer a save request
+        // can originate from.
         var menu = fixture.Menu;
         menu.Open();
         Assert.Equal(ExplorationMenuMode.MainMenu, menu.Mode);
         menu.Press(ExplorationMenuKey.Down);
+        menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemItems, menu.Mode);
         menu.Press(ExplorationMenuKey.Confirm);
 
         var activity = new ExplorationSaveActivity(Battle: null, Trigger: fixture.CompletedTrigger,
@@ -129,9 +132,12 @@ public sealed class ExplorationSaveGateTests
         fixture.Menu.Open();
         fixture.Menu.Press(ExplorationMenuKey.Down);
         fixture.Menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemItems, fixture.Menu.Mode); // #227's item layer
+        fixture.Menu.Press(ExplorationMenuKey.Confirm);
         Assert.Equal(ExplorationMenuMode.SystemMenu, fixture.Menu.Mode);
         Assert.Equal(ExplorationSaveRejection.MovementWaitPending, Reject(gate, fixture, trigger: movement));
-        fixture.Menu.Press(ExplorationMenuKey.Cancel); // back to MainMenu for the later variants
+        fixture.Menu.Press(ExplorationMenuKey.Cancel); // slot layer -> the #227 system items
+        fixture.Menu.Press(ExplorationMenuKey.Cancel); // system items -> MainMenu for the later variants
         var sceneWait = ParkedTrigger(fixture.World,
             """{"op":"waitUpdate","frames":3,"runTriggers":0,"updateGestures":0}""");
         Assert.Equal(TriggerScriptPhase.WaitingForSceneWait, sceneWait.Phase);
@@ -191,6 +197,8 @@ public sealed class ExplorationSaveGateTests
         fixture.Menu.Open();
         fixture.Menu.Press(ExplorationMenuKey.Down);
         fixture.Menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemItems, fixture.Menu.Mode); // #227's item layer
+        fixture.Menu.Press(ExplorationMenuKey.Confirm);
         Assert.Equal(ExplorationMenuMode.SystemMenu, fixture.Menu.Mode);
         var activity = new ExplorationSaveActivity(null, fixture.CompletedTrigger, null, null, fixture.Menu);
 
@@ -229,8 +237,11 @@ public sealed class ExplorationSaveGateTests
         Assert.Equal(ExplorationMenuMode.MainMenu, menu.Mode);
         Assert.Equal("系统", menu.EntryLabel(1));
 
-        // uigame.c PAL_InGameMenu's system item opens the system-menu layer (PAL_SystemMenu).
+        // uigame.c PAL_InGameMenu's system item opens the system-menu layer (PAL_SystemMenu's
+        // #227 item rows; its SAVE row enters the slot list).
         menu.Press(ExplorationMenuKey.Down);
+        menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemItems, menu.Mode);
         menu.Press(ExplorationMenuKey.Confirm);
         Assert.Equal(ExplorationMenuMode.SystemMenu, menu.Mode);
         // #224 replaces #222's provisional "every other key stays inert" leaf contract with the
@@ -259,11 +270,15 @@ public sealed class ExplorationSaveGateTests
         // the remembered cursor survives closes (gpGlobals->iCurMainMenuItem), so a reopen
         // still lands on the system entry and Confirm re-enters the layer without moving.
         menu.Press(ExplorationMenuKey.Cancel);
+        Assert.Equal(ExplorationMenuMode.SystemItems, menu.Mode);
+        menu.Press(ExplorationMenuKey.Cancel);
         Assert.Equal(ExplorationMenuMode.MainMenu, menu.Mode);
         menu.Press(ExplorationMenuKey.Cancel);
         Assert.Equal(ExplorationMenuMode.Closed, menu.Mode);
         menu.Open();
         Assert.Equal(1, menu.SelectedEntry);
+        menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemItems, menu.Mode);
         menu.Press(ExplorationMenuKey.Confirm);
         Assert.Equal(ExplorationMenuMode.SystemMenu, menu.Mode);
     }
@@ -407,6 +422,8 @@ public sealed class ExplorationSaveGateTests
         {
             [ExplorationMenuSession.StatusEntryWord] = "状态",
             [ExplorationMenuSession.SystemEntryWord] = "系统",
+            [ExplorationMenuSession.SaveItemWord] = "存档",
+            [ExplorationMenuSession.LoadItemWord] = "读取",
             [60100] = "大侠",
             [60102] = "侠三",
             [60105] = "剑客",

@@ -48,6 +48,12 @@ public class SystemSaveSceneTests
             AssertThat(host.Main.Menu.EntryLabel(1)).IsEqual("SYSTEM");
             host.Tap(Key.Down);
             host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Menu!.Mode == ExplorationMenuMode.SystemItems);
+            // #227: the reference system menu's item rows (uigame.c PAL_SystemMenu SAVE/LOAD) —
+            // confirming the remembered SAVE row enters the five-slot layer with the save intent.
+            AssertThat(host.Main.Menu!.SystemItemLabel(0)).IsEqual("SAVE");
+            AssertThat(host.Main.Menu!.SystemItemLabel(1)).IsEqual("LOAD");
+            host.Tap(Key.Enter);
             await host.Wait(() => host.Main.Menu!.Mode == ExplorationMenuMode.SystemMenu);
 
             var menu = host.Main.Menu!;
@@ -119,8 +125,10 @@ public class SystemSaveSceneTests
             AssertThat(host.Main.CurrentRecoverySlot).IsEqual(2);
             AssertThat(menu.Mode).IsEqual(ExplorationMenuMode.SystemMenu);
 
-            // kKeyMenu leaves the layer back to the main menu, the menu closes, and exploration
-            // input resumes on the next update (uigame.c).
+            // kKeyMenu leaves the slot layer back to the system items, then the main menu; the
+            // menu closes and exploration input resumes on the next update (uigame.c).
+            host.Tap(Key.Escape);
+            await host.Wait(() => menu.Mode == ExplorationMenuMode.SystemItems);
             host.Tap(Key.Escape);
             await host.Wait(() => menu.Mode == ExplorationMenuMode.MainMenu);
             host.Tap(Key.Escape);

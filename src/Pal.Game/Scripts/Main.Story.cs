@@ -34,8 +34,9 @@ public partial class Main
     private PlayerSaveStorage? storySaveStorage;
     private int storySaveCount;
     /// <summary>The session's current recovery slot (#148 Decision 27): null in an independent
-    /// context; only a completed save switches it in this leaf — browsing, rejection, write
-    /// failure and cancellation never do (a completed read joins with its own C leaf).</summary>
+    /// context; only a completed save (#224) or a completed read (#227 — always this session's
+    /// actually selected slot, never the payload's carried one) switches it. Browsing,
+    /// rejection, write failure, read failure and cancellation never do.</summary>
     public int? CurrentRecoverySlot { get; private set; }
     /// <summary>The gameplay content identity this session's saves bind to (#221 matrix D1):
     /// the scene bundle hash folded with every verified resource hash, independent of
@@ -193,28 +194,9 @@ public partial class Main
             // label and role-name words now, and the font preflight covers every glyph the menu
             // can draw, so missing content rejects before the scene publishes ready. The
             // equipment page exists only for scenarios that author an equip context; its bag,
-            // bindings and poison owner come from the same shared live owners.
-            var menuEntries = new List<ExplorationMenuEntry>
-            {
-                new(ExplorationMenuPage.Status, ExplorationMenuSession.StatusEntryWord),
-            };
-            if (equipmentPage) menuEntries.Add(new(ExplorationMenuPage.Equipment, ExplorationMenuSession.EquipmentEntryWord));
-            if (itemsPage) menuEntries.Add(new(ExplorationMenuPage.Items, ExplorationMenuSession.ItemsEntryWord));
-            if (magicPage) menuEntries.Add(new(ExplorationMenuPage.Magic, ExplorationMenuSession.MagicEntryWord));
-            // #222/#224: the formal M6-C system entry (uigame.c GAMEMENU_LABEL_SYSTEM, the
-            // reference's always-present last item) opens the system-menu save layer for every
-            // story context; its label word resolves with the other entries below.
-            menuEntries.Add(new(ExplorationMenuPage.System, ExplorationMenuSession.SystemEntryWord));
-            menu = new ExplorationMenuSession(
-                menuEntries,
-                checkedStory.BattleContent.Players.Select(player => new ExplorationMenuMember(player.RoleId,
-                    ExplorationMenuSession.RoleNameWordBase + player.RoleId,
-                    checkedStory.BattleContent.PanelDeclaredRoles.Contains(player.RoleId),
-                    player.Attack, player.MagicPower, player.Defense, player.Dexterity, player.FleeRate)).ToArray(),
-                roleLiveState, storyEquipment,
-                checkedStory.BattleContent.GrowthByRole, checkedStory.SelectedWords, storyPoisons,
-                checkedStory.BattleContent.EquipMenu, checkedStory.BattleContent.EquipmentObjects, storyInventory,
-                checkedStory.BattleContent.UseMenu, checkedStory.BattleContent.MagicMenu);
+            // bindings and poison owner come from the same shared live owners. #227 extracts the
+            // construction so a committed load rebuilds the same session over restored owners.
+            menu = BuildStoryMenu(storyPartyRoleIds, roleLiveState, storyEquipment, storyPoisons, storyInventory);
             PalMenuView.ValidateTexts(checkedStory.Font,
                 Enumerable.Range(0, menu.Entries.Count).Select(menu.EntryLabel)
                     .Concat(new[]
@@ -272,6 +254,43 @@ public partial class Main
             throw;
         }
     }
+    /// <summary>The story host's exploration menu session over the shared live owners
+    /// (#213–#217, #222/#224). #227 extracts the construction so the load commit rebuilds the
+    /// exact same session shape over the restored owners and the saved party order — every
+    /// restored member must map to an authored player record (its name word, panel declaration
+    /// and authored panel words are content words), and the session resolves every label, name
+    /// and binding word at construction, so a closure the prepared content cannot rebuild
+    /// rejects before the switch applies anything anywhere.</summary>
+    private ExplorationMenuSession BuildStoryMenu(IReadOnlyList<int> partyRoleIds, RoleLiveState roles,
+        BattleEquipmentState equipment, PartyPoisonState poisons, InventoryLiveState inventory)
+    {
+        var content = story!.BattleContent;
+        var byRole = content.Players.ToDictionary(player => player.RoleId);
+        var menuEntries = new List<ExplorationMenuEntry>
+        {
+            new(ExplorationMenuPage.Status, ExplorationMenuSession.StatusEntryWord),
+        };
+        if (content.EquipMenu.Count > 0) menuEntries.Add(new(ExplorationMenuPage.Equipment, ExplorationMenuSession.EquipmentEntryWord));
+        if (content.UseMenu.Count > 0) menuEntries.Add(new(ExplorationMenuPage.Items, ExplorationMenuSession.ItemsEntryWord));
+        if (content.MagicMenu.Count > 0) menuEntries.Add(new(ExplorationMenuPage.Magic, ExplorationMenuSession.MagicEntryWord));
+        // #222/#224: the formal M6-C system entry (uigame.c GAMEMENU_LABEL_SYSTEM, the
+        // reference's always-present last item) opens the system-menu layer for every story
+        // context; #227's SAVE/LOAD item words resolve with the other entries.
+        menuEntries.Add(new(ExplorationMenuPage.System, ExplorationMenuSession.SystemEntryWord));
+        return new ExplorationMenuSession(
+            menuEntries,
+            partyRoleIds.Select(roleId => byRole.TryGetValue(roleId, out var player)
+                ? new ExplorationMenuMember(roleId, ExplorationMenuSession.RoleNameWordBase + roleId,
+                    content.PanelDeclaredRoles.Contains(roleId),
+                    player.Attack, player.MagicPower, player.Defense, player.Dexterity, player.FleeRate)
+                : throw new InvalidDataException(
+                    $"The party member {roleId} has no authored player record in the prepared battle content."))
+                .ToArray(),
+            roles, equipment, content.GrowthByRole, story.SelectedWords, poisons,
+            content.EquipMenu, content.EquipmentObjects, inventory,
+            content.UseMenu, content.MagicMenu);
+    }
+
     /// <summary>One empty unused role record (#224): level 0, no vitals, seven zero growth
     /// tracks and zero panels — the reference's unallocated rgPlayerRoles row.</summary>
     private static BattleRoleSnapshot EmptyRole(int roleId) => new(roleId, 0, 0, 0, 0, 0,
@@ -855,6 +874,11 @@ public partial class Main
                         // committed production update boundary (the parked layer owns input
                         // until the receipt; duplicates never issue a second).
                         CompleteMenuSave(pendingSave);
+                    else if (menu.Mode == ExplorationMenuMode.SystemMenu && menu.PendingLoad is { } pendingLoad)
+                        // #227: the confirmed read's whole chain completes inside this same
+                        // committed production update boundary; a successful switch retires this
+                        // very menu (the Closed branch below frees its view), a failure keeps it.
+                        CompleteMenuLoad(pendingLoad);
                 }
                 if (menu.Mode == ExplorationMenuMode.Closed)
                 {
@@ -989,6 +1013,121 @@ public partial class Main
         CurrentRecoverySlot = pending.Slot; // #148 Decision 27: only a completed save switches it
         menu!.CompleteSave(pending.Id, succeeded: true);
         GD.Print($"PAL_SAVE_COMPLETED:slot={pending.Slot};savedTimes={storySaveCount};recoverySlot={CurrentRecoverySlot}");
+    }
+
+    /// <summary>#227 (parent #148 Stories 27–31, Decisions 24–25): the confirmed read's whole
+    /// chain completes inside this one committed production update boundary — real FileAccess
+    /// slot read through the #224 adapter, #223 decode/validation against this context's content
+    /// identity, then the #225/#226 restore plans' complete candidate set. Any read, validation
+    /// or preparation failure keeps the original session and the current recovery slot untouched
+    /// (Story 30), un-parks the layer for cancel (Story 35) and reports one located reason;
+    /// only a completed switch commits and retires the old session.</summary>
+    private void CompleteMenuLoad(ExplorationMenuLoadRequest pending)
+    {
+        byte[]? bytes;
+        try { bytes = storySaveStorage!.ReadSlot(pending.Slot); }
+        catch (InvalidDataException error) { MenuLoadFailed(pending, error.Message); return; }
+        if (bytes is null) { MenuLoadFailed(pending, "slot-missing"); return; }
+        PlayerSaveV1 save;
+        try { save = PlayerSaveJson.Decode(bytes, SaveContentIdentity!); }
+        catch (InvalidDataException error) { MenuLoadFailed(pending, error.Message); return; }
+        var oldMenu = menu!;
+        try { CommitLoadedSession(pending.Slot, save); }
+        catch (InvalidDataException error) { MenuLoadFailed(pending, error.Message); return; }
+        // The retired session still receipts its own request exactly once (Story 33: old
+        // receipts never reach the new session — this is the only completion it will accept).
+        oldMenu.CompleteLoad(pending.Id, succeeded: true);
+    }
+
+    private void MenuLoadFailed(ExplorationMenuLoadRequest pending, string reason)
+    {
+        // Story 30/35: the original session and the current recovery slot stay untouched; the
+        // layer re-opens browsing so the player can cancel back to the gameplay as it was.
+        menu!.CompleteLoad(pending.Id, succeeded: false);
+        GD.Print($"PAL_LOAD_FAILED:slot={pending.Slot};reason={reason};recoverySlotKept={(CurrentRecoverySlot is { } kept ? kept : 0)}");
+    }
+
+    /// <summary>#227 (parent #148 Decision 24–25): builds the complete candidate set first —
+    /// the #225 role-domain owners over the prepared battle-content closures, the #226
+    /// world/exploration/music candidates over the prepared scene closure, then every rebinding
+    /// the switch needs (fresh menu, interaction, shop and a brand-new trigger executor over a
+    /// brand-new dialogue node) — and only then swaps ownership in one throwaway-free pass:
+    /// nothing is applied anywhere before the complete candidate exists, so any rejection
+    /// leaves the old session fully usable. The swap itself happens inside the caller's already
+    /// committed production update boundary: the old session is frozen (the menu owns input)
+    /// and the new owners publish before any further update can run, so old and new sessions
+    /// never update in parallel (Decision 25). The new session re-establishes request/receipt
+    /// identity, subscriptions and input ownership (Decision 26): the old dialogue node (its
+    /// display subscription and pending state included) is retired, the per-session request ids
+    /// are cleared, and the restored setMusic words reseed the fresh D13 owner.</summary>
+    private void CommitLoadedSession(int slot, PlayerSaveV1 save)
+    {
+        var checkedStory = story!;
+        var content = checkedStory.BattleContent;
+        // The prepared closures the candidates validate against: every magic word the authored
+        // content declares (role tables ∪ menu bindings), every item object the context can
+        // own (bag seed ∪ shop ∪ use-menu) and the declared equipment objects. An id outside
+        // these closures can never correspond to a real capture of this content and rejects
+        // fail-closed inside the plans (#148 Decision 19/24).
+        var magicClosure = new HashSet<int>(content.MagicMenu.Select(binding => binding.ObjectId));
+        foreach (var role in content.InitialRoles.Values)
+            foreach (int magic in role.Magics)
+                if (magic != 0) magicClosure.Add(magic);
+        var itemClosure = new HashSet<int>(content.UseMenu.Select(binding => binding.ObjectId));
+        foreach (int objectId in content.ShopObjects.Keys) itemClosure.Add(objectId);
+        foreach (var row in content.InitialInventory)
+            if (row.ItemId != 0) itemClosure.Add(row.ItemId);
+        var roles = PlayerSaveRestorePlan.Build(save, new PlayerSaveRestoreContent(
+            content.EquipmentObjects, magicClosure, itemClosure, new Dictionary<int, int>()));
+        var world = PlayerSaveWorldRestorePlan.BuildWorld(save, new PlayerSaveWorldRestoreContent(
+            storyWorld!.SceneId, checkedStory.Exploration.Rules, checkedStory.Exploration.Leader), roles);
+        bool equipmentPage = content.EquipMenu.Count > 0;
+        bool shopContext = content.ShopObjects.Count > 0;
+        var newInteraction = NpcInteractionSession.ForSelectedEntry(
+            world.Rules, world.World.Leader, checkedStory.Entry);
+        var newMenu = BuildStoryMenu(roles.PartyRoleIds, roles.Roles, roles.Equipment, roles.Poisons, roles.Inventory);
+        var newShop = shopContext
+            ? new ExplorationShopSession(content.Stores, content.ShopObjects,
+                roles.Cash, roles.Inventory, roles.Roles, roles.PartyRoleIds, checkedStory.SelectedWords)
+            : null;
+        var newDialogue = new PalTriggerDialogue();
+        try
+        {
+            newDialogue.FirstBattleWorld = world.World;
+            newDialogue.Initialize(Display!, checkedStory, storyRandom!,
+                equipmentPage ? roles.Equipment : null, equipmentPage ? roles.Poisons : null,
+                shopContext ? roles.Cash : null, shopContext ? roles.Inventory : null);
+            if (world.Music is { } music) newDialogue.Session!.RestoreMusic(music);
+        }
+        catch { newDialogue.Free(); throw; }
+        // One-shot ownership commit (Decision 25): field swaps only — nothing below can throw.
+        var oldDialogue = Dialogue!;
+        roleLiveState = roles.Roles;
+        storyEquipment = roles.Equipment;
+        storyPoisons = roles.Poisons;
+        storyInventory = roles.Inventory;
+        storyCash = roles.Cash;
+        storyWorld = world.World;
+        storySaveGate = new ExplorationSaveGate(roleLiveState, storyInventory, storyCash, storyWorld);
+        storySaveCount = save.SavedTimes;
+        CurrentRecoverySlot = slot; // Decision 27: this session's actually selected slot, never the payload's
+        RemoveChild(oldDialogue);
+        oldDialogue.Free();
+        AddChild(newDialogue);
+        Dialogue = newDialogue;
+        Interaction = newInteraction;
+        shop = newShop;
+        // Decision 26: new request/receipt identities — old item/magic/shop requests, the parked
+        // search trigger and every queued key die with the old session; no old receipt can
+        // complete anything on the new owners.
+        itemUseId = Guid.Empty; magicRunId = Guid.Empty; shopRequestId = Guid.Empty;
+        activeTrigger = null;
+        menuOpenPressed = false;
+        pendingMenuKeys.Clear();
+        pendingShopKeys.Clear();
+        menu = newMenu;
+        mapScene!.UpdateScene(newInteraction.Current.Plan);
+        GD.Print($"PAL_LOAD_COMPLETED:slot={slot};savedTimes={storySaveCount};recoverySlot={CurrentRecoverySlot}");
     }
 
     /// <summary>#217 script.c 0x0026/0x0027: the parked shop request opens the shop over the
