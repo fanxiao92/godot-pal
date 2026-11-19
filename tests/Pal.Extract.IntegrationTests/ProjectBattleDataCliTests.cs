@@ -90,8 +90,6 @@ public sealed class ProjectBattleDataCliTests : IDisposable
     [InlineData("sourceHash", "sha256")]
     [InlineData("nonzeroEquipment", "equipment[2][4]")]
     [InlineData("magicFFFF", "magicId")]
-    [InlineData("emptySlot", "zero")]
-    [InlineData("tailEmptySlot", "zero")]
     [InlineData("fourRoles", "roles")]
     [InlineData("role5", "sixth")]
     [InlineData("missingTeam", "missing referenced")]
@@ -105,7 +103,7 @@ public sealed class ProjectBattleDataCliTests : IDisposable
         else if (mutation == "truncated") File.WriteAllText(Path.Combine(input, "index.json"), "{");
         else if (mutation is not "fourRoles" and not "role5" and not "missingTeam")
         {
-            string file = mutation is "nonzeroEquipment" ? "player-roles.json" : mutation is "magicFFFF" ? "enemy.json" : mutation is "emptySlot" or "tailEmptySlot" ? "enemy-team.json" : "index.json";
+            string file = mutation is "nonzeroEquipment" ? "player-roles.json" : mutation is "magicFFFF" ? "enemy.json" : "index.json";
             BattleProjectionFixture.Mutate(files, file, d =>
             {
                 if (mutation == "unknownKey") d["unexpected"] = true;
@@ -114,7 +112,7 @@ public sealed class ProjectBattleDataCliTests : IDisposable
                 else if (mutation == "sourceHash") d["sources"]![1]!["sha256"] = "not-a-hash";
                 else if (mutation == "nonzeroEquipment") d["records"]![0]!["equipment"]![2]![4] = 8;
                 else if (mutation == "magicFFFF") { d["records"]![1]!["magicId"] = 65535; d["records"]![1]!["magicRate"] = 0; }
-                else d["records"]![0]!["enemies"]![mutation == "tailEmptySlot" ? 4 : 1] = 0;
+                else d["records"]![0]!["enemies"]![1] = 65534;
             });
             Save(files);
         }
@@ -124,6 +122,34 @@ public sealed class ProjectBattleDataCliTests : IDisposable
         Assert.Empty(result.Stdout);
         Assert.Contains(diagnostic, result.Stderr, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(Directory.EnumerateFileSystemEntries(output));
+    }
+
+    [Theory]
+    [InlineData("emptySlot", 1, 1)]
+    [InlineData("tailEmptySlot", 4, -1)]
+    public async Task Zero_source_rows_project_as_isEmpty_runtime_slots(string mutation, int sourceSlot, int expectedIndex)
+    {
+        // #140 (battle.c:1617-1717): a zero source row is a legal empty runtime slot, not a
+        // projection fault — the CLI exits zero and emits the canonical isEmpty enemy. The old
+        // exit-one expectation predates #140 and was not migrated with the unit-layer contract.
+        // FFFF rows are skipped without runtime slots, so a zero tail row lands at the dense
+        // array end (expectedIndex -1) rather than at its source index.
+        var files = BattleProjectionFixture.Create();
+        BattleProjectionFixture.Mutate(files, "enemy-team.json", d =>
+            d["records"]![0]!["enemies"]![sourceSlot] = 0);
+        Save(files);
+        var result = await Run();
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.Stderr);
+        string numeric = Path.Combine(output, "numeric", "battle-data.json");
+        var content = JsonNode.Parse(File.ReadAllText(numeric))!;
+        var enemies = content["teams"]![0]!["enemies"]!.AsArray();
+        Assert.Equal(1, enemies.Count(enemy => (bool?)enemy!["isEmpty"] == true));
+        int actualIndex = enemies.TakeWhile(enemy => (bool?)enemy!["isEmpty"] != true).Count();
+        Assert.Equal(expectedIndex == -1 ? enemies.Count - 1 : expectedIndex, actualIndex);
+        var empty = enemies[actualIndex]!;
+        Assert.Equal(0, empty["id"]!.GetValue<int>());
+        Assert.Equal(0, empty["hp"]!.GetValue<int>());
     }
 
     [Theory]
