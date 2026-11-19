@@ -1122,7 +1122,11 @@ public class StoryRoundtripSceneTests
                 && ReferenceEquals(session, observedSession)).IsTrue();
             AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1 }))
                 .OverrideFailureMessage("Story shared-owner party order must be the authored [0,1].").IsTrue();
-            AssertThat(owner.Roles.Count).IsEqual(2); // PartyWin declares no spectators.
+            // #224 (parent #148, D2): the live role owner carries the complete six-row table the
+            // frozen v1 save contract needs (authored rows plus empty records for unused ids);
+            // party, menu and battle consumers stay authored-roles-driven, so only the two
+            // authored rows are battle-relevant and the padded rows never join the party.
+            AssertThat(owner.Roles.Count).IsEqual(PlayerSaveContract.RoleCount); // Six-row table; authored [0,1] drive everything.
             AssertThat(session.BattleRoles!.Count).IsEqual(2);
             AssertThat(ReferenceEquals(session.BattleRoles, liveProjection)).IsTrue();
             foreach (int roleId in new[] { 0, 1 })
@@ -1391,8 +1395,10 @@ public class StoryRoundtripSceneTests
             if (!observedParty)
             {
                 observedParty = true;
-                AssertThat(world.RoleLiveState!.Roles.Count).IsEqual(3);
-                AssertThat(world.RoleLiveState.Roles.Keys.Order().SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
+                // #224 (parent #148, D2): the live owner carries the six-row table for the v1 save
+                // role domain; party, menu and battle consumers stay authored-roles-driven.
+                AssertThat(world.RoleLiveState!.Roles.Count).IsEqual(PlayerSaveContract.RoleCount);
+                AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
             }
             observedBattle ??= main.StoryBattle;
         }

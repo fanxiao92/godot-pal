@@ -71,9 +71,13 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             {
                 // Z is exclusive to the second-order root; do not damage the existing FD
                 // dialogue (which already uses V) or change the committed authored font.
+                // #213 added 'Z' to the authored font itself, so add only when absent: a
+                // duplicate codepoint fails the font check and masks each variant's own fault
+                // shape (the glyph fault negatives duplicate 'G' deliberately at line ~793).
                 string path = Path.Combine(root, "Leaves/Dialogue/Font.tres");
                 var font = ResourceLoader.Load<PalDialogueFont>(path, cacheMode: ResourceLoader.CacheMode.IgnoreDeep)!;
-                font.Glyphs.Add(new PalDialogueGlyph { Codepoint = 90, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
+                if (!font.Glyphs.Any(glyph => glyph is not null && glyph.Codepoint == 90))
+                    font.Glyphs.Add(new PalDialogueGlyph { Codepoint = 90, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
                 NativeProfileFixture.SaveResource(font, path);
             }
             // Ruling (b): the copied languages become rotation-free local copies — the authored
