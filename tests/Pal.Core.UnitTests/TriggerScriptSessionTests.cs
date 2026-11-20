@@ -96,8 +96,6 @@ public class TriggerScriptSessionTests
     [InlineData("rng")]
     [InlineData("center")]
     [InlineData("addItem")]
-    [InlineData("goto")]
-    [InlineData("advance")]
     public void Entire_selected_capability_closure_is_rejected_before_any_display_or_caller_change(string fault)
     {
         var fixture = new EventFixture();
@@ -110,8 +108,9 @@ public class TriggerScriptSessionTests
             // control is the randomized dialog word (rngWord != 0).
             "center" => JsonNode.Parse("""{"op":"setDialog","box":"center","color":0,"rngWord":1,"source":{"index":3,"opcode":59,"operands":[0,1,0]}}""")!,
             "addItem" => JsonNode.Parse("""{"op":"addItem","itemId":5,"count":-1,"source":{"index":3,"opcode":31,"operands":[0,0,0]}}""")!,
-            "goto" => JsonNode.Parse("""{"op":"goto","to":"L0000","limit":0,"source":{"index":3,"opcode":3,"operands":[0,0,0]}}""")!,
-            _ => JsonNode.Parse("""{"op":"end","mode":"advance","source":{"index":3,"opcode":1,"operands":[0,0,0]}}""")!
+            // goto (0x0003), end advance (0x0001) and call (0x0004) are supported control flow
+            // since #237; TriggerScriptControlFlowTests owns their positive and rejection cases.
+            _ => throw new ArgumentOutOfRangeException(nameof(fault))
         };
         unsupported["label"] = "L0003";
         unsupported["next"] = "L0004";

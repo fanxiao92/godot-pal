@@ -171,7 +171,8 @@ public sealed class TriggerEventCollection
             {
                 "raw" => [],
                 "end" => EventJson.Text(node, "mode") == "redirect" ? ["mode", "to", "limit"] : ["mode"],
-                "goto" => ["to", "limit"], "addItem" => ["itemId", "count"],
+                "goto" => ["to", "limit"], "call" => ["to", "eventObjectId"], "advanceEntry" => [],
+                "addItem" => ["itemId", "count"],
                 "randomJump" => ["rate", "to"],
                 "changeHp" => ["scope", "amount"], "changeMp" => ["scope", "amount"],
                 "boostStat" => ["field", "percent", "roleOperand"],
@@ -244,6 +245,22 @@ public sealed class TriggerEventCollection
                 case "goto":
                     if (opcode != 3) throw new InvalidDataException("Invalid goto mapping.");
                     ReadTarget(node, command);
+                    break;
+                case "call":
+                    // script.c 0x0004: call the target entry, then resume at this instruction's
+                    // successor. Operand1 is a literal caller WORD; word zero inherits the current
+                    // caller and word 0xFFFF resolves to the global last event object inside the
+                    // nested entry (0xFFFF is not the host start-entry spelling here).
+                    if (opcode != 4) throw new InvalidDataException("Invalid call mapping.");
+                    command.TargetReference = EventJson.Reference(node, "to")
+                        ?? throw new InvalidDataException("call.to must be a reference, including address zero.");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
+                    break;
+                case "advanceEntry":
+                    // script.c 0x0008 (trigger) / 0x00A7 (auto): replace the returned entry with the
+                    // next instruction. The two switch-only twins stay distinct so the trigger and
+                    // auto closures each reject the other one's opcode.
+                    if (opcode is not (0x0008 or 0x00A7)) throw new InvalidDataException("Invalid advanceEntry mapping.");
                     break;
                 case "addItem":
                     // #116: the frozen 0x001F verb is addItem (#100); the v1 placeholder giveItem is rejected.

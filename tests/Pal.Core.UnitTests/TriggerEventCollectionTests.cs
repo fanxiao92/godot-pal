@@ -56,9 +56,9 @@ public class TriggerEventCollectionTests
     }
 
 
+    // The former call (0x0004) rows migrated to TriggerScriptControlFlowTests when #237 opened
+    // trigger calls; changeHp keeps the same cross-file/context closure rejection.
     [Theory]
-    [InlineData(0x0004, "call", 0)]
-    [InlineData(0x0004, "call", 101)]
     [InlineData(0x001B, "changeHp", 0)]
     [InlineData(0x001B, "changeHp", 101)]
     public void Complete_named_random_closure_rejects_cross_file_content_or_wrong_context_before_any_effect(
@@ -87,7 +87,7 @@ public class TriggerEventCollectionTests
         var error = Assert.Throws<InvalidDataException>(() => script.Start("selected", "npc", 5, Guid.NewGuid()));
         Assert.Contains($"archive.json#L{target:X4} @{target:X4}", error.Message);
         Assert.Contains(verb, error.Message);
-        Assert.Contains(targetOpcode == 4 ? "trigger context Event" : "battle role hook", error.Message);
+        Assert.Contains("battle role hook", error.Message);
         Assert.Equal(0, random.Draws);
         Assert.Equal(before, WorldSnapshot(world)); // Earlier setState must not execute, no rollback.
         Assert.Equal(entries, events.Entries);
@@ -169,7 +169,6 @@ public class TriggerEventCollectionTests
 
     // Literal modern fields from events-schema and fixed script.c, not DecodeCommand/profile output.
     [Theory]
-    [InlineData(0x0008, "{\"op\":\"advanceEntry\"}")]
     [InlineData(0x000A, "{\"op\":\"confirmNoJump\",\"to\":\"shared#L0000\"}")]
     [InlineData(0x0011, "{\"op\":\"walkToSlow\",\"x\":65535,\"y\":0,\"h\":65535}")]
     [InlineData(0x0012, "{\"op\":\"setObjectPositionRelativeToParty\",\"eventObjectId\":65535,\"xOffset\":65408,\"yOffset\":56}")]
@@ -532,14 +531,13 @@ public class TriggerEventCollectionTests
     [InlineData(0x00A4, "{\"op\":\"scrollFbp\",\"fbpId\":65535,\"speed\":0}")]
     [InlineData(0x00A5, "{\"op\":\"showFbpWithEffectSprite\",\"fbpId\":0,\"effectSprite\":65535,\"fade\":65535}")]
     [InlineData(0x00A6, "{\"op\":\"backupScreen\"}")]
-    [InlineData(0x00A7, "{\"op\":\"advanceEntry\"}")]
     public void U5_final_screen_music_and_control_content_preserves_literals_without_execution(int opcode, string semanticJson)
         => AssertContentOnlyLiteral(opcode, semanticJson);
 
     [Theory]
     [InlineData("{\"label\":\"L0001\",\"op\":\"advanceEntry\",\"next\":\"L0002\",\"source\":{\"index\":1,\"opcode\":8,\"operands\":[65535,17,123]}}", 8)]
     [InlineData("{\"label\":\"L0001\",\"op\":\"advanceEntry\",\"next\":\"L0002\",\"source\":{\"index\":1,\"opcode\":167,\"operands\":[65535,17,123]}}", 167)]
-    public void U5_advanceEntry_dual_source_mappings_are_legal_content_but_neither_executor_is_enabled(string literal, int opcode)
+    public void U5_advanceEntry_dual_source_mappings_resolve_to_their_own_switch(string literal, int opcode)
     {
         var fixture = new EventFixture();
         fixture.Commands[1] = JsonNode.Parse(literal);
@@ -548,11 +546,23 @@ public class TriggerEventCollectionTests
         Assert.Equal(opcode, events.GetSource(1).Opcode);
         Assert.Equal(new[] { 65535, 17, 123 }, events.GetSource(1).Operands);
         var trigger = new TriggerScriptSession(events, TriggerScriptSessionTests.Language());
-        var error = Assert.Throws<InvalidDataException>(() => trigger.Start("shared", "npc", 60));
-        Assert.Contains("content-only command 'advanceEntry'", error.Message);
-        Assert.Contains("trigger context", error.Message);
-        Assert.Equal(TriggerScriptPhase.Ready, trigger.Phase);
-        Assert.Null(trigger.CurrentPosition);
+        if (opcode == 0x0008)
+        {
+            // #237 opened the trigger twin: 0x0008 publishes the successor as the entry and continues.
+            trigger.Start("shared", "npc", 60);
+            Assert.Equal(2, trigger.ReturnEntry);
+            Assert.Equal(TriggerScriptPhase.WaitingForDisplay, trigger.Phase);
+            Assert.Equal(61, Assert.Single(trigger.PendingDisplay!.MessageReferences).StartMessageId);
+        }
+        else
+        {
+            // 0x00A7 belongs to the auto switch and stays closed for trigger code.
+            var error = Assert.Throws<InvalidDataException>(() => trigger.Start("shared", "npc", 60));
+            Assert.Contains("advanceEntry", error.Message);
+            Assert.Contains("auto switch", error.Message);
+            Assert.Equal(TriggerScriptPhase.Ready, trigger.Phase);
+            Assert.Null(trigger.CurrentPosition);
+        }
 
         var autoFixture = new DynamicEventSessionTests.DynamicFixture();
         var autoCommand = JsonNode.Parse(literal)!;
@@ -565,8 +575,8 @@ public class TriggerEventCollectionTests
         var autoError = Assert.Throws<InvalidDataException>(() => new DynamicEventSession(rules,
             DynamicEventSessionTests.DynamicFixture.Leader(), autoEvents, TriggerScriptSessionTests.Language(),
             autoEvents.GetEntry("scene", "npc"), 1, 0, 0));
-        Assert.Contains("content-only command 'advanceEntry'", autoError.Message);
-        Assert.Contains("auto context", autoError.Message);
+        // The auto executor still does not consume advanceEntry in either mapping.
+        Assert.Contains("unsupported auto-script command 'advanceEntry'", autoError.Message);
         Assert.Contains("@0010", autoError.Message);
         Assert.Equal(352, rules.Objects.Single(o => o.Id == 6).X);
         Assert.Equal(15, rules.Objects.Single(o => o.Id == 6).AutoEntry);

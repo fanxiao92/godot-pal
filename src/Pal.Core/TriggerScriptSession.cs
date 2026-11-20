@@ -25,6 +25,19 @@ public sealed class TriggerScriptSession
     private CapturedBattleHookOwner? _battleHookOwner;
     private ClassicBattleEndScript? _battleEndScript;
     private int _parkedCaller;
+    // script.c 0x0004 keeps the author continuation in the interpreter's own frame: the callee's
+    // returned entry never replaces it, and only the current frame owns the public return entry.
+    private readonly Stack<CallFrame> _callFrames = new();
+    private readonly record struct CallFrame(int Continuation, int Caller);
+    // fight.c 768-880 / battle.c 1334-1337 call PAL_RunTriggerScript recursively: the battle-owned
+    // script starts with its own wScriptEntry/wNextScriptEntry depth, so a root end there never
+    // pops the event frame that parked on startBattle. The parked event frames are restored when
+    // the battle-owned invocation completes.
+    private CallFrame[]? _parkedCallFrames;
+    // fight.c 768-880 / battle.c 1334-1337 start a fresh PAL_RunTriggerScript invocation whose own
+    // wNextScriptEntry is written back to the Name-owned hook entry (or discarded for battle end).
+    // Keeping it apart from the public root ReturnEntry mirrors that per-invocation local word.
+    private int _hookReturnEntry;
     private (int EnemyTeamId, bool IsBoss)? _lostBattleContext;
 
     // Metadata discovery for the host's selected interaction; does not start or preview a call.
@@ -240,7 +253,7 @@ public sealed class TriggerScriptSession
         if (caller is < 0 or > 65535) throw new ArgumentOutOfRangeException(nameof(caller));
         var entry = _events.GetEntry(fileId, entryId);
         if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
-        ValidateCapabilityClosure(entry.SourceAddress, TriggerScriptContext.Event, requirements);
+        ValidateCapabilityClosure(entry.SourceAddress, TriggerScriptContext.Event, requirements, caller == 65535 ? _lastCaller : caller);
         return entry;
     }
 
@@ -365,12 +378,18 @@ public sealed class TriggerScriptSession
             throw new InvalidOperationException("No battle is waiting for this trigger call.");
         if (_battleHook is not null) throw new InvalidOperationException("A battle role hook is already running.");
         var hook = PendingBattleHook ?? throw new InvalidOperationException("The waiting battle has no pending role hook.");
-        ValidateCapabilityClosure(hook.ScriptAddress, TriggerScriptContext.RoleHook);
+        ValidateCapabilityClosure(hook.ScriptAddress, TriggerScriptContext.RoleHook, null, hook.RoleId);
         _battleHookOwner = _world is not null && _battleContent!.Players[hook.PartyIndex].NameObjectId is int nameObjectId
             ? new CapturedBattleHookOwner(nameObjectId, hook.Kind == ClassicBattleHookKind.FriendDeath ? 0 : 1, hook.ScriptAddress)
             : null;
         _battleHook = hook;
         _parkedCaller = Caller;
+        EnterBattleOwnedInvocation();
+        // script.c PAL_RunTriggerScript entry: wNextScriptEntry starts at this entry, the dialog
+        // delay returns to its default and g_fScriptSuccess is reset for this invocation.
+        _hookReturnEntry = hook.ScriptAddress;
+        ScriptSuccess = true;
+        Context = Context with { DelayMilliseconds = 24 };
         _lastCaller = Caller = hook.RoleId;
         _address = hook.ScriptAddress;
         Continue();
@@ -387,22 +406,29 @@ public sealed class TriggerScriptSession
             throw new InvalidOperationException("A battle script is already running.");
         var script = PendingBattle.Lifecycle.PendingBattleEndScript
             ?? throw new InvalidOperationException("The waiting battle has no pending enemy battle-end script.");
-        ValidateCapabilityClosure(script.ScriptAddress, TriggerScriptContext.BattleEnd);
+        ValidateCapabilityClosure(script.ScriptAddress, TriggerScriptContext.BattleEnd, null, script.EnemySlot);
         _battleEndScript = script;
         _parkedCaller = Caller;
+        EnterBattleOwnedInvocation();
+        // The enemy post-victory script is its own PAL_RunTriggerScript invocation: same entry
+        // globals as any trigger entry, and its returned entry is not consumed by battle.c.
+        ScriptSuccess = true;
+        Context = Context with { DelayMilliseconds = 24 };
         _lastCaller = Caller = script.EnemySlot;
         _address = script.ScriptAddress;
         Continue();
     }
 
-    private void ValidateCapabilityClosure(int address, TriggerScriptContext context, EntryRequirementsCollector? requirements = null) =>
+    private void ValidateCapabilityClosure(int address, TriggerScriptContext context, EntryRequirementsCollector? requirements = null,
+        int? caller = null) =>
         ValidateCapabilityClosure(_events, _language, _battleContent, BattleRoles, Context.Color, address, requirements, context,
             rejectMappedBattlesWithoutWorld: _world is null, validateNameMappings: true,
             currentObjectScripts: _world?.ObjectScripts, rejectObjectScriptWithoutWorld: _world is null,
             hasCashOwner: CashLiveState is not null, hasInventoryOwner: InventoryLiveState is not null,
             equipmentState: EquipmentState,
             hasRemovalOwners: InventoryLiveState is not null && EquipmentState is not null && _roleLiveState is not null && PartyPoisons is not null,
-            removalPartyMatchesWorld: _world is null || PartyPoisons is not null && PartyPoisons.PartyRoleIds.SequenceEqual(_world.PartyRoles));
+            removalPartyMatchesWorld: _world is null || PartyPoisons is not null && PartyPoisons.PartyRoleIds.SequenceEqual(_world.PartyRoles),
+            world: _world, caller: caller);
 
     private sealed class EntryRequirementsCollector
     {
@@ -411,32 +437,96 @@ public sealed class TriggerScriptSession
         internal readonly HashSet<int> Teams = new();
     }
 
+    // Static-closure walk node. The frame trail mirrors the interpreter's 0x0004 stack so a nested
+    // entry resumes its caller's own continuation, while EndSlot marks which enemy end script's
+    // invocation (battle.c 1334-1337) a work item belongs to.
+    private sealed class WalkFrame(int continuation, int? caller, WalkFrame? next)
+    {
+        public int Continuation { get; } = continuation;
+        public int? Caller { get; } = caller;
+        public WalkFrame? Next { get; } = next;
+    }
+    private readonly record struct WalkState(int Address, TriggerScriptContext Context, int? Caller, int? Last,
+        WalkFrame? Frames, int? EndSlot);
+
     private static void ValidateCapabilityClosure(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent? battleContent, IReadOnlyDictionary<int, BattleRoleSnapshot>? battleRoles, int color, int address,
         EntryRequirementsCollector? requirements = null, TriggerScriptContext context = TriggerScriptContext.Event,
         bool rejectMappedBattlesWithoutWorld = false, bool validateNameMappings = false,
         IReadOnlyDictionary<(int ObjectId, int SlotIndex), int>? currentObjectScripts = null,
         bool rejectObjectScriptWithoutWorld = false, bool hasCashOwner = false, bool hasInventoryOwner = false,
-        BattleEquipmentState? equipmentState = null, bool hasRemovalOwners = false, bool removalPartyMatchesWorld = true)
+        BattleEquipmentState? equipmentState = null, bool hasRemovalOwners = false, bool removalPartyMatchesWorld = true,
+        DynamicEventWorld? world = null, int? caller = null)
     {
-        var pending = new Stack<(int Address, TriggerScriptContext Context)>();
-        var visited = new HashSet<(int Address, TriggerScriptContext Context)>();
+        // The walk models both words a recursive invocation carries: wEventObjectID (the current
+        // caller, which owns idle counters) and wLastEventObject (script.c 3163-3182). A 0x0004
+        // operand 0xFFFF resolves the callee from the last event object, and a return restores only
+        // the caller, so a caller continuation keeps the callee word as its last event object.
+        var pending = new Stack<WalkState>();
+        // Each (address, context, caller, last) is validated once; the frame trail only steers how a
+        // nested frame's end resumes, so a recursive call graph still terminates while the callee is
+        // expanded before its own caller continuation is revisited.
+        var visited = new HashSet<(int Address, TriggerScriptContext Context, int? Caller, int? Last)>();
+        // script.c 3163-3182/3263-3267: the event continuation resumes after the battle settles and
+        // wLastEventObject keeps whatever battle-owned invocation ran last -- fight.c 768-880 enters
+        // its role hook and battle.c 1334-1337 its enemy end script with the hook role / enemy slot
+        // as both words, and a return never restores the last word. Those entries and their nested
+        // callee words are collected while the worklist drains and then re-walked as post-battle last
+        // words, so a 0xFFFF call in the continuation is preflighted against every owner the battle
+        // can leave behind instead of only the pre-battle word (which would let a battle start and
+        // then fail, or reject a script whose real owner is legal).
+        var postBattleContinuations = new Queue<(int Address, int? Caller, WalkFrame? Frames, int? EndSlot)>();
+        var postBattleSeen = new HashSet<(int Address, int? Caller, int Last)>();
+        // Role hooks run with their member's word (fight.c 768-880) and any of their nested 0x0004
+        // callee words can be the last one written before the hook returns. battle.c 1334-1337 runs
+        // the enemy end scripts in slot order, so only the last authored one can survive; a loss or
+        // flee continuation cannot see it at all.
+        var hookOwnedLasts = new HashSet<int>();
+        // battle.c 1334-1337 runs its enemy end scripts in slot order: only the final authored slot's
+        // invocation survives in wLastEventObject, including any nested 0x0004 callee word it ran.
+        var battleEndOwnedLasts = new Dictionary<int, HashSet<int>>();
         // Per-walk candidates, not a live bank: a write can precede discovery of its battle/Name.
         var hookWrites = new Dictionary<(int ObjectId, int SlotIndex), List<TriggerCommand>>();
         var relevantHookKeys = new HashSet<(int ObjectId, int SlotIndex)>();
         var hookRoots = new HashSet<(int ObjectId, int SlotIndex, int Entry)>();
+        // fight.c 768-880 runs each hook with its member's RoleId; a counted gate inside a hook
+        // resolves the counter owner from that caller word, not from the event caller.
+        var hookCallers = new Dictionary<(int ObjectId, int SlotIndex), int>();
         TriggerPosition? removalPosition = null, partyChangePosition = null;
-        pending.Push((address, context));
-        while (pending.TryPop(out var item))
+        pending.Push(new WalkState(address, context, caller, caller, null, null));
+        while (pending.TryPop(out var item) || ExpandPostBattle(out item))
         {
             address = item.Address;
-            if (address == 0 || !visited.Add(item)) continue;
+            if (address == 0)
+            {
+                // script.c's loop exits on word zero, which returns a nested frame to its caller.
+                if (item.Frames is { } zeroFrame)
+                    pending.Push(item with { Address = zeroFrame.Continuation, Caller = zeroFrame.Caller, Frames = zeroFrame.Next });
+                continue;
+            }
+            if (!visited.Add((address, item.Context, item.Caller, item.Last))) continue;
+            // Collect every word a role hook can leave in wLastEventObject: its own entry caller and
+            // each nested 0x0004 callee caller, both of which appear as a RoleHook work item's caller.
+            if (item.Context == TriggerScriptContext.RoleHook && item.Caller is int hookWord)
+                hookOwnedLasts.Add(hookWord);
+            // The same trailing-word rule applies inside the enemy end script that actually runs last.
+            if (item.EndSlot is int endSlot && item.Caller is int endWord)
+            {
+                if (!battleEndOwnedLasts.TryGetValue(endSlot, out var endWords))
+                    battleEndOwnedLasts.Add(endSlot, endWords = new HashSet<int>());
+                endWords.Add(endWord);
+            }
             var command = events.CommandAt(address);
             if (command.IsContentOnly || (command.Op is "changeCash" or "halveCash" && !hasCashOwner)
                 || (command.Op is "addItem" or "itemShortageJump" && !hasInventoryOwner))
                 throw new InvalidDataException($"{command.Position}: content-only command '{command.Op}' is unsupported in trigger context {item.Context}."
                     + (command.Op is "changeCash" or "halveCash" ? " An explicit cash owner is required." : "")
                     + (command.Op is "addItem" or "itemShortageJump" ? " An explicit inventory owner is required." : ""));
+            if (item.Context == TriggerScriptContext.RoleHook && item.Caller is int hookCaller
+                && (battleRoles is null || !battleRoles.ContainsKey(hookCaller)))
+                // fight.c 768-880 always invokes a role hook with a real party role word; a call
+                // operand that names someone else must fail before any prefix display or effect.
+                throw new InvalidDataException($"{command.Position}: role hook caller {hookCaller} is not a battle participant.");
             if (command.Op == "removeItem")
             {
                 if (!hasRemovalOwners || item.Context != TriggerScriptContext.Event)
@@ -460,10 +550,72 @@ public sealed class TriggerScriptSession
                     throw new InvalidDataException($"{command.Position}: {command.Op} requires explicit cash and inventory owners.");
                 if (command.Op == "showBuyMenu" && !battleContent.Stores.ContainsKey(command.StoreId))
                     throw new InvalidDataException($"{command.Position}: showBuyMenu store {command.StoreId} is not authored.");
-                pending.Push((Next(command), item.Context));
+                pending.Push(item with { Address = Next(command) });
                 continue;
             }
-            if (command.Op == "end" && command.Mode == "keep") continue;
+            if (command.Op is "goto" or "call" or "advanceEntry" || command.Op == "end")
+            {
+                // script.c 0x0000-0x0004/0x0008: end keeps/advances/redirects the frame, goto jumps
+                // and call runs a nested frame. A counted gate needs the caller's event-object counter,
+                // checked here before any side effect; limit zero never touches a counter.
+                if (command.Op is "goto" or "end") ValidateCountedGate(command, item.Caller);
+                int target = command.Op is "goto" or "call" || command.Op == "end" && command.Mode == "redirect"
+                    ? events.ResolveControlTarget(command) : 0;
+                switch (command.Op)
+                {
+                    case "end" when command.Mode is "keep" or "advance":
+                        // The frame ends; advance only publishes its own return entry, and a return
+                        // restores the caller word but never wLastEventObject.
+                        if (item.Frames is { } popped)
+                            pending.Push(item with { Address = popped.Continuation, Caller = popped.Caller, Frames = popped.Next });
+                        break;
+                    case "end":
+                        // script.c 0x0002: a successful gate ends the frame, a failed one falls through.
+                        if (command.Limit != 0) pending.Push(item with { Address = Next(command) });
+                        if (item.Frames is { } redirected)
+                            pending.Push(item with { Address = redirected.Continuation, Caller = redirected.Caller, Frames = redirected.Next });
+                        break;
+                    case "goto":
+                        // script.c 3196/3241-3255: word zero ends the invocation, so a callee's
+                        // goto word zero returns to its caller continuation instead of jumping;
+                        // an idle-gate failure still resumes the authored successor.
+                        if (target != 0) pending.Push(item with { Address = target });
+                        else if (item.Frames is { } ended)
+                            pending.Push(item with { Address = ended.Continuation, Caller = ended.Caller, Frames = ended.Next });
+                        if (command.Limit != 0) pending.Push(item with { Address = Next(command) });
+                        break;
+                    case "call":
+                        // Operand1 is a literal caller; word zero inherits the current one and word
+                        // 0xFFFF resolves to the last event object inside the nested entry (never a
+                        // literal participant word). The callee keeps the frame context and the
+                        // caller continues at its successor, which keeps the callee word as the last
+                        // event object because a return never restores wLastEventObject.
+                        int? callee = command.EventObjectId switch
+                        {
+                            0 => item.Caller,
+                            0xffff => item.Last,
+                            _ => command.EventObjectId,
+                        };
+                        // The successor is walked with the callee word (the value it holds when the
+                        // callee returns without another call), while the frame below also resumes
+                        // there with whatever word the callee actually leaves, so a battle-owned last
+                        // word or a deeper callee word reaches the caller's own 0xFFFF call.
+                        pending.Push(item with { Address = Next(command), Last = callee });
+                        if (target != 0)
+                            pending.Push(item with
+                            {
+                                Address = target, Caller = callee, Last = callee,
+                                Frames = new WalkFrame(Next(command), item.Caller, item.Frames),
+                            });
+                        break;
+                    default: // advanceEntry 0x0008
+                        if (command.Source.Opcode != 0x0008)
+                            throw new InvalidDataException($"{command.Position}: advanceEntry 0x{command.Source.Opcode:X4} belongs to the auto switch, not the trigger switch.");
+                        pending.Push(item with { Address = Next(command) });
+                        break;
+                }
+                continue;
+            }
             if (command.Op == "startBattle" && battleContent is not null && item.Context == TriggerScriptContext.Event)
             {
                 if (rejectMappedBattlesWithoutWorld && battleContent.Players.Any(player => player.NameObjectId.HasValue))
@@ -490,9 +642,9 @@ public sealed class TriggerScriptSession
                 try { battleContent.Validate(command.EnemyTeamId, battleRoles!, equipmentState); }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 requirements?.Teams.Add(command.EnemyTeamId);
-                pending.Push((Next(command), TriggerScriptContext.Event));
-                if (command.LossAddress is { } loss) pending.Push((loss, TriggerScriptContext.Event));
-                if (command.FleeAddress is { } flee) pending.Push((flee, TriggerScriptContext.Event));
+                pending.Push(item with { Address = Next(command) });
+                if (command.LossAddress is { } loss) pending.Push(item with { Address = loss });
+                if (command.FleeAddress is { } flee) pending.Push(item with { Address = flee });
                 // fight.c 768-880: preflight the party's current Name-owned hook entries. A stored
                 // entry (including disabled WORD 0) wins; only a missing key uses the declared seed.
                 foreach (var player in battleContent.SettledPlayers(battleRoles!, useCurrentEquipment: equipmentState is not null))
@@ -505,46 +657,61 @@ public sealed class TriggerScriptSession
                     }
                     if (player.NameObjectId is int hookName)
                     {
-                        PushHookCandidate((hookName, 0), command.Position, friendDeath);
-                        PushHookCandidate((hookName, 1), command.Position, dying);
+                        hookCallers[(hookName, 0)] = player.RoleId;
+                        hookCallers[(hookName, 1)] = player.RoleId;
+                        PushHookCandidate((hookName, 0), command.Position, friendDeath, player.RoleId);
+                        PushHookCandidate((hookName, 1), command.Position, dying, player.RoleId);
                         ActivateHookKey((hookName, 0));
                         ActivateHookKey((hookName, 1));
                     }
                     else
                     {
-                        if (friendDeath != 0) PushHook(events, pending, command.Position, friendDeath);
-                        if (dying != 0) PushHook(events, pending, command.Position, dying);
+                        if (friendDeath != 0) PushHook(events, pending, command.Position, friendDeath, player.RoleId);
+                        if (dying != 0) PushHook(events, pending, command.Position, dying, player.RoleId);
                     }
                 }
                 // battle.c 1334-1337: every enemy slot's post-victory script runs after the growth
                 // settlement; the whole closure (both random branches included) is preflighted here.
+                int? finalEndSlot = null;
                 foreach (var (enemy, slot) in battleContent.Enemies(command.EnemyTeamId).Select((enemy, slot) => (enemy, slot)))
                     if (enemy.BattleEndScript != 0)
-                        PushScript(events, pending, command.Position, enemy.BattleEndScript, TriggerScriptContext.BattleEnd);
+                    {
+                        finalEndSlot = slot;
+                        PushScript(events, pending, command.Position, enemy.BattleEndScript, TriggerScriptContext.BattleEnd, slot);
+                    }
+                // The whole remaining caller chain is re-walked for each owner a battle-owned
+                // invocation can leave in wLastEventObject, so a 0xFFFF call reached after the
+                // enclosing 0x0004 frame returns is preflighted against the runtime owner too. The
+                // deferred walk runs once the hooks and end scripts above have been observed; only
+                // the normal settlement can have run an end script, while a loss or a flee can still
+                // have run a role hook.
+                postBattleContinuations.Enqueue((Next(command), item.Caller, item.Frames, finalEndSlot));
+                if (command.LossAddress is { } lossTarget) postBattleContinuations.Enqueue((lossTarget, item.Caller, item.Frames, null));
+                if (command.FleeAddress is { } fleeTarget) postBattleContinuations.Enqueue((fleeTarget, item.Caller, item.Frames, null));
             }
             else if (command.Op == "randomJump" && battleContent is not null)
             {
                 // script.c 3301: both the rate-miss successor and the jump target are real branches.
-                pending.Push((Next(command), item.Context));
-                pending.Push((command.TargetAddress!.Value, item.Context));
+                pending.Push(item with { Address = Next(command) });
+                pending.Push(item with { Address = command.TargetAddress!.Value });
             }
             else if (command.Op is "changeCash" or "itemShortageJump")
             {
                 // Check both branches without reading/mutating cash or inventory, even when
                 // the current balance/count would make one branch unreachable.
-                pending.Push((Next(command), item.Context));
-                pending.Push((command.TargetAddress!.Value, item.Context));
+                pending.Push(item with { Address = Next(command) });
+                pending.Push(item with { Address = command.TargetAddress!.Value });
             }
             else if (command.Op == "removeItem")
             {
                 // A null shortage target permits partial removal; a reference adds a second arm.
                 // Never prune either arm from current stock or simulate equipment writes here.
-                pending.Push((Next(command), item.Context));
-                if (command.TargetAddress is int shortage) pending.Push((shortage, item.Context));
+                pending.Push(item with { Address = Next(command) });
+                if (command.TargetAddress is int shortage) pending.Push(item with { Address = shortage });
             }
             else if (command.Op is "setMusic" or "fadeToRed" or "halveCash" or "addItem")
             {
-                pending.Push((Next(command), item.Context));
+                pending.Push(item with { Address = Next(command) });
             }
             else if (command.Op == "setObjectScript")
             {
@@ -556,9 +723,9 @@ public sealed class TriggerScriptSession
                     if (!hookWrites.TryGetValue(key, out var writes)) hookWrites.Add(key, writes = new());
                     writes.Add(command);
                     if (relevantHookKeys.Contains(key))
-                        PushHookCandidate(key, command.Position, command.Value);
+                        PushHookCandidate(key, command.Position, command.Value, hookCallers[key]);
                 }
-                pending.Push((Next(command), item.Context));
+                pending.Push(item with { Address = Next(command) });
             }
             else if (command.Op is "walkStep" or "face" or "setState" or "hide" or "setTriggerMode"
                 or "setSceneScripts" or "setPartyPos" or "setPartyFacing"
@@ -570,7 +737,7 @@ public sealed class TriggerScriptSession
                 // #52 dynamic-story verbs: they are never branch points; execution applies them
                 // through the dynamic world (or parks the call). No-world sessions reject them at
                 // execution, keeping the structural walk shared.
-                pending.Push((Next(command), item.Context));
+                pending.Push(item with { Address = Next(command) });
             }
             else if (command.Op == "requestReload")
             {
@@ -587,7 +754,7 @@ public sealed class TriggerScriptSession
                     throw new InvalidDataException($"{command.Position}: boostStat must target the role hook's caller.");
                 if (command.Op == "boostStat" && command.StatField is not (17 or 18 or 19 or 20 or 21))
                     throw new InvalidDataException($"{command.Position}: temporary stat boost field {command.StatField} is not a supported panel word.");
-                pending.Push((Next(command), TriggerScriptContext.RoleHook));
+                pending.Push(item with { Address = Next(command) });
             }
             else if (command.Op == "showDialog")
             {
@@ -600,12 +767,12 @@ public sealed class TriggerScriptSession
                 }
                 catch (InvalidDataException exception) { throw new InvalidDataException($"{command.Position}: {exception.Message}", exception); }
                 requirements?.Displays.Add(new(content.Block, content.References));
-                pending.Push((address, item.Context));
+                pending.Push(item with { Address = address });
             }
             else if (command.Op == "setDialog" && command.Box is "upper" or "lower" or "centerWindow" or "center" && command.RngWord == 0)
             {
                 if (command.PortraitId != 0) requirements?.Portraits.Add(command.PortraitId);
-                pending.Push((Next(command), item.Context));
+                pending.Push(item with { Address = Next(command) });
             }
             else throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
         }
@@ -615,10 +782,24 @@ public sealed class TriggerScriptSession
         if (removalPosition is not null && partyChangePosition is not null)
             throw new InvalidDataException($"{removalPosition}: removeItem with setParty at {partyChangePosition} requires unsupported poison party migration.");
 
-        void PushHookCandidate((int ObjectId, int SlotIndex) key, TriggerPosition position, int entry)
+        void ValidateCountedGate(TriggerCommand command, int? caller)
+        {
+            if (command.Limit == 0) return;
+            // The static entry check has no caller and therefore no way to prove the counter
+            // owner; counted control flow stays outside that counter-free contract and Start
+            // rechecks the bound owner before any effect.
+            if (caller is null)
+                throw new InvalidDataException($"{command.Position}: counted {command.Op} requires a bound caller and scene event object.");
+            if (world is null)
+                throw new InvalidDataException($"{command.Position}: counted {command.Op} requires a bound scene with event object {caller}.");
+            if (caller == 0 || world.Find(caller.Value) is null)
+                throw new InvalidDataException($"{command.Position}: counted {command.Op} requires event object {caller} in the bound scene.");
+        }
+
+        void PushHookCandidate((int ObjectId, int SlotIndex) key, TriggerPosition position, int entry, int caller)
         {
             if (entry != 0 && hookRoots.Add((key.ObjectId, key.SlotIndex, entry)))
-                PushHook(events, pending, position, entry);
+                PushHook(events, pending, position, entry, caller);
         }
 
         void ActivateHookKey((int ObjectId, int SlotIndex) key)
@@ -626,24 +807,53 @@ public sealed class TriggerScriptSession
             // Each of at most four related keys consumes its prior writes once; later writes
             // join the same worklist directly, including those discovered inside new hooks.
             if (!relevantHookKeys.Add(key) || !hookWrites.TryGetValue(key, out var writes)) return;
-            foreach (var write in writes) PushHookCandidate(key, write.Position, write.Value);
+            foreach (var write in writes) PushHookCandidate(key, write.Position, write.Value, hookCallers[key]);
+        }
+
+        bool ExpandPostBattle(out WalkState expanded)
+        {
+            // Only called once the worklist is empty, so every battle-owned entry and its nested
+            // callee caller words have been observed; each queued event continuation is then walked
+            // once per possible post-battle last word, resuming through the 0x0004 frames that parked
+            // on the battle so their own continuations see that same word. A battle with no hook or
+            // end script leaves the pre-battle word, which the eager walk already covers.
+            while (postBattleContinuations.TryDequeue(out var continuation))
+            {
+                foreach (int owner in hookOwnedLasts)
+                    PushContinuation(continuation.Address, continuation.Caller, continuation.Frames, owner);
+                if (continuation.EndSlot is int endSlot && battleEndOwnedLasts.TryGetValue(endSlot, out var endWords))
+                    foreach (int owner in endWords)
+                        PushContinuation(continuation.Address, continuation.Caller, continuation.Frames, owner);
+                if (pending.TryPop(out expanded)) return true;
+            }
+            expanded = default;
+            return false;
+
+            void PushContinuation(int next, int? caller, WalkFrame? frames, int owner)
+            {
+                if (postBattleSeen.Add((next, caller, owner)))
+                    pending.Push(new WalkState(next, TriggerScriptContext.Event, caller, owner, frames, null));
+            }
         }
     }
 
-    private static void PushHook(TriggerEventCollection events, Stack<(int Address, TriggerScriptContext Context)> pending,
-        TriggerPosition position, int scriptAddress)
+    private static void PushHook(TriggerEventCollection events, Stack<WalkState> pending,
+        TriggerPosition position, int scriptAddress, int caller)
     {
         if (scriptAddress >= events.InstructionCount)
             throw new InvalidDataException($"{position}: role hook address {scriptAddress:X4} is outside the event collection.");
-        pending.Push((scriptAddress, TriggerScriptContext.RoleHook));
+        // fight.c 768-880 enters its own invocation with the hook role as both words.
+        pending.Push(new WalkState(scriptAddress, TriggerScriptContext.RoleHook, caller, caller, null, null));
     }
 
-    private static void PushScript(TriggerEventCollection events, Stack<(int Address, TriggerScriptContext Context)> pending,
-        TriggerPosition position, int scriptAddress, TriggerScriptContext context)
+    private static void PushScript(TriggerEventCollection events, Stack<WalkState> pending,
+        TriggerPosition position, int scriptAddress, TriggerScriptContext context, int? caller)
     {
         if (scriptAddress >= events.InstructionCount)
             throw new InvalidDataException($"{position}: battle-end script address {scriptAddress:X4} is outside the event collection.");
-        pending.Push((scriptAddress, context));
+        // battle.c 1334-1337 enters its own invocation with the enemy slot as both words.
+        pending.Push(new WalkState(scriptAddress, context, caller, caller, null,
+            context == TriggerScriptContext.BattleEnd ? caller : null));
     }
 
     private (DialogueMessageBlock Block, IReadOnlyList<TriggerMessageReference> References) ReadDisplay(ref int address) =>
@@ -685,13 +895,72 @@ public sealed class TriggerScriptSession
 
     private void Continue()
     {
-        while (_address != 0)
+        while (true)
         {
+            if (_address == 0)
+            {
+                // script.c's loop exits on word zero: a nested call frame returns to its caller and
+                // only the outermost frame completes the public call.
+                if (EndFrame()) continue;
+                CurrentPosition = _events.CommandAt(0).Position;
+                Complete();
+                return;
+            }
             var command = _events.CommandAt(_address);
             CurrentPosition = command.Position;
             switch (command.Op)
             {
-                case "end" when command.Mode == "keep": Complete(); return;
+                case "end" when command.Mode == "keep":
+                    if (EndFrame()) continue;
+                    Complete();
+                    return;
+                case "end" when command.Mode == "advance":
+                    // script.c 0x0001: the frame returns the instruction after this one.
+                    PublishReturn(Next(command));
+                    if (EndFrame()) continue;
+                    Complete();
+                    return;
+                case "end" when command.Mode == "redirect":
+                    // script.c 0x0002: the counted failure resets the counter and falls through.
+                    if (TakeIdleGate(command))
+                    {
+                        PublishReturn(_events.ResolveControlTarget(command));
+                        if (EndFrame()) continue;
+                        Complete();
+                        return;
+                    }
+                    _address = Next(command);
+                    break;
+                case "goto":
+                    // script.c 0x0003: an unconditional jump with the same shared idle gate.
+                    _address = TakeIdleGate(command) ? _events.ResolveControlTarget(command) : Next(command);
+                    break;
+                case "call":
+                    // script.c 0x0004: each entry resets g_fScriptSuccess, restores the default
+                    // dialog delay and advances wLastEventObject; the caller continuation and
+                    // caller word stay in this interpreter frame. Operand word zero inherits the
+                    // current caller, while 0xFFFF resolves to the global last event object in the
+                    // nested entry (wLastEventObject is not restored when the callee returns).
+                    int calleeCaller = command.EventObjectId switch
+                    {
+                        0 => Caller,
+                        0xffff => _lastCaller,
+                        _ => command.EventObjectId,
+                    };
+                    _callFrames.Push(new CallFrame(Next(command), Caller));
+                    Caller = calleeCaller;
+                    _lastCaller = Caller;
+                    ScriptSuccess = true;
+                    Context = Context with { DelayMilliseconds = 24 };
+                    _address = _events.ResolveControlTarget(command);
+                    break;
+                case "advanceEntry":
+                    // script.c 0x0008: replace the returned entry with the next instruction and continue.
+                    if (command.Source.Opcode != 0x0008)
+                        throw new InvalidDataException($"{command.Position}: advanceEntry 0x{command.Source.Opcode:X4} belongs to the auto switch, not the trigger switch.");
+                    _address = Next(command);
+                    PublishReturn(_address);
+                    break;
                 case "setDialog" when command.Box is "upper" or "lower" && command.RngWord == 0:
                     Context = Context with { Box = command.Box, PortraitId = command.PortraitId, Color = command.Color == 0 ? Context.Color : command.Color };
                     _address = Next(command);
@@ -711,16 +980,19 @@ public sealed class TriggerScriptSession
                 case "changeMp" when _battleHook is not null:
                     if (command.Scope != 0)
                         throw new InvalidDataException($"{command.Position}: party-wide {command.Op} is unsupported; the role hook applies to its caller.");
+                    // script.c 0x001B/0x001C: wEventObjectID names the player role, never the
+                    // hook that started the invocation, so a nested callee routes by its caller.
+                    int routedParty = HookPartyIndex(command);
                     bool roleHookChanged = command.Op == "changeHp"
-                        ? PendingBattle!.Lifecycle.ApplyRoleHookHp(_battleHook.PartyIndex, command.Amount)
-                        : PendingBattle!.Lifecycle.ApplyRoleHookMp(_battleHook.PartyIndex, command.Amount);
+                        ? PendingBattle!.Lifecycle.ApplyRoleHookHp(routedParty, command.Amount)
+                        : PendingBattle!.Lifecycle.ApplyRoleHookMp(routedParty, command.Amount);
                     if (!roleHookChanged) ScriptSuccess = false;
                     _address = Next(command);
                     break;
                 case "boostStat" when _battleHook is not null:
                     if (command.RoleOperand != 0)
                         throw new InvalidDataException($"{command.Position}: boostStat must target the role hook's caller.");
-                    PendingBattle!.Lifecycle.ApplyRoleHookStatBoost(_battleHook.PartyIndex, command.StatField, command.Amount);
+                    PendingBattle!.Lifecycle.ApplyRoleHookStatBoost(HookPartyIndex(command), command.StatField, command.Amount);
                     _address = Next(command);
                     break;
                 case "startBattle" when _battleContent is not null:
@@ -938,8 +1210,68 @@ public sealed class TriggerScriptSession
                 default: throw new InvalidDataException($"{command.Position}: unsupported trigger command/context '{command.Op}'.");
             }
         }
-        CurrentPosition = _events.CommandAt(0).Position;
-        Complete();
+    }
+
+    /// <summary>Battle-owned scripts recurse into PAL_RunTriggerScript with their own script-entry
+    /// depth, so the caller's 0x0004 frames are set aside for the duration of the hook/end run.</summary>
+    private void EnterBattleOwnedInvocation()
+    {
+        _parkedCallFrames = _callFrames.ToArray();
+        _callFrames.Clear();
+    }
+
+    /// <summary>Restores the event's call frames after the battle-owned invocation finishes; a
+    /// nested callee inside that invocation already popped its own frames.</summary>
+    private void ExitBattleOwnedInvocation()
+    {
+        if (_parkedCallFrames is null) return;
+        for (int i = _parkedCallFrames.Length - 1; i >= 0; i--) _callFrames.Push(_parkedCallFrames[i]);
+        _parkedCallFrames = null;
+    }
+
+    /// <summary>Pops one script.c 0x0004 call frame; the callee's return entry is discarded and the
+    /// caller keeps its own word (wLastEventObject is not restored). False for the outermost frame.</summary>
+    private bool EndFrame()
+    {
+        if (_callFrames.Count == 0) return false;
+        var frame = _callFrames.Pop();
+        Caller = frame.Caller;
+        _address = frame.Continuation;
+        return true;
+    }
+
+    /// <summary>script.c's wNextScriptEntry is local to each PAL_RunTriggerScript invocation: a
+    /// nested call's 0x0001/0x0002/0x0008 never overwrites its caller's word, while the active
+    /// root (event call, role hook or battle-end script) keeps its own. The public ReturnEntry is
+    /// the selected host entry's word and stays untouched by battle-owned invocations.</summary>
+    private void PublishReturn(int value)
+    {
+        if (_callFrames.Count > 0) return;
+        if (_battleHook is not null) { _hookReturnEntry = value; return; }
+        if (_battleEndScript is not null) return; // battle.c ignores the returned entry
+        ReturnEntry = value;
+    }
+
+    /// <summary>script.c 0x001B/0x001C/0x0030 apply the single-role word to wEventObjectID, which
+    /// the reference documents as the current player role; a callee's literal caller can therefore
+    /// target another participant, and a non-participant caller is rejected before any effect.</summary>
+    private int HookPartyIndex(TriggerCommand command)
+    {
+        foreach (var player in PendingBattle!.Lifecycle.Current.Combat.Players)
+            if (player.RoleId == Caller) return player.PartyIndex;
+        throw new InvalidDataException($"{command.Position}: role hook caller {Caller} is not a battle participant.");
+    }
+
+    /// <summary>script.c 0x0002/0x0003 idle gate: zero is unconditional, otherwise the caller's
+    /// event object counts up to the limit and the first failure resets it and falls through.</summary>
+    private bool TakeIdleGate(TriggerCommand command)
+    {
+        if (command.Limit == 0) return true;
+        var owner = (_world ?? throw new InvalidDataException($"{command.Position}: counted {command.Op} requires a bound scene with event object {Caller}."))
+            .Find(Caller) ?? throw new InvalidDataException($"{command.Position}: counted {command.Op} requires event object {Caller} in the bound scene.");
+        if (++owner.TriggerIdleCount < command.Limit) return true;
+        owner.TriggerIdleCount = 0;
+        return false;
     }
 
     private static int Next(TriggerCommand command) => command.NextAddress
@@ -953,9 +1285,11 @@ public sealed class TriggerScriptSession
         if (_battleHook is not null)
         {
             if (_battleHookOwner is { } owner)
-                _world!.SetObjectScript(owner.NameObjectId, owner.ScriptAddress, owner.SlotIndex);
+                _world!.SetObjectScript(owner.NameObjectId, _hookReturnEntry, owner.SlotIndex);
             _battleHookOwner = null;
             _battleHook = null;
+            _hookReturnEntry = 0;
+            ExitBattleOwnedInvocation();
             PendingBattle!.Lifecycle.AcknowledgeRoleHook();
             Caller = _parkedCaller; // the parked outer call keeps its own caller (PAL_RunTriggerScript state)
             Phase = TriggerScriptPhase.WaitingForBattle;
@@ -964,6 +1298,7 @@ public sealed class TriggerScriptSession
         if (_battleEndScript is not null)
         {
             _battleEndScript = null;
+            ExitBattleOwnedInvocation();
             PendingBattle!.Lifecycle.AcknowledgeBattleEndScript();
             Caller = _parkedCaller;
             Phase = TriggerScriptPhase.WaitingForBattle;

@@ -286,7 +286,8 @@ public class DynamicEventSessionTests
         var rules = fixture.Rules();
         var error = Assert.Throws<InvalidDataException>(() => new DynamicEventSession(rules, DynamicFixture.Leader(),
             events, Language(), events.GetEntry("scene", "npc"), 1, 0, 0));
-        Assert.Contains("content-only", error.Message);
+        // Trigger calls are supported since #237, but the auto switch still rejects them.
+        Assert.Contains("unsupported auto-script command", error.Message);
         Assert.Contains("auto", error.Message);
         Assert.Contains("call", error.Message);
         Assert.Contains("scene.json#L0016 @0010", error.Message);

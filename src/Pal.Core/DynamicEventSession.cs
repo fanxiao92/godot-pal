@@ -17,6 +17,10 @@ public sealed class DynamicEventObject(SceneObject initial)
     // script.c wScriptIdleFrameCountAuto: one counter per object, shared by the auto
     // end-redirect/goto limits and the auto frame wait; reset on fall-through.
     public int AutoIdleCount { get; internal set; }
+    // script.c nScriptIdleFrame: the trigger counter for 0x0002/0x0003, independent of the auto
+    // counter; the trigger gate pre-increments while below the limit and resets on fall-through.
+    // Owned by the event object (the reference's pEvtObj field) and therefore per caller.
+    public int TriggerIdleCount { get; internal set; }
     internal SceneObject Initial { get; } = initial;
 }
 
@@ -60,7 +64,8 @@ public sealed class DynamicEventWorld
         {
             X = obj.X, Y = obj.Y, Direction = obj.Direction, CurrentFrame = obj.CurrentFrame,
             State = obj.State, VanishTime = obj.VanishTime, TriggerMode = obj.TriggerMode,
-            TriggerEntry = obj.TriggerEntry, AutoEntry = obj.AutoEntry, AutoIdleCount = obj.AutoIdleCount
+            TriggerEntry = obj.TriggerEntry, AutoEntry = obj.AutoEntry, AutoIdleCount = obj.AutoIdleCount,
+            TriggerIdleCount = obj.TriggerIdleCount
         }).ToArray());
         SceneId = source.SceneId;
         Leader = source.Leader;

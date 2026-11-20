@@ -194,15 +194,17 @@ public sealed class TriggerScriptRemovalTests
         Assert.Contains("removeItem", Assert.Throws<InvalidDataException>(() => TriggerScriptSession.ValidateEntry(
             removal.Load(), Language(), legacySeed.Content, "shared", "npc", inventoryLiveState: legacySeed.Stock)).Message);
 
-        // Both removal arms must be supported before the earlier add can commit.
+        // Both removal arms must be supported before the earlier add can commit; an unsupported
+        // content-only command in either arm still rejects the whole closure (trigger calls are
+        // supported since #237, so the branch uses a still-closed named verb).
         foreach (int badAddress in new[] { 3, 6 })
         {
             var branchSeed = Seed();
             var branch = Fixture();
             Set(branch, 1, 0x1f, """{"op":"addItem","itemId":7,"count":1}""");
             Remove(branch, 2, 7, 0, "L0006");
-            Set(branch, badAddress, 0x4, """{"op":"call","to":"L0008","eventObjectId":60}""");
-            Reject(Bind(branch, branchSeed), branchSeed, "call");
+            Set(branch, badAddress, 0x42, """{"op":"simulateMagic","magicId":1,"baseDamage":0,"enemyOperand":0}""");
+            Reject(Bind(branch, branchSeed), branchSeed, "simulateMagic");
         }
         // Non-selected remove commands do not demand any new capability.
         var unselected = Fixture();
