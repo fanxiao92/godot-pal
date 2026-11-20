@@ -59,6 +59,41 @@ public class NativeStoryProfileTests
     }
 
     [TestCase]
+    public void ProjectedNativeBattleContentRequiresAndMatchesTheAuthoredStoryExpectation()
+    {
+        // #235: a projected native battle source carries receipt identity; the Story expectation
+        // is the only binding and must be complete. A legacy non-projected numeric resource with
+        // a dangling expectation is equally invalid. The Story never opens the receipt bytes.
+        using var fixture = new NativeStoryProfileFixture();
+        var source = fixture.ProjectBattleContent();
+        fixture.Profile.BattleProjectionReceiptSha256 = source.ReceiptSha256;
+        fixture.Profile.BattleProjectionReceiptByteLength = source.ReceiptByteLength;
+        fixture.SaveProfile();
+        AssertThat(NativeStoryProfile.Load(fixture.Uri, "en").BattleContent.Teams[18].Id).IsEqual(1);
+
+        void Reject(string sha256, long byteLength, string expected)
+        {
+            fixture.Profile.BattleProjectionReceiptSha256 = sha256;
+            fixture.Profile.BattleProjectionReceiptByteLength = byteLength;
+            fixture.SaveProfile();
+            AssertThat(Failure(() => NativeStoryProfile.Load(fixture.Uri)).Contains(expected)).IsTrue();
+        }
+        Reject("", -1, "projected native battle content requires a story battleProjection receipt expectation");
+        Reject(source.ReceiptSha256, -1, "story battleProjection requires");
+        Reject("", source.ReceiptByteLength, "story battleProjection requires");
+        Reject("A" + source.ReceiptSha256[1..], source.ReceiptByteLength, "story battleProjection requires");
+        Reject(new string('d', 64), source.ReceiptByteLength, "does not match native battle content source");
+        Reject(source.ReceiptSha256, source.ReceiptByteLength + 1, "does not match native battle content source");
+
+        using var legacy = new NativeStoryProfileFixture();
+        legacy.Profile.BattleProjectionReceiptSha256 = source.ReceiptSha256;
+        legacy.Profile.BattleProjectionReceiptByteLength = source.ReceiptByteLength;
+        legacy.SaveProfile();
+        AssertThat(Failure(() => NativeStoryProfile.Load(legacy.Uri))
+            .Contains("requires projected native battle content")).IsTrue();
+    }
+
+    [TestCase]
     public void SelectedPartyClosureBindsTwoPlayersAndEnemySlots()
     {
         using var fixture = new NativeStoryProfileFixture(party: true);

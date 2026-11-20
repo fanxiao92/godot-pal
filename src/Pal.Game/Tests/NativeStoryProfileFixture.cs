@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Godot;
+using Pal.Core;
+using Pal.Game.Profiles;
 using Pal.Game.Resources;
 
 namespace Pal.Game.Tests;
@@ -190,6 +192,69 @@ internal sealed class NativeStoryProfileFixture : IDisposable
 
     public void Save(Resource resource, string name) => NativeProfileFixture.SaveResource(resource, Root + "/" + name);
     public void SaveProfile() => NativeProfileFixture.SaveResource(Profile, Uri);
+
+    /// <summary>#235 test-owned projection: rewrite numeric enemy battle ids to their runtime
+    /// slots and save a projected native resource with a literal checked source.</summary>
+    public BattleProjectionSourceInfo ProjectBattleContent()
+    {
+        foreach (var team in Numeric.Teams)
+        {
+            int runtime = 0;
+            foreach (var enemy in team.Enemies)
+            {
+                runtime++;
+                if (!enemy.IsEmpty) enemy.Id = runtime;
+            }
+        }
+        var content = NativeBattleContent.CreateCore(Numeric, "fixture projected battle content");
+        var source = ProjectionSource(content);
+        var projected = NativeBattleContent.Write(content, source);
+        // Preserve the fixture's existing external Role.tres dependency; ExpectedPaths/ResourceSha256
+        // intentionally pin that exact story graph while only the optional projection fields change.
+        string roleUri = Root + "/Role.tres";
+        if (Godot.FileAccess.FileExists(roleUri))
+        {
+            var externalRole = ResourceLoader.Load<PalBattleRole>(roleUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+            int roleIndex = Array.FindIndex(projected.Roles, role => role.RoleId == externalRole.RoleId);
+            if (roleIndex >= 0) projected.Roles[roleIndex] = externalRole;
+        }
+        Save(projected, "Numeric.tres");
+        RefreshHashes(); SaveProfile();
+        return source;
+    }
+
+    private static BattleProjectionSourceInfo ProjectionSource(TriggerBattleContent content)
+    {
+        var slots = new List<BattleProjectionEnemySlot>();
+        foreach (var team in content.EnemyTeams)
+        {
+            int runtime = 0;
+            for (int sourceSlot = 0; sourceSlot < 5; sourceSlot++)
+            {
+                if (sourceSlot >= team.Value.Count)
+                {
+                    slots.Add(new(team.Key, sourceSlot, 65535, "skip-FFFF"));
+                    continue;
+                }
+                var enemy = team.Value[sourceSlot];
+                if (enemy.IsEmpty) slots.Add(new(team.Key, sourceSlot, 0, "empty-0"));
+                else slots.Add(new(team.Key, sourceSlot, enemy.Id, "loaded", enemy.Id, runtime, runtime + 1));
+                runtime++;
+            }
+        }
+        return new BattleProjectionSourceInfo(1, "m5-base-table-physical-projection",
+            "independent-base-table-context-not-natural-save", new string('a', 64), 1234, new string('b', 64), 2048,
+            ProjectionInputs(), content.Players.Select(player => player.RoleId).ToArray(), content.EnemyTeams.Keys.ToArray(), slots);
+    }
+
+    private static BattleProjectionModernInput[] ProjectionInputs() => [
+        new("battle-effect-index.json", new string('0', 64), 1), new("battle-field.json", new string('1', 64), 102),
+        new("enemy-pos.json", new string('2', 64), 103), new("enemy-team.json", new string('3', 64), 104),
+        new("enemy.json", new string('4', 64), 105), new("event-object.json", new string('5', 64), 106),
+        new("index.json", new string('6', 64), 107), new("level-up-exp.json", new string('7', 64), 108),
+        new("level-up-magic.json", new string('8', 64), 109), new("magic.json", new string('9', 64), 110),
+        new("object.json", new string('a', 64), 111), new("player-roles.json", new string('b', 64), 112),
+        new("scene.json", new string('c', 64), 113), new("store.json", new string('d', 64), 114)];
 
     /// <summary>#137 test-owned third party member: role2 mirrors the authored role1 numeric row
     /// and re-saves the story numeric/profile in place so 1..3-member hosts share one fixture.</summary>

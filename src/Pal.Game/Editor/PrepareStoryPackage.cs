@@ -235,12 +235,34 @@ public partial class PrepareStoryPackage : Node
 
     private static (PalStoryProfile Story, PalBattleVisualProfile Visual) ReadMetadata(JsonElement root)
     {
-        PropertiesWithOptional(root, new[] { "itemBitmaps" }, "formatVersion", "sourceIdentity", "staticResources", "staticProfile", "bundleSha256", "entryFileId", "entryId", "ownerId", "entryAddress", "battleContentUri", "dialogueDirectory", "portraits", "visual");
+        PropertiesWithOptional(root, new[] { "itemBitmaps", "battleProjection" }, "formatVersion", "sourceIdentity", "staticResources", "staticProfile", "bundleSha256", "entryFileId", "entryId", "ownerId", "entryAddress", "battleContentUri", "dialogueDirectory", "portraits", "visual");
         Require(Int(root, "formatVersion") == 1, "story package formatVersion must be 1");
         var story = new PalStoryProfile { FormatVersion = 1, SourceIdentity = Text(root, "sourceIdentity"), StaticResources = Text(root, "staticResources"),
             StaticProfile = Text(root, "staticProfile"), BundleSha256 = Text(root, "bundleSha256"), EntryFileId = Text(root, "entryFileId"), EntryId = Text(root, "entryId"),
             OwnerId = Int(root, "ownerId"), EntryAddress = Int(root, "entryAddress"), BattleContentUri = Text(root, "battleContentUri"), DialogueDirectory = Text(root, "dialogueDirectory") };
         Require(root.GetProperty("portraits").ValueKind == JsonValueKind.Array, "portraits must be an array");
+        // #235: optional projection receipt expectation. The nested object is closed to exactly
+        // receiptSha256/receiptByteLength; a half declaration or malformed identity is rejected
+        // here, never silently treated as an unprojected legacy story. The receipt bytes stay
+        // offline: the strict story load compares this pair with the checked native source.
+        if (root.TryGetProperty("battleProjection", out JsonElement battleProjectionElement))
+        {
+            try
+            {
+                Properties(battleProjectionElement, "receiptSha256", "receiptByteLength");
+                string receiptSha256 = Text(battleProjectionElement, "receiptSha256");
+                Require(receiptSha256.Length == 64 && receiptSha256.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'),
+                    "battleProjection.receiptSha256 must be 64 lowercase hexadecimal characters");
+                var lengthElement = battleProjectionElement.GetProperty("receiptByteLength");
+                long receiptByteLength = 0;
+                Require(lengthElement.ValueKind == JsonValueKind.Number && lengthElement.TryGetInt64(out receiptByteLength) && receiptByteLength > 0,
+                    "battleProjection.receiptByteLength must be a positive Int64");
+                story.BattleProjectionReceiptSha256 = receiptSha256;
+                story.BattleProjectionReceiptByteLength = receiptByteLength;
+            }
+            catch (InvalidDataException error)
+            { throw new InvalidDataException("battleProjection: " + error.Message, error); }
+        }
         foreach (var portrait in root.GetProperty("portraits").EnumerateArray())
         {
             Properties(portrait, "id", "uri"); int id = Int(portrait, "id");

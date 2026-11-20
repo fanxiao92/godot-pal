@@ -89,7 +89,11 @@ pwsh -NoProfile -File ./scripts/Prepare-BattleData.ps1 `
 
 独立人工fixture为 `tests/Fixtures/ProjectedBattleData/{numeric/battle-data.json,receipt.json}`，不是正式CLI输出、真实派生资源或原档认证。字面角色[4,0]、队伍[65535,0]、同对象97重复实例/完整10槽、14输入及503字段叶覆盖，固定fixture SHA；BOM/空白装饰用独立.NET SHA核原字节，经正式Prepare→LoadChecked。新增27个Game direct与12个Prepare process覆盖身份/覆盖/角色拒绝、路径/锁定源、无覆盖、不修改源、不自动发现及必要真实argv/退出；登记不等于实测，实际结果绑定本轮收据。
 
-**Story `battleProjection` 期望与checked native配对、正式人工M5→CLI→Prepare→正常Main的同一RoleLiveState/所属ACK/胜负/返回/再次使用仍未交付。** 本叶不改Core/工具/native v1或M3/M4非投影入口，不关闭#134，不增加工程叶18/story0/fullM6false或私有/GPU/桌面/CI证据。上下文中#198/#199的“未接Prepare”记录各原叶边界，由本节新增能力接续，不转签旧运行证据。
+**正式人工M5→CLI→Prepare→正常Main的同一RoleLiveState/所属ACK/胜负/返回/再次使用仍未交付。** 本叶不改Core/工具/native v1或M3/M4非投影入口，不关闭#134，不增加工程叶18/story0/fullM6false或私有/GPU/桌面/CI证据。上下文中#198/#199的“未接Prepare”记录各原叶边界，由本节新增能力接续，不转签旧运行证据。
+
+## Story `battleProjection` 期望（#235，路线 A 契约第 5 项）
+
+`story-package.json` 根新增可选 `battleProjection`，对象恰含 `receiptSha256`（64位小写十六进制）与 `receiptByteLength`（正 Int64）。`PrepareStoryPackage` 严格拒绝半声明、空串、坏 hash、非正整数及未知字段；选择后把该结构化期望写入 `PalStoryProfile.BattleProjectionReceiptSha256/BattleProjectionReceiptByteLength`。`NativeStoryProfile.Load` 改用 `NativeBattleContent.LoadChecked` 读取同次 checked native，并把期望与 `BattleProjectionSourceInfo` 的 receipt 身份逐项核对：未声明且 native 无来源保留旧合法入口；有投影 native 却省略期望、悬空期望或身份不符均在玩法副作用前拒绝。Story 不打开 receipt/numeric，不做三方转换/独立认证或第二 native graph；既有 native graph 继续锁定实际 BattleContent 文件字节。
 
 ## 离线 receipt 与原 numeric 字节核对（#199，路线 A 第二叶）
 

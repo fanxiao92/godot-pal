@@ -95,7 +95,7 @@ Game及正式wrapper/editor测试构造同步当前契约，未新增测试ident
 }
 ```
 
-`portraits` 可为空；非零 WORD id 唯一，实际精确集合由 Story 所选闭包严格验证。`visual.players` 按 party 顺序逐角色声明（见 #209 统一逐角色绑定），`visual.teams` 精确匹配 requirements，team/target/role、WORD metadata、完整 nominal frames 与 aliases、palette 一致性由既有 Visual loader 校验，不再复制 validator。writer 显式写 Story root 的 `FormatVersion=1` 与 Visual root 的 `FormatVersion=2`。`EventsIndex` 与两个 `ResourceSha256` 不由 metadata 作者填写：生产函数确定输出路径，并通过共享 `NativeContentDependencies` 计算各自**精确** data graph 和每条文件 SHA-256。Story 的 hash 另包含完整现代事件集合。
+`portraits` 可为空；非零 WORD id 唯一，实际精确集合由 Story 所选闭包严格验证。根可选 `battleProjection: {receiptSha256, receiptByteLength}` 只表达已准备投影数值的 receipt 期望：两字段必须同时出现，SHA 为 64 位小写十六进制、长度为正 Int64；Prepare 把结构化值写入 Story，严格 Load 再与 checked native `BattleProjectionSourceInfo` 核对。未声明且 native 无来源保持旧入口；有投影 native 而省略或悬空期望、半声明/坏值/未知字段一律拒绝，Story 不读取 receipt 原件。`visual.players` 按 party 顺序逐角色声明（见 #209 统一逐角色绑定），`visual.teams` 精确匹配 requirements，team/target/role、WORD metadata、完整 nominal frames 与 aliases、palette 一致性由既有 Visual loader 校验，不再复制 validator。writer 显式写 Story root 的 `FormatVersion=1` 与 Visual root 的 `FormatVersion=2`。`EventsIndex` 与两个 `ResourceSha256` 不由 metadata 作者填写：生产函数确定输出路径，并通过共享 `NativeContentDependencies` 计算各自**精确** data graph 和每条文件 SHA-256。Story 的 hash 另包含完整现代事件集合。
 
 静态场景实际 owner 的 `wTriggerScript` 必须指向匹配的具名 entry；profile/bundle/实际 scene 身份必须一致，初始 role0 限制不变。两语内容、画像与真实 font/prompts 均走正常 Story 检查。仅格式合法的未选 numeric 内容不因此获可执行能力授权。
 

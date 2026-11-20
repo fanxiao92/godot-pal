@@ -46,6 +46,86 @@ public class PrepareStoryPackageTests
     }
 
     [TestCase]
+    public void ProjectedBattleContentBindsDeclaredReceiptIdentityThroughPrepareAndStrictLoad()
+    {
+        using var source = new Preparation(projection: true);
+        string[] before = source.Snapshot();
+        (string StoryUri, string VisualUri) result;
+        try { result = PrepareStoryPackage.Prepare(source.Input, source.Output); }
+        catch (Exception error)
+        {
+            AssertThat(false).OverrideFailureMessage(error.Message).IsTrue();
+            return;
+        }
+        var story = NativeStoryProfile.Load(result.StoryUri, "en");
+        var visual = NativeBattleVisualProfile.Load(result.VisualUri, story);
+        var nativeStory = ResourceLoader.Load<Pal.Game.Resources.PalStoryProfile>(result.StoryUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+        AssertThat(story.BattleContent.Teams[18].Id).IsEqual(1);
+        AssertThat(visual.Teams[18].EnemySlots[0].TargetId).IsEqual(1);
+        AssertThat(nativeStory.BattleProjectionReceiptSha256).IsEqual(source.Projection!.ReceiptSha256);
+        AssertThat(nativeStory.BattleProjectionReceiptByteLength).IsEqual(source.Projection.ReceiptByteLength);
+        AssertThat(source.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase("missing-sha256")]
+    [TestCase("missing-byteLength")]
+    [TestCase("empty-sha256")]
+    [TestCase("bad-hash")]
+    [TestCase("nonpositive-length")]
+    [TestCase("unknown-field")]
+    public void ProjectedBattleContentDeclarationIsStrictAndFailClosed(string defect)
+    {
+        using var source = new Preparation(projection: true);
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!.AsObject();
+        var projection = metadata["battleProjection"]!.AsObject();
+        switch (defect)
+        {
+            case "missing-sha256": projection.Remove("receiptSha256"); break;
+            case "missing-byteLength": projection.Remove("receiptByteLength"); break;
+            case "empty-sha256": projection["receiptSha256"] = ""; break;
+            case "bad-hash": projection["receiptSha256"] = "A" + new string('a', 63); break;
+            case "nonpositive-length": projection["receiptByteLength"] = 0; break;
+            default: projection["receiptPath"] = "ignored.json"; break;
+        }
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        string[] before = source.Snapshot();
+        string expected = defect switch
+        {
+            "missing-sha256" => "missing: receiptSha256",
+            "missing-byteLength" => "missing: receiptByteLength",
+            "empty-sha256" => "receiptSha256 requires a nonempty string",
+            "bad-hash" => "battleProjection.receiptSha256 must be 64 lowercase hexadecimal characters",
+            "nonpositive-length" => "battleProjection.receiptByteLength must be a positive Int64",
+            _ => "unknown: receiptPath"
+        };
+        Reject(source.Input, source.Output, expected);
+        AssertThat(source.Snapshot()).IsEqual(before);
+        AssertThat(Directory.Exists(source.Output)).IsFalse();
+    }
+
+    [TestCase("dangling")]
+    [TestCase("missing")]
+    public void ProjectedBattleContentExpectationAndNativeSourceMustBePaired(string defect)
+    {
+        using var source = new Preparation(projection: defect == "missing");
+        var metadata = JsonNode.Parse(File.ReadAllText(source.Metadata))!.AsObject();
+        if (defect == "dangling")
+            metadata["battleProjection"] = new JsonObject
+            {
+                ["receiptSha256"] = new string('a', 64),
+                ["receiptByteLength"] = 1
+            };
+        else metadata.Remove("battleProjection");
+        File.WriteAllText(source.Metadata, metadata.ToJsonString());
+        string[] before = source.Snapshot();
+        Reject(source.Input, source.Output, defect == "dangling"
+            ? "story battleProjection receipt expectation requires projected native battle content"
+            : "projected native battle content requires a story battleProjection receipt expectation");
+        AssertThat(source.Snapshot()).IsEqual(before);
+        AssertThat(Directory.Exists(source.Output)).IsFalse();
+    }
+
+    [TestCase]
     public void AuthoredFiveSlotTeamsPrepareLoadAndKeepPerSlotIdentity()
     {
         // #210: the author schema and native chain accept five loaded enemy slots; repeated
@@ -1016,9 +1096,18 @@ public class PrepareStoryPackageTests
         public string OutputUri { get; } = "res://Assets/PrepareTests/" + Guid.NewGuid().ToString("N");
         public string Output => ProjectSettings.GlobalizePath(OutputUri);
         public string Metadata => Path.Combine(Input, "story-package.json");
-        public Preparation(bool party = false, bool five = false, bool mixed = false)
+        public BattleProjectionSourceInfo? Projection { get; }
+        public Preparation(bool party = false, bool five = false, bool mixed = false, bool projection = false)
         {
             Native = new NativeBattleVisualProfileFixture(party, five, emptySlots: mixed);
+            if (projection)
+            {
+                Projection = Native.Story.ProjectBattleContent();
+                var storyEnemies = Native.Story.Numeric.Teams[0].Enemies;
+                for (int slot = 0; slot < Native.Profile.Teams[0].EnemySlots.Length; slot++)
+                    Native.Profile.Teams[0].EnemySlots[slot].TargetId = storyEnemies[slot].Id;
+                Native.Save();
+            }
             Directory.CreateDirectory(Path.Combine(Input, "events"));
             foreach (string name in new[] { "index.json", "shared.json", "outcomes.json" })
                 File.Copy(ProjectSettings.GlobalizePath(Native.Root + "/" + name), Path.Combine(Input, "events", name));
@@ -1038,7 +1127,7 @@ public class PrepareStoryPackageTests
                 }
                 enemies.Add(row);
             }
-            File.WriteAllText(Metadata, JsonSerializer.Serialize(new
+            var metadata = JsonSerializer.SerializeToNode(new
             {
                 formatVersion = 1, sourceIdentity = "synthetic preparation test; not desktop art",
                 staticResources = s.StaticResources, staticProfile = s.StaticProfile, bundleSha256 = s.BundleSha256,
@@ -1049,10 +1138,18 @@ public class PrepareStoryPackageTests
                         playerPosition = new[] { p.PlayerPosition.X, p.PlayerPosition.Y } }).ToArray(), paletteUri = v.PaletteUri,
                     teams = new[] { new { teamId = t.TeamId, backgroundUri = t.BackgroundUri,
                         enemies } } }
-            }));
+            })!;
+            if (Projection is not null)
+                metadata["battleProjection"] = new JsonObject
+                {
+                    ["receiptSha256"] = Projection.ReceiptSha256,
+                    ["receiptByteLength"] = Projection.ReceiptByteLength
+                };
+            File.WriteAllText(Metadata, metadata.ToJsonString());
         }
         public string[] Snapshot() => Directory.GetFiles(Input, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
             .Select(p => Path.GetRelativePath(Input, p) + ":" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(p)))).ToArray();
+
         public void Dispose()
         {
             Native.Dispose();

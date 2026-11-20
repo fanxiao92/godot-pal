@@ -74,7 +74,9 @@ public static class NativeStoryProfile
             Require(entry is { OwnerType: "eventObject", Slot: "wTriggerScript", Kind: "trigger" }
                 && entry.SourceAddress != 0 && entry.SourceAddress == native.EntryAddress
                 && entry.OwnerId == native.OwnerId, "story owner-trigger-entry identity mismatch or disabled entry");
-            var content = NativeBattleContent.Load(native.BattleContentUri);
+            var checkedBattle = NativeBattleContent.LoadChecked(native.BattleContentUri);
+            CheckBattleProjectionExpectation(native, checkedBattle.ProjectedSource);
+            var content = checkedBattle.Content;
             // #215: every authored use-menu binding resolves exactly one enabled item.wScriptOnUse
             // entry now; a usable object without its on-use script rejects before the scene binds.
             var itemUseEntries = new Dictionary<int, TriggerEventEntry>();
@@ -240,6 +242,24 @@ public static class NativeStoryProfile
         catch (InvalidDataException error) { throw new InvalidDataException(uri + ": " + error.Message, error); }
         catch (Exception error) when (error is ArgumentException or NullReferenceException or InvalidCastException or InvalidOperationException or JsonException)
         { throw new InvalidDataException(uri + ": malformed native story content: " + error.Message, error); }
+    }
+
+    private static void CheckBattleProjectionExpectation(PalStoryProfile native, BattleProjectionSourceInfo? source)
+    {
+        string receiptSha256 = native.BattleProjectionReceiptSha256 ?? "";
+        long receiptByteLength = native.BattleProjectionReceiptByteLength;
+        if (receiptSha256.Length == 0 && receiptByteLength == -1)
+        {
+            Require(source is null,
+                "projected native battle content requires a story battleProjection receipt expectation");
+            return;
+        }
+        Require(IsHash(receiptSha256) && receiptByteLength > 0,
+            "story battleProjection requires a 64 lowercase hex receiptSha256 and a positive receiptByteLength");
+        Require(source is not null,
+            "story battleProjection receipt expectation requires projected native battle content");
+        Require(source!.ReceiptSha256 == receiptSha256 && source.ReceiptByteLength == receiptByteLength,
+            "story battleProjection receipt identity does not match native battle content source");
     }
 
     private static T LoadResource<T>(string uri) where T : Resource
