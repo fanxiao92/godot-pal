@@ -9,10 +9,19 @@
   <ItemGroup>
     <!-- C# editor scenes need the Game host built, not its assembly or test dependencies. -->
     <ProjectReference Include="../../src/Pal.Game/Pal.Game.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="../../tools/Pal.Extract/Pal.Extract.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4"><PrivateAssets>all</PrivateAssets></PackageReference>
     <Compile Include="../Fixtures/M1Bundle.cs" Link="M1Bundle.cs" />
     <Compile Include="../Fixtures/BattleContextTestFixture.cs" Link="BattleContextTestFixture.cs" />
+    <Compile Include="../Fixtures/ProjectedStoryChainTables.cs" Link="ProjectedStoryChainTables.cs" />
   </ItemGroup>
+  <!-- Run the built CLI bytes, never an in-process substitute. -->
+  <Target Name="CopyCliForProjectedChainTests" AfterTargets="Build">
+    <ItemGroup>
+      <CliFiles Include="../../tools/Pal.Extract/bin/$(Configuration)/net10.0/Pal.Extract.*;../../tools/Pal.Extract/bin/$(Configuration)/net10.0/Pal.Core.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CliFiles)" DestinationFolder="$(OutDir)cli" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

@@ -95,6 +95,10 @@ pwsh -NoProfile -File ./scripts/Prepare-BattleData.ps1 `
 
 `story-package.json` 根新增可选 `battleProjection`，对象恰含 `receiptSha256`（64位小写十六进制）与 `receiptByteLength`（正 Int64）。`PrepareStoryPackage` 严格拒绝半声明、空串、坏 hash、非正整数及未知字段；选择后把该结构化期望写入 `PalStoryProfile.BattleProjectionReceiptSha256/BattleProjectionReceiptByteLength`。`NativeStoryProfile.Load` 改用 `NativeBattleContent.LoadChecked` 读取同次 checked native，并把期望与 `BattleProjectionSourceInfo` 的 receipt 身份逐项核对：未声明且 native 无来源保留旧合法入口；有投影 native 却省略期望、悬空期望或身份不符均在玩法副作用前拒绝。Story 不打开 receipt/numeric，不做三方转换/独立认证或第二 native graph；既有 native graph 继续锁定实际 BattleContent 文件字节。
 
+## 完整 M5→CLI→Prepare→Story→正常 Main 链验证（#236，路线 A 契约第 6 项）
+
+`ProjectedStoryChainTests` 用可提交的合成 caller-verified M5 表（team 18 两槽、role0）经正式 `pal-extract project-battle-data` 产 receipt/numeric，再以 `--projection-receipt` 跑正式 `PrepareBattleData`、以 `battleProjection` 声明跑正式 `PrepareStoryPackage`，最后用正常 `Main` argv 与真实输入进入投影战斗。`ObserveProjectedBattle` 只观察正式加载、选令与结算：先核对 Story 期望与 checked native receipt 身份及 roles/teams/slots，再确认真实战斗 Won、6 exp/10 cash 的所属 ACK 只消费一次、trigger Completed、战斗视图释放与探索恢复；随后经真实菜单输入打开状态页，读取同一共享 `RoleLiveState` 的 role0 经验 6，证明结算确实回写活角色而不只是宿主账目。numeric 字节漂移在 `PrepareBattleData` 以 `receipt.json.$.output.sha256` 拒绝；Story receipt 声明漂移在 `PrepareStoryPackage` 以 native 来源不匹配拒绝，均无成功标记或部分产物。该测试不改运行时 JSON/MKF、不建第二宿主，不新增 Game 批次测试；Prepare 批准计数 128→129。真实资源、GPU、桌面与远端 CI 仍分层留证，本叶不自行关闭 #134 或宣称完整 M6。
+
 ## 离线 receipt 与原 numeric 字节核对（#199，路线 A 第二叶）
 
 `Pal.Game.Editor.ProjectedBattleSource.Parse(ReadOnlyMemory<byte> receiptBytes, ReadOnlyMemory<byte> numericBytes)` 返回 `(TriggerBattleContent Content, BattleProjectionSourceInfo Source)`。这是离线纯内存边界，不读文件、不创建 Godot 对象或会话、不引用 Pal.Extract，不重新投影基表。实际 numeric 严格 UTF-8（可选 BOM）解码后仅调用一次 `ModernBattleContent.Parse`；来源与同次 Content 的选择/完整槽/能力一致性直接复用 #198。numeric 沿既有 Core typed defensive snapshot 契约，Source 构造时深冻结；两者均不保留输入 buffer alias，返回后改写原数组不能污染结果。本叶不改变 Core `PanelDeclaredRoles` 等既有集合的具体存储或承诺全部 Core 集合无法向下转型修改。

@@ -86,7 +86,7 @@ $script:LocalOnlyRealMatches = @('Pal.Game.Tests.RealFirstBattleFlowTests.')
 # Independently approved Prepare cardinality, shared by Range and the full gate.
 # Keep this lightweight: Prepare-only must not enumerate Game source inventory.
 function Get-PrepareTestCount {
-    $count = 128
+    $count = 129
     if ($count -isnot [int] -or $count -le 0) { throw 'Approved Prepare case count must be a positive Int32.' }
     return $count
 }

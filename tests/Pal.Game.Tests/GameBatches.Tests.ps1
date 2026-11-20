@@ -75,7 +75,7 @@ try {
             # Change only the approval literal in an owned in-memory/offline fixture, never from discovery.
             $metadataSource.Substring(0, $value.StartOffset) + $Expression + $metadataSource.Substring($value.EndOffset)
         }
-        Assert ((Get-PrepareTestCount) -ceq 128) 'Approved fire+ball Prepare increment must select exactly 128 cases.'
+        Assert ((Get-PrepareTestCount) -ceq 129) 'Approved fire+ball+projected-chain Prepare increment must select exactly 129 cases.'
         $fireProcess = [IO.File]::ReadAllText((Join-Path $repository 'tests/Pal.Prepare.Tests/FireEffectsPrepareProcessTests.cs'))
         $fireProcessCases = [regex]::Matches($fireProcess, '(?m)^\s*\[(Fact|InlineData)(\(|\])').Count
         Assert ($fireProcessCases -eq 13) 'Fire-effects process class must retain editor publish plus new12 wrapper/argv cases.'
@@ -651,7 +651,7 @@ public class Fixture
             core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 1534, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 537, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 419, 2)
-            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 128, 0)
+            prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 129, 0)
             game = @('src/Pal.Game/Pal.Game.csproj', 1095, 0)
         }
         foreach ($project in $plan.projects) {
@@ -756,7 +756,7 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1534 passed; CLI unit 537 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 128 passed; Godot source/discovery 1098; positives 1095 as serial 85/134/2/5/6/3/4/30/782/44 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1534 passed; CLI unit 537 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 129 passed; Godot source/discovery 1098; positives 1095 as serial 85/134/2/5/6/3/4/30/782/44 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }
@@ -782,7 +782,7 @@ public class Fixture
     }
     Case 'committable gate PASS summary declares scope and the private-asset boundary' {
         $summary = Get-GatePassSummary (Get-GameBatchPlan $repository -Scope committable)
-        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1534 passed; CLI unit 537 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 128 passed; Godot source/discovery 1098; positives 1094 as serial 85/134/2/5/6/3/4/30/782/43 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
+        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1534 passed; CLI unit 537 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 129 passed; Godot source/discovery 1098; positives 1094 as serial 85/134/2/5/6/3/4/30/782/43 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
         Assert ($summary -ceq $expected) "Wrong committable gate PASS summary: $summary"
         Assert ($summary -cmatch 'committable-scope full gate') 'Committable identity missing.'
         Assert ($summary -cmatch 'local-only real-asset positives excluded') 'Private-asset boundary missing.'
