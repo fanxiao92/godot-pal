@@ -12,7 +12,7 @@
 
 | 资产 | 本机路径 | 说明 |
 |---|---|---|
-| **LRA state**（必需） | `C:/Users/xiaofan/.pi/agent/long-running/8abd28935ce05eefeb27/124/` | github-state.json + attempts/ 全部证据；无它无法 resume LRA |
+| **LRA state**（无需迁移，2026-11-23 更新） | 旧机 `C:/Users/xiaofan/.pi/agent/long-running/8abd28935ce05eefeb27/124/`（3.5GB） | GitHub 是唯一事实源：新机 `cli.ts init` 生成新 state，83 张已关票自动 accounted，#238 作 ready 新叶重做（候选 patch 在 `tmp/238-candidate-uncommitted.patch`）；旧 state 仅审计价值，留旧机或另行打包（非 git） |
 | #238 候选 patch | `C:/evidence/m6/207-repair-20261114/m6c-tickets/238-candidate-uncommitted.patch` | 584 行 12 文件（契约/捕获/恢复/JSON/矩阵/测试全改完，**未验证**）；新机器可 apply 参考或让 LRA 重做 |
 | 证据根（建议） | `C:/evidence/m6/` | 全部历史证据（收尾/基线/RED） |
 | 固定 GdUnit 包 | `worktrees/godot-pal-m6-long-running/.packages/gdunit` | 固定版本测试包（SHA256SUMS 校验）；或按 docs/testing/gdunit-source-packages.md 重新准备 |
