@@ -16,7 +16,7 @@
 ## 新机器环境准备（缺一不可）
 
 - [ ] `git clone -b integration/m6-long-running`（远端已验证 `52ad2c9`）
-- [ ] 迁移 LRA state：`<旧机>C:/Users/xiaofan/.pi/agent/long-running/8abd28935ce05eefeb27/124/` 整目录 → 新机任意位置；**把 `github-state.json` 内所有旧绝对路径（含 `C:\\Users\\xiaofan\\Repos\\worktrees\\godot-pal-m6-long-running` 与 attempts 路径）替换为新机路径**
+- [x] LRA state **无需迁移**（3.5GB，与旧机路径/证据强耦合）：GitHub 是唯一事实源（83/84 票已关闭），新机 `cli.ts init` 生成全新 state 即可——已关票自动识别为 accounted，#238 作为 ready 新叶执行。旧机 state 仅审计价值，留旧机或另行打包（非 git）。
 - [ ] Godot 4.7.2 mono（`godot-mono.console.exe`）+ `.packages/gdunit` 固定测试包（随迁或按 `docs/testing/gdunit-source-packages.md` 重备）
 - [ ] 随迁 `C:/evidence/m6/207-repair-20261114/`（含 #238 候选 patch：`m6c-tickets/238-candidate-uncommitted.patch`，584 行/12 文件，实现完整未验证）
 - [ ] gh CLI 已登录（票务操作需要）
