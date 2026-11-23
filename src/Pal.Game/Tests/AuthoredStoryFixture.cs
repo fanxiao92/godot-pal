@@ -23,7 +23,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
         bool zeroHpPuppetEntry = false, bool mixedEmptySlots = false, bool attackAllMember0 = false,
         bool fleeEscape = false, bool menuEquip = false, bool menuItems = false, bool menuMagic = false,
         bool menuItemsBitmaps = false, bool menuItemsBitmapsMissingBinding = false,
-        bool menuShop = false, bool menuShopBitmapsMissingBinding = false, bool menuShopEmptyBag = false)
+        bool menuShop = false, bool menuShopBitmapsMissingBinding = false, bool menuShopEmptyBag = false,
+        bool controlFlow = false)
     {
         if (heterogeneousEnemies && scenario != "PartyWin")
             throw new ArgumentException("Heterogeneous enemy art requires the two-slot PartyWin author.", nameof(heterogeneousEnemies));
@@ -61,6 +62,8 @@ internal sealed class AuthoredStoryFixture : IDisposable
             throw new ArgumentException("The missing shop-bitmap binding derivation requires the shop author.", nameof(menuShopBitmapsMissingBinding));
         if (menuShopEmptyBag && !menuShop)
             throw new ArgumentException("The empty-bag shop derivation requires the shop author (the sell menu of an empty bag).", nameof(menuShopEmptyBag));
+        if (controlFlow && scenario != "Midbattle")
+            throw new ArgumentException("The T03 control-flow derivation requires the Midbattle author.", nameof(controlFlow));
         if (partyHpMpPrefixAmount is { } amount)
         {
             if (scenario != "PartyWin")
@@ -83,7 +86,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 : ProjectSettings.GlobalizePath("res://Samples/AuthoredBattle/Static/Scenes/Scene.tscn"), Path.Combine(output, "Static/Scenes/Scene.tscn"));
             if (ownedStatic) File.Copy(Path.Combine(scenarioStatic, "Exploration.tres"), Path.Combine(output, "Static/Exploration.tres"));
             string numbers = Path.Combine(source, "Numbers");
-            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape || menuEquip || menuItems || menuMagic || menuShop)
+            if (enemyHp is { } hp || playerHp is { } || removeDualAttack || singlePlayerTwoEnemies || threePlayer || zeroHpPuppetEntry || mixedEmptySlots || attackAllMember0 || fleeEscape || menuEquip || menuItems || menuMagic || menuShop || controlFlow)
             {
                 // Owned sibling, not an extra directory in strict Story input. Original author bytes stay read-only.
                 numericInput = Path.Combine(Path.GetTempPath(), "pal-story-numeric-" + Guid.NewGuid().ToString("N"));
@@ -92,6 +95,15 @@ internal sealed class AuthoredStoryFixture : IDisposable
                 string dataPath = Path.Combine(numericInput, "battle-data.json");
                 var data = JsonNode.Parse(File.ReadAllText(dataPath, System.Text.Encoding.UTF8))!;
                 var team = System.Linq.Enumerable.Single(data["teams"]!.AsArray(), t => (int)t!["teamId"]! == 18)!;
+                if (controlFlow)
+                {
+                    // #234 (T03 production chain): the dying role hook starts with the appended
+                    // counted root goto (owner = the hook's RoleId participant word) and the
+                    // second enemy slot owns an empty battle-end script, so the settled event
+                    // continuation's 0xFFFF call runs with the battle-owned last caller word.
+                    data["players"]![1]!["dyingScript"] = 78;
+                    team["enemies"]![1]!["battleEndScript"] = 77;
+                };
                 if (enemyHp is { } enemyHpValue)
                 {
                     var enemy = System.Linq.Enumerable.Single(team["enemies"]!.AsArray(), e => (int)e!["id"]! == 7)!;
@@ -283,6 +295,7 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (menuItems) AddItemUseEntries();
             if (menuMagic) AddMagicUseEntries();
             if (menuShop) AddShopEntries();
+            if (controlFlow) AddControlFlowStream();
             var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "Story/story-package.json")))!;
             if (singlePlayerTwoEnemies)
             {
@@ -362,6 +375,9 @@ internal sealed class AuthoredStoryFixture : IDisposable
             if (menuEquip)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned menu equip context (T02 #214): bag rows, head object 199 and part/eligibility bindings; authored inputs, not retail data.";
+            if (controlFlow)
+                metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
+                    + " Test-owned T03 production-chain derivation (#234): the selected entry calls an appended nested display, the dying hook starts with a counted root goto and the settled 0xFFFF call owns the battle-end last caller; authored inputs, not retail data.";
             if (menuItems)
                 metadata["sourceIdentity"] = metadata["sourceIdentity"]!.GetValue<string>()
                     + " Test-owned menu item-use context (T03 #215): usable bag rows, consuming/apply-to-all bindings and item.wScriptOnUse entries; authored inputs, not retail data.";
@@ -481,6 +497,91 @@ internal sealed class AuthoredStoryFixture : IDisposable
         commands.Add(new JsonObject { ["label"] = "L0015", ["op"] = "end", ["next"] = null,
             ["source"] = new JsonObject { ["index"] = 15, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) },
             ["mode"] = "keep" });
+        var bytes = new byte[commands.Count * 8];
+        for (int address = 0; address < commands.Count; address++)
+        {
+            var source = commands[address]!["source"]!;
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8), checked((ushort)source["opcode"]!.GetValue<int>()));
+            for (int word = 0; word < 3; word++)
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(address * 8 + 2 + word * 2), checked((ushort)source["operands"]![word]!.GetValue<int>()));
+        }
+        index["source"]!["instructionCount"] = commands.Count;
+        index["source"]!["byteLength"] = bytes.Length;
+        index["source"]!["sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        File.WriteAllText(arenaPath, arena.ToJsonString());
+        File.WriteAllText(indexPath, index.ToJsonString());
+    }
+
+    private void AddControlFlowStream()
+    {
+        // Only this owned authored shape is relocatable (same rule as the flee/item derivations).
+        string arenaPath = Path.Combine(input, "events/arena.json");
+        string indexPath = Path.Combine(input, "events/index.json");
+        var arena = JsonNode.Parse(File.ReadAllText(arenaPath))!;
+        var index = JsonNode.Parse(File.ReadAllText(indexPath))!;
+        var commands = arena["commands"]!.AsArray();
+        if (commands.Count != 65 || commands[1]!["op"]!.GetValue<string>() != "setDialog"
+            || commands[3]!["op"]!.GetValue<string>() != "startBattle"
+            || commands[6]!["op"]!.GetValue<string>() != "end"
+            || commands[10]!["op"]!.GetValue<string>() != "randomJump"
+            || commands[64]!["op"]!.GetValue<string>() != "end")
+            throw new InvalidDataException("The T03 control-flow derivation requires the known 65-instruction Midbattle author arena shape.");
+        // The original terminal row gains the appended continuation as its WORD-order successor.
+        commands[64]!["next"] = "L0065";
+        // L0001: call the appended nested callee with operand word zero (inherit the event caller).
+        commands[1]!["op"] = "call";
+        commands[1]!["to"] = "L0065";
+        commands[1]!["eventObjectId"] = 0;
+        foreach (string field in new[] { "box", "portraitId", "color", "rngWord" }) commands[1]!.AsObject().Remove(field);
+        commands[1]!["source"]!["opcode"] = 4;
+        commands[1]!["source"]!["operands"] = new JsonArray(65, 0, 0);
+        // L0004 (the battle's WORD-order successor): call the appended counted callee with the
+        // inherited event caller word (0). The Midbattle friend-death hook can leave last event
+        // object 0, whose counted gate is undefined (script.c dereferences only a nonzero object),
+        // so the derived settled call inherits the root caller instead of 0xFFFF.
+        commands[4]!["op"] = "call";
+        commands[4]!["to"] = "L0068";
+        commands[4]!["eventObjectId"] = 0;
+        foreach (string field in new[] { "box", "portraitId", "color", "rngWord" }) commands[4]!.AsObject().Remove(field);
+        commands[4]!["source"]!["opcode"] = 4;
+        commands[4]!["source"]!["operands"] = new JsonArray(68, 0, 0);
+        // L0005: the callee returns here; 0x0001 publishes its WORD-order successor as the
+        // returned entry, which Main writes back to the searched object (play.c 153).
+        commands[5]!["op"] = "end";
+        commands[5]!["mode"] = "advance";
+        foreach (string field in new[] { "messageId", "descriptionLineWord" }) commands[5]!.AsObject().Remove(field);
+        commands[5]!["source"]!["opcode"] = 1;
+        commands[5]!["source"]!["operands"] = new JsonArray(0, 0, 0);
+        void Append(string label, string op, int opcode, JsonArray operands, string? next, string semantics)
+        {
+            var row = JsonNode.Parse(semantics)!.AsObject();
+            row["label"] = label;
+            row["op"] = op;
+            row["next"] = next is null ? null : JsonValue.Create(next);
+            row["source"] = new JsonObject { ["index"] = commands.Count, ["opcode"] = opcode, ["operands"] = operands };
+            commands.Add(row);
+        }
+        Append("L0065", "setDialog", 60, new JsonArray(0, 0, 0), "L0066", """{"box":"upper","portraitId":0,"color":0,"rngWord":0}""");
+        Append("L0066", "showDialog", 65535, new JsonArray(4, 0, 0), "L0067", """{"messageId":4,"descriptionLineWord":0}""");
+        Append("L0067", "end", 0, new JsonArray(0, 0, 0), "L0068", """{"mode":"keep"}""");
+        // The settled continuation's inherited callee: a counted root gate (owner = event caller)
+        // then the Won display; the failure arm ends without one.
+        Append("L0068", "goto", 3, new JsonArray(70, 4, 0), "L0069", """{"to":"L0070","limit":4}""");
+        Append("L0069", "end", 0, new JsonArray(0, 0, 0), "L0070", """{"mode":"keep"}""");
+        Append("L0070", "setDialog", 60, new JsonArray(0, 0, 0), "L0071", """{"box":"upper","portraitId":0,"color":0,"rngWord":0}""");
+        Append("L0071", "showDialog", 65535, new JsonArray(2, 0, 0), "L0072", """{"messageId":2,"descriptionLineWord":0}""");
+        Append("L0072", "end", 0, new JsonArray(0, 0, 0), "L0073", """{"mode":"keep"}""");
+        Append("L0073", "end", 0, new JsonArray(0, 0, 0), "L0074", """{"mode":"keep"}""");
+        Append("L0074", "end", 0, new JsonArray(0, 0, 0), "L0075", """{"mode":"keep"}""");
+        Append("L0075", "end", 0, new JsonArray(0, 0, 0), "L0076", """{"mode":"keep"}""");
+        Append("L0076", "end", 0, new JsonArray(0, 0, 0), "L0077", """{"mode":"keep"}""");
+        // The second enemy slot's post-victory script (battle.c 1334-1337): empty, so its own
+        // invocation leaves the slot word in wLastEventObject and the settled 0xFFFF resolves it.
+        Append("L0077", "end", 0, new JsonArray(0, 0, 0), "L0078", """{"mode":"keep"}""");
+        // The dying hook's own root counted goto (script.c 3196): owner = the hook participant
+        // word; the high limit keeps both the threshold and the death invocation on the target.
+        Append("L0078", "goto", 3, new JsonArray(10, 100, 0), "L0079", """{"to":"L0010","limit":100}""");
+        Append("L0079", "end", 0, new JsonArray(0, 0, 0), null, """{"mode":"keep"}""");
         var bytes = new byte[commands.Count * 8];
         for (int address = 0; address < commands.Count; address++)
         {

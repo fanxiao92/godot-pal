@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Pal.Core;
 using Xunit;
 
@@ -52,6 +53,108 @@ public class NpcInteractionSessionTests
         Assert.Equal(0x0188, session.Objects.Single(o => o.Id == 60).TriggerEntry);
         Assert.False(session.CompleteTrigger(request.Id, trigger, 120));
         Assert.False(session.Update(149));
+    }
+
+    [Fact]
+    public void Completed_call_writes_the_returned_entry_back_to_the_searched_object()
+    {
+        // play.c 153: p->wTriggerScript = PAL_RunTriggerScript(...) stores the returned WORD, so a
+        // non-keep 0x0008/0x0001 entry is a real completion rather than a receipt mismatch.
+        var fixture = new EventFixture();
+        fixture.Commands.Clear();
+        fixture.Commands.Add(new JsonObject { ["label"] = "L0000", ["op"] = "raw", ["next"] = "L0001",
+            ["source"] = new JsonObject { ["index"] = 0, ["opcode"] = 134, ["operands"] = new JsonArray(0, 65535, 8) } });
+        fixture.Commands.Add(new JsonObject { ["label"] = "L0001", ["op"] = "advanceEntry", ["next"] = "L0002",
+            ["source"] = new JsonObject { ["index"] = 1, ["opcode"] = 8, ["operands"] = new JsonArray(0, 0, 0) } });
+        fixture.Commands.Add(new JsonObject { ["label"] = "L0002", ["op"] = "end", ["mode"] = "keep", ["next"] = null,
+            ["source"] = new JsonObject { ["index"] = 2, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) } });
+        fixture.Index["source"]!["instructionCount"] = 3;
+        fixture.Index["source"]!["byteLength"] = 24;
+        var events = fixture.Load();
+        var session = NpcInteractionSession.ForSelectedEntry(SceneSearchTests.Rules([Target() with { TriggerEntry = 1 }]),
+            SceneSearchTests.Leader(1232, 1336), events.GetEntry("shared", "npc"));
+        session.PressSearch(); session.Update(0);
+        var request = session.PendingTrigger!;
+        var trigger = new TriggerScriptSession(events, TriggerScriptSessionTests.Language());
+        trigger.Start(request.FileId, request.EntryId, request.Caller, request.Id);
+        Assert.Equal(TriggerScriptPhase.Completed, trigger.Phase);
+        Assert.Equal(2, trigger.ReturnEntry);
+        Assert.True(session.BindTrigger(request.Id, trigger));
+        Assert.True(session.CompleteTrigger(request.Id, trigger, 100));
+        Assert.Equal(2, session.Objects.Single(o => o.Id == 60).TriggerEntry);
+    }
+
+    [Fact]
+    public void Completed_call_writes_the_returned_entry_back_to_the_bound_runtime_world()
+    {
+        // play.c 153 stores the returned WORD on the runtime EVENTOBJECT the production host
+        // consumes (the save chain and the world->rules projection read this world), not on the
+        // static exploration copy. The legacy copy-only host stays covered by the previous test.
+        var fixture = new EventFixture();
+        fixture.Commands.Clear();
+        fixture.Commands.Add(new JsonObject { ["label"] = "L0000", ["op"] = "raw", ["next"] = "L0001",
+            ["source"] = new JsonObject { ["index"] = 0, ["opcode"] = 134, ["operands"] = new JsonArray(0, 65535, 8) } });
+        fixture.Commands.Add(new JsonObject { ["label"] = "L0001", ["op"] = "advanceEntry", ["next"] = "L0002",
+            ["source"] = new JsonObject { ["index"] = 1, ["opcode"] = 8, ["operands"] = new JsonArray(0, 0, 0) } });
+        fixture.Commands.Add(new JsonObject { ["label"] = "L0002", ["op"] = "end", ["mode"] = "keep", ["next"] = null,
+            ["source"] = new JsonObject { ["index"] = 2, ["opcode"] = 0, ["operands"] = new JsonArray(0, 0, 0) } });
+        fixture.Index["source"]!["instructionCount"] = 3;
+        fixture.Index["source"]!["byteLength"] = 24;
+        var events = fixture.Load();
+        var rules = SceneSearchTests.Rules([Target() with { TriggerEntry = 1 }]);
+        var leader = SceneSearchTests.Leader(1232, 1336);
+        var world = DynamicEventWorld.ForHost(rules, leader, sceneId: 4, onEnter: 0, onTeleport: 0);
+        var session = NpcInteractionSession.ForSelectedEntry(rules, leader, events.GetEntry("shared", "npc"), world);
+        session.PressSearch(); session.Update(0);
+        var request = session.PendingTrigger!;
+        var trigger = new TriggerScriptSession(events, TriggerScriptSessionTests.Language());
+        trigger.Start(request.FileId, request.EntryId, request.Caller, request.Id);
+        Assert.Equal(TriggerScriptPhase.Completed, trigger.Phase);
+        Assert.Equal(2, trigger.ReturnEntry);
+        Assert.True(session.BindTrigger(request.Id, trigger));
+        Assert.True(session.CompleteTrigger(request.Id, trigger, 100));
+        Assert.Equal(2, world.Objects.Single(o => o.Id == 60).TriggerEntry);
+        // The consumed runtime owner keeps the word across a world isolation copy; the legacy
+        // static exploration surface is never additionally rewritten in world-bound mode.
+        Assert.Equal(2, world.CreateIsolatedCopy().Objects.Single(o => o.Id == 60).TriggerEntry);
+        Assert.Equal(1, session.Objects.Single(o => o.Id == 60).TriggerEntry);
+    }
+
+    [Fact]
+    public void Selected_entry_accepts_the_restored_runtime_entry_of_the_bound_world_as_authoritative_state()
+    {
+        // #227 (matrix D11) restores the retained dispatch word into the bound world, and a
+        // completed non-keep return (play.c 153) leaves that object word on a consumed address the
+        // save chain then captures. Rebuilding the interaction over such a restored world must not
+        // reject its own capture: the bound world's object word is authoritative retained state,
+        // while the authored entry stays the checked host dispatch closure (the #125 dynamic
+        // host's split; no unvalidated address from file bytes is executed).
+        var events = TriggerScriptSessionTests.RealShape().Load();
+        var entry = events.GetEntry("shared", "npc"); // owner 60 / wTriggerScript @0188
+        // The restored world and its projection carry the saved consumed return word (word 2
+        // here), exactly what BuildWorld rebuilds from a completed capture; the authored entry
+        // stays the checked dispatch closure.
+        var rules = SceneSearchTests.Rules([Target() with { TriggerEntry = 2 }]);
+        var leader = SceneSearchTests.Leader(1232, 1336);
+        var world = DynamicEventWorld.ForHost(rules, leader, sceneId: 4, onEnter: 0, onTeleport: 0);
+        Assert.Equal(2, world.Objects.Single(o => o.Id == 60).TriggerEntry);
+        var session = NpcInteractionSession.ForSelectedEntry(rules, leader, entry, world);
+        Assert.Equal(2, session.Objects.Single(o => o.Id == 60).TriggerEntry);
+        session.PressSearch();
+        Assert.True(session.Update(0));
+        var request = session.PendingTrigger!;
+        Assert.Equal(("shared", "npc", 60, 0x0188),
+            (request.FileId, request.EntryId, request.Caller, request.SourceAddress));
+        var trigger = new TriggerScriptSession(events, TriggerScriptSessionTests.Language());
+        trigger.Start(request.FileId, request.EntryId, request.Caller, request.Id);
+        Finish(trigger);
+        Assert.True(session.BindTrigger(request.Id, trigger));
+        Assert.True(session.CompleteTrigger(request.Id, trigger, 100));
+        // The completion still writes its returned word through the bound runtime owner; the
+        // legacy static exploration surface keeps the restored word and is never rewritten.
+        Assert.Equal(0x0188, world.Objects.Single(o => o.Id == 60).TriggerEntry);
+        Assert.Equal(2, session.Objects.Single(o => o.Id == 60).TriggerEntry);
+        Assert.Equal(NpcInteractionPhase.Returning, session.Phase);
     }
 
     [Theory]

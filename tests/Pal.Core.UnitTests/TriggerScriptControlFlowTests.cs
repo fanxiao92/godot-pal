@@ -673,6 +673,32 @@ public class TriggerScriptControlFlowTests
     }
 
     [Fact]
+    public void Static_checks_accept_a_counted_gate_with_the_bound_scene_and_caller()
+    {
+        // #234: the formal story preflight binds the static scene world and the entry owner word
+        // Main passes at Start, so a counted 0x0002/0x0003 gate resolves its owner exactly like
+        // the runtime (script.c 3196/3229, play.c 153) instead of staying outside the contract.
+        var events = StaticCountedFixture("""{"op":"goto","to":"L0005","limit":2}""", 3).Load();
+        var world = World(60);
+        var requirements = TriggerScriptSession.ValidateEntry(events, Text((61, "A")), SimpleContent(), "shared", "npc",
+            world: world, caller: 60);
+        Assert.Empty(requirements.BattleTeamIds);
+        Assert.Empty(requirements.PortraitIds);
+        Assert.Equal(0, world.Objects.Single(o => o.Id == 60).TriggerIdleCount);
+    }
+
+    [Fact]
+    public void Static_checks_reject_a_counted_gate_with_an_unreachable_scene_owner_before_prefix()
+    {
+        var events = StaticCountedFixture("""{"op":"goto","to":"L0005","limit":2}""", 3).Load();
+        var error = Assert.Throws<InvalidDataException>(() =>
+            TriggerScriptSession.ValidateEntry(events, Text((61, "A")), SimpleContent(), "shared", "npc",
+                world: World(5), caller: 60));
+        Assert.Contains("counted goto", error.Message);
+        Assert.Contains("event object 60", error.Message);
+    }
+
+    [Fact]
     public void Static_checks_keep_counted_redirect_outside_the_counter_free_contract()
     {
         var events = StaticCountedFixture("""{"op":"end","mode":"redirect","to":"L0005","limit":2}""", 2).Load();

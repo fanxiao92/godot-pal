@@ -135,7 +135,6 @@ public partial class Main
         {
             checkedStory.Exploration.SetPalette(map.Data, checkedStory.Palette.ToArray());
             map.InitializeScene(checkedStory.Exploration.Plan, checkedStory.Exploration.TextureFor);
-            var interaction = NpcInteractionSession.ForSelectedEntry(checkedStory.Exploration.Rules, checkedStory.Exploration.Leader, checkedStory.Entry);
             storyRandom = new GodotBattleRandom(selected.BattleSeed);
             display = new PalDialogueDisplay();
             dialogue = new PalTriggerDialogue();
@@ -179,6 +178,10 @@ public partial class Main
             storyWorld = DynamicEventWorld.ForHost(checkedStory.Exploration.Rules,
                 checkedStory.Exploration.Leader, map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
                 roleLiveState, storyPartyRoleIds);
+            // #234: the interaction's completed trigger publishes its returned entry into the same
+            // runtime world the save chain consumes (play.c 153), not the static exploration copy.
+            var interaction = NpcInteractionSession.ForSelectedEntry(checkedStory.Exploration.Rules,
+                checkedStory.Exploration.Leader, checkedStory.Entry, storyWorld);
             dialogue.FirstBattleWorld = storyWorld;
             storySaveGate = new ExplorationSaveGate(roleLiveState, storyInventory, storyCash, storyWorld);
             storySaveStorage = new PlayerSaveStorage(selected.SaveDirectory);
@@ -1084,7 +1087,7 @@ public partial class Main
         bool equipmentPage = content.EquipMenu.Count > 0;
         bool shopContext = content.ShopObjects.Count > 0;
         var newInteraction = NpcInteractionSession.ForSelectedEntry(
-            world.Rules, world.World.Leader, checkedStory.Entry);
+            world.Rules, world.World.Leader, checkedStory.Entry, world.World);
         var newMenu = BuildStoryMenu(roles.PartyRoleIds, roles.Roles, roles.Equipment, roles.Poisons, roles.Inventory);
         var newShop = shopContext
             ? new ExplorationShopSession(content.Stores, content.ShopObjects,

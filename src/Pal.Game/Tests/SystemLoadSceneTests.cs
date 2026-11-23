@@ -116,6 +116,64 @@ public class SystemLoadSceneTests
         }
     }
 
+    [TestCase(Timeout = 120000)]
+    public async Task Load_accepts_a_saved_consumed_runtime_trigger_entry_and_keeps_the_restored_word()
+    {
+        // #234 (parent #129 T03; #227 matrix D11): the production completion writes the returned
+        // trigger word into the runtime world (play.c 153) and the save chain captures that word,
+        // so a committed load rebuilds the interaction over a restored object whose entry has moved
+        // off the authored entry. The restored world object entry is authoritative retained state:
+        // the load completes and keeps it, while the authored entry stays the checked dispatch
+        // closure (never an unvalidated address supplied by file bytes). The crafted slot is an
+        // independent fixture this test owns: the actual capture with only the searched object's
+        // retained trigger word replaced by the authored end address 6 — the shape #234's
+        // control-flow completion writes (StoryRoundtripSceneTests' Main chain) — never a value
+        // produced by the chain under test.
+        using var fixture = new AuthoredStoryFixture("PartyWin");
+        string saveRoot = "user://load-tests-" + Guid.NewGuid().ToString("N");
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1", "--story-language", "en",
+            "--save-directory", saveRoot);
+        using var host = new LoadHost(selection);
+        try
+        {
+            host.AssertHealthy();
+            await host.Wait(() => host.Updates.Count > 0);
+            var storage = host.Main.SaveStorage!;
+            string identity = host.Main.SaveContentIdentity!;
+            await SaveThroughFormalMenu(host, slot: 2);
+            AssertThat(host.Main.CurrentRecoverySlot).IsEqual(2);
+            var saved = PlayerSaveJson.Decode(storage.ReadSlot(2)!, identity);
+            var objects = saved.World.Objects.Select(obj => obj.ObjectId == 1
+                ? new PlayerSaveObject(obj.ObjectId, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
+                    obj.State, obj.VanishTime, obj.TriggerMode, 6, obj.AutoEntry, obj.AutoIdleCount)
+                : obj).ToArray();
+            var crafted = new PlayerSaveV1(saved.FormatVersion, saved.SaveSlot, saved.SavedTimes, saved.ContentIdentity,
+                saved.Roles, saved.PartyRoleIds, saved.Inventory, saved.Cash,
+                new PlayerSaveWorld(saved.World.SceneId, saved.World.Leader, objects,
+                    saved.World.SceneScripts, saved.World.ObjectScripts, saved.World.Battlefield, saved.World.Music));
+            using (var file = FileAccess.Open(storage.SlotPath(4), FileAccess.ModeFlags.Write))
+                file!.StoreBuffer(PlayerSaveJson.EncodeToUtf8(crafted));
+
+            await LoadThroughFormalMenu(host, fromSlot: 2, toSlot: 4);
+            AssertThat(host.Main.Menu!.Mode).IsEqual(ExplorationMenuMode.Closed);
+            AssertThat(host.Main.CurrentRecoverySlot).IsEqual(4);
+            AssertThat(host.Main.Interaction!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)6);
+            AssertThat(host.Main.Failure).IsNull();
+
+            // The rebuilt session still consumes its checked authored entry on a real search.
+            host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Dialogue!.Session is { PendingDisplay: not null });
+            AssertThat(host.Main.Dialogue!.Session!.StartedEntry!.SourceAddress).IsEqual(1);
+            AssertThat(host.Main.Interaction!.PendingTrigger is not null).IsTrue();
+            AssertThat(host.Main.Failure).IsNull();
+        }
+        finally
+        {
+            CleanupNamespace(saveRoot);
+        }
+    }
+
     [TestCase(Timeout = 90000)]
     public async Task Released_session_and_a_fresh_main_read_the_saved_slot_through_the_formal_menu()
     {

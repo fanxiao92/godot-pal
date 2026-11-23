@@ -151,7 +151,27 @@ public static class NativeStoryProfile
             // language loop below runs TriggerScriptSession.ValidateEntry, which validates every
             // startBattle team of the selected entry (one to three players and enemy slots) and
             // ignores unselected teams as plain data. Only the party head is bound to the static leader.
-            var font = LoadResource<PalDialogueFont>(dialogue + "/Font.tres");
+            var packedScene = LoadResource<PackedScene>(sceneUri);
+            Node? node = null;
+            try
+            {
+                node = packedScene.Instantiate();
+                Require(node is PalMapScene, sceneUri + ": expected PalMapScene root");
+                var scene = ((PalMapScene)node).Data;
+                Require(scene is not null && scene.BundleSha256 == native.BundleSha256, "story scene BundleSha256 mismatch");
+                CheckedExplorationProfile exploration = NativeExplorationProfile.Load(native.StaticProfile, scene!);
+                Require(content.Players[0].RoleId == 0, "story battle role must match static leader role0");
+                Require(scene!.Objects.SingleOrDefault(x => x.Id == entry.OwnerId)?.WTriggerScript == entry.SourceAddress,
+                    "story entry does not match bound native scene owner trigger");
+                Require(scene.Palette is not null && scene.Palette.Rgb is { Length: 768 }, "story requires the native 256-color scene palette");
+                byte[] rgb = scene.Palette!.Rgb;
+                var palette = Enumerable.Range(0, 256).Select(i => new Color(rgb[i * 3] / 255f, rgb[i * 3 + 1] / 255f, rgb[i * 3 + 2] / 255f)).ToArray();
+                // The selected entry's static preflight binds the same static scene and caller word
+                // Main passes at Start (the searched object's ID): a counted 0x0002/0x0003 gate
+                // resolves its owner only through that binding (script.c 3196/3229, play.c 153).
+                var preflightWorld = DynamicEventWorld.ForHost(exploration.Rules, exploration.Leader,
+                    scene.SceneId, scene.WScriptOnEnter, scene.WScriptOnTeleport);
+                var font = LoadResource<PalDialogueFont>(dialogue + "/Font.tres");
             Require(!string.IsNullOrWhiteSpace(font.SourceIdentity) && font.FormatVersion == 1 && font.LineHeight == 16,
                 "native font identity/version/line height is invalid");
             var prompts = Enumerable.Range(0, 3).Select(i => LoadImage($"{dialogue}/Prompt-{i:D2}.tres")).ToArray();
@@ -181,7 +201,8 @@ public static class NativeStoryProfile
                     packages.Add(id, resource.ToCorePackage());
                     if (id == language) selectedWords = resource.CopyWords();
                     requirements.Add(id, TriggerScriptSession.ValidateEntry(events, packages[id], content, native.EntryFileId, native.EntryId,
-                        cashLiveState: shopCashOwner, inventoryLiveState: shopInventoryOwner));
+                        cashLiveState: shopCashOwner, inventoryLiveState: shopInventoryOwner,
+                        world: preflightWorld, caller: entry.OwnerId));
                     var perItem = new Dictionary<int, TriggerEntryRequirements>();
                     foreach (var pair in itemUseEntries)
                         perItem.Add(pair.Key, TriggerScriptSession.ValidateEntry(events, packages[id], content, pair.Value.FileId, pair.Value.Id,
@@ -205,21 +226,6 @@ public static class NativeStoryProfile
             Require(requiredPortraits.SetEquals(portraits.Keys),
                 "Portraits must cover exactly the selected, item-use and magic entries' nonzero portrait IDs");
 
-            var packedScene = LoadResource<PackedScene>(sceneUri);
-            Node? node = null;
-            try
-            {
-                node = packedScene.Instantiate();
-                Require(node is PalMapScene, sceneUri + ": expected PalMapScene root");
-                var scene = ((PalMapScene)node).Data;
-                Require(scene is not null && scene.BundleSha256 == native.BundleSha256, "story scene BundleSha256 mismatch");
-                CheckedExplorationProfile exploration = NativeExplorationProfile.Load(native.StaticProfile, scene!);
-                Require(content.Players[0].RoleId == 0, "story battle role must match static leader role0");
-                Require(scene!.Objects.SingleOrDefault(x => x.Id == entry.OwnerId)?.WTriggerScript == entry.SourceAddress,
-                    "story entry does not match bound native scene owner trigger");
-                Require(scene.Palette is not null && scene.Palette.Rgb is { Length: 768 }, "story requires the native 256-color scene palette");
-                byte[] rgb = scene.Palette!.Rgb;
-                var palette = Enumerable.Range(0, 256).Select(i => new Color(rgb[i * 3] / 255f, rgb[i * 3 + 1] / 255f, rgb[i * 3 + 2] / 255f)).ToArray();
                 // Both supported languages stay validated together (#215 adds the item entries and
                 // #216 the magic on-use/on-success pairs to the same boundary); the unselected
                 // language must never lose glyph coverage.

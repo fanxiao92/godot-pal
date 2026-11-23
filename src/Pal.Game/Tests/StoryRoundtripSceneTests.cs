@@ -2486,6 +2486,84 @@ public class StoryRoundtripSceneTests
     }
 
     [TestCase(Timeout = 120000)]
+    public async Task MainStoryControlFlowExecutesNestedCallsCountedGatesAndWritesBackTheReturnedEntry()
+    {
+        // #234 leaf (parent #129 T03): the control flow consumed by the formal story Main. The
+        // derived Midbattle stream calls an appended nested display with the inherited caller
+        // before the battle, starts the dying role hook with a counted root goto (owner = the
+        // hook participant word), and runs a settled inherited call with a counted gate owned by
+        // the event caller; its 0x0001 publishes the next instruction, which the production
+        // completion writes back to the searched object (play.c 153).
+        using var fixture = new AuthoredStoryFixture("Midbattle", controlFlow: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        var hookCounters = new List<int>();
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)],
+            updateObserver: main =>
+            {
+                if (main.Dialogue?.Session is { } running
+                    && running.RunningBattleHook is { Kind: Pal.Core.ClassicBattleHookKind.Dying }
+                    && main.Dialogue.FirstBattleWorld is { } world)
+                    hookCounters.Add(world.Objects.Single(o => o.Id == 1).TriggerIdleCount);
+            }))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            var origin = old.Interaction!.PendingTrigger!.Id;
+            Guid call = script.CallId;
+            // The nested callee display is the first observable boundary of the real call.
+            AssertThat(script.SourceRequestId).IsEqual((Guid?)origin);
+            AssertThat(script.Caller).IsEqual(1);
+            AssertThat(script.ReturnEntry).IsEqual(1);
+            AssertThat(script.PendingDisplay!.MessageReferences[0].StartMessageId).IsEqual(4);
+            AssertThat(old.Interaction!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)1);
+            AssertThat(old.Dialogue!.FirstBattleWorld!.Objects.Single(o => o.Id == 1).TriggerIdleCount).IsEqual(0);
+            await host.FinishDisplay();
+            // Word zero inherits the caller; the caller continuation resumes with its own word and
+            // the callee display is never replayed.
+            await host.Wait(() => script.PendingDisplay is { } prelude && prelude.MessageReferences[0].StartMessageId == 1);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
+            AssertThat(script.Caller).IsEqual(1);
+            AssertThat(script.CallId).IsEqual(call);
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            while (script.PendingBattle is not null) await DriveMidbattleMenus(host, old);
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            // The hook's own counted root goto incremented its participant owner before the display.
+            AssertThat(hookCounters.Count > 0).IsTrue();
+            AssertThat(hookCounters[0]).IsEqual(1);
+            AssertThat(hookCounters.All(value => value is 0 or 1)).IsTrue();
+            // The settled inherited call runs its counted gate and pauses on the Won display.
+            AssertThat(script.PendingDisplay!.MessageReferences[0].StartMessageId).IsEqual(2);
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            // 0x0001 published the next instruction; Main wrote it back to the runtime world the
+            // production save chain consumes (play.c 153), not the static exploration copy.
+            AssertThat(script.ReturnEntry).IsEqual(6);
+            AssertThat(old.Dialogue!.FirstBattleWorld!.Objects.Single(o => o.Id == 1).TriggerEntry)
+                .OverrideFailureMessage("The completed selected trigger must write its returned entry back to the runtime world the production host consumes, not the static exploration copy.")
+                .IsEqual((ushort)6);
+            AssertThat(old.Interaction!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)1);
+            // A further committed production update keeps the world-owned write-back; the host
+            // publishes the current leader into the same world on every committed update and
+            // never rewrites the static exploration copy.
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.Dialogue!.FirstBattleWorld!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)6);
+            AssertThat(old.Interaction!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)1);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+    }
+
+    [TestCase(Timeout = 120000)]
     public async Task FriendDeathHookHealsCovererAndBattleStillEndsWon()
     {
         // The cover scenario: once an enemy strike kills role1, the coverer role0's friend-death

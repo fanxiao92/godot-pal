@@ -19,6 +19,8 @@
 
 `NpcInteractionSession(rules, leader, selectedEntry)` 组合既有 `ExplorationSession` / `ExplorationInput`，独占探索推进。selectedEntry 必须来自已解析的完整事件集合，必须是 eventObject60 / wTriggerScript / trigger / source0188，且实际对象 TriggerEntry 相同。只支持该入口，不预造通用事件总线。`TriggerScriptSession.Entries` 只转发既有集合的只读入口元数据，供宿主从 **同一已初始化的 PalTriggerDialogue.Session** 选入口，不重复文件读取或另建运行执行器；原 Start/显示/回执行为不变。
 
+M6 故事宿主把同一交互绑定到运行期 `DynamicEventWorld` 时（可选尾参；不传保持上述静态语义），完成回写的目标是该 world 的对应事件对象（与参考 `play.c` 153 的 `p->wTriggerScript` 同一 owner），静态 exploration 副本不再额外改写。绑定 world 时构造器以 world 对象当前的 `TriggerEntry` 为权威保留字：完成触发后的非 keep 返回会让该字离开 authored entry，存档链捕获的正是该字，因此 #227 读档重建必须接受它而不是拒绝自己的捕获（矩阵 D11：入口字是保留数据）。authored entry 仍是受检的宿主 dispatch 闭包，不从文件字节直接执行未预检地址；这与 #125 动态宿主在 world 字与 authored entry 之间的分工一致。
+
 公开边界：
 
 - `Press(key,repeat)` / `Release(key)` 完全委托现有方向输入；正常方向别名、优先级、repeat、held释放规则不变。
@@ -31,7 +33,7 @@
 
 `NpcInteractionRequest` 提供唯一 Id、真实 FileId/EntryId、global Caller=60、SourceAddress=0188 和命中 SampleIndex。它只是对正常 Start 的请求，不持有/执行第二份脚本。宿主必须调用既有 **PalTriggerDialogue.Start**，保留其实际owner表核对、整链能力/资源预检及唯一显示更新/自动回执，不能直接绕过适配器调用 Core Start 来运行游戏。
 
-显示恢复已应用、正常适配器完成后，宿主在实际完成边界调用 `CompleteTrigger(request.Id, dialogue.Session, completionTicks)`。该方法检查当前请求ID、真实 TriggerScriptPhase.Completed、Caller和ReturnEntry；拒绝未完成、陈旧ID、错误caller/保存入口，成功将实际 ReturnEntry 写入运行时对象并进入 Returning。宿主必须回传**消费了该请求的同一正常会话**；此接口不是外部不可信回执的认证协议。PC018B不是保存入口0188；本切片0000保留0188，返回后可再次完整调用。
+显示恢复已应用、正常适配器完成后，宿主在实际完成边界调用 `CompleteTrigger(request.Id, dialogue.Session, completionTicks)`。该方法要求当前请求ID、真实 TriggerScriptPhase.Completed、Caller 以及 `StartedEntry` 仍是选中入口；selected 模式还要求同一已绑定会话/CallId。返回字**不再要求等于保存入口**：end keep 保留原字，end advance/redirect 可发布任意合法WORD。成功后把实际 ReturnEntry 写入运行时对象并进入 Returning：绑定 world 时写入该 world 的对应事件对象（与参考 `play.c` 153 的 `p->wTriggerScript` 同一 owner），无 world 时写入静态 exploration 副本；拒绝未完成、陈旧ID、错误caller或错误入口。宿主必须回传**消费了该请求的同一正常会话**；此接口不是外部不可信回执的认证协议。PC018B不是保存入口0188；本切片0000保留0188，返回后可再次完整调用。
 
 Returning 的50ms从显示恢复/trigger真正完成的 `completionTicks` 开始，不从后来宿主观察时刻重新计。49ms仍阻塞，50ms（含uint回绕）可返回；使用与探索相同 `<2^31ms` 的 SDL_TICKS_PASSED 比较前提。晚到更新不补走，正常探索下一截止仍从实际步的当前时间+100ms计算；不重置原有尚未到期的探索截止。
 

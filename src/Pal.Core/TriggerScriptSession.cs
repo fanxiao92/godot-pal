@@ -199,10 +199,13 @@ public sealed class TriggerScriptSession
     }
 
     /// <summary>Pure selected-entry capability check against the content's initial role. Does not start a call,
-    /// create a battle or require randomness; later Start calls still validate their current settled role.</summary>
+    /// create a battle or require randomness; later Start calls still validate their current settled role.
+    /// An optional bound world/caller (the formal story preflight) resolves counted gate owners with the
+    /// same event-object rule the runtime uses; without them the counter-free contract is unchanged.</summary>
     public static TriggerEntryRequirements ValidateEntry(TriggerEventCollection events, DialogueLanguagePackage language,
         TriggerBattleContent battleContent, string fileId, string entryId, int inheritedColor = DialogueTextTokenizer.DefaultColor,
-        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null)
+        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null,
+        DynamicEventWorld? world = null, int? caller = null)
     {
         ArgumentNullException.ThrowIfNull(events);
         ArgumentNullException.ThrowIfNull(language);
@@ -212,7 +215,8 @@ public sealed class TriggerScriptSession
         if (entry.Kind != "trigger") throw new InvalidDataException($"{fileId}.json entry {entryId} @{entry.SourceAddress:X4}: auto context is unsupported.");
         var requirements = new EntryRequirementsCollector();
         ValidateCapabilityClosure(events, language, battleContent, battleContent.InitialRoles, inheritedColor, entry.SourceAddress, requirements,
-            hasCashOwner: cashLiveState is not null, hasInventoryOwner: inventoryLiveState is not null);
+            hasCashOwner: cashLiveState is not null, hasInventoryOwner: inventoryLiveState is not null,
+            world: world, caller: caller);
         return new(requirements.Displays, requirements.Portraits, requirements.Teams);
     }
 
@@ -785,9 +789,10 @@ public sealed class TriggerScriptSession
         void ValidateCountedGate(TriggerCommand command, int? caller)
         {
             if (command.Limit == 0) return;
-            // The static entry check has no caller and therefore no way to prove the counter
-            // owner; counted control flow stays outside that counter-free contract and Start
-            // rechecks the bound owner before any effect.
+            // Without a bound caller there is no way to prove the counter owner; counted control
+            // flow then stays outside the counter-free contract and Start rechecks the bound
+            // owner before any effect. A supplied static world/caller (the story preflight)
+            // resolves the same event object the runtime gate will use (script.c 3196/3229).
             if (caller is null)
                 throw new InvalidDataException($"{command.Position}: counted {command.Op} requires a bound caller and scene event object.");
             if (world is null)
