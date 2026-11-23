@@ -84,10 +84,11 @@ public static class PlayerSaveWorldRestorePlan
             currentRow.OnEnterEntry, currentRow.OnTeleportEntry, roles.Roles, roles.PartyRoleIds);
 
         // D11: every dynamic word of every object — dispatch words included, so a consumed
-        // trigger/auto entry resumes from its saved address and the shared idle counter keeps
-        // its progress (Story 22); sprite identity and frame counts stay with the prepared
-        // records and never come from the file (Story 24). Pure word writes on a world that is
-        // not yet published: no script runs, no world tick advances and no event fires.
+        // trigger/auto entry resumes from its saved address and both per-object idle counters
+        // keep their progress (the reference stores the whole EVENTOBJECT, global.c:869; Story 22);
+        // sprite identity and frame counts stay with the prepared records and never come from the
+        // file (Story 24). Pure word writes on a world that is not yet published: no script runs,
+        // no world tick advances and no event fires.
         foreach (var row in saved.Objects)
         {
             var obj = world.Find(row.ObjectId)
@@ -102,6 +103,7 @@ public static class PlayerSaveWorldRestorePlan
             obj.TriggerEntry = row.TriggerEntry;
             obj.AutoEntry = row.AutoEntry;
             obj.AutoIdleCount = row.AutoIdleCount;
+            obj.TriggerIdleCount = row.TriggerIdleCount;
         }
 
         // D12: the retained scene/object script slots write back through the world's own word

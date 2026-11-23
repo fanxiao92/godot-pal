@@ -41,7 +41,7 @@ public static class PlayerSaveJson
     private static readonly string[] ObjectFields =
     {
         "objectId", "x", "y", "direction", "currentFrame", "state", "vanishTime",
-        "triggerMode", "triggerEntry", "autoEntry", "autoIdleCount",
+        "triggerMode", "triggerEntry", "autoEntry", "autoIdleCount", "triggerIdleCount",
     };
     private static readonly string[] SceneScriptFields = { "sceneId", "onEnterEntry", "onTeleportEntry" };
     private static readonly string[] ObjectScriptFields = { "objectId", "slotIndex", "entry" };
@@ -132,6 +132,7 @@ public static class PlayerSaveJson
                 writer.WriteNumber("triggerEntry", obj.TriggerEntry);
                 writer.WriteNumber("autoEntry", obj.AutoEntry);
                 writer.WriteNumber("autoIdleCount", obj.AutoIdleCount);
+                writer.WriteNumber("triggerIdleCount", obj.TriggerIdleCount);
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
@@ -415,7 +416,8 @@ public static class PlayerSaveJson
                 Integer(objectElement.GetProperty("triggerMode"), path + ".triggerMode"),
                 Integer(objectElement.GetProperty("triggerEntry"), path + ".triggerEntry"),
                 Integer(objectElement.GetProperty("autoEntry"), path + ".autoEntry"),
-                Integer(objectElement.GetProperty("autoIdleCount"), path + ".autoIdleCount")));
+                Integer(objectElement.GetProperty("autoIdleCount"), path + ".autoIdleCount"),
+                Integer(objectElement.GetProperty("triggerIdleCount"), path + ".triggerIdleCount")));
         }
 
         JsonElement sceneScriptsElement = ArrayField(element, "sceneScripts", "$.world", PlayerSaveContract.MaxSceneScriptEntries);

@@ -224,8 +224,9 @@ public sealed class PlayerSaveLeader
 
 /// <summary>One event object's dynamic words (DynamicEventObject / reference EVENTOBJECT):
 /// position, facing, frame, state (negative = hidden by 0x0052), vanish countdown, trigger mode,
-/// trigger/auto script entries and the shared auto idle counter. Sprite identity and frame
-/// counts are static content, rebuilt from the prepared scene — never stored here.</summary>
+/// trigger/auto script entries, the shared auto idle counter and the owner's trigger idle counter.
+/// Sprite identity and frame counts are static content, rebuilt from the prepared scene — never
+/// stored here.</summary>
 public sealed class PlayerSaveObject
 {
     public int ObjectId { get; }
@@ -239,9 +240,11 @@ public sealed class PlayerSaveObject
     public int TriggerEntry { get; }
     public int AutoEntry { get; }
     public int AutoIdleCount { get; }
+    public int TriggerIdleCount { get; }
 
     public PlayerSaveObject(int objectId, int x, int y, int direction, int currentFrame,
-        int state, int vanishTime, int triggerMode, int triggerEntry, int autoEntry, int autoIdleCount)
+        int state, int vanishTime, int triggerMode, int triggerEntry, int autoEntry, int autoIdleCount,
+        int triggerIdleCount)
     {
         if (objectId is < 1 or > 65535)
             throw new InvalidDataException("$.world.objects.objectId: expected a one-based WORD (1..65535).");
@@ -255,6 +258,8 @@ public sealed class PlayerSaveObject
             throw new InvalidDataException("$.world.objects: triggerMode/triggerEntry/autoEntry must be WORDs (0..65535).");
         if (autoIdleCount is < 0 or > 65535)
             throw new InvalidDataException("$.world.objects.autoIdleCount: expected a WORD (0..65535).");
+        if (triggerIdleCount is < 0 or > 65535)
+            throw new InvalidDataException("$.world.objects.triggerIdleCount: expected a WORD (0..65535).");
         ObjectId = objectId;
         X = x;
         Y = y;
@@ -266,15 +271,16 @@ public sealed class PlayerSaveObject
         TriggerEntry = triggerEntry;
         AutoEntry = autoEntry;
         AutoIdleCount = autoIdleCount;
+        TriggerIdleCount = triggerIdleCount;
     }
 
     public override bool Equals(object? obj) => obj is PlayerSaveObject other
         && ObjectId == other.ObjectId && X == other.X && Y == other.Y && Direction == other.Direction
         && CurrentFrame == other.CurrentFrame && State == other.State && VanishTime == other.VanishTime
         && TriggerMode == other.TriggerMode && TriggerEntry == other.TriggerEntry && AutoEntry == other.AutoEntry
-        && AutoIdleCount == other.AutoIdleCount;
+        && AutoIdleCount == other.AutoIdleCount && TriggerIdleCount == other.TriggerIdleCount;
     public override int GetHashCode() => HashCode.Combine(HashCode.Combine(ObjectId, X, Y, Direction, CurrentFrame, State),
-        HashCode.Combine(VanishTime, TriggerMode, TriggerEntry, AutoEntry, AutoIdleCount));
+        HashCode.Combine(VanishTime, TriggerMode, TriggerEntry, AutoEntry, AutoIdleCount, TriggerIdleCount));
 }
 
 /// <summary>One scene's retained enter/teleport script slots (reference SCENE wScriptOnEnter/

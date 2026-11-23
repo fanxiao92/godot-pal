@@ -32,11 +32,12 @@ public sealed class PlayerSaveWorldRestorePlanTests
 
         // D11: every object's dynamic words field-by-field against independent literals —
         // including the redirected trigger entry 392 (a completed call's saved return entry),
-        // the mid-walk auto entry 16 with its idle counter 3, and the hidden state -2 whose
-        // vanish word 800 keeps its countdown progress.
-        Assert.Equal((1250, 850, 2, 1, 2, 0, 1, 392, 0, 0), Words(candidate.World, 5));
-        Assert.Equal((1210, 830, 1, 2, -2, 800, 0, 0, 16, 3), Words(candidate.World, 6));
-        Assert.Equal((1300, 870, 0, 0, 3, 0, 2, 200, 0, 0), Words(candidate.World, 7));
+        // the max WORD trigger counter 65535 on object 5, the mid-walk auto entry 16 with
+        // co-existing auto idle counter 3 and trigger idle counter 17 on object 6, the hidden
+        // state -2 whose vanish word 800 keeps its countdown progress, and 0 on object 7.
+        Assert.Equal((1250, 850, 2, 1, 2, 0, 1, 392, 0, 0, 65535), Words(candidate.World, 5));
+        Assert.Equal((1210, 830, 1, 2, -2, 800, 0, 0, 16, 3, 17), Words(candidate.World, 6));
+        Assert.Equal((1300, 870, 0, 0, 3, 0, 2, 200, 0, 0, 0), Words(candidate.World, 7));
 
         // D12: the retained scene script slots — the current scene's saved row plus the
         // cross-scene modification of the unloaded scene 13 (Story 23: saving never truncates
@@ -143,7 +144,7 @@ public sealed class PlayerSaveWorldRestorePlanTests
         // A saved object id outside the prepared scene is a dangling reference: fail closed.
         var unknownObject = new WorldFixture(WorldFixture.WorldWithObjects(
             WorldFixture.SavedObject(5), WorldFixture.SavedObject(6),
-            new PlayerSaveObject(99, 10, 10, 0, 0, 1, 0, 0, 0, 0, 0)));
+            new PlayerSaveObject(99, 10, 10, 0, 0, 1, 0, 0, 0, 0, 0, 0)));
         Assert.StartsWith("$.world.objects.objectId", Assert.Throws<InvalidDataException>(() =>
             PlayerSaveWorldRestorePlan.BuildWorld(unknownObject.Save, unknownObject.WorldContent,
                 PlayerSaveRestorePlan.Build(unknownObject.Save, unknownObject.RoleContent))).Message);
@@ -173,9 +174,9 @@ public sealed class PlayerSaveWorldRestorePlanTests
             new PlayerSaveLeader(1200, 800, 3, 1, 2),
             new PlayerSaveObject[]
             {
-                new(5, 1250, 850, 2, 1, 2, 0, 1, 1, 0, 0),
-                new(6, 1210, 830, 3, 1, 1, 0, 0, 0, 16, 2),
-                new(7, 1300, 870, 0, 0, 3, 0, 2, 200, 0, 0),
+                new(5, 1250, 850, 2, 1, 2, 0, 1, 1, 0, 0, 0),
+                new(6, 1210, 830, 3, 1, 1, 0, 0, 0, 16, 2, 0),
+                new(7, 1300, 870, 0, 0, 3, 0, 2, 200, 0, 0, 0),
             },
             new PlayerSaveSceneScript[] { new(77, 40, 0) },
             Array.Empty<PlayerSaveObjectScript>(), 3, null);
@@ -205,6 +206,43 @@ public sealed class PlayerSaveWorldRestorePlanTests
     }
 
     [Fact]
+    public void A_restored_trigger_idle_counter_resumes_the_owners_gate_instead_of_restarting_at_zero()
+    {
+        // EVENTOBJECT.nScriptIdleFrame is stored with the whole object (global.c:869): a saved
+        // trigger counter of 1 must come back on the live owner so the next counted gate call
+        // continues from it. With limit 2 the restored 1 pre-increments to 2, fails the
+        // below-the-limit test, resets and falls through to L0002; restarting from zero would
+        // instead take the branch, land on L0003 and leave the counter at 1.
+        var world = new PlayerSaveWorld(77,
+            new PlayerSaveLeader(1200, 800, 3, 1, 2),
+            new PlayerSaveObject[]
+            {
+                new(5, 1250, 850, 2, 1, 2, 0, 1, 392, 0, 4, 1),
+                new(6, 1210, 830, 1, 2, -2, 800, 0, 0, 16, 3, 65535),
+                new(7, 1300, 870, 0, 0, 3, 0, 2, 200, 0, 0, 0),
+            },
+            new PlayerSaveSceneScript[] { new(77, 40, 0) },
+            Array.Empty<PlayerSaveObjectScript>(), 3, null);
+        var fixture = new WorldFixture(world);
+        var candidate = PlayerSaveWorldRestorePlan.BuildWorld(fixture.Save, fixture.WorldContent,
+            PlayerSaveRestorePlan.Build(fixture.Save, fixture.RoleContent));
+
+        Assert.Equal(1, candidate.World.Objects.Single(o => o.Id == 5).TriggerIdleCount);
+        Assert.Equal(4, candidate.World.Objects.Single(o => o.Id == 5).AutoIdleCount);
+        Assert.Equal(65535, candidate.World.Objects.Single(o => o.Id == 6).TriggerIdleCount);
+        Assert.Equal(3, candidate.World.Objects.Single(o => o.Id == 6).AutoIdleCount);
+
+        var script = new TriggerScriptSession(CountedTriggerEvents(), Language(), candidate.World);
+        script.Start("shared", "npc", 5);
+        Assert.Equal(TriggerScriptPhase.Completed, script.Phase);
+        Assert.Equal(new TriggerPosition("shared", "L0002", 2), script.CurrentPosition);
+        Assert.Equal(0, candidate.World.Objects.Single(o => o.Id == 5).TriggerIdleCount);
+        Assert.Equal(4, candidate.World.Objects.Single(o => o.Id == 5).AutoIdleCount);
+        Assert.Equal(65535, candidate.World.Objects.Single(o => o.Id == 6).TriggerIdleCount);
+        Assert.Equal(3, candidate.World.Objects.Single(o => o.Id == 6).AutoIdleCount);
+    }
+
+    [Fact]
     public void A_world_saved_before_the_first_setMusic_restores_a_null_music_state()
     {
         // D13: the music words are null before the first setMusic; the restore returns the same
@@ -215,13 +253,13 @@ public sealed class PlayerSaveWorldRestorePlanTests
         Assert.Null(candidate.Music);
     }
 
-    /// <summary>One object's ten dynamic words as a comparable row.</summary>
+    /// <summary>One object's eleven dynamic words as a comparable row.</summary>
     private static (int X, int Y, int Direction, int CurrentFrame, int State, int VanishTime,
-        int TriggerMode, int TriggerEntry, int AutoEntry, int AutoIdleCount) Words(DynamicEventWorld world, int objectId)
+        int TriggerMode, int TriggerEntry, int AutoEntry, int AutoIdleCount, int TriggerIdleCount) Words(DynamicEventWorld world, int objectId)
     {
         var obj = world.Objects.Single(o => o.Id == objectId);
         return (obj.X, obj.Y, obj.Direction, obj.CurrentFrame, obj.State, obj.VanishTime,
-            obj.TriggerMode, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount);
+            obj.TriggerMode, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount, obj.TriggerIdleCount);
     }
 
     private static DialogueLanguagePackage Language() =>
@@ -258,6 +296,24 @@ public sealed class PlayerSaveWorldRestorePlanTests
               {"label":"L0017","op":"end","mode":"keep","next":null,"source":{"index":17,"opcode":0,"operands":[0,0,0]}}]}
             """,
         });
+
+    /// <summary>A counted goto entry (script.c 0x0003, limit 2) owned by event object 5: the
+    /// first call pre-increments the owner's trigger counter to 1 and takes the branch.</summary>
+    private static TriggerEventCollection CountedTriggerEvents()
+    {
+        var fixture = new EventFixture();
+        fixture.Index["source"]!["instructionCount"] = 4;
+        fixture.Index["source"]!["byteLength"] = 32;
+        fixture.Commands.Clear();
+        fixture.Commands.Add(TriggerScriptControlFlowTests.Command(0, 134, """{"op":"raw"}""", 3));
+        fixture.Commands.Add(TriggerScriptControlFlowTests.Command(1, 3, """{"op":"goto","to":"L0003","limit":2}""", 3));
+        fixture.Commands.Add(TriggerScriptControlFlowTests.Command(2, 0, """{"op":"end","mode":"keep"}""", 3));
+        fixture.Commands.Add(TriggerScriptControlFlowTests.Command(3, 0, """{"op":"end","mode":"keep"}""", 3));
+        fixture.Entry["owner"]!["id"] = 5;
+        fixture.Entry["target"] = "L0001";
+        fixture.Entry["sourceAddress"] = 1;
+        return fixture.Load();
+    }
 
     /// <summary>Hand-written literal snapshot over the frozen v1 contract: six minimal role
     /// records with an empty equipment/magic domain (the role plan's zero closure), the party
@@ -303,9 +359,9 @@ public sealed class PlayerSaveWorldRestorePlanTests
 
         internal static PlayerSaveObject SavedObject(int objectId) => objectId switch
         {
-            5 => new(5, 1250, 850, 2, 1, 2, 0, 1, 392, 0, 0),
-            6 => new(6, 1210, 830, 1, 2, -2, 800, 0, 0, 16, 3),
-            _ => new(7, 1300, 870, 0, 0, 3, 0, 2, 200, 0, 0),
+            5 => new(5, 1250, 850, 2, 1, 2, 0, 1, 392, 0, 0, 65535),
+            6 => new(6, 1210, 830, 1, 2, -2, 800, 0, 0, 16, 3, 17),
+            _ => new(7, 1300, 870, 0, 0, 3, 0, 2, 200, 0, 0, 0),
         };
 
         public static PlayerSaveWorld WorldWithObjects(params PlayerSaveObject[] objects) => new(77,

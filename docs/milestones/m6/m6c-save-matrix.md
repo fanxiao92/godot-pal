@@ -148,9 +148,9 @@
 
 - 所有者：`DynamicEventWorld.Objects`（`DynamicEventObject`；静态身份留在 `Initial`/`StaticSceneRules`）。
 - 引用身份：对象全局唯一 WORD id（1..65535）。
-- 存储域：`$.world.objects[*]`：`objectId/x/y/direction/currentFrame`（WORD）、`state/vanishTime`（有符号 SHORT；负 state=0x0052 隐藏）、`triggerMode/triggerEntry/autoEntry`（WORD）、`autoIdleCount`（WORD，`wScriptIdleFrameCountAuto`）。
+- 存储域：`$.world.objects[*]`：`objectId/x/y/direction/currentFrame`（WORD）、`state/vanishTime`（有符号 SHORT；负 state=0x0052 隐藏）、`triggerMode/triggerEntry/autoEntry`（WORD）、`autoIdleCount`（WORD，`wScriptIdleFrameCountAuto`）、`triggerIdleCount`（WORD，`nScriptIdleFrame`；参考 `global.h:109` 定义，`PAL_SaveGame_Common`/`PAL_LoadGame_Common` 以 `global.c:869/402` 整体 memcpy 保存/恢复 `EVENTOBJECT`，故 trigger 计数必然往返）。
 - 捕获时点：稳定边界整场景读出。
-- 保存：全部动态字，含 trigger/auto 入口（自动重定向保留的地址就是入口字）与每对象共享 idle 计数（参考把整个 `EVENTOBJECT` 存档）。
+- 保存：全部动态字，含 trigger/auto 入口（自动重定向保留的地址就是入口字）与每对象两个 idle 计数（参考把整个 `EVENTOBJECT` 存档）。
 - 清除：无（动态字是保留数据）。
 - 重算：sprite 身份、帧数、layer 等静态字由内容重建；负 state 的离屏恢复与 vanish 倒数继续由世界更新推进（play.c `PAL_GameUpdate`）。
 - 恢复顺序：随 D12。

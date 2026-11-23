@@ -146,7 +146,8 @@ public class SystemLoadSceneTests
             var saved = PlayerSaveJson.Decode(storage.ReadSlot(2)!, identity);
             var objects = saved.World.Objects.Select(obj => obj.ObjectId == 1
                 ? new PlayerSaveObject(obj.ObjectId, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
-                    obj.State, obj.VanishTime, obj.TriggerMode, 6, obj.AutoEntry, obj.AutoIdleCount)
+                    obj.State, obj.VanishTime, obj.TriggerMode, 6, obj.AutoEntry, obj.AutoIdleCount,
+                    obj.TriggerIdleCount)
                 : obj).ToArray();
             var crafted = new PlayerSaveV1(saved.FormatVersion, saved.SaveSlot, saved.SavedTimes, saved.ContentIdentity,
                 saved.Roles, saved.PartyRoleIds, saved.Inventory, saved.Cash,

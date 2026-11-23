@@ -55,8 +55,8 @@ public sealed class PlayerSaveContractTests
         var inventory = new List<PlayerSaveInventorySlot> { new(7, 3, 2), new(65535, 0, 65535) };
         var objects = new List<PlayerSaveObject>
         {
-            new(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5),
-            new(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0),
+            new(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5, 11),
+            new(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0, 0),
         };
         var sceneScripts = new List<PlayerSaveSceneScript> { new(12, 4, 9), new(13, 40, 0) };
         var objectScripts = new List<PlayerSaveObjectScript> { new(1, 0, 328), new(60, 1, 0) };
@@ -111,8 +111,10 @@ public sealed class PlayerSaveContractTests
         // World domain: scene identity, leader words, event-object dynamic words, script slots.
         Assert.Equal(12, save.World.SceneId);
         Assert.Equal(new PlayerSaveLeader(-3192, 1032, 3, 1, 2), save.World.Leader);
-        Assert.Equal(new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5), save.World.Objects[0]);
-        Assert.Equal(new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0), save.World.Objects[1]);
+        Assert.Equal(new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5, 11), save.World.Objects[0]);
+        Assert.NotEqual(new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5, 12), save.World.Objects[0]);
+        Assert.Equal(new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0, 0), save.World.Objects[1]);
+        Assert.Equal(65535, new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0, 65535).TriggerIdleCount);
         Assert.Equal(new PlayerSaveSceneScript(12, 4, 9), save.World.SceneScripts[0]);
         Assert.Equal(new PlayerSaveSceneScript(13, 40, 0), save.World.SceneScripts[1]);
         Assert.Equal(new PlayerSaveObjectScript(1, 0, 328), save.World.ObjectScripts[0]);
@@ -123,7 +125,7 @@ public sealed class PlayerSaveContractTests
         // The snapshot owns defensive copies: later source mutations never reach the frozen view.
         party.Add(1);
         inventory.Add(new PlayerSaveInventorySlot(9, 9, 9));
-        objects.Add(new PlayerSaveObject(99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+        objects.Add(new PlayerSaveObject(99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
         sceneScripts.Add(new PlayerSaveSceneScript(99, 0, 0));
         objectScripts.Add(new PlayerSaveObjectScript(99, 0, 0));
         ((List<PlayerSaveRole>)roles)[0] = Role(roleId: 4);
@@ -225,14 +227,16 @@ public sealed class PlayerSaveContractTests
         Assert.Throws<InvalidDataException>(() => Save(leader: new PlayerSaveLeader(-3192, 1032, 3, 1, 4)));
         Assert.Throws<InvalidDataException>(() => Save(leader: new PlayerSaveLeader(-3192, 1032, 3, 65536, 2)));
         Assert.Throws<InvalidDataException>(() => Save(sceneId: 65536));
-        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }.Concat(Objects()).ToArray()));
-        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }));
-        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, -32769, 0, 0, 0, 0, 0) }));
-        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 32768, 0, 0, 0, 0) }));
-        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 65536, 0, 0) }));
-        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1) }));
+        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }.Concat(Objects()).ToArray()));
+        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }));
+        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, -32769, 0, 0, 0, 0, 0, 0) }));
+        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 32768, 0, 0, 0, 0, 0) }));
+        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 65536, 0, 0, 0) }));
+        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0) }));
+        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1) }));
+        Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65536) }));
         Assert.Throws<InvalidDataException>(() => Save(objects:
-            Enumerable.Range(1, 5501).Select(id => new PlayerSaveObject(id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)).ToArray()));
+            Enumerable.Range(1, 5501).Select(id => new PlayerSaveObject(id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)).ToArray()));
         Assert.Throws<InvalidDataException>(() => Save(sceneScripts: new[] { new PlayerSaveSceneScript(12, 4, 9), new PlayerSaveSceneScript(12, 5, 5) }));
         Assert.Throws<InvalidDataException>(() => Save(sceneScripts:
             Enumerable.Range(1, 301).Select(id => new PlayerSaveSceneScript(id, 0, 0)).ToArray()));
@@ -264,7 +268,9 @@ public sealed class PlayerSaveContractTests
         Assert.StartsWith("$.inventory.itemId", Assert.Throws<InvalidDataException>(() => Save(inventory: new[] { new PlayerSaveInventorySlot(0, 1, 0) })).Message);
         Assert.StartsWith("$.inventory.amount", Assert.Throws<InvalidDataException>(() => Save(inventory: new[] { new PlayerSaveInventorySlot(7, 100, 0) })).Message);
         Assert.StartsWith("$.partyRoleIds", Assert.Throws<InvalidDataException>(() => Save(party: new[] { 2, 2, 5 })).Message);
-        Assert.StartsWith("$.world.objects.state", Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, -32769, 0, 0, 0, 0, 0) })).Message);
+        Assert.StartsWith("$.world.objects.state", Assert.Throws<InvalidDataException>(() => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, -32769, 0, 0, 0, 0, 0, 0) })).Message);
+        Assert.StartsWith("$.world.objects.triggerIdleCount", Assert.Throws<InvalidDataException>(
+            () => Save(objects: new[] { new PlayerSaveObject(60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65536) })).Message);
         Assert.StartsWith("$.world.objectScripts.slotIndex", Assert.Throws<InvalidDataException>(() => Save(objectScripts: new[] { new PlayerSaveObjectScript(60, 6, 0) })).Message);
     }
 
@@ -325,7 +331,7 @@ public sealed class PlayerSaveContractTests
 
     private static IReadOnlyList<PlayerSaveObject> Objects() => new[]
     {
-        new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5),
-        new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0),
+        new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5, 11),
+        new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0, 0),
     };
 }

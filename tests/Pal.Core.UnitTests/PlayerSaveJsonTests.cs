@@ -68,8 +68,8 @@ public sealed class PlayerSaveJsonTests
         Assert.Equal(new PlayerSaveLeader(-3192, 1032, 3, 1, 2), decoded.World.Leader);
         Assert.Equal(new[]
         {
-            new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5),
-            new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0),
+            new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5, 11),
+            new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0, 0),
         }, decoded.World.Objects);
         Assert.Equal(new[]
         {
@@ -115,7 +115,7 @@ public sealed class PlayerSaveJsonTests
         }, save.Inventory);
         Assert.Equal(123456789u, save.Cash);
         Assert.Equal(new PlayerSaveLeader(-3192, 1032, 3, 1, 2), save.World.Leader);
-        Assert.Equal(new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0), save.World.Objects[1]);
+        Assert.Equal(new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0, 0), save.World.Objects[1]);
         Assert.Equal(new PlayerSaveSceneScript(13, 40, 0), save.World.SceneScripts[1]);
         Assert.Equal(new PlayerSaveObjectScript(1, 0, 328), save.World.ObjectScripts[0]);
         Assert.Equal(new PlayerSaveMusic(3, 1), save.World.Music);
@@ -248,6 +248,17 @@ public sealed class PlayerSaveJsonTests
             () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace(
                 "\"battlefield\":7,", "\"battlefield\":7,\"nope\":1,")), Fixture.Identity));
         Assert.Contains("unknown field 'nope'", unknownWorld.Message);
+
+        // The trigger idle word is a required v1 field: absence and a repeated key both reject
+        // before any state domain is built.
+        InvalidDataException missingTriggerIdle = Assert.Throws<InvalidDataException>(
+            () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace(",\"triggerIdleCount\":11", "")), Fixture.Identity));
+        Assert.Contains("triggerIdleCount", missingTriggerIdle.Message);
+        InvalidDataException duplicateTriggerIdle = Assert.Throws<InvalidDataException>(
+            () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace(
+                "\"triggerIdleCount\":11", "\"triggerIdleCount\":11,\"triggerIdleCount\":12")), Fixture.Identity));
+        Assert.Contains("duplicate", duplicateTriggerIdle.Message);
+        Assert.Contains("triggerIdleCount", duplicateTriggerIdle.Message);
     }
 
     [Fact]
@@ -257,6 +268,12 @@ public sealed class PlayerSaveJsonTests
             () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace("\"hp\":90,", "\"hp\":\"90\",")), Fixture.Identity));
         Assert.StartsWith("$.roles[0].hp", wrongType.Message);
         Assert.Contains("integer", wrongType.Message);
+
+        InvalidDataException triggerIdleType = Assert.Throws<InvalidDataException>(
+            () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace(
+                "\"triggerIdleCount\":11", "\"triggerIdleCount\":\"11\"")), Fixture.Identity));
+        Assert.StartsWith("$.world.objects[0].triggerIdleCount", triggerIdleType.Message);
+        Assert.Contains("integer", triggerIdleType.Message);
 
         InvalidDataException notArray = Assert.Throws<InvalidDataException>(
             () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace("\"partyRoleIds\":[2,0,5]", "\"partyRoleIds\":7")), Fixture.Identity));
@@ -329,6 +346,11 @@ public sealed class PlayerSaveJsonTests
             () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace("\"state\":-2", "\"state\":32768")), Fixture.Identity));
         Assert.StartsWith("$.world.objects.state", state.Message);
 
+        InvalidDataException triggerIdleRange = Assert.Throws<InvalidDataException>(
+            () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace(
+                "\"triggerIdleCount\":11", "\"triggerIdleCount\":65536")), Fixture.Identity));
+        Assert.StartsWith("$.world.objects.triggerIdleCount", triggerIdleRange.Message);
+
         InvalidDataException cash = Assert.Throws<InvalidDataException>(
             () => PlayerSaveJson.Decode(Bytes(Fixture.LiteralJson.Replace("\"cash\":123456789", "\"cash\":4294967296")), Fixture.Identity));
         Assert.StartsWith("$.cash", cash.Message);
@@ -361,7 +383,7 @@ public sealed class PlayerSaveJsonTests
         public const string Identity = "modern-context/first-battle@sha256:9f2c";
 
         public const string LiteralJson =
-            """{"formatVersion":1,"saveSlot":2,"savedTimes":9,"contentIdentity":"modern-context/first-battle@sha256:9f2c","roles":[{"roleId":0,"level":1,"hp":90,"maxHp":90,"mp":12,"maxMp":30,"primaryExperience":{"value":0,"level":1,"count":0},"hiddenExperience":{},"equipment":[0,0,0,0,0,0],"magics":[],"coveredByRoleId":0,"attack":12,"magicPower":11,"defense":10,"dexterity":9,"fleeRate":8},{"roleId":1,"level":7,"hp":100,"maxHp":100,"mp":20,"maxMp":20,"primaryExperience":{"value":10,"level":2,"count":3},"hiddenExperience":{},"equipment":[0,0,0,0,0,0],"magics":[],"coveredByRoleId":0,"attack":22,"magicPower":21,"defense":20,"dexterity":19,"fleeRate":18},{"roleId":2,"level":33,"hp":110,"maxHp":120,"mp":5,"maxMp":5,"primaryExperience":{"value":20,"level":3,"count":4},"hiddenExperience":{},"equipment":[0,0,0,0,0,0],"magics":[65],"coveredByRoleId":0,"attack":32,"magicPower":31,"defense":30,"dexterity":29,"fleeRate":28},{"roleId":3,"level":40,"hp":0,"maxHp":480,"mp":0,"maxMp":10,"primaryExperience":{"value":30,"level":4,"count":5},"hiddenExperience":{},"equipment":[0,0,0,0,0,0],"magics":[],"coveredByRoleId":0,"attack":42,"magicPower":41,"defense":40,"dexterity":39,"fleeRate":38},{"roleId":4,"level":50,"hp":55,"maxHp":66,"mp":7,"maxMp":8,"primaryExperience":{"value":40,"level":5,"count":6},"hiddenExperience":{"health":{"value":41,"level":2,"count":3}},"equipment":[0,0,1,0,0,0],"magics":[],"coveredByRoleId":0,"attack":52,"magicPower":51,"defense":50,"dexterity":49,"fleeRate":48},{"roleId":5,"level":99,"hp":1,"maxHp":65535,"mp":0,"maxMp":65535,"primaryExperience":{"value":39,"level":4,"count":4},"hiddenExperience":{"attack":{"value":87,"level":3,"count":1},"flee":{"value":0,"level":3,"count":0}},"equipment":[1,0,0,0,0,0],"magics":[65,0],"coveredByRoleId":4,"attack":210,"magicPower":205,"defense":200,"dexterity":195,"fleeRate":190}],"partyRoleIds":[2,0,5],"inventory":[{"itemId":7,"amount":3,"amountInUse":2},{"itemId":65535,"amount":0,"amountInUse":65535}],"cash":123456789,"world":{"sceneId":12,"leader":{"x":-3192,"y":1032,"direction":3,"layer":1,"stepPhase":2},"objects":[{"objectId":60,"x":1450,"y":898,"direction":2,"currentFrame":1,"state":1,"vanishTime":0,"triggerMode":1,"triggerEntry":392,"autoEntry":0,"autoIdleCount":5},{"objectId":3,"x":1920,"y":1000,"direction":3,"currentFrame":0,"state":-2,"vanishTime":800,"triggerMode":0,"triggerEntry":0,"autoEntry":77,"autoIdleCount":0}],"sceneScripts":[{"sceneId":12,"onEnterEntry":4,"onTeleportEntry":9},{"sceneId":13,"onEnterEntry":40,"onTeleportEntry":0}],"objectScripts":[{"objectId":1,"slotIndex":0,"entry":328},{"objectId":60,"slotIndex":1,"entry":0}],"battlefield":7,"music":{"musicId":3,"mode":1}}}""";
+            """{"formatVersion":1,"saveSlot":2,"savedTimes":9,"contentIdentity":"modern-context/first-battle@sha256:9f2c","roles":[{"roleId":0,"level":1,"hp":90,"maxHp":90,"mp":12,"maxMp":30,"primaryExperience":{"value":0,"level":1,"count":0},"hiddenExperience":{},"equipment":[0,0,0,0,0,0],"magics":[],"coveredByRoleId":0,"attack":12,"magicPower":11,"defense":10,"dexterity":9,"fleeRate":8},{"roleId":1,"level":7,"hp":100,"maxHp":100,"mp":20,"maxMp":20,"primaryExperience":{"value":10,"level":2,"count":3},"hiddenExperience":{},"equipment":[0,0,0,0,0,0],"magics":[],"coveredByRoleId":0,"attack":22,"magicPower":21,"defense":20,"dexterity":19,"fleeRate":18},{"roleId":2,"level":33,"hp":110,"maxHp":120,"mp":5,"maxMp":5,"primaryExperience":{"value":20,"level":3,"count":4},"hiddenExperience":{},"equipment":[0,0,0,0,0,0],"magics":[65],"coveredByRoleId":0,"attack":32,"magicPower":31,"defense":30,"dexterity":29,"fleeRate":28},{"roleId":3,"level":40,"hp":0,"maxHp":480,"mp":0,"maxMp":10,"primaryExperience":{"value":30,"level":4,"count":5},"hiddenExperience":{},"equipment":[0,0,0,0,0,0],"magics":[],"coveredByRoleId":0,"attack":42,"magicPower":41,"defense":40,"dexterity":39,"fleeRate":38},{"roleId":4,"level":50,"hp":55,"maxHp":66,"mp":7,"maxMp":8,"primaryExperience":{"value":40,"level":5,"count":6},"hiddenExperience":{"health":{"value":41,"level":2,"count":3}},"equipment":[0,0,1,0,0,0],"magics":[],"coveredByRoleId":0,"attack":52,"magicPower":51,"defense":50,"dexterity":49,"fleeRate":48},{"roleId":5,"level":99,"hp":1,"maxHp":65535,"mp":0,"maxMp":65535,"primaryExperience":{"value":39,"level":4,"count":4},"hiddenExperience":{"attack":{"value":87,"level":3,"count":1},"flee":{"value":0,"level":3,"count":0}},"equipment":[1,0,0,0,0,0],"magics":[65,0],"coveredByRoleId":4,"attack":210,"magicPower":205,"defense":200,"dexterity":195,"fleeRate":190}],"partyRoleIds":[2,0,5],"inventory":[{"itemId":7,"amount":3,"amountInUse":2},{"itemId":65535,"amount":0,"amountInUse":65535}],"cash":123456789,"world":{"sceneId":12,"leader":{"x":-3192,"y":1032,"direction":3,"layer":1,"stepPhase":2},"objects":[{"objectId":60,"x":1450,"y":898,"direction":2,"currentFrame":1,"state":1,"vanishTime":0,"triggerMode":1,"triggerEntry":392,"autoEntry":0,"autoIdleCount":5,"triggerIdleCount":11},{"objectId":3,"x":1920,"y":1000,"direction":3,"currentFrame":0,"state":-2,"vanishTime":800,"triggerMode":0,"triggerEntry":0,"autoEntry":77,"autoIdleCount":0,"triggerIdleCount":0}],"sceneScripts":[{"sceneId":12,"onEnterEntry":4,"onTeleportEntry":9},{"sceneId":13,"onEnterEntry":40,"onTeleportEntry":0}],"objectScripts":[{"objectId":1,"slotIndex":0,"entry":328},{"objectId":60,"slotIndex":1,"entry":0}],"battlefield":7,"music":{"musicId":3,"mode":1}}}""";
 
         public static PlayerSaveV1 Save(bool withMusic = true)
         {
@@ -385,8 +407,8 @@ public sealed class PlayerSaveJsonTests
             var world = new PlayerSaveWorld(12, new PlayerSaveLeader(-3192, 1032, 3, 1, 2),
                 new[]
                 {
-                    new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5),
-                    new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0),
+                    new PlayerSaveObject(60, 1450, 898, 2, 1, 1, 0, 1, 392, 0, 5, 11),
+                    new PlayerSaveObject(3, 1920, 1000, 3, 0, -2, 800, 0, 0, 77, 0, 0),
                 },
                 new[] { new PlayerSaveSceneScript(12, 4, 9), new PlayerSaveSceneScript(13, 40, 0) },
                 new[] { new PlayerSaveObjectScript(1, 0, 328), new PlayerSaveObjectScript(60, 1, 0) },

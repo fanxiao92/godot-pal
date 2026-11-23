@@ -163,7 +163,8 @@ public sealed class ExplorationSaveGate
         var worldSnapshot = new PlayerSaveWorld(world.SceneId,
             new PlayerSaveLeader(world.Leader.X, world.Leader.Y, world.Leader.Direction, world.Leader.Layer, world.Leader.StepPhase),
             world.Objects.Select(obj => new PlayerSaveObject(obj.Id, obj.X, obj.Y, obj.Direction, obj.CurrentFrame,
-                obj.State, obj.VanishTime, obj.TriggerMode, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount)).ToArray(),
+                obj.State, obj.VanishTime, obj.TriggerMode, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount,
+                obj.TriggerIdleCount)).ToArray(),
             world.SceneScripts.Keys.Order().Select(sceneId =>
                 new PlayerSaveSceneScript(sceneId, world.SceneScripts[sceneId].Item1, world.SceneScripts[sceneId].Item2)).ToArray(),
             world.ObjectScripts.Keys.OrderBy(key => key.ObjectId).ThenBy(key => key.SlotIndex)

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json.Nodes;
 using Pal.Core;
 using Xunit;
@@ -81,8 +82,8 @@ public sealed class ExplorationSaveGateTests
         Assert.Equal(new PlayerSaveLeader(-3192, 1032, 3, 1, 2), save.World.Leader);
         Assert.Equal(new[]
         {
-            new PlayerSaveObject(5, 304, 328, 0, 0, 2, 0, 1, 1, 0, 0),
-            new PlayerSaveObject(6, 352, 320, 0, 0, 0, 0, 0, 0, 15, 0),
+            new PlayerSaveObject(5, 304, 328, 0, 0, 2, 0, 1, 1, 0, 0, 0),
+            new PlayerSaveObject(6, 352, 320, 0, 0, 0, 0, 0, 0, 15, 0, 0),
         }, save.World.Objects);
         // Story 7 reverse case: recorded-but-not-executed auto entries never block the boundary —
         // object 6 keeps its nonzero auto entry word in the frozen snapshot untouched.
@@ -98,6 +99,46 @@ public sealed class ExplorationSaveGateTests
         // Capture advanced nothing: every sampled public owner word is bit-identical afterwards
         // (#148 Decision 7 — no script, world tick, randomness or owner write during capture).
         Assert.Equal(before, fixture.DescribeOwners());
+    }
+
+    [Fact]
+    public void Capture_preserves_the_live_trigger_idle_counter_as_a_required_v1_word()
+    {
+        var fixture = new SaveFixture();
+        var gate = new ExplorationSaveGate(fixture.Roles, fixture.Inventory, fixture.Cash, fixture.World);
+        gate.NotifyProductionUpdateCommitted();
+
+        // A real counted goto (script.c 0x0003) pre-increments the caller's own event-object
+        // word: EVENTOBJECT.nScriptIdleFrame (global.h:109), the trigger counter independent of
+        // the auto counter. The call completes below its limit 2 and leaves the word at 1.
+        var counted = new TriggerScriptSession(CountedTriggerEvents(), SaveFixture.Language(), fixture.World);
+        counted.Start("shared", "npc", 5);
+        Assert.Equal(TriggerScriptPhase.Completed, counted.Phase);
+        Assert.Equal(1, fixture.World.Objects.Single(o => o.Id == 5).TriggerIdleCount);
+
+        // The formal system-menu save layer is the only savable menu mode (#222).
+        var menu = fixture.Menu;
+        menu.Open();
+        menu.Press(ExplorationMenuKey.Down);
+        menu.Press(ExplorationMenuKey.Confirm);
+        menu.Press(ExplorationMenuKey.Confirm);
+        Assert.Equal(ExplorationMenuMode.SystemMenu, menu.Mode);
+
+        var outcome = gate.TryCapture(gate.CreateRequest(),
+            new ExplorationSaveActivity(null, counted, null, null, menu), 2, 4, "story/scene12@sha256:5e7f2c");
+        Assert.True(outcome.Captured);
+        var save = outcome.Save!;
+
+        // The reference saves the whole EVENTOBJECT (PAL_SaveGame_Common memcpy,
+        // reference/sdlpal/global.c:869), so the trigger counter must ride the object row as a
+        // required v1 WORD — capturing only the auto counter silently loses counted progress.
+        JsonObject encoded = (JsonObject)JsonNode.Parse(Encoding.UTF8.GetString(PlayerSaveJson.EncodeToUtf8(save)))!;
+        JsonObject objectRow = encoded["world"]!["objects"]!.AsArray()
+            .Select(node => node!.AsObject()).Single(row => row["objectId"]!.GetValue<int>() == 5);
+        Assert.True(objectRow.ContainsKey("triggerIdleCount"),
+            "PAL_SAVE_TRIGGER_COUNT_RED: the captured object row must carry the live trigger idle counter as triggerIdleCount");
+        Assert.Equal(1, objectRow["triggerIdleCount"]!.GetValue<int>());
+        Assert.Equal(0, objectRow["autoIdleCount"]!.GetValue<int>());
     }
 
     [Fact]
@@ -371,7 +412,7 @@ public sealed class ExplorationSaveGateTests
             World.Battlefield,
             string.Join(",", World.PartyRoles),
             string.Join(",", World.Objects.Select(obj =>
-                $"{obj.Id}:{obj.X}:{obj.Y}:{obj.Direction}:{obj.State}:{obj.VanishTime}:{obj.TriggerMode}:{obj.TriggerEntry}:{obj.AutoEntry}:{obj.AutoIdleCount}")),
+                $"{obj.Id}:{obj.X}:{obj.Y}:{obj.Direction}:{obj.State}:{obj.VanishTime}:{obj.TriggerMode}:{obj.TriggerEntry}:{obj.AutoEntry}:{obj.AutoIdleCount}:{obj.TriggerIdleCount}")),
             string.Join(",", World.SceneScripts.OrderBy(pair => pair.Key)
                 .Select(pair => $"{pair.Key}:{pair.Value.Item1}:{pair.Value.Item2}")),
             string.Join(",", World.ObjectScripts.OrderBy(pair => pair.Key.ObjectId).ThenBy(pair => pair.Key.SlotIndex)
@@ -474,6 +515,24 @@ public sealed class ExplorationSaveGateTests
     {
         public int NextInclusive(int from, int to) => from;
         public float NextInclusive(float from, float to) => from;
+    }
+
+    /// <summary>A counted goto entry (script.c 0x0003, limit 2) owned by event object 5: the
+    /// first call pre-increments the owner's trigger counter to 1 and takes the branch.</summary>
+    private static TriggerEventCollection CountedTriggerEvents()
+    {
+        var fixture = new EventFixture();
+        fixture.Index["source"]!["instructionCount"] = 4;
+        fixture.Index["source"]!["byteLength"] = 32;
+        fixture.Commands.Clear();
+        fixture.Commands.Add(TriggerScriptControlFlowTests.Command(0, 134, """{"op":"raw"}""", 3));
+        fixture.Commands.Add(TriggerScriptControlFlowTests.Command(1, 3, """{"op":"goto","to":"L0003","limit":2}""", 3));
+        fixture.Commands.Add(TriggerScriptControlFlowTests.Command(2, 0, """{"op":"end","mode":"keep"}""", 3));
+        fixture.Commands.Add(TriggerScriptControlFlowTests.Command(3, 0, """{"op":"end","mode":"keep"}""", 3));
+        fixture.Entry["owner"]!["id"] = 5;
+        fixture.Entry["target"] = "L0001";
+        fixture.Entry["sourceAddress"] = 1;
+        return fixture.Load();
     }
 
     /// <summary>Builds a trigger call over the given world that parks on the first body command

@@ -183,7 +183,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
     }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
-        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 1596; skipped = 0 }
+        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 1598; skipped = 0 }
         [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 537; skipped = 0 }
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 419; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = (Get-PrepareTestCount); skipped = 0 }
