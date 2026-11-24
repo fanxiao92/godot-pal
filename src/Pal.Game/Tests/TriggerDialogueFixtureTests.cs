@@ -197,7 +197,7 @@ public class TriggerDialogueFixtureTests
         try
         {
             surface.SetPalette(palette);
-            surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres"));
+            surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
             trigger.Initialize(display, files.Root + "/index.json", files.Root, palette, scene);
             session = trigger.Session!;
             display.ActivePaletteChanged += OnPalette;
@@ -330,8 +330,8 @@ public class TriggerDialogueFixtureTests
         var surface = display.GetNode<PalDialoguePaletteSurface>("IndexedBackground");
         var palette = Palette(); palette[0xF9] = Colors.Red; palette[0xFA] = Colors.Green;
         surface.SetPalette(palette);
-        surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>(Root + "/Portrait-059.tres"));
-        var savedBackground = ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres");
+        surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>(Root + "/Portrait-059.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+        var savedBackground = ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
         int restores = 0;
         display.BackgroundRestoreRequested += () => { restores++; surface.SetImage(savedBackground); };
         display.ActivePaletteChanged += surface.SetPalette;
@@ -494,8 +494,8 @@ public class TriggerDialogueFixtureTests
         var surface = display.GetNode<PalDialoguePaletteSurface>("IndexedBackground");
         var palette = Palette(); palette[0xF9] = Colors.Red;
         surface.SetPalette(palette);
-        surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>(Root + "/Portrait-059.tres"));
-        var background = ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres");
+        surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>(Root + "/Portrait-059.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
+        var background = ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
         int restores = 0;
         display.BackgroundRestoreRequested += () => { restores++; surface.SetImage(background); };
         var trigger = new PalTriggerDialogue(); display.AddChild(trigger);
@@ -674,7 +674,7 @@ public class TriggerDialogueFixtureTests
         try
         {
             surface.SetPalette(story.Palette.ToArray());
-            surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres"));
+            surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
             trigger.Initialize(display, story, random);
             display.UpdateCompleted += OnUpdate;
             display.ActivePaletteChanged += OnPalette;
@@ -860,7 +860,7 @@ public class TriggerDialogueFixtureTests
         var session = trigger.Session!;
         var surface = display.GetNode<PalDialoguePaletteSurface>("IndexedBackground");
         surface.SetPalette(story.Palette.ToArray());
-        surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres"));
+        surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
         int palettes = 0, restores = 0, updates = 0, failures = 0;
         void OnPalette(Color[] _) => palettes++;
         void OnRestore() => restores++;
@@ -1199,7 +1199,7 @@ public class TriggerDialogueFixtureTests
             AssertThat(session.CallId).IsEqual(Guid.Empty);
             var surface = display.GetNode<PalDialoguePaletteSurface>("IndexedBackground");
             surface.SetPalette(palette);
-            surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres"));
+            surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
 
             if (fault == "clean-control")
             {
@@ -1364,7 +1364,7 @@ public class TriggerDialogueFixtureTests
                 var busyLanguage = ResourceLoader.Load<PalDialogueLanguage>(resources.ResourceSha256.Keys.Single(
                     uri => uri.EndsWith("/Language.en.tres", StringComparison.Ordinal)), cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
                 display.Start(busyLanguage, resources.Font,
-                    ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres"),
+                    ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep),
                     resources.Prompts.ToArray(), palette, 1, 0, 0, 0, 0);
                 AssertThat(display.Current!.Phase).IsEqual(DialogueDisplayPhase.Typing);
                 AssertStartRejection(CapturePriority, () => trigger.Start("story", "missing-entry", 65536, requestId),
@@ -1462,7 +1462,7 @@ public class TriggerDialogueFixtureTests
         if (mode == "bad-portrait") resources.Portraits[7].Alpha = [];
         var surface = display.GetNode<PalDialoguePaletteSurface>("IndexedBackground");
         surface.SetPalette(palette);
-        surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres"));
+        surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
         int updates = 0, palettes = 0, restores = 0, failures = 0;
         void OnUpdate() => updates++;
         void OnPalette(Color[] _) => palettes++;
@@ -1741,7 +1741,7 @@ public class TriggerDialogueFixtureTests
             AssertThat(requestId == Guid.Empty).IsFalse();
             var surface = display.GetNode<PalDialoguePaletteSurface>("IndexedBackground");
             surface.SetPalette(palette);
-            surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres"));
+            surface.SetImage(ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep));
             AssertThat(world.ObjectScripts.Count).IsEqual(bankMode == "absent-seed" ? 0 : 1);
             if (bankMode != "absent-seed") AssertThat(world.ObjectScripts[(0, 1)]).IsEqual(futureWrite ? 0 : dyingAddress);
             int friendDeath = 0xA9B5;
@@ -2043,7 +2043,7 @@ public class TriggerDialogueFixtureTests
                 var busyLanguage = ResourceLoader.Load<PalDialogueLanguage>(resources.ResourceSha256.Keys.Single(
                     uri => uri.EndsWith("/Language.en.tres", StringComparison.Ordinal)), cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
                 display.Start(busyLanguage, resources.Font,
-                    ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres"),
+                    ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep),
                     resources.Prompts.ToArray(), palette, 1, 0, 0, 0, 0);
                 RejectStart(() => trigger.Start("story", "missing-entry", 65536, nextId), typeof(InvalidOperationException),
                     "The display is already in use.");
@@ -2277,7 +2277,7 @@ public class TriggerDialogueFixtureTests
             display.Failed += OnFailure;
             if (bankMode == "warmup")
             {
-                warmupBackground = ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres");
+                warmupBackground = ResourceLoader.Load<PalDialogueIndexedImage>("res://Tests/Fixtures/DialogueSyntheticBackground.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
                 surface.SetPalette(story.Palette.ToArray());
                 surface.SetImage(warmupBackground);
                 display.ActivePaletteChanged += OnPalette;
