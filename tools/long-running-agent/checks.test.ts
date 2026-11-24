@@ -256,9 +256,11 @@ test('range completion must come from the selected existing contract, never a wr
 });
 test('fixture negative mutations assert field existence rather than silently removing an obsolete address', () => {
   const source = fs.readFileSync(path.join(repository, 'src/Pal.Game/Tests/AuthoredStoryFixture.cs'), 'utf8');
-  assert.doesNotMatch(source, /\.AsObject\(\)\.Remove\(/);
+  const negativeBlock = source.match(/if \(missingPresentation == "effect"\)[\s\S]*?if \(missingPresentation == "idle"\)[^\n]*/)?.[0] ?? '';
+  assert.ok(negativeBlock.length > 0, 'missingPresentation negative-mutation block must exist');
+  assert.doesNotMatch(negativeBlock, /\.AsObject\(\)\.Remove\(/);
   assert.match(source, /if\s*\(!owner\.Remove\(field\)\)\s*throw new InvalidOperationException/);
-  assert.equal((source.match(/RemoveRequired\([^\n]+"(?:attackEffectSpriteUri|attackEffectIndex|numberSpriteUri|idleAnimSpeed)"\)/g) ?? []).length, 4);
+  assert.equal((negativeBlock.match(/RemoveRequired\([^\n]+"(?:attackEffectSpriteUri|attackEffectIndex|numberSpriteUri|idleAnimSpeed)"\)/g) ?? []).length, 4);
 });
 test('new PID-only helper parses through the existing PowerShell syntax entry', () => {
   const result = native(repository, 'pwsh', ['-NoProfile', '-File', path.join(repository, 'scripts/Test-PowerShellSyntax.ps1'), '-Path', 'tools/long-running-agent/engine-processes.ps1']);

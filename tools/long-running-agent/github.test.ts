@@ -14,7 +14,7 @@ import { codingResourceLoader, codingTools, failureReceipt, GitHubPiExecutor } f
 import { approveCorrection, requireWritable } from './policy.ts';
 import { formatStatus, githubHelp, githubMain, issueNumber } from './github-cli.ts';
 
-const suite = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-github-coding-'));
+const suite = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'pal-github-coding-'));
 console.log(`Synthetic GitHub workflow evidence retained at ${suite}`);
 let sequence = 0;
 const signal = () => new AbortController().signal;

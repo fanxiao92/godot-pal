@@ -10,9 +10,9 @@ function Fail([string]$Code, [string]$Message) { throw "[boundary:$Code] $Messag
 # root (e.g. _fix_loader.py in #53, _pb2.py caught by the M4 dual review) must fail here instead of
 # riding along in delivery diffs. Missing entries are fine; unexpected entries are not.
 $script:AllowedRootFiles = @('.gitattributes', '.gitignore', 'AGENTS.md', 'GLOSSARY.md', 'GodotPal.sln', 'NuGet.Config', 'README.md', 'global.json')
-# NuGet.Config and the locked GdUnit bootstrap require this local cache directory.
-# Its package integrity is checked by bootstrap; it is not a unit compilation source.
-$script:AllowedRootDirectories = @('.github', '.packages', 'data', 'docs', 'reference', 'samples', 'scripts', 'src', 'tests', 'tools')
+# NuGet.Config and the locked GdUnit bootstrap require .packages; .pi holds project-trusted
+# Pi subagent configuration (docs/agents/execution-environment.md). Neither is a unit compilation source.
+$script:AllowedRootDirectories = @('.github', '.packages', '.pi', 'data', 'docs', 'reference', 'samples', 'scripts', 'src', 'tests', 'tools')
 function Test-RootFiles([string]$Root) {
     foreach ($entry in @(Get-ChildItem -LiteralPath $Root -Force | Where-Object Name -ne '.git')) {
         if ($entry.PSIsContainer) {

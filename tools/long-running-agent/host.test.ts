@@ -10,7 +10,7 @@ import { acquire, atomicJson, git, json, lockFile, native, QuiescenceUnknownErro
 import { loadSdk, PiExecutor, scopedPath, scopedTools, type PiSdk } from './pi.ts';
 import { main } from './cli.ts';
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pal-agent-host-tests-'));
+const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'pal-agent-host-tests-'));
 console.log(`Synthetic test evidence retained at ${root}`);
 let sequence = 0;
 function setup(overrides: Partial<Plan['approval']> = {}, count = 1) {
