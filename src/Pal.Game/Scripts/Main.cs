@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Godot;
@@ -25,7 +26,23 @@ public partial class Main : Node2D
     private bool awaitingFirstBattleDraw;
     private bool firstBattleRendererSubscribed;
     private GodotBattleRandom? firstBattleRandom;
+    private ulong? initialFirstBattleSeed;
+    internal GodotBattleRandom? FirstBattleRandom => firstBattleRandom;
     private DynamicEventWorld? firstBattleWorld;
+    private RoleLiveState? roleLiveState;
+    // #213 exploration menu: the story-profile host binds the Core menu session over the shared
+    // live owners; the open menu owns input and freezes exploration updates (uigame.c).
+    private ExplorationMenuSession? menu;
+    private PalMenuView? menuView;
+    private bool menuOpenPressed;
+    private readonly List<ExplorationMenuKey> pendingMenuKeys = new();
+    // #217 shop (story-profile context): the Core shop session over the shared cash/inventory
+    // owners; the open shop owns input and freezes exploration updates while the trigger call
+    // parks inside PAL_BuyMenu/PAL_SellMenu (script.c 0x0026/0x0027).
+    internal ExplorationShopSession? shop;
+    internal PalShopView? shopView;
+    internal Guid shopRequestId;
+    private readonly List<ExplorationMenuKey> pendingShopKeys = new();
     private bool awaitingSceneDraw;
     private bool rendererSubscribed;
     private GameSceneConfiguration? configuration;
@@ -34,10 +51,24 @@ public partial class Main : Node2D
     public string? Failure { get; private set; }
     public event Action<string>? Failed;
     /// <summary>True once the 0x004E lost-reload boundary parked the story call: business
-    /// advancement stops for the rest of this run, distinct from an unexpected Failure.</summary>
+    /// advancement stops while the registered defeat-reload request waits for its processing
+    /// boundary or the run stays in its closable failure terminal, distinct from an
+    /// unexpected <see cref="Failure"/>.</summary>
     public bool StoryLostTerminal { get; private set; }
-    /// <summary>How many lost-reload diagnostics this Main printed; the boundary prints exactly once.</summary>
+    /// <summary>How many lost-reload requests this Main registered; the boundary registers
+    /// exactly once per parked request (#148 Decision 28).</summary>
     public int StoryLostReloadDiagnostics { get; private set; }
+    /// <summary>The located reason the defeat recovery closed in its failure terminal (#228;
+    /// #148 Decision 30, Stories 44/45/48): null before any request failed and after a
+    /// successful reload. Distinct from <see cref="Failure"/> (unexpected host errors) and
+    /// from the formal menu's own save/load failure receipts — the three never collapse into
+    /// one state.</summary>
+    public string? StoryLostReloadFailure { get; private set; }
+    // #228: the registered defeat-reload request's one-shot processing state. The request's
+    // own committed boundary only marks it due; repeats, stale parked requests and old
+    // session receipts never re-switch, and the failure terminal never auto-retries.
+    private bool lostReloadDue;
+    private bool lostReloadDone;
 
     /// <summary>Configure once before entering the tree. The host owns this node, including on failure.
     /// Initialization occurs in _Ready; failed or removed scenes must be freed, not reused.</summary>
@@ -49,12 +80,27 @@ public partial class Main : Node2D
         configuration = selection;
     }
 
+    internal void Configure(GameSceneConfiguration selection, ulong initialFirstBattleSeed)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        if (selection.BattleProfile is null)
+            throw new ArgumentException("An initial first-battle seed requires a first-battle profile.", nameof(selection));
+        Configure(selection);
+        this.initialFirstBattleSeed = initialFirstBattleSeed;
+    }
+
     public ExplorationState? Exploration => Battle?.Current ?? Interaction?.Current ?? dynamicSession?.Current ?? input?.Current;
     public NpcInteractionSession? Interaction { get; private set; }
     public FirstMandatoryBattleSession? Battle => battle;
     public string? SelectedLanguage { get; private set; }
     public PalTriggerDialogue? Dialogue { get; private set; }
     public PalDialogueDisplay? Display { get; private set; }
+    /// <summary>The #213 exploration menu session bound to the story-profile host, or null on
+    /// hosts without the formal shared live-state chain (supported context of this leaf).</summary>
+    public ExplorationMenuSession? Menu => menu;
+    internal PalMenuView? MenuView => menuView;
+    internal ExplorationShopSession? Shop => shop;
+    internal PalShopView? ShopView => shopView;
     // Actual Main callback completion; display completion has its own production boundary.
     public event Action? UpdateCompleted;
 
@@ -169,22 +215,30 @@ public partial class Main : Node2D
                 var staticIds = new System.Collections.Generic.HashSet<int>(Battle!.Rules.Objects.Select(o => (int)o.Id));
                 var extendedRules = Battle.Rules.WithObjects(Battle.Rules.Objects
                     .Concat(real.Resources.GlobalObjects.Where(o => !staticIds.Contains(o.Id))));
-                var world = DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
-                    map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport);
-                for (int role = 0; role < real.Profile.Roles.Count; role++)
-                {
-                    var snapshot = real.Profile.Roles[role];
-                    world.InitializePartyVitals(role, snapshot.Hp, snapshot.MaxHp, snapshot.Mp, snapshot.MaxMp);
-                }
+                // Seed the validated battle declarations once; party order is explicit and
+                // independent of how many role records the content declares.
+                roleLiveState = new RoleLiveState(real.Resources.BattleContent.InitialRoles.Values.ToArray());
+                var world = DynamicEventWorld.ForHost(extendedRules, Battle.Current.Leader,
+                    map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport,
+                    roleLiveState, real.Resources.BattleContent.Players.Select(player => player.RoleId).ToArray());
                 Dialogue.FirstBattleWorld = world;
                 firstBattleWorld = world;
-                var firstBattleSeedRandom = new GodotBattleRandom(selected.BattleSeed);
-                Dialogue.PreviewSessionFactory = () => new TriggerScriptSession(real.Resources.Events,
-                    language == "zh-Hans" ? real.Resources.Chinese : real.Resources.English,
-                    real.Resources.BattleContent, new GodotBattleRandom(selected.BattleSeed),
-                    DynamicEventWorld.ForHost(extendedRules, checkedProfile.Leader,
-                        map.Data.SceneId, map.Data.WScriptOnEnter, map.Data.WScriptOnTeleport));
-                Dialogue.Initialize(Display, real.Resources, language, firstBattleSeedRandom, map.Data);
+                firstBattleRandom = new GodotBattleRandom(initialFirstBattleSeed ?? selected.BattleSeed);
+                Dialogue.PreviewSessionFactory = () =>
+                {
+                    var fork = firstBattleRandom.Fork();
+                    try
+                    {
+                        return (new TriggerScriptSession(real.Resources.Events,
+                            language == "zh-Hans" ? real.Resources.Chinese : real.Resources.English,
+                            real.Resources.BattleContent, fork, world.CreateIsolatedCopy(),
+                            Dialogue.Session!.Context.Color), fork);
+                    }
+                    catch { fork.Dispose(); throw; }
+                };
+                Dialogue.Initialize(Display, real.Resources, language, firstBattleRandom, map.Data);
+                if (!Battle.InitializeTrigger(Dialogue.Session!))
+                    throw new InvalidOperationException("First battle trigger could not initialize its production world before exploration.");
                 // The verified closure reuses the production story-battle machinery: the facade
                 // carries the same checked exploration, scene, palette and settlement words, so
                 // team18's real battle, hooks and settlement run through the identical host.
@@ -202,7 +256,6 @@ public partial class Main : Node2D
                 Display.UpdateCompleted += CompleteFirstBattleTrigger;
                 RenderingServer.FramePostDraw += StartFirstBattleAfterSceneDraw;
                 firstBattleRendererSubscribed = true;
-                firstBattleRandom = new GodotBattleRandom(selected.BattleSeed);
                 GD.Print($"PAL_M4_FIRST_BATTLE_REAL:scene2/map12; owner28/09C3; language={language}; closure verified; teams=[{string.Join(",", real.Closure.VerifiedBattleTeamIds)}]");
             }
             else if (firstBattle is not null) GD.Print($"PAL_M4_FIRST_BATTLE_CONTEXT:scene2/map12; owner28/09C3; language={language}; trigger closure unavailable");
@@ -214,6 +267,14 @@ public partial class Main : Node2D
             Fail(StartupDiagnostics.Format(selectedProfilePath, scenePath, staticProfilePath, e.Message));
         }
     }
+
+    private static ExplorationMenuKey DirectionMenuKey(int direction) => direction switch
+    {
+        0 => ExplorationMenuKey.Down,
+        1 => ExplorationMenuKey.Left,
+        2 => ExplorationMenuKey.Up,
+        _ => ExplorationMenuKey.Right,
+    };
 
     private static Color[] Palette(PalSceneData scene) => Enumerable.Range(0, 256).Select(i =>
         new Color(scene.Palette.Rgb[i * 3] / 255f, scene.Palette.Rgb[i * 3 + 1] / 255f, scene.Palette.Rgb[i * 3 + 2] / 255f)).ToArray();
@@ -259,6 +320,72 @@ public partial class Main : Node2D
                         storyCycle = i / 2 == 3 ? 1 : -1;
                         GetViewport().SetInputAsHandled();
                     }
+                    // input.c: 'd' is kKeyDefend (uibattle.c 1166-1171: the main move menu
+                    // commits the defend action directly; no target menu exists for it). The
+                    // exploration east alias carries the same physical key, so the battle
+                    // consumes it inside this branch — the standalone blocks below are
+                    // unreachable for a direction-alias key.
+                    else if (key.Pressed && !key.Echo && key.Keycode == Key.D
+                        && StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                    {
+                        storyDefend = true;
+                        GetViewport().SetInputAsHandled();
+                    }
+                    return;
+                }
+                if (menu is { Mode: ExplorationMenuMode.ItemScript })
+                {
+                    // #215: the pending item script owns the frame (play.c blocks inside
+                    // PAL_RunTriggerScript): direction presses never reach the frozen world and
+                    // never queue menu keys; releases keep held-key state truthful for the resume.
+                    if (key.Pressed) GetViewport().SetInputAsHandled();
+                    else if (dynamicSession is { } dynamicRelease) dynamicRelease.Release((ExplorationKey)i);
+                    else if (battle is { } battleRelease) battleRelease.Release((ExplorationKey)i);
+                    else if (Interaction is { } interactionRelease) interactionRelease.Release((ExplorationKey)i);
+                    else input!.Release((ExplorationKey)i);
+                    return;
+                }
+                if (menu is { Mode: ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess })
+                {
+                    // #216: the pending magic cast's on-use/on-success script owns the frame
+                    // (uigame.c blocks inside PAL_RunTriggerScript): direction presses never
+                    // reach the frozen world and never queue menu keys; releases keep held-key
+                    // state truthful for the resume.
+                    if (key.Pressed) GetViewport().SetInputAsHandled();
+                    else if (dynamicSession is { } dynamicRelease) dynamicRelease.Release((ExplorationKey)i);
+                    else if (battle is { } battleRelease) battleRelease.Release((ExplorationKey)i);
+                    else if (Interaction is { } interactionRelease) interactionRelease.Release((ExplorationKey)i);
+                    else input!.Release((ExplorationKey)i);
+                    return;
+                }
+                if (menu is { Mode: not ExplorationMenuMode.Closed })
+                {
+                    // The open menu owns direction presses (uigame.c menu loops); releases keep
+                    // the exploration held-key state truthful for the post-close resume.
+                    if (key.Pressed)
+                    {
+                        if (!key.Echo) pendingMenuKeys.Add(DirectionMenuKey(i / 2));
+                        GetViewport().SetInputAsHandled();
+                    }
+                    else if (dynamicSession is { } dynamicRelease) dynamicRelease.Release((ExplorationKey)i);
+                    else if (battle is { } battleRelease) battleRelease.Release((ExplorationKey)i);
+                    else if (Interaction is { } interactionRelease) interactionRelease.Release((ExplorationKey)i);
+                    else input!.Release((ExplorationKey)i);
+                    return;
+                }
+                if (shop is { Mode: not ExplorationShopMode.Closed })
+                {
+                    // #217: the open shop owns direction presses (uigame.c menu loops); releases
+                    // keep the exploration held-key state truthful for the post-close resume.
+                    if (key.Pressed)
+                    {
+                        if (!key.Echo) pendingShopKeys.Add(DirectionMenuKey(i / 2));
+                        GetViewport().SetInputAsHandled();
+                    }
+                    else if (dynamicSession is { } dynamicRelease) dynamicRelease.Release((ExplorationKey)i);
+                    else if (battle is { } battleRelease) battleRelease.Release((ExplorationKey)i);
+                    else if (Interaction is { } interactionRelease) interactionRelease.Release((ExplorationKey)i);
+                    else input!.Release((ExplorationKey)i);
                     return;
                 }
                 if (dynamicSession is { } dynamic)
@@ -284,7 +411,33 @@ public partial class Main : Node2D
             if (key.Pressed && !key.Echo
                 && (key.Keycode is Key.Enter or Key.Space or Key.KpEnter || key.Keycode == Key.Ctrl && key.Location != KeyLocation.Right))
             {
-                if (storyRequest is not null)
+                if (menu is { Mode: ExplorationMenuMode.ItemScript })
+                {
+                    // #215: the item script's display owns Search while the run is pending; the
+                    // press propagates to it untouched and never queues a menu confirm or reaches
+                    // the frozen exploration search.
+                }
+                else if (menu is { Mode: ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess })
+                {
+                    // #216: the magic cast's script display owns Search while a run is pending;
+                    // the press propagates to it untouched and never queues a menu confirm or
+                    // reaches the frozen exploration search.
+                }
+                else if (menu is { Mode: not ExplorationMenuMode.Closed })
+                {
+                    // The open menu consumes Search as its confirm; the press never reaches the
+                    // exploration search, so closing cannot leak into an NPC trigger (uigame.c).
+                    pendingMenuKeys.Add(ExplorationMenuKey.Confirm);
+                    GetViewport().SetInputAsHandled();
+                }
+                else if (shop is { Mode: not ExplorationShopMode.Closed })
+                {
+                    // #217: the open shop consumes Search as its confirm (uigame.c); the press
+                    // never reaches the frozen exploration search.
+                    pendingShopKeys.Add(ExplorationMenuKey.Confirm);
+                    GetViewport().SetInputAsHandled();
+                }
+                else if (storyRequest is not null)
                 {
                     // The paused role hook's dialogue display consumes input itself; a menu
                     // confirm must not queue behind the script (fight.c 768-880 pause).
@@ -304,6 +457,42 @@ public partial class Main : Node2D
                 storyFlee = true;
                 GetViewport().SetInputAsHandled();
             }
+            // input.c 66-70: the kKeyMenu family (Escape/Insert/Alt/KP_0) cancels the active
+            // battle menu. Only the selecting menus consume it; the paused role-hook dialogue
+            // display owns its own input and exploration never sees battle-frame keys.
+            if (key.Pressed && !key.Echo && storyRequest is not null
+                && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
+                && StoryBattleMode is StoryBattlePresentation.AttackMenu or StoryBattlePresentation.TargetMenu)
+            {
+                storyCancel = true;
+                GetViewport().SetInputAsHandled();
+            }
+            // input.c 66-70 kKeyMenu (Escape/Insert/Alt/KP_0): play.c 551 opens the in-game menu
+            // from the clean exploring state after that frame's scene update; the press applies
+            // at the real update boundary and the guard re-checks the mode owner there.
+            if (key.Pressed && !key.Echo && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
+                && shop is { Mode: not ExplorationShopMode.Closed })
+            {
+                // #217: the open shop consumes kKeyMenu as its cancel (uigame.c's menu loops);
+                // the press never queues an exploration menu open behind the parked trigger.
+                pendingShopKeys.Add(ExplorationMenuKey.Cancel);
+                GetViewport().SetInputAsHandled();
+            }
+            if (key.Pressed && !key.Echo && key.Keycode is Key.Escape or Key.Insert or Key.Alt or Key.Kp0
+                && storyRequest is null && menu is not null && shop is not { Mode: not ExplorationShopMode.Closed })
+            {
+                if (menu.Mode is not (ExplorationMenuMode.Closed or ExplorationMenuMode.ItemScript
+                    or ExplorationMenuMode.MagicOnUse or ExplorationMenuMode.MagicOnSuccess))
+                {
+                    pendingMenuKeys.Add(ExplorationMenuKey.Cancel);
+                    GetViewport().SetInputAsHandled();
+                }
+                else if (menu.Mode == ExplorationMenuMode.Closed)
+                {
+                    menuOpenPressed = true;
+                    GetViewport().SetInputAsHandled();
+                }
+            }
         }
         catch (Exception error) { Fail($"Exploration input failed: {error.Message}"); }
     }
@@ -317,9 +506,11 @@ public partial class Main : Node2D
             ObserveStoryLostTerminal();
             if (StoryLostTerminal)
             {
-                // The failure terminal only advances its presentation (red fade); no event,
-                // battle or exploration business runs and no reward path can trigger.
+                // The failure terminal only advances its presentation (red fade) while the
+                // registered request waits for its processing boundary; no event, battle or
+                // exploration business runs and no reward path can trigger.
                 AdvanceStoryRedFade(unchecked((uint)Time.GetTicksMsec()));
+                AdvanceLostReload();
                 UpdateCompleted?.Invoke();
                 return;
             }
@@ -330,7 +521,11 @@ public partial class Main : Node2D
             if (awaitingSceneDraw && DisplayServer.GetName() == "headless") StartAfterSceneDraw();
             if (awaitingFirstBattleDraw && DisplayServer.GetName() == "headless") StartFirstBattleAfterSceneDraw();
             if (Failure is not null) return;
-            bool changed = battle?.Update(unchecked((uint)Time.GetTicksMsec()))
+            // play.c PAL_GameLoop: the frame's update runs first, then kKeyMenu opens the menu;
+            // while the menu is open the world stays frozen (PAL_InGameMenu blocks the loop). The
+            // parked shop request freezes the same way (script.c blocks inside PAL_BuyMenu).
+            bool changed = shop is { Mode: not ExplorationShopMode.Closed } || menu is { Mode: not ExplorationMenuMode.Closed } ? false
+                : battle?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? Interaction?.Update(unchecked((uint)Time.GetTicksMsec()))
                 ?? input!.Update(unchecked((uint)Time.GetTicksMsec()));
             // World-wired first-battle call: the parked scene waits and counted movements
@@ -347,8 +542,22 @@ public partial class Main : Node2D
                     firstBattleWorldTick = now;
                     world.AdvanceTriggerTick(trigger);
                     Dialogue!.BindPendingDisplays();
+                    CompleteFirstBattleTrigger();
                 }
             }
+            // #224: the world tracks the committed exploration leader (the dynamic host does
+            // this after every walk), and the save gate's boundary advances exactly once per
+            // committed production update — both before any input application, so a confirmed
+            // save's request and its capture share this same boundary (#148 Decision 7).
+            if (storyWorld is not null && Interaction?.Current is { } committedState)
+                storyWorld.PublishLeader(committedState.Leader);
+            storySaveGate?.NotifyProductionUpdateCommitted();
+            ApplyShopInput();
+            if (Failure is not null) return;
+            ApplyMenuInput();
+            if (Failure is not null) return;
+            if (shop is { Mode: not ExplorationShopMode.Closed } || menu is { Mode: not ExplorationMenuMode.Closed })
+            { UpdateCompleted?.Invoke(); return; }
             if (changed) mapScene.UpdateScene(Exploration.Plan);
             // Presentation transitions (redraw/fadeScene/fadeOut) in the world-wired call:
             // redraw the retained scene, then receipt after the delay elapsed.
@@ -394,7 +603,12 @@ public partial class Main : Node2D
         {
             var entry = Dialogue!.Session!.Entries.Single(e =>
                 e is { OwnerType: "eventObject", OwnerId: 28, Slot: "wTriggerScript", Kind: "trigger" } && e.SourceAddress == request.EntryAddress);
-            Dialogue.Start(entry.FileId, entry.Id, request.OwnerId);
+            Guid requestId = Battle.PendingRequestId;
+            if (requestId == Guid.Empty)
+                throw new InvalidOperationException("First battle search request has no origin.");
+            Dialogue.Start(entry.FileId, entry.Id, request.OwnerId, requestId);
+            if (!Battle.BindTrigger(requestId, Dialogue.Session!))
+                throw new InvalidOperationException("First battle trigger call could not bind its search request.");
             CompleteFirstBattleTrigger(); // also handles synchronous, no-display completion
         }
         catch (Exception e) { Fail($"First battle trigger failed: {e.Message}"); }
@@ -423,6 +637,7 @@ public partial class Main : Node2D
         _ = Dialogue.Session.AcknowledgeTransition(transition.Id);
         // The call advanced past its transition; a newly parked display must be bound.
         Dialogue.BindPendingDisplays();
+        CompleteFirstBattleTrigger();
     }
 
     private static PackedScene mapScenePackedScene(string staticResources) =>
@@ -430,25 +645,14 @@ public partial class Main : Node2D
 
     private void CompleteFirstBattleTrigger()
     {
-        if (Failure is not null || exited || firstBattleActiveTrigger is not { } request
+        if (Failure is not null || exited || firstBattleActiveTrigger is null
             || Dialogue?.Session is not { Phase: TriggerScriptPhase.Completed } session) return;
-        // The completed pre-battle/Won/Lost call has done its world mutations; hand control
-        // back to the changed exploration. PendingBattle states are an error here because the
-        // battle request path is driven by the story-battle host wiring delivered with it.
+        // Core owns the call identity, current scene publication and return deadline. A
+        // refused receipt must leave both the facade request and Main's active call intact.
+        if (!Battle!.CompleteTrigger(Battle.PendingRequestId, session, unchecked((uint)Time.GetTicksMsec())))
+            throw new InvalidOperationException("First battle trigger completion does not match the active search request.");
         firstBattleActiveTrigger = null;
-        // The completed call's world mutations become the changed exploration state: entry
-        // rewrites/states/positions flow back into the session's observable object words.
-        if (firstBattleWorld is { } changed)
-            foreach (var source in changed.Objects)
-            {
-                var target = Battle!.State.World.EventObjects.SingleOrDefault(item => item.OwnerId == source.Id);
-                if (target is null) continue;
-                target.X = source.X; target.Y = source.Y; target.Direction = source.Direction;
-                target.State = source.State; target.VanishTime = source.VanishTime;
-                target.TriggerMode = source.TriggerMode; target.TriggerEntry = source.TriggerEntry;
-                target.AutoEntry = source.AutoEntry; target.CurrentFrame = source.CurrentFrame;
-            }
-        mapScene!.UpdateScene(Exploration!.Plan);
+        mapScene!.UpdateScene(Battle.Current.Plan);
     }
 
     private void CompleteTrigger()
@@ -464,7 +668,10 @@ public partial class Main : Node2D
     private void DisplayFailed(Exception error) => Fail($"Dialogue update failed: {error.Message}");
 
     /// <summary>Observes the failure branch's formal state: starts the red fade when the
-    /// 0x004F transition lands, and enters the 0x004E failure terminal exactly once.</summary>
+    /// 0x004F transition lands, and registers the completed failure story's 0x004E request
+    /// exactly once (#228; #148 Decision 28) — this boundary never rebuilds inside the
+    /// script stack; <see cref="AdvanceLostReload"/> processes the request at the next
+    /// production update boundary.</summary>
     private void ObserveStoryLostTerminal()
     {
         if (story is not null && storyRedStep < 0 && Dialogue?.Session?.FadedToRed == true)
@@ -473,15 +680,69 @@ public partial class Main : Node2D
             storyRedStepAt = presentationNow;
         }
         if (StoryLostTerminal || Dialogue?.Session?.PendingLostReload is not { } request) return;
-        // TODO(#51): implement the real script.c 0x004E save-slot reload (PAL_FadeOut(1) then
-        // PAL_ReloadInNextTick): no save system exists yet, so this run stays in the lost
-        // terminal state (red screen, no business advancement) until the window closes.
         StoryLostTerminal = true;
         StoryLostReloadDiagnostics++;
+        lostReloadDue = false;
+        lostReloadDone = false;
+        StoryLostReloadFailure = null;
         string team = request.EnemyTeamId is { } enemyTeam ? enemyTeam.ToString(System.Globalization.CultureInfo.InvariantCulture) : "none";
         string music = Dialogue.Session.Music is { } state ? state.MusicId.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unchanged";
-        GD.Print($"PAL_LOST_RELOAD_TODO:{request.Position}; team={team}; boss={request.IsBoss}; caller={Dialogue.Session.Caller}; music={music}; "
-            + "save-slot reload not implemented; lost terminal until window close");
+        GD.Print($"PAL_LOST_RELOAD_REQUESTED:{request.Position}; team={team}; boss={request.IsBoss}; caller={Dialogue.Session.Caller}; music={music}; "
+            + $"recoverySlot={(CurrentRecoverySlot is { } slot ? slot : 0)}; processing=next-production-boundary");
+    }
+
+    /// <summary>#228 (parent #148 Decisions 28–30, Stories 41–48): processes the registered
+    /// defeat-reload request exactly once, at the committed production boundary after its
+    /// registration — never re-entering the script stack that parked it. With a current
+    /// recovery slot it runs the same #227 chain (real slot read, #223 validation against
+    /// this context's content identity, candidate/commit through CommitLoadedSession; no
+    /// defeat-specific deserializer): a completed switch retires the lost terminal with its
+    /// red presentation and resumes the rebuilt session. Without a current slot — or when
+    /// the file, the archive or the preparation fails — the run closes in this closable
+    /// terminal with one located reason: the original session, the recovery slot and every
+    /// live owner stay untouched, nothing is refilled, no new game is faked and nothing
+    /// auto-retries.</summary>
+    private void AdvanceLostReload()
+    {
+        if (lostReloadDone) return;
+        if (!lostReloadDue)
+        {
+            // Decision 28: the request's own committed boundary only registered it; the
+            // reload happens in the next production update.
+            lostReloadDue = true;
+            return;
+        }
+        lostReloadDone = true;
+        if (CurrentRecoverySlot is not { } slot || storySaveStorage is null)
+        {
+            LostReloadFailed("no-current-slot");
+            return;
+        }
+        byte[]? bytes;
+        try { bytes = storySaveStorage.ReadSlot(slot); }
+        catch (InvalidDataException error) { LostReloadFailed(error.Message); return; }
+        if (bytes is null) { LostReloadFailed("slot-missing"); return; }
+        PlayerSaveV1 save;
+        try { save = PlayerSaveJson.Decode(bytes, SaveContentIdentity!); }
+        catch (InvalidDataException error) { LostReloadFailed(error.Message); return; }
+        try { CommitLoadedSession(slot, save); }
+        catch (InvalidDataException error) { LostReloadFailed(error.Message); return; }
+        // Decision 29: the same chain rebuilt the session over the saved snapshot; the
+        // terminal, its red presentation and the failed world retire with the old session.
+        StoryLostTerminal = false;
+        storyRedStep = -1;
+        storyRedStepAt = 0;
+        story!.Exploration.SetPalette(mapScene!.Data, story.Palette.ToArray());
+        mapScene.UpdateScene(Exploration!.Plan);
+        GD.Print($"PAL_LOST_RELOAD_COMPLETED:slot={slot};savedTimes={storySaveCount};recoverySlot={CurrentRecoverySlot}");
+    }
+
+    private void LostReloadFailed(string reason)
+    {
+        // Story 44/48: one located reason in the closable terminal; the original session and
+        // the current recovery slot stay exactly as they were (Stories 30/40).
+        StoryLostReloadFailure = reason;
+        GD.Print($"PAL_LOST_RELOAD_FAILED:reason={reason};recoverySlot={(CurrentRecoverySlot is { } kept ? kept : 0)};terminal=closable;no-retry");
     }
 
     protected void Fail(string message)
@@ -495,6 +756,7 @@ public partial class Main : Node2D
         DisconnectRuntime();
         ReleaseStory();
         ReleaseDynamic();
+        ReleaseFirstBattleRandom();
         Failed?.Invoke(message);
     }
 
@@ -512,12 +774,19 @@ public partial class Main : Node2D
         }
     }
 
+    private void ReleaseFirstBattleRandom()
+    {
+        if (Dialogue is not null) Dialogue.PreviewSessionFactory = null;
+        firstBattleRandom?.Dispose(); firstBattleRandom = null;
+    }
+
     public override void _ExitTree()
     {
         exited = true;
         DisconnectRuntime();
         ReleaseStory();
         ReleaseDynamic();
+        ReleaseFirstBattleRandom();
         activeTrigger = null; firstBattleActiveTrigger = null; Interaction = null; input = null; battle = null; mapScene = null;
         if (firstBattleRendererSubscribed)
         {
@@ -525,5 +794,6 @@ public partial class Main : Node2D
             firstBattleRendererSubscribed = false;
         }
         Display = null; Dialogue = null; SelectedLanguage = null;
+        firstBattleWorld = null; roleLiveState = null;
     }
 }

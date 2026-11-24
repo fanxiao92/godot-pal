@@ -276,6 +276,176 @@ public sealed class ClassicBattleEquipmentSessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void SelectedEquipmentWordsRejectBeforeEffectsAndRandom()
+    {
+        // ARTIFICIAL selected-guard fixture: object170/role1 is not a retail field4/65 claim.
+        // The real 1/351 writes belong to dormant roles2/3; sprite0 isolates the new guard here.
+        var fixture = new EventFixture();
+        fixture.Commands[1] = JsonNode.Parse("""
+          {"label":"L0001","op":"setMusic","musicId":5,"mode":3,"next":"L0002","source":{"index":1,"opcode":67,"operands":[5,3,0]}}
+          """);
+        fixture.Commands[2] = JsonNode.Parse("""
+          {"label":"L0002","op":"changeHpMp","scope":0,"amount":-5,"next":"L0003","source":{"index":2,"opcode":29,"operands":[0,65531,0]}}
+          """);
+        fixture.Commands[3] = JsonNode.Parse("""
+          {"label":"L0003","op":"startBattle","enemyTeamId":18,"lossTarget":"L0004","isBoss":true,"fleeTarget":null,
+           "next":"L0004","source":{"index":3,"opcode":7,"operands":[18,4,0]}}
+          """);
+        var events = fixture.Load();
+        var language = TriggerScriptSessionTests.Language();
+        var legacy = Content();
+        var typedNull = new TriggerBattleContent(legacy.InitialRoles.Values.ToArray(), legacy.Players,
+            legacy.GrowthByRole, legacy.EnemyTeams, legacy.RoleEquipment,
+            legacy.EquipmentObjects.Values.Select(obj => obj with
+            {
+                Effects = obj.Effects.Select(effect => effect with { AttackAll = null, CooperativeMagic = null }).ToArray()
+            }).ToArray());
+        var explicitZero = Content(equipmentAttackAll: 0, equipmentCooperativeMagic: 0);
+        Assert.Null(legacy.EquipmentObjects[170].Effects[1].AttackAll);
+        Assert.Null(legacy.EquipmentObjects[170].Effects[1].CooperativeMagic);
+        Assert.Null(typedNull.EquipmentObjects[170].Effects[1].AttackAll);
+        Assert.Null(typedNull.EquipmentObjects[170].Effects[1].CooperativeMagic);
+        Assert.Equal(0, explicitZero.EquipmentObjects[170].Effects[1].AttackAll);
+        Assert.Equal(0, explicitZero.EquipmentObjects[170].Effects[1].CooperativeMagic);
+
+        // Controls run first, in this order: old omission, explicit typed null, explicit JSON zero.
+        foreach (var content in new[] { legacy, typedNull, explicitZero })
+        {
+            var random = new ScriptedRandom([]);
+            var equipment = BattleEquipmentState.Initialize(content);
+            Assert.Equal([0, 0, 0, 170, 0, 0], equipment.Equipment(1));
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 0, 60000], equipment.StatusOverlay(1));
+            Assert.Equal(0, content.EquipmentObjects[170].Effects[1].BattleSprite);
+            var session = new ClassicBattleSession(Definition(content), random, equipment);
+            Assert.Equal((40, 20, 100), (session.Current.Players[0].Attack,
+                session.Current.Players[0].Defense, session.Current.Players[0].Dexterity));
+            Assert.Equal((45, 22, 120), (session.Current.Players[1].Attack,
+                session.Current.Players[1].Defense, session.Current.Players[1].Dexterity));
+            var lifecycle = new ClassicBattleLifecycleSession(content.InitialRoles.Values.ToArray(), content.Players,
+                content.EnemyTeams[18], content.GrowthByRole, random, equipment);
+            Assert.Equal((45, 22, 120), (lifecycle.Current.Combat.Players[1].Attack,
+                lifecycle.Current.Combat.Players[1].Defense, lifecycle.Current.Combat.Players[1].Dexterity));
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 0, 60000], lifecycle.Current.Roles[1].Statuses);
+            var owner = new RoleLiveState(content.InitialRoles.Values.ToArray());
+            var world = DynamicEventWorld.ForHost(
+                new StaticSceneRules(new SceneMap(2, new uint[16384], [new SceneFrame(0, 32, 15)]), []),
+                new StaticLeader(320, 320, 0, 0, 0, 3,
+                    new SceneSprite(17, Enumerable.Range(0, 12).Select(i => new SceneFrame(i, 20, 30)))), 2, 0, 0, owner);
+            var script = TriggerScriptSession.ForSharedRoles(events, language, content, random, owner, world);
+            Assert.Equal(new[] { 18 }, script.GetCurrentEntryRequirements("shared", "npc", 1).BattleTeamIds);
+            Assert.Null(script.PendingBattle);
+            Assert.Null(script.Music);
+            script.Start("shared", "npc", 1);
+            Assert.Equal(TriggerScriptPhase.WaitingForBattle, script.Phase);
+            Assert.Equal(new TriggerMusicState(5, 3), script.Music);
+            Assert.Equal((90, 15), (world.PartyVitals[1].Hp, world.PartyVitals[1].Mp));
+            var battle = Assert.IsType<TriggerBattleRequest>(script.PendingBattle);
+            Assert.Equal(18, battle.EnemyTeamId);
+            Assert.Equal((45, 22, 120), (battle.Lifecycle.Current.Combat.Players[1].Attack,
+                battle.Lifecycle.Current.Combat.Players[1].Defense, battle.Lifecycle.Current.Combat.Players[1].Dexterity));
+            Assert.Equal((90, 15), (battle.Lifecycle.Current.Roles[1].Hp, battle.Lifecycle.Current.Roles[1].Mp));
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 0, 60000], battle.Lifecycle.Current.Roles[1].Statuses);
+            Assert.Equal((35, 18, 100), (content.Players[1].Attack, content.Players[1].Defense, content.Players[1].Dexterity));
+            Assert.Equal((95, 20), (content.InitialRoles[1].Hp, content.InitialRoles[1].Mp));
+            random.AssertExhausted();
+        }
+
+        // #143 (T15): the equipment rgwAttackAll word is the reference all-target capability
+        // (PAL_PlayerCanAttackAll global.c 2048-2080) and now opens the combat domain through
+        // every entry; the authored player word stays false here, so the capability is the
+        // equipment register alone.
+        foreach (int attackAll in new[] { 1, 65535 })
+        {
+            var content = Content(equipmentAttackAll: attackAll);
+            var effect = content.EquipmentObjects[170].Effects[1];
+            Assert.Equal(attackAll, effect.AttackAll);
+            Assert.Null(effect.CooperativeMagic);
+            Assert.Equal(0, effect.BattleSprite);
+            Assert.False(content.Players[1].AttackAll);
+            Assert.Equal(new int[9], content.Players[0].Statuses);
+            var equipment = BattleEquipmentState.Initialize(content);
+            Assert.Equal(attackAll, equipment.AttackAllWord(1, 3));
+            var random = new ScriptedRandom(QueueDraws());
+            var session = new ClassicBattleSession(Definition(content), random, equipment);
+            Assert.Equal(new[] { false, true }, session.Current.Players.Select(p => p.CanAttackAll).ToArray());
+            var uncapable = session.Current;
+            Assert.Throws<InvalidOperationException>(() => session.SelectAttackAll(0));
+            Assert.Same(uncapable, session.Current);
+            session.SelectAttack(0, 0);
+            Assert.False(session.Current.Players[0].SelectedAttackAll);
+            session.SelectAttackAll(1);
+            Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+            Assert.True(session.Current.Players[1].SelectedAttackAll);
+            Assert.Null(session.Current.Players[1].SelectedEnemySlot);
+            random.AssertExhausted();
+            new ClassicBattleLifecycleSession(content.InitialRoles.Values.ToArray(), content.Players,
+                content.EnemyTeams[18], content.GrowthByRole, new ScriptedRandom(QueueDraws()), equipment);
+            var owner = new RoleLiveState(content.InitialRoles.Values.ToArray());
+            var world = DynamicEventWorld.ForHost(
+                new StaticSceneRules(new SceneMap(2, new uint[16384], [new SceneFrame(0, 32, 15)]), []),
+                new StaticLeader(320, 320, 0, 0, 0, 3,
+                    new SceneSprite(17, Enumerable.Range(0, 12).Select(i => new SceneFrame(i, 20, 30)))), 2, 0, 0, owner);
+            var script = TriggerScriptSession.ForSharedRoles(events, language, content, new ScriptedRandom(QueueDraws()), owner, world);
+            script.GetCurrentEntryRequirements("shared", "npc", 1);
+            script.Start("shared", "npc", 1);
+            Assert.True(script.PendingBattle!.Lifecycle.Current.Combat.Players[1].CanAttackAll);
+        }
+
+        (int? AttackAll, int? CooperativeMagic, string Word)[] cases =
+            [(null, 351, "cooperativeMagic"), (null, 65535, "cooperativeMagic")];
+        foreach (var test in cases)
+        {
+            var content = Content(equipmentAttackAll: test.AttackAll, equipmentCooperativeMagic: test.CooperativeMagic);
+            var effect = content.EquipmentObjects[170].Effects[1];
+            Assert.Equal(test.AttackAll, effect.AttackAll);
+            Assert.Equal(test.CooperativeMagic, effect.CooperativeMagic);
+            Assert.Equal(0, effect.BattleSprite);
+            Assert.False(content.Players[1].AttackAll);
+            Assert.Equal(new int[9], content.Players[1].Statuses);
+            var equipment = BattleEquipmentState.Initialize(content);
+            var random = new ScriptedRandom([]);
+            var directError = Assert.Throws<InvalidDataException>(() =>
+                new ClassicBattleSession(Definition(content), random, equipment));
+            var lifecycleError = Assert.Throws<InvalidDataException>(() =>
+                new ClassicBattleLifecycleSession(content.InitialRoles.Values.ToArray(), content.Players,
+                    content.EnemyTeams[18], content.GrowthByRole, random, equipment));
+            var entryError = Assert.Throws<InvalidDataException>(() =>
+                TriggerScriptSession.ValidateEntry(events, language, content, "shared", "npc"));
+            var owner = new RoleLiveState(content.InitialRoles.Values.ToArray());
+            var world = DynamicEventWorld.ForHost(
+                new StaticSceneRules(new SceneMap(2, new uint[16384], [new SceneFrame(0, 32, 15)]), []),
+                new StaticLeader(320, 320, 0, 0, 0, 3,
+                    new SceneSprite(17, Enumerable.Range(0, 12).Select(i => new SceneFrame(i, 20, 30)))), 2, 0, 0, owner);
+            var script = TriggerScriptSession.ForSharedRoles(events, language, content, random, owner, world);
+            var role0 = owner.Roles[0];
+            var role1 = owner.Roles[1];
+            var before = (script.Phase, script.CallId, script.StartedEntry, script.SourceRequestId, script.Caller,
+                script.ReturnEntry, script.CurrentPosition, script.Context, script.Music, script.PendingDisplay, script.PendingBattle);
+            var queryError = Assert.Throws<InvalidDataException>(() => script.GetCurrentEntryRequirements("shared", "npc", 1));
+            var startError = Assert.Throws<InvalidDataException>(() => script.Start("shared", "npc", 1));
+            foreach (var error in new[] { directError, lifecycleError, entryError, queryError, startError })
+            {
+                Assert.Contains("equipment", error.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains(test.Word, error.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("role 1", error.Message, StringComparison.OrdinalIgnoreCase);
+            }
+            Assert.Equal(before, (script.Phase, script.CallId, script.StartedEntry, script.SourceRequestId, script.Caller,
+                script.ReturnEntry, script.CurrentPosition, script.Context, script.Music, script.PendingDisplay, script.PendingBattle));
+            Assert.Equal(TriggerScriptPhase.Ready, script.Phase);
+            Assert.Null(script.PendingBattle);
+            Assert.Null(script.Music);
+            Assert.Same(role0, owner.Roles[0]);
+            Assert.Same(role1, owner.Roles[1]);
+            Assert.Same(role1, script.BattleRoles![1]);
+            Assert.Equal((100, 20), (world.PartyVitals[0].Hp, world.PartyVitals[0].Mp));
+            Assert.Equal((95, 20), (world.PartyVitals[1].Hp, world.PartyVitals[1].Mp));
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 0, 60000], role1.Statuses);
+            Assert.Equal(55, role1.HiddenExperience["attack"].Count);
+            random.AssertExhausted();
+        }
+    }
+
     private static ClassicBattleDefinition Definition(TriggerBattleContent content) =>
         new(content.Players, content.EnemyTeams[18]);
 
@@ -289,7 +459,8 @@ public sealed class ClassicBattleEquipmentSessionTests
     private static TriggerBattleContent Content(int enemyCount = 2, int enemyDexterity = 0, int member1Hp = 95,
         int member0Hp = 100, int? player1CoveredBy = null, int battleSprite = 0, int settledDualAttack = 60000,
         int settledBravery = 0, bool settledBadStatus = false, bool player1EquipmentZero = false,
-        int[]? role1Equipment = null, int extraBravery = 0, int extraProtect = 0, int extraHaste = 0)
+        int[]? role1Equipment = null, int extraBravery = 0, int extraProtect = 0, int extraHaste = 0,
+        int? equipmentAttackAll = null, int? equipmentCooperativeMagic = null)
     {
         role1Equipment ??= [0, 0, 0, 170, 0, 0];
         int[] role1Statuses = [0, 0, 0, 0, 0, settledBravery, 0, 0, settledDualAttack];
@@ -337,6 +508,10 @@ public sealed class ClassicBattleEquipmentSessionTests
         }
         """;
         var data = JsonNode.Parse(json)!.AsObject();
+        if (equipmentAttackAll is int attackAll)
+            data["equipments"]![0]!["effects"]![1]!["attackAll"] = attackAll;
+        if (equipmentCooperativeMagic is int cooperativeMagic)
+            data["equipments"]![0]!["effects"]![1]!["cooperativeMagic"] = cooperativeMagic;
         foreach (int role in new[] { 0, 1 })
             data["growth"]![role]!["levelUpExperience"] = new JsonArray(
                 Enumerable.Repeat(0, 100).Select(_ => JsonValue.Create(100) as JsonNode).ToArray());

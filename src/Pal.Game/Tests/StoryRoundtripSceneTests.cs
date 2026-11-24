@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GdUnit4;
 using Godot;
@@ -13,6 +17,369 @@ namespace Pal.Game.Tests;
 [TestSuite, RequireGodotRuntime]
 public class StoryRoundtripSceneTests
 {
+    [TestCase(Timeout = 20000)]
+    public async Task SinglePlayerTwoEnemiesDrawBothDuplicateSlotsOnFirstBattleUpdateAndFreshMain()
+    {
+        using var fixture = new AuthoredStoryFixture("PartyWin", singlePlayerTwoEnemies: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
+        for (int run = 0; run < 2; run++)
+        {
+            bool observedFirstBattle = false, observedLethalFeedback = false, observedDisappearance = false;
+            void Observe(Main main)
+            {
+                if (main.StoryBattle is null) return;
+                var draw = main.StoryDrawSnapshot!.Value;
+                if (main.StoryBattle.Current.Combat.Enemies[0].Hp == 0 && !observedDisappearance)
+                {
+                    AssertThat(draw.PartyEnemies.Select(enemy => enemy.Hp).SequenceEqual(new[]
+                        { main.StoryBattleMode == StoryBattlePresentation.Feedback && !draw.ResultVisible ? 43 : 0, 43 })).IsTrue();
+                    if (main.StoryBattleMode == StoryBattlePresentation.Feedback)
+                    {
+                        observedLethalFeedback = true;
+                        AssertThat(draw.PartyEnemies.All(enemy => enemy.Visible))
+                            .OverrideFailureMessage("Lethal feedback must keep the struck slot visible until the action finishes.").IsTrue();
+                    }
+                    else
+                    {
+                        observedDisappearance = true;
+                        AssertThat(observedLethalFeedback).IsTrue();
+                        AssertThat(draw.PartyEnemies.Select(enemy => enemy.Visible).SequenceEqual(new[] { false, true }))
+                            .OverrideFailureMessage("Dead enemy slot must stop drawing after lethal feedback without hiding its duplicate-ID neighbour.").IsTrue();
+                    }
+                }
+                // Capture the first battle completion unconditionally, not the first correct draw.
+                if (observedFirstBattle) return;
+                observedFirstBattle = true;
+                AssertThat(draw.PartyEnemies.Count)
+                    .OverrideFailureMessage("One-player/two-enemy Main must draw both enemy slots on its first battle update.")
+                    .IsEqual(2);
+                AssertThat(draw.EnemyIdleCounters.SequenceEqual(new[] { 2, 2 })).IsTrue();
+                AssertThat(draw.EnemyIdleFrames.SequenceEqual(new[] { 0, 0 })).IsTrue();
+                AssertThat(draw.PartyPlayers.Count).IsEqual(1);
+                AssertThat(draw.PartyPlayers[0].Position == new Vector2(240, 170)).IsTrue();
+                AssertThat(draw.PartyEnemies[0].Position == new Vector2(100, 120)).IsTrue();
+                AssertThat(draw.PartyEnemies[1].Position == new Vector2(128, 104)).IsTrue();
+                AssertThat(draw.PartyEnemies.Select(enemy => enemy.Hp).SequenceEqual(new[] { 43, 43 })).IsTrue();
+                AssertThat(draw.PartyEnemies.All(enemy => enemy.Visible)).IsTrue();
+                AssertThat(main.StoryBattle.Current.Combat.Enemies.Select(enemy => enemy.Id)
+                    .SequenceEqual(new[] { 7, 7 })).IsTrue();
+            }
+            using var host = new StoryHost(selection, [new(100, 120), new(128, 104)], [new(240, 170)], Observe);
+            AssertThat(host.Main.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            await host.Wait(() => observedFirstBattle);
+            AssertThat(host.Main.StoryBattleMode).IsEqual(StoryBattlePresentation.AttackMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            await host.Wait(() => observedDisappearance);
+            await host.Wait(() => host.Main.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            AssertThat(host.Main.StoryDrawSnapshot!.Value.PartyEnemies.Select(enemy => enemy.Visible)
+                .SequenceEqual(new[] { false, true })).IsTrue();
+        }
+    }
+
+    [TestCase(Timeout = 20000)]
+    public async Task PreparedHeterogeneousSlotsUseOwnActionsTargetsAndFreshMain()
+    {
+        using var fixture = new AuthoredStoryFixture("PartyWin", heterogeneousEnemies: true);
+        string[] before = fixture.Snapshot();
+        var story = Pal.Game.Profiles.NativeStoryProfile.Load(fixture.StoryUri);
+        var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+        var slots = visual.Teams[18].EnemySlots;
+        AssertThat(slots.Select(s => s.TargetId).SequenceEqual(new[] { 7, 7 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite!.SpriteId).SequenceEqual(new[] { 97, 98 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite!.FrameCount).SequenceEqual(new[] { 3, 4 })).IsTrue();
+        AssertThat(slots.Select(s => s.EnemySprite!.Frames[0].Width).SequenceEqual(new[] { 2, 3 })).IsTrue();
+        AssertThat(slots[0].EnemySprite!.Frames.Select(f => f.Height).SequenceEqual(new[] { 1, 1, 1 })).IsTrue();
+        AssertThat(slots[1].EnemySprite!.Frames.Select(f => f.Height).SequenceEqual(new[] { 3, 6, 9, 12 })).IsTrue();
+        AssertThat((slots[0].IdleFrames, slots[0].IdleAnimSpeed, slots[0].MagicFrames, slots[0].AttackFrames, slots[0].ActWaitFrames))
+            .IsEqual((1, 0, 1, 1, 0));
+        AssertThat((slots[1].IdleFrames, slots[1].IdleAnimSpeed, slots[1].MagicFrames, slots[1].AttackFrames, slots[1].ActWaitFrames))
+            .IsEqual((2, 3, 0, 2, 2));
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
+        for (int run = 0; run < 2; run++)
+        {
+            bool first = false, wrappedZero = false, removed = false;
+            int[] targetHeights = [0, 0];
+            var hitTargets = new HashSet<int>();
+            var enemyPoses = new HashSet<int>();
+            void Observe(Main main)
+            {
+                if (main.StoryBattle is not { } battle) return;
+                var combat = battle.Current.Combat;
+                var draw = main.StoryDrawSnapshot!.Value;
+                if (!first)
+                {
+                    first = true; // First actual completion, not the first matching draw.
+                    // battle.c1782 + first StartFrame: two WORD pre-decrements before first draw.
+                    AssertThat(draw.EnemyIdleCounters.SequenceEqual(new[] { 65534, 1 })).IsTrue();
+                    wrappedZero = true;
+                    AssertThat(draw.EnemyIdleFrames.SequenceEqual(new[] { 0, 0 })).IsTrue();
+                    AssertThat(combat.Enemies.Select(e => e.Id).SequenceEqual(new[] { 7, 7 })).IsTrue();
+                    AssertThat(draw.PartyEnemies.Select(e => e.Position).SequenceEqual(new[] { new Vector2(100, 120), new Vector2(128, 104) })).IsTrue();
+                    AssertThat(draw.PartyEnemies.Select(e => e.Hp).SequenceEqual(new[] { 43, 43 })).IsTrue();
+                    AssertThat(draw.PartyEnemies.All(e => e.Visible)).IsTrue();
+                }
+                var action = combat.LastAction;
+                bool lethalFeedback = main.StoryBattleMode == StoryBattlePresentation.Feedback
+                    && action is { Attacker: ClassicBattleSide.Player, TargetIndex: 0 };
+                if (combat.Enemies[0].Hp == 0)
+                {
+                    AssertThat(draw.PartyEnemies[0].Visible).IsEqual(lethalFeedback);
+                    AssertThat(draw.PartyEnemies[1].Visible).IsTrue();
+                    if (!lethalFeedback) removed = true;
+                }
+                if (main.StoryBattleMode != StoryBattlePresentation.Feedback || main.StoryBattlePose is not { } pose) return;
+                if (action!.Attacker == ClassicBattleSide.Player)
+                {
+                    int target = action.TargetIndex;
+                    // fight.c ShowPlayerAttackAnim samples current target height before approach.
+                    // Pose3 is the last completed windup; literal per-frame art heights above.
+                    if (pose.Pose == 3)
+                        targetHeights[target] = target == 0 ? 1 : new[] { 3, 6 }[draw.EnemyIdleFrames[target]];
+                    if (pose.Pose is >= 7 and <= 9)
+                    {
+                        AssertThat(targetHeights[target] > 0).IsTrue();
+                        int fx = pose.Pose - 7;
+                        Vector2 origin = target == 0 ? new(100, 120) : new(128, 104);
+                        AssertThat(draw.EffectFrame == fx).IsTrue();
+                        AssertThat(draw.EffectPosition == origin + new Vector2(-16 * fx, 10 - targetHeights[target] / 3 + 16 * fx)).IsTrue();
+                        AssertThat(draw.PartyEnemies[1 - target].Position == (target == 0 ? new Vector2(128, 104) : new Vector2(100, 120))).IsTrue();
+                        hitTargets.Add(target);
+                    }
+                }
+                else
+                {
+                    AssertThat(action.ActorIndex).IsEqual(1); // The surviving duplicate id7, not slot0 metadata.
+                    AssertThat(draw.PartyEnemies[0].Visible).IsFalse();
+                    if (pose.Pose is 0 or 1 or 2 or 3)
+                        AssertThat(draw.PartyEnemies[1].Position == new Vector2(128, 104)
+                            - new Vector2(pose.Pose < 3 ? (pose.Pose + 1) * 2 : 6, pose.Pose < 3 ? pose.Pose + 1 : 3)).IsTrue();
+                    if (pose.Pose is >= 4 and <= 9)
+                    {
+                        // fight.c4987–5055: magic0, three pre-moves + hold, inclusive attack2/wait2.
+                        AssertThat(draw.PartyEnemies[1].Frame).IsEqual(1 + (pose.Pose - 4) / 2);
+                        Vector2 player = action.TargetIndex == 0 ? new(200, 176) : new(256, 152);
+                        AssertThat(draw.PartyEnemies[1].Position == player + new Vector2(-44, -16)).IsTrue();
+                    }
+                    AssertThat(action.CovererPartyIndex).IsNull();
+                    Vector2 targetOrigin = action.TargetIndex == 0 ? new(200, 176) : new(256, 152);
+                    if (pose.Pose == 10)
+                    {
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].Frame).IsEqual(action.Evaded ? 3 : 4);
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].ColorShift).IsEqual(action.Evaded ? 0 : 6);
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].Position == targetOrigin).IsTrue();
+                    }
+                    if (pose.Pose is 11 or 12)
+                    {
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].Position == targetOrigin
+                            + (pose.Pose == 11 ? new Vector2(8, 4) : new Vector2(10, 5))).IsTrue();
+                        AssertThat(draw.PartyPlayers[action.TargetIndex].ColorShift).IsEqual(0);
+                    }
+                    AssertThat(draw.PartyPlayers[1 - action.TargetIndex].Position
+                        == (action.TargetIndex == 0 ? new Vector2(256, 152) : new Vector2(200, 176))).IsTrue();
+                    AssertThat(draw.ResultVisible).IsEqual(pose.Pose >= 10);
+                    AssertThat(draw.PartyPlayers[action.TargetIndex].Hp)
+                        .IsEqual(combat.Players[action.TargetIndex].Hp + (pose.Pose < 10 ? action.Damage : 0));
+                    enemyPoses.Add(pose.Pose);
+                }
+            }
+            Main old;
+            using (var host = new StoryHost(selection, [new(100, 120), new(128, 104)],
+                [new(200, 176), new(256, 152)], Observe, enemyImpactPose: 10))
+            {
+                old = host.Main;
+                AssertThat(old.Failure).IsNull();
+                host.Tap(Key.Enter);
+                await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+                await host.FinishDisplay();
+                await host.Wait(() => first && old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                host.Tap(Key.Right);
+                await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+                await host.Wait(() => host.Actions.Count == 3 && old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+                AssertThat(host.Actions.Select(a => (a.Attacker, a.ActorIndex, a.TargetIndex)).Take(2).SequenceEqual(new[]
+                    { (ClassicBattleSide.Player, 1, 1), (ClassicBattleSide.Player, 0, 0) })).IsTrue();
+                AssertThat(host.Actions[0].Damage is >= 33 and <= 38).IsTrue();
+                AssertThat(host.Actions[1].Damage >= 43).IsTrue();
+                AssertThat(wrappedZero && removed).IsTrue();
+                AssertThat(hitTargets.SetEquals(new[] { 0, 1 })).IsTrue();
+                AssertThat(enemyPoses.SetEquals(Enumerable.Range(0, 21))).IsTrue();
+                AssertThat(old.StoryBattle!.Current.Combat.Enemies.Select(e => e.Hp).SequenceEqual(new[] { 0, 43 - host.Actions[0].Damage })).IsTrue();
+            }
+            AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+            AssertThat(Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.Right)).IsFalse();
+            AssertThat(fixture.Snapshot()).IsEqual(before);
+        }
+
+        string output = ProjectSettings.GlobalizePath(fixture.Root);
+        string rejectedOutput = Path.Combine(output, "RejectedStory");
+        string authorPath = Path.Combine(fixture.InputDirectory, "story-package.json");
+        byte[] originalAuthor = File.ReadAllBytes(authorPath);
+        var positiveBytes = Directory.GetFiles(output, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, File.ReadAllBytes);
+        var author = JsonNode.Parse(originalAuthor)!;
+        // Only slot1's URI changes: its unchanged idle2 + magic0 + attack2 requires
+        // indices 0..3, but this same fixture's sprite97 has only indices 0..2.
+        author["visual"]!["teams"]![0]!["enemies"]![1]!["enemySpriteUri"] =
+            author["visual"]!["teams"]![0]!["enemies"]![0]!["enemySpriteUri"]!.GetValue<string>();
+        Dictionary<string, byte[]> SourceBytes() => Directory.GetFiles(fixture.InputDirectory, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, File.ReadAllBytes);
+        try
+        {
+            File.WriteAllText(authorPath, author.ToJsonString());
+            var sourceBefore = SourceBytes();
+            bool outputAbsentBefore = !Directory.Exists(rejectedOutput) && !File.Exists(rejectedOutput);
+            AssertThat(outputAbsentBefore).IsTrue();
+            InvalidDataException? rejection = null;
+            try { Pal.Game.Editor.PrepareStoryPackage.Prepare(fixture.InputDirectory, rejectedOutput); }
+            catch (InvalidDataException error) { rejection = error; }
+            var sourceAfter = SourceBytes();
+            bool sourceUnchanged = sourceBefore.Keys.ToHashSet().SetEquals(sourceAfter.Keys)
+                && sourceBefore.All(pair => pair.Value.SequenceEqual(sourceAfter[pair.Key]));
+            bool outputAbsentAfter = !Directory.Exists(rejectedOutput) && !File.Exists(rejectedOutput);
+            GD.Print("PAL_HETEROGENEOUS_NEGATIVE_CONTROL:" + JsonSerializer.Serialize(new
+            {
+                sourceBefore, sourceAfter, rejectedOutput, outputAbsentBefore, outputAbsentAfter,
+                sourceUnchanged, exception = rejection?.ToString()
+            }));
+            const string missingFrame = "visual Teams[TeamId=18].EnemySlots[1]: enemy frame metadata references unaddressable frames";
+            string expected = "^" + Regex.Escape(fixture.Root + "/RejectedStory/.story-package-")
+                + "[0-9a-f]{32}" + Regex.Escape("/Visual.tres: " + missingFrame) + "$";
+            AssertThat(rejection is not null && Regex.IsMatch(rejection.Message, expected)
+                && rejection.InnerException?.Message == missingFrame).IsTrue();
+            AssertThat(sourceUnchanged).IsTrue();
+            AssertThat(outputAbsentAfter).IsTrue();
+        }
+        finally
+        {
+            File.WriteAllBytes(authorPath, originalAuthor);
+            bool positiveBytesUnchanged = Directory.GetFiles(output, "*", SearchOption.AllDirectories)
+                .ToHashSet().SetEquals(positiveBytes.Keys)
+                && positiveBytes.All(pair => pair.Value.SequenceEqual(File.ReadAllBytes(pair.Key)));
+            string[] restored = fixture.Snapshot();
+            GD.Print("PAL_HETEROGENEOUS_NEGATIVE_RESTORED:" + JsonSerializer.Serialize(new
+            {
+                positiveBytesUnchanged, originalAuthor, restoredAuthor = File.ReadAllBytes(authorPath), before, restored
+            }));
+            AssertThat(positiveBytesUnchanged).IsTrue();
+            AssertThat(File.ReadAllBytes(authorPath).SequenceEqual(originalAuthor)).IsTrue();
+            AssertThat(restored).IsEqual(before);
+        }
+        string ownedInput = fixture.InputDirectory;
+        fixture.Dispose();
+        bool ownedCleaned = !Directory.Exists(ownedInput) && !Directory.Exists(output);
+        GD.Print("PAL_HETEROGENEOUS_NEGATIVE_CLEANUP:" + JsonSerializer.Serialize(new { ownedInput, output, ownedCleaned }));
+        AssertThat(ownedCleaned).IsTrue();
+    }
+
+    [TestCase(Timeout = 90000)]
+    public async Task PreparedMixedEmptySlotsUseRuntimeIndicesTargetLoadedOnlyAndSettleOnceThroughFreshMain()
+    {
+        // #141 (T13c): a three-player party meets the five-slot team [empty, 7, empty, 7, empty]
+        // through the formal Prepare and normal Main. Empty runtime slots keep identity, order and
+        // position but never draw, target or act; the default target starts at the first alive
+        // slot, cycling crosses empties, and the last real enemy's death settles exactly once
+        // with only the loaded slots' rewards (3+3 exp / 5+5 cash, never the empty slots').
+        using var fixture = new AuthoredStoryFixture("PartyWin", threePlayer: true, mixedEmptySlots: true);
+        string[] before = fixture.Snapshot();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        for (int run = 0; run < 2; run++)
+        {
+            bool first = false;
+            void Observe(Main main)
+            {
+                if (main.StoryBattle is null) return;
+                var draw = main.StoryDrawSnapshot!.Value;
+                if (!first)
+                {
+                    first = true; // First actual completion, not the first matching draw.
+                    AssertThat(main.StoryBattle!.Current.Combat.Enemies.Select(enemy => (enemy.Id, enemy.IsEmpty)).ToArray())
+                        .IsEqual(new[] { (0, true), (7, false), (0, true), (7, false), (0, true) });
+                    AssertThat(draw.PartyEnemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 43, 0, 43, 0 });
+                    AssertThat(draw.PartyEnemies.Select(enemy => enemy.Visible).ToArray())
+                        .IsEqual(new[] { false, true, false, true, false });
+                    AssertThat(draw.PartyEnemies.Select(enemy => enemy.Position).ToArray()).IsEqual(new[] {
+                        new Vector2(72, 136), new(100, 120), new(128, 104), new(156, 88), new(184, 72) });
+                }
+                // Empty runtime slots never draw at any later callback, including while a
+                // loaded neighbour is struck or removed.
+                if (draw.PartyEnemies.Count == 5)
+                    for (int slot = 0; slot < 5; slot += 2)
+                        AssertThat(draw.PartyEnemies[slot].Visible).IsFalse();
+            }
+            Main old;
+            using (var host = new StoryHost(selection,
+                enemySlots: [new(72, 136), new(100, 120), new(128, 104), new(156, 88), new(184, 72)],
+                players: [new(180, 180), new(234, 170), new(270, 146)], updateObserver: Observe))
+            {
+                old = host.Main;
+                AssertThat(old.Failure).IsNull();
+                host.Tap(Key.Enter);
+                await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+                await host.FinishDisplay();
+                var script = old.Dialogue!.Session!;
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+                var battle = old.StoryBattle!;
+                // Member 0 confirms attack; the target menu starts at the first alive slot 1.
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+                AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(1);
+                // Member 1 cycles right across empty slot 2 to the last loaded slot 3.
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                host.Tap(Key.Right);
+                await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+                AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(3);
+                // Member 2 keeps the default first-alive target; its confirm builds the queue.
+                await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+                AssertThat(battle.Current.Combat.Players.Select(player => player.SelectedEnemySlot).ToArray())
+                    .IsEqual(new int?[] { 1, 3, 1 });
+                AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(5);
+                while (script.PendingBattle is not null && old.StoryBattleMode != StoryBattlePresentation.Settlement)
+                {
+                    await host.Wait(() => old.StoryBattleMode is StoryBattlePresentation.Feedback or StoryBattlePresentation.Settlement
+                        || script.PendingBattle is null);
+                    if (script.PendingBattle is null || old.StoryBattleMode == StoryBattlePresentation.Settlement) break;
+                    await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                        || script.PendingBattle is null);
+                }
+                // Every presented action targets a loaded slot; empty slots never act or answer.
+                AssertThat(host.Actions.All(action => action.Attacker == ClassicBattleSide.Player)).IsTrue();
+                AssertThat(host.Actions.All(action => action.TargetIndex is 1 or 3)).IsTrue();
+                AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+                AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0 });
+                AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.IsEmpty).ToArray())
+                    .IsEqual(new[] { true, false, true, false, true });
+                // Both loaded slots' rewards settle exactly once; the empty slots contribute nothing.
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Settlement);
+                AssertThat(old.StorySettlementLine!.Contains(":6", StringComparison.Ordinal)
+                    && old.StorySettlementLine.Contains("10", StringComparison.Ordinal)).IsTrue();
+                host.Tap(Key.Enter);
+                await host.Wait(() => old.StoryBattleMode is null);
+                await host.FinishDisplay();
+                await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+                AssertThat(old.StoryExperienceGranted).IsEqual(6);
+                AssertThat(old.StoryCashGranted).IsEqual(10);
+                AssertThat(old.StoryBattleMode).IsNull();
+                AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+                AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+                AssertThat(old.Failure).IsNull();
+            }
+            AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+            AssertThat(Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.Right)).IsFalse();
+            AssertThat(fixture.Snapshot()).IsEqual(before);
+        }
+    }
+
     [TestCase]
     public void FloatingNumbersUseUnsignedWallAgeRightAlignedBlueDigitsAndWrap()
     {
@@ -104,6 +471,21 @@ public class StoryRoundtripSceneTests
         idle.Advance(); AssertThat(idle.Frame).IsEqual(0); AssertThat((int)idle.Counter).IsEqual(1);
         idle.Advance(); AssertThat(idle.Frame).IsEqual(1); AssertThat((int)idle.Counter).IsEqual(2);
         idle.Advance(); AssertThat(idle.Frame).IsEqual(1); AssertThat((int)idle.Counter).IsEqual(1);
+        // Each ordinal owns a state, even with shared prepared metadata. FALSE gestures
+        // assign only the actor; the spectator keeps its frame and WORD counter.
+        var slots = new[] { new StoryEnemyIdleState(3, 2), new StoryEnemyIdleState(2, 3) };
+        int[][] frames = [[0,0], [1,0], [1,1], [2,1], [2,1], [0,0]];
+        int[][] counters = [[1,2], [2,1], [1,3], [2,2], [1,1], [2,3]];
+        for (int tick = 0; tick < frames.Length; tick++)
+        {
+            foreach (var slot in slots) slot.Advance();
+            AssertThat(slots.Select(slot => slot.Frame).SequenceEqual(frames[tick])).IsTrue();
+            AssertThat(slots.Select(slot => (int)slot.Counter).SequenceEqual(counters[tick])).IsTrue();
+        }
+        slots[1].SetFrame(5);
+        AssertThat(slots[0].Frame).IsEqual(0);
+        AssertThat((int)slots[0].Counter).IsEqual(2);
+        AssertThat((int)slots[1].Counter).IsEqual(3);
         var zero = new StoryEnemyIdleState(3, 0);
         zero.Advance(); AssertThat((int)zero.Counter).IsEqual(65535); AssertThat(zero.Frame).IsEqual(0);
         zero.SetFrame(2); zero.Advance(); AssertThat((int)zero.Counter).IsEqual(65534); AssertThat(zero.Frame).IsEqual(2);
@@ -111,18 +493,396 @@ public class StoryRoundtripSceneTests
         AssertThat(fresh.Frame).IsEqual(0); AssertThat((int)fresh.Counter).IsEqual(2);
     }
 
+    [TestCase(Timeout = 90000)]
+    public async Task PreparedThreePlayersCancelTargetsRevertEarlierSelectionsAndSettleOnce()
+    {
+        // #142 (T14): the classic kKeyMenu cancel works through normal Main production input —
+        // cancelling the target returns to the action menu with no commit, cancelling the
+        // action menu reopens the newest committed member (the first member is a boundary
+        // no-op), and the finally committed selections settle exactly once through the formal
+        // mixed-empty chain with only loaded slots targeted.
+        using var fixture = new AuthoredStoryFixture("PartyWin", threePlayer: true, mixedEmptySlots: true);
+        string[] before = fixture.Snapshot();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(72, 136), new(100, 120), new(128, 104), new(156, 88), new(184, 72)],
+            players: [new(180, 180), new(234, 170), new(270, 146)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            var script = old.Dialogue!.Session!;
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            // The first member's cancel is the boundary no-op: same menu, no commit, no queue.
+            host.Tap(Key.Escape);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(0);
+            AssertThat(battle.Current.Combat.Players.All(player => player.SelectedEnemySlot is null)).IsTrue();
+            AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(0);
+            // Cancelling the target returns to the action menu without committing member 0.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Escape);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsNull();
+            // Member 0 commits slot 3 (cycling across the empty slot 2).
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Right);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(3);
+            // Member 1's action-menu cancel reopens member 0's still-editable selection.
+            host.Tap(Key.Escape);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 0);
+            AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsNull();
+            // Re-entering the target menu restarts from the first alive slot; member 0 re-edits to 1.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(1);
+            // Member 1: a target cancel then re-confirm keeps the default first-alive target.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Escape);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(1);
+            // Member 2's cancel reopens member 1; member 1 re-edits onto slot 3.
+            host.Tap(Key.Escape);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 1);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(1);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsNull();
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Right);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(3);
+            // The final member's commit closes editing and builds the queue.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            AssertThat(battle.Current.Combat.Players.Select(player => player.SelectedEnemySlot).ToArray())
+                .IsEqual(new int?[] { 1, 3, 1 });
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+            while (script.PendingBattle is not null && old.StoryBattleMode != StoryBattlePresentation.Settlement)
+            {
+                await host.Wait(() => old.StoryBattleMode is StoryBattlePresentation.Feedback or StoryBattlePresentation.Settlement
+                    || script.PendingBattle is null);
+                if (script.PendingBattle is null || old.StoryBattleMode == StoryBattlePresentation.Settlement) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+            }
+            // Every presented action targets a loaded slot; the party wins and settles exactly once.
+            AssertThat(host.Actions.All(action => action.Attacker == ClassicBattleSide.Player)).IsTrue();
+            AssertThat(host.Actions.All(action => action.TargetIndex is 1 or 3)).IsTrue();
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0 });
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Settlement);
+            AssertThat(old.StorySettlementLine!.Contains(":6", StringComparison.Ordinal)
+                && old.StorySettlementLine.Contains("10", StringComparison.Ordinal)).IsTrue();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StoryBattleMode is null);
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.StoryExperienceGranted).IsEqual(6);
+            AssertThat(old.StoryCashGranted).IsEqual(10);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.Right) || Input.IsKeyPressed(Key.Escape)).IsFalse();
+        AssertThat(fixture.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase(Timeout = 90000)]
+    public async Task PreparedThreePlayersDefendCommitPoseCountsAndSettleOnce()
+    {
+        // #144 (T16): kKeyDefend ('d', input.c:85) commits the defend action through normal Main
+        // production input (uibattle.c 1166-1171 — no target menu, nothing consumed at commit),
+        // the classic cancel reverts the committed defend like any newest member selection, the
+        // defenders hold the reference defend frame 3 (fight.c 977-980) while the round runs, the
+        // hidden defense count 2 lands per performed defend (fight.c 4113-4115) with no attack
+        // count, the flags clear with the next selection (fight.c 1599-1604/1068), and the
+        // battle still settles exactly once through the formal Prepare chain.
+        using var fixture = new AuthoredStoryFixture("PartyWin", threePlayer: true);
+        string[] before = fixture.Snapshot();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        bool sawDefendPose = false;
+        bool sawClearedCounts = false;
+        void Observe(Main observed)
+        {
+            if (observed.StoryBattle is not { } battle) return;
+            var combat = battle.Current.Combat;
+            if (!sawDefendPose && observed.StoryBattleMode == StoryBattlePresentation.Feedback
+                && combat.LastAction is { Attacker: ClassicBattleSide.Player, ActorIndex: 2 }
+                && observed.StoryDrawSnapshot is { } pose)
+            {
+                // Both defenders performed before the attacker (fight.c 1535 x5 priority) and
+                // hold frame 3 while member 2's strike animates.
+                sawDefendPose = combat.Players[0].IsDefending && combat.Players[1].IsDefending
+                    && pose.PartyPlayers[0].Frame == 3 && pose.PartyPlayers[1].Frame == 3;
+            }
+            if (!sawClearedCounts && observed.StoryBattleMode == StoryBattlePresentation.AttackMenu
+                && combat.Players[0].Counts.Defense == 2 && combat.Players[1].Counts.Defense == 2
+                && combat.Players[0].Counts.Attack == 0 && combat.Players[1].Counts.Attack == 0
+                && combat.Players.All(member => !member.IsDefending))
+                sawClearedCounts = true;
+        }
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)],
+            players: [new(180, 180), new(234, 170), new(270, 146)], updateObserver: Observe))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            var script = old.Dialogue!.Session!;
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            // Member 0's D commit has no target menu: member 1 already selects, nothing consumed.
+            host.Tap(Key.D);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu
+                && battle.Current.Combat.SelectingPlayerIndex == 1);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsNull();
+            AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(0);
+            // The classic cancel reopens member 0's committed defend like any newest selection.
+            host.Tap(Key.Escape);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 0
+                && old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            // Re-commit members 0 and 1 as defenders.
+            host.Tap(Key.D);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 1);
+            host.Tap(Key.D);
+            await host.Wait(() => battle.Current.Combat.SelectingPlayerIndex == 2);
+            // 'd' in the target menu is not a defend input (input.c gates it to the move menu).
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.D);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.TargetMenu);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(2);
+            AssertThat(battle.Current.Combat.Players[2].SelectedEnemySlot).IsNull();
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+            while (script.PendingBattle is not null && old.StoryBattleMode != StoryBattlePresentation.Settlement)
+            {
+                while (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                {
+                    // Every later round commits plain attacks through the classic target menu.
+                    await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                    await host.ConfirmMemberTarget(battle);
+                }
+                await host.Wait(() => old.StoryBattleMode is StoryBattlePresentation.Feedback or StoryBattlePresentation.Settlement
+                    || script.PendingBattle is null);
+                if (script.PendingBattle is null || old.StoryBattleMode == StoryBattlePresentation.Settlement) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+            }
+            AssertThat(sawDefendPose).IsTrue();
+            AssertThat(sawClearedCounts).IsTrue();
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 0 });
+            // Plain PartyWin authors zero rewards, so the victory completes without settlement
+            // lines (the PartyThreePlayers precedent's tail).
+            await host.Wait(() => old.StoryBattleMode is null);
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter) || Input.IsKeyPressed(Key.D) || Input.IsKeyPressed(Key.Escape)).IsFalse();
+        AssertThat(fixture.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase(Timeout = 90000)]
+    public async Task AttackAllMemberCommitsWithoutTargetMenuStrikesBothLoadedSlotsAndSettlesOnce()
+    {
+        // #143 (T15): the authored attack-all member's Attack confirm commits the all-target
+        // selection directly (uibattle.c 1094-1099/1611-1617 — the classic target menu is never
+        // entered for that member), one strike covers both loaded slots of the mixed five-slot
+        // team in reference order {2,1,0,4,3} with per-target records, and the battle settles
+        // exactly once through the formal Prepare chain.
+        using var fixture = new AuthoredStoryFixture("PartyWin", mixedEmptySlots: true, attackAllMember0: true);
+        string[] before = fixture.Snapshot();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        bool capableMemberSawTargetMenu = false;
+        List<int[]> strikeTargets = [];
+        List<int[]> strikeDamages = [];
+        List<bool> strikeSingleCritical = [];
+        List<int> numberSlots = [];
+        IReadOnlyList<ClassicBattleAction>? capturedStrike = null;
+        void Observe(Main observed)
+        {
+            var combat = observed.StoryBattle?.Current.Combat;
+            if (observed.StoryBattleMode == StoryBattlePresentation.TargetMenu && combat?.SelectingPlayerIndex == 0)
+                capableMemberSawTargetMenu = true;
+            if (combat?.LastAction is { Attacker: ClassicBattleSide.Player, AttackAll: true }
+                && combat.LastActionTargets is { Count: > 1 } targets)
+            {
+                if (!ReferenceEquals(capturedStrike, targets))
+                {
+                    capturedStrike = targets;
+                    strikeTargets.Add(targets.Select(record => record.TargetIndex).ToArray());
+                    strikeDamages.Add(targets.Select(record => record.Damage).ToArray());
+                    strikeSingleCritical.Add(targets.Select(record => record.Critical).Distinct().Count() == 1);
+                }
+            }
+            if (observed.StoryBattleMode == StoryBattlePresentation.Feedback
+                && combat?.LastAction is { AttackAll: true })
+            {
+                var digits = observed.GetChildren().OfType<PalStoryBattleView>().Single().NumberDigits;
+                if (digits.Count >= 2)
+                    numberSlots = digits.Select(digit => digit.Slot).Distinct().ToList();
+            }
+        }
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(72, 136), new(100, 120), new(128, 104), new(156, 88), new(184, 72)],
+            players: [new(200, 176), new(256, 152)], updateObserver: Observe))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            var script = old.Dialogue!.Session!;
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            AssertThat(battle.Current.Combat.Players[0].CanAttackAll).IsTrue();
+            AssertThat(battle.Current.Combat.Players[1].CanAttackAll).IsFalse();
+            // Member 0's Attack confirm commits the all-target selection directly: member 1 is
+            // already selecting and the classic target menu never opened for the capable member.
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu
+                && battle.Current.Combat.SelectingPlayerIndex == 1);
+            AssertThat(battle.Current.Combat.Players[0].SelectedAttackAll).IsTrue();
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsNull();
+            // Member 1 keeps the classic single-target menu; the final commit builds the queue.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            while (script.PendingBattle is not null && old.StoryBattleMode != StoryBattlePresentation.Settlement)
+            {
+                await host.Wait(() => old.StoryBattleMode is StoryBattlePresentation.Feedback or StoryBattlePresentation.Settlement
+                    || script.PendingBattle is null);
+                if (script.PendingBattle is null || old.StoryBattleMode == StoryBattlePresentation.Settlement) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+            }
+            // Every attack-all strike hit exactly the loaded slots in reference order {2,1,0,4,3}.
+            AssertThat(strikeTargets.Count > 0).IsTrue();
+            AssertThat(strikeTargets.All(targets => targets.SequenceEqual(new[] { 1, 3 }))).IsTrue();
+            AssertThat(strikeSingleCritical.All(single => single)).IsTrue(); // one roll covers the whole strike
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(battle.Current.Combat.Enemies.Select(enemy => enemy.Hp).ToArray()).IsEqual(new[] { 0, 0, 0, 0, 0 });
+            // Both struck enemies displayed their own damage number at once (fight.c 2198-2212).
+            AssertThat(numberSlots.Count >= 2).IsTrue();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Settlement);
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.StoryBattleMode is null);
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.StoryExperienceGranted).IsEqual(6);
+            AssertThat(old.StoryCashGranted).IsEqual(10);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(capableMemberSawTargetMenu).IsFalse();
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+        AssertThat(fixture.Snapshot()).IsEqual(before);
+    }
+
+    [TestCase]
+    public void AttackAllPresentationCoversEveryStruckEnemyWithOneAnim()
+    {
+        // fight.c 2036-2256 with sTarget -1: the actor walks the single-target offsets toward the
+        // fixed (150,100) center; the three FX frames blit at BOTH struck enemies without the
+        // per-frame x offset; both struck enemies shift color at poses 8-9 and shake -8/-4/-6
+        // horizontally at poses 10-12; the HP result reveals at pose 7.
+        var presentation = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+            [new Vector2(100, 120), new Vector2(156, 88)], [1, 3], [80, 60], [40, 55], 2, dual: false, secondStrike: false);
+        Vector2[] poses =
+        [
+            new(200, 176), new(200, 176), new(200, 176), new(200, 176),
+            new(214, 120), new(214, 120), new(204, 118), new(204, 118), new(204, 118),
+            new(206, 119), new(206, 119), new(206, 119), new(206, 119),
+            new(200, 176), new(200, 176), new(200, 176)
+        ];
+        for (int pose = 0; pose < 16; pose++)
+        {
+            var shown = presentation.At(pose, 25);
+            AssertThat(shown.PlayerFrame).IsEqual(pose < 4 ? 7 : pose < 7 ? 8 : pose < 13 ? 9 : 2);
+            AssertThat(shown.PlayerPosition == poses[pose]).IsTrue();
+            var struck = shown.StruckEnemies!;
+            AssertThat(struck.Count).IsEqual(2);
+            // Slot is the struck enemy's combat slot index (EnemyDraws keys per-slot draws on it),
+            // not the hit-list ordinal — slots 1 and 3 are the loaded mixed-team slots.
+            AssertThat(struck[0].Slot).IsEqual(1);
+            AssertThat(struck[1].Slot).IsEqual(3);
+            AssertThat(shown.EffectFrame == (pose is >= 7 and <= 9 ? pose - 7 : (int?)null)).IsTrue();
+            for (int hit = 0; hit < 2; hit++)
+            {
+                Vector2 basePosition = hit == 0 ? new Vector2(100, 120) : new Vector2(156, 88);
+                Vector2 shake = pose == 10 ? new Vector2(-8, 0) : pose == 11 ? new Vector2(-4, 0)
+                    : pose == 12 ? new Vector2(-6, 0) : Vector2.Zero;
+                AssertThat(struck[hit].Position == basePosition + shake).IsTrue();
+                AssertThat(struck[hit].ColorShift).IsEqual(pose is 8 or 9 ? 6 : 0);
+                AssertThat(struck[hit].DisplayedHp).IsEqual(pose >= 7 ? (hit == 0 ? 40 : 55) : (hit == 0 ? 80 : 60));
+                AssertThat(struck[hit].ResultVisible == (pose >= 7)).IsTrue();
+                AssertThat(struck[hit].EffectPosition == basePosition).IsTrue(); // no per-frame offset
+            }
+        }
+        // fight.c 2080-2101: a dual attack-all actor stays at its home column instead (first
+        // strike −8/−4, second strike −20/−12).
+        var first = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+            [new Vector2(100, 120)], [1], [80], [70], 2, dual: true, secondStrike: false);
+        var second = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+            [new Vector2(100, 120)], [1], [70], [60], 2, dual: true, secondStrike: true);
+        for (int pose = 0; pose < 16; pose++)
+        {
+            AssertThat(first.At(pose, 25).PlayerPosition == new Vector2(192, 172)).IsTrue();
+            AssertThat(second.At(pose, 25).PlayerPosition == new Vector2(180, 164)).IsTrue();
+        }
+    }
+
     [TestCase("effect")]
     [TestCase("idle")]
     [TestCase("number")]
     public void BaseFormatWithoutSelectedPresentationFailsBeforePartialMain(string missing)
     {
+        if (missing == "idle")
+        {
+            // Per-slot idle speed is required author data, not an optional reference capability.
+            // Since the per-slot presentation group is all-or-none, the partial enemy-slot
+            // declaration is rejected by formal Prepare during fixture construction with the
+            // current group diagnostic (same migration as StoryMainProcessTests): no partial
+            // Main runs. The fixture cleans its failed output.
+            InvalidDataException? rejected = null;
+            try { using var unexpected = new AuthoredStoryFixture("Win", missing); }
+            catch (InvalidDataException error) { rejected = error; }
+            AssertThat(rejected is not null).IsTrue();
+            string diagnostic = rejected!.Message;
+            AssertThat(diagnostic.StartsWith(Path.Combine(Path.GetTempPath(), "pal-story-c-"), StringComparison.Ordinal)).IsTrue();
+            AssertThat(diagnostic.Contains("story-package.json: visual.teams[0]: enemies[0]: enemy presentation fields must be declared together", StringComparison.Ordinal)).IsTrue();
+            return;
+        }
         using var fixture = new AuthoredStoryFixture("Win", missing);
         var story = Pal.Game.Profiles.NativeStoryProfile.Load(fixture.StoryUri);
         var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
         AssertThat(visual.Teams.Count).IsEqual(1); // Format remains legal independently of selected capability.
         using var host = new StoryHost(GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1"));
-        AssertThat(host.Main.Failure!.Contains(missing == "effect" ? "attack effect" : missing == "number" ? "NumberSpriteUri" : "IdleAnimSpeed")).IsTrue();
+        AssertThat(host.Main.Failure!.Contains(missing == "effect" ? "attack effect" : "NumberSpriteUri")).IsTrue();
         AssertThat(host.Main.GetChildCount()).IsEqual(0);
         AssertThat(host.Main.Dialogue).IsNull(); AssertThat(host.Main.StoryBattle).IsNull();
     }
@@ -271,17 +1031,206 @@ public class StoryRoundtripSceneTests
         // fight.c157-170 bounds: one player hit deals 43..297, so each 43hp slot dies to its first hit;
         // the second member retargets when both picked the same slot, and the dead enemies' own
         // queue entries pass without producing a new LastAction.
-        using var fixture = new AuthoredStoryFixture("PartyWin");
+        using var fixture = new AuthoredStoryFixture("PartyWin", partyHpMpPrefixAmount: -3);
         var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
             "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        DynamicEventWorld? observedWorld = null;
+        RoleLiveState? observedOwner = null;
+        TriggerScriptSession? observedSession = null;
+        IReadOnlyDictionary<int, BattleRoleSnapshot>? liveProjection = null;
+        BattleRoleSnapshot[] initialRoles = [], prefixRoles = [], settledRoles = [];
+        ClassicBattleLifecycleSession? observedBattle = null;
+        ClassicBattleAction? enemyResponse = null;
+        Guid observedCall = Guid.Empty, observedOrigin = Guid.Empty;
+        bool searchDelivered = false, observedPrefix = false;
+        Guid beforeCall = Guid.Empty;
+        Guid? beforeSourceRequest = null, beforeInteractionRequest = null;
+        TriggerScriptPhase beforePhase = TriggerScriptPhase.Ready;
+        bool observedInitial = false, observedEntry = false, observedCommit = false, observedSuffix = false, observedReturn = false;
+        void AssertInitialRole(BattleRoleSnapshot role, int roleId)
+        {
+            AssertThat(role.RoleId).IsEqual(roleId);
+            AssertThat(role.Hp).IsEqual(roleId == 0 ? 100 : 95);
+            AssertThat(role.Mp).IsEqual(20);
+            AssertThat(role.MaxHp).IsEqual(150); AssertThat(role.MaxMp).IsEqual(50);
+            AssertThat(role.Level).IsEqual(2); AssertThat(role.PrimaryExperience.Value).IsEqual(0);
+            AssertThat(role.Equipment.SequenceEqual(new int[6])).IsTrue();
+            AssertThat(role.Magics.SequenceEqual(new int[32])).IsTrue();
+            AssertThat(role.Statuses.SequenceEqual(new int[9])).IsTrue();
+            AssertThat(role.HiddenExperience.Values.All(track => track.Value == 0 && track.Level == 1 && track.Count == 0)).IsTrue();
+        }
+        void AssertPrefixRole(BattleRoleSnapshot role, int roleId)
+        {
+            AssertThat(role.Hp).IsEqual(roleId == 0 ? 97 : 92);
+            AssertThat(role.Mp).IsEqual(17);
+            AssertInitialRole(role with { Hp = roleId == 0 ? 100 : 95, Mp = 20 }, roleId);
+        }
+        void ObserveSharedOwner(Main main)
+        {
+            var world = main.Dialogue?.FirstBattleWorld
+                ?? throw new InvalidOperationException("Story completion is missing its shared world.");
+            var owner = world.RoleLiveState
+                ?? throw new InvalidOperationException("Story completion is missing its live role owner.");
+            var session = main.Dialogue!.Session!;
+            if (!observedInitial)
+            {
+                observedInitial = true;
+                observedWorld = world; observedOwner = owner; observedSession = session;
+                liveProjection = session.BattleRoles;
+                initialRoles = [owner.Roles[0], owner.Roles[1]];
+                AssertThat(session.CallId).IsEqual(Guid.Empty);
+                AssertThat(main.StoryBattle).IsNull();
+                AssertInitialRole(initialRoles[0], 0); AssertInitialRole(initialRoles[1], 1);
+            }
+            // Search is queued before StartAfterSceneDraw actually starts the call. The first
+            // completion with its new CallId is applicable regardless of phase or HP/MP shape.
+            if (searchDelivered && !observedPrefix && session.CallId != beforeCall)
+            {
+                observedPrefix = true;
+                observedCall = session.CallId;
+                observedOrigin = main.Interaction!.PendingTrigger!.Id;
+                prefixRoles = [owner.Roles[0], owner.Roles[1]];
+                GD.Print($"PAL_STORY_PREFIX:beforeCall={beforeCall};beforeSource={beforeSourceRequest};"
+                    + $"beforeRequest={beforeInteractionRequest};beforePhase={beforePhase};newCall={observedCall};"
+                    + $"source={session.SourceRequestId};request={observedOrigin};phase={session.Phase};"
+                    + $"hp={prefixRoles[0].Hp}/{prefixRoles[1].Hp};mp={prefixRoles[0].Mp}/{prefixRoles[1].Mp}");
+                AssertPrefixRole(prefixRoles[0], 0); AssertPrefixRole(prefixRoles[1], 1);
+                AssertThat(observedCall != Guid.Empty && observedOrigin != Guid.Empty).IsTrue();
+                AssertThat(session.SourceRequestId).IsEqual(observedOrigin);
+                AssertThat(session.Phase).IsEqual(TriggerScriptPhase.WaitingForDisplay);
+                AssertThat(session.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
+                for (int roleId = 0; roleId < 2; roleId++)
+                    AssertThat(ReferenceEquals(prefixRoles[roleId], initialRoles[roleId])).IsFalse();
+            }
+            // Numeric consumption precedes pending/lifecycle identity checks so a startup-value
+            // consumer cannot be intercepted by an incidental request-reference mismatch.
+            if (main.StoryBattle is { } entering && !observedEntry)
+            {
+                observedEntry = true;
+                observedBattle = entering;
+                AssertThat(entering.Current.Combat.Players.Select(p => p.Hp).SequenceEqual(new[] { 97, 92 }))
+                    .OverrideFailureMessage("Story battle must consume prefix-current HP [97,92], not startup [100,95].").IsTrue();
+                AssertPrefixRole(entering.Current.Roles[0], 0); AssertPrefixRole(entering.Current.Roles[1], 1);
+                AssertThat(observedPrefix).IsTrue();
+                AssertThat(ReferenceEquals(session.PendingBattle!.Lifecycle, entering)).IsTrue();
+                AssertThat(entering.Current.Combat.Players.Select(p => p.RoleId).SequenceEqual(new[] { 0, 1 })).IsTrue();
+                AssertThat(entering.Current.Combat.Players.Select(p => p.Attack).SequenceEqual(new[] { 40, 35 })).IsTrue();
+                AssertThat(entering.Current.Combat.Players.Select(p => p.Defense).SequenceEqual(new[] { 20, 18 })).IsTrue();
+                AssertThat(entering.Current.Combat.Players.All(p => p.Dexterity == 100)).IsTrue();
+            }
+            AssertThat(ReferenceEquals(world, observedWorld) && ReferenceEquals(owner, observedOwner)
+                && ReferenceEquals(session, observedSession)).IsTrue();
+            AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1 }))
+                .OverrideFailureMessage("Story shared-owner party order must be the authored [0,1].").IsTrue();
+            // #224 (parent #148, D2): the live role owner carries the complete six-row table the
+            // frozen v1 save contract needs (authored rows plus empty records for unused ids);
+            // party, menu and battle consumers stay authored-roles-driven, so only the two
+            // authored rows are battle-relevant and the padded rows never join the party.
+            AssertThat(owner.Roles.Count).IsEqual(PlayerSaveContract.RoleCount); // Six-row table; authored [0,1] drive everything.
+            AssertThat(session.BattleRoles!.Count).IsEqual(2);
+            AssertThat(ReferenceEquals(session.BattleRoles, liveProjection)).IsTrue();
+            foreach (int roleId in new[] { 0, 1 })
+            {
+                AssertInitialRole(initialRoles[roleId], roleId); // Held history must never change.
+                AssertThat(ReferenceEquals(liveProjection![roleId], owner.Roles[roleId])).IsTrue();
+                var vitals = world.PartyVitals[roleId];
+                var role = owner.Roles[roleId];
+                AssertThat(vitals.Hp).IsEqual(role.Hp); AssertThat(vitals.Mp).IsEqual(role.Mp);
+                AssertThat(vitals.MaxHp).IsEqual(role.MaxHp); AssertThat(vitals.MaxMp).IsEqual(role.MaxMp);
+            }
+            if (main.StoryBattle is { } lifecycle)
+            {
+                AssertThat(ReferenceEquals(lifecycle, observedBattle)).IsTrue();
+                AssertThat(session.Phase).IsEqual(TriggerScriptPhase.WaitingForBattle);
+                AssertThat(session.PendingDisplay).IsNull();
+                // Neither combat damage nor intermediate settlement may publish before final ACK.
+                for (int roleId = 0; roleId < 2; roleId++)
+                {
+                    AssertPrefixRole(owner.Roles[roleId], roleId);
+                    AssertThat(ReferenceEquals(owner.Roles[roleId], prefixRoles[roleId])).IsTrue();
+                }
+                if (lifecycle.Current.Combat.LastAction is { Attacker: ClassicBattleSide.Enemy } response)
+                    enemyResponse ??= response;
+            }
+            else if (observedEntry && !observedCommit)
+            {
+                observedCommit = true; // First publication after the owned final ACK, regardless of values.
+                var receipt = observedBattle!.Completion!;
+                AssertThat(observedBattle.OwnsCompletion(receipt)).IsTrue();
+                AssertThat(receipt.Outcome).IsEqual(ClassicBattlePhase.Won);
+                AssertThat(receipt.ExperienceGranted).IsEqual(0); AssertThat(receipt.CashGranted).IsEqual(0);
+                AssertThat(session.PendingBattle).IsNull();
+                AssertThat(session.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
+                AssertThat(enemyResponse).IsNotNull();
+                // Independent exhaustive bank: one enemy response, role0 damage20..23 or
+                // role1 damage21..24 (fight.c), then half-missing recovery (battle.c1347-1350).
+                // Select a legal branch by the action, never calculate expected from live HP.
+                int[] expectedHp = enemyResponse switch
+                {
+                    { Evaded: true, Damage: 0, TargetIndex: 0 or 1 } => [123, 121],
+                    { Evaded: false, TargetIndex: 0, Damage: 20 or 21 } => [113, 121],
+                    { Evaded: false, TargetIndex: 0, Damage: 22 or 23 } => [112, 121],
+                    { Evaded: false, TargetIndex: 1, Damage: 21 or 22 } => [123, 110],
+                    { Evaded: false, TargetIndex: 1, Damage: 23 or 24 } => [123, 109],
+                    _ => throw new InvalidOperationException("Story enemy response is outside the independent HP recovery table.")
+                };
+                settledRoles = [owner.Roles[0], owner.Roles[1]];
+                for (int roleId = 0; roleId < 2; roleId++)
+                {
+                    var role = settledRoles[roleId];
+                    AssertThat(role.Hp).IsEqual(expectedHp[roleId]);
+                    AssertThat(role.Mp).IsEqual(33);
+                    AssertThat(role.MaxHp).IsEqual(150); AssertThat(role.MaxMp).IsEqual(50);
+                    AssertThat(role.Level).IsEqual(2); AssertThat(role.PrimaryExperience.Value).IsEqual(0);
+                    AssertThat(ReferenceEquals(role, initialRoles[roleId])).IsFalse();
+                    var settled = observedBattle.Current.Roles[roleId];
+                    AssertThat(ReferenceEquals(role, settled)).IsFalse();
+                    AssertThat(role.Hp).IsEqual(settled.Hp); AssertThat(role.Mp).IsEqual(settled.Mp);
+                    AssertThat(role.RoleId).IsEqual(settled.RoleId);
+                    AssertThat(role.Level).IsEqual(settled.Level);
+                    AssertThat(role.MaxHp).IsEqual(settled.MaxHp); AssertThat(role.MaxMp).IsEqual(settled.MaxMp);
+                    AssertThat(role.CoveredByRoleId).IsEqual(settled.CoveredByRoleId);
+                    AssertThat(role.Attack).IsEqual(settled.Attack); AssertThat(role.MagicPower).IsEqual(settled.MagicPower);
+                    AssertThat(role.Defense).IsEqual(settled.Defense); AssertThat(role.Dexterity).IsEqual(settled.Dexterity);
+                    AssertThat(role.FleeRate).IsEqual(settled.FleeRate);
+                    AssertThat(role.PrimaryExperience).IsEqual(settled.PrimaryExperience);
+                    AssertThat(role.HiddenExperience.OrderBy(p => p.Key).SequenceEqual(settled.HiddenExperience.OrderBy(p => p.Key))).IsTrue();
+                    AssertThat(role.Equipment.SequenceEqual(settled.Equipment) && role.Magics.SequenceEqual(settled.Magics)
+                        && role.Statuses.SequenceEqual(settled.Statuses)).IsTrue();
+                }
+            }
+            if (observedCommit)
+            {
+                AssertThat(session.CallId).IsEqual(observedCall);
+                AssertThat(session.SourceRequestId).IsEqual(observedOrigin);
+                for (int roleId = 0; roleId < 2; roleId++)
+                    AssertThat(ReferenceEquals(owner.Roles[roleId], settledRoles[roleId])).IsTrue();
+                if (!observedSuffix && session.Phase == TriggerScriptPhase.Completed)
+                {
+                    observedSuffix = true;
+                    AssertThat(main.Interaction!.PendingTrigger).IsNull();
+                    AssertThat(main.Interaction.Phase is NpcInteractionPhase.Returning or NpcInteractionPhase.Exploring).IsTrue();
+                }
+                if (observedSuffix && !observedReturn && main.Interaction!.Phase == NpcInteractionPhase.Exploring)
+                    observedReturn = true;
+            }
+        }
         Main old;
         using (var host = new StoryHost(selection,
-            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)],
+            updateObserver: ObserveSharedOwner))
         {
             old = host.Main;
             AssertThat(old.Failure).IsNull();
+            await host.Wait(() => observedInitial);
+            beforeCall = old.Dialogue!.Session!.CallId;
+            beforeSourceRequest = old.Dialogue.Session.SourceRequestId;
+            beforeInteractionRequest = old.Interaction!.PendingTrigger?.Id;
+            beforePhase = old.Dialogue.Session.Phase;
             host.Tap(Key.Enter);
-            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            searchDelivered = true;
+            await host.Wait(() => observedPrefix && old.Dialogue!.Session!.PendingDisplay is not null);
+            AssertThat(observedPrefix).IsTrue();
             var script = old.Dialogue!.Session!;
             Guid call = script.CallId;
             await host.FinishDisplay();
@@ -365,7 +1314,7 @@ public class StoryRoundtripSceneTests
             AssertThat(host.Actions[3].Attacker == ClassicBattleSide.Player && host.Actions[3].ActorIndex == 1
                 && host.Actions[3].TargetIndex == 1 && host.Actions[3].Damage is >= 33 and <= 38).IsTrue();
             // Members only lost HP to that one enemy action (0 or 20..24).
-            int[] startHp = [100, 95];
+            int[] startHp = [97, 92];
             for (int i = 0; i < 2; i++)
             {
                 int hp = battle.Current.Combat.Players[i].Hp;
@@ -382,15 +1331,40 @@ public class StoryRoundtripSceneTests
             AssertThat(old.Exploration!.Leader.X).IsEqual(leaderX);
             AssertThat(old.Exploration!.Leader.Y).IsEqual(leaderY);
             AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(observedInitial && observedPrefix && observedEntry && observedCommit && observedSuffix && observedReturn).IsTrue();
             AssertThat(old.Failure).IsNull();
         }
         AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
         AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
         AssertThat(Input.IsKeyPressed(Key.Right)).IsFalse();
         // Same-URI fresh Main: prepared resources are reused read-only, no session state leaks.
-        using (var fresh = new StoryHost(selection,
-            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        bool observedFresh = false;
+        void ObserveFreshOwner(Main main)
         {
+            if (observedFresh) return;
+            observedFresh = true;
+            var world = main.Dialogue!.FirstBattleWorld!;
+            var owner = world.RoleLiveState!;
+            var session = main.Dialogue.Session!;
+            AssertThat(ReferenceEquals(world, observedWorld) || ReferenceEquals(owner, observedOwner)
+                || ReferenceEquals(session, observedSession)).IsFalse();
+            AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1 })).IsTrue();
+            AssertThat(session.CallId).IsEqual(Guid.Empty);
+            for (int roleId = 0; roleId < 2; roleId++)
+            {
+                AssertInitialRole(owner.Roles[roleId], roleId);
+                AssertThat(ReferenceEquals(session.BattleRoles![roleId], owner.Roles[roleId])).IsTrue();
+                AssertThat(ReferenceEquals(owner.Roles[roleId], initialRoles[roleId])
+                    || ReferenceEquals(owner.Roles[roleId], settledRoles[roleId])).IsFalse();
+                AssertThat(world.PartyVitals[roleId].Hp).IsEqual(roleId == 0 ? 100 : 95);
+                AssertThat(world.PartyVitals[roleId].Mp).IsEqual(20);
+            }
+        }
+        using (var fresh = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)],
+            updateObserver: ObserveFreshOwner))
+        {
+            await fresh.Wait(() => observedFresh);
             AssertThat(fresh.Main.Failure).IsNull();
             AssertThat(fresh.Main.Dialogue!.Session!.CallId).IsEqual(Guid.Empty);
             AssertThat(fresh.Main.StoryBattle).IsNull();
@@ -398,6 +1372,138 @@ public class StoryRoundtripSceneTests
             await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
             AssertThat(fresh.Main.Dialogue!.Session!.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
         }
+    }
+
+    [TestCase(Timeout = 90000)]
+    public async Task PartyThreePlayersPickTargetsByCyclingExecuteQueueAndWin()
+    {
+        // #137: three authored roles (dex100, hp100/95/95, atk40/35/35) act before two id7 slots
+        // (dex0, speed18). fight.c157-170 bounds vs defense24: role0's atk40 hit is >=43 (kills a
+        // 43hp slot), role1/role2 atk35 hits are 33..38 (crit up to 297), so slot1 survives role1's
+        // strike and role2 finishes it: a one-round Won with three distinct member actions and no
+        // enemy answer. The party draws at the reference g_rgPlayerPos[2] columns (battle.c:27-31).
+        using var fixture = new AuthoredStoryFixture("PartyWin", threePlayer: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        ClassicBattleLifecycleSession? observedBattle = null;
+        bool observedParty = false;
+        void ObserveThreePlayerOwner(Main main)
+        {
+            var world = main.Dialogue!.FirstBattleWorld!;
+            AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1, 2 }))
+                .OverrideFailureMessage("Story shared-owner party order must be the authored [0,1,2].").IsTrue();
+            if (!observedParty)
+            {
+                observedParty = true;
+                // #224 (parent #148, D2): the live owner carries the six-row table for the v1 save
+                // role domain; party, menu and battle consumers stay authored-roles-driven.
+                AssertThat(world.RoleLiveState!.Roles.Count).IsEqual(PlayerSaveContract.RoleCount);
+                AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1, 2 })).IsTrue();
+            }
+            observedBattle ??= main.StoryBattle;
+        }
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)],
+            players: [new(180, 180), new(234, 170), new(270, 146)],
+            updateObserver: ObserveThreePlayerOwner))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            await host.FinishDisplay();
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            AssertThat(ReferenceEquals(old.StoryBattle, script.PendingBattle!.Lifecycle)).IsTrue();
+            AssertThat(battle.Current.Combat.Players.Count).IsEqual(3);
+            AssertThat(battle.Current.Combat.Players.Select(p => p.RoleId).ToArray()).IsEqual(new[] { 0, 1, 2 });
+            AssertThat(battle.Current.Combat.Players.Select(p => p.Hp).ToArray()).IsEqual(new[] { 100, 95, 95 });
+            AssertThat(battle.Current.Combat.Enemies.Count).IsEqual(2);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(0);
+            // Member 0 confirms attack, then the default target slot 0; one physical Enter each.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(1);
+            AssertThat(battle.Current.Combat.Players[0].SelectedEnemySlot).IsEqual(0);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsNull();
+            // Member 1 confirms attack, cycles the target highlight to slot 1, then confirms.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Right);
+            await host.ConfirmMenu(StoryBattlePresentation.AttackMenu);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsEqual(2);
+            AssertThat(battle.Current.Combat.Players[1].SelectedEnemySlot).IsEqual(1);
+            AssertThat(battle.Current.Combat.Players[2].SelectedEnemySlot).IsNull();
+            // Member 2 confirms attack, cycles to slot 1 too; its confirm builds the queue.
+            await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+            host.Tap(Key.Right);
+            await host.ConfirmMenu(StoryBattlePresentation.Resolving);
+            AssertThat(battle.Current.Combat.Phase).IsEqual(ClassicBattlePhase.Resolving);
+            AssertThat(battle.Current.Combat.SelectingPlayerIndex).IsNull();
+            AssertThat(battle.Current.Combat.Players.Select(p => p.SelectedEnemySlot).ToArray()).IsEqual(new int?[] { 0, 1, 1 });
+            AssertThat(battle.Current.Combat.ActionQueue.Count).IsEqual(5);
+            while (script.PendingBattle is not null)
+            {
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+                if (script.PendingBattle is null) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback
+                    || script.PendingBattle is null);
+            }
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            AssertThat(script.CallId).IsEqual(call);
+            // Distinct presented player actions only; a possible atk35 critical ends the battle
+            // before the last member's queue entry runs, so the count is 2 or 3.
+            AssertThat(host.Actions.All(a => a.Attacker == ClassicBattleSide.Player)).IsTrue();
+            AssertThat(host.Actions.Count is 2 or 3).IsTrue();
+            for (int i = 0; i < host.Actions.Count; i++)
+                for (int j = i + 1; j < host.Actions.Count; j++)
+                    AssertThat(ReferenceEquals(host.Actions[i], host.Actions[j])).IsFalse();
+            // Actions resolve by party index; the actors are distinct and map to RoleId 0,1,2.
+            int[] actingRoles = host.Actions.Select(a => battle.Current.Combat.Players[a.ActorIndex].RoleId).ToArray();
+            AssertThat(actingRoles.Distinct().Count() == actingRoles.Length && actingRoles.All(r => r is 0 or 1 or 2)).IsTrue();
+            if (host.Actions.Count == 2) AssertThat(actingRoles.Order().SequenceEqual(new[] { 0, 1 })).IsTrue();
+            foreach (var presented in host.Actions)
+            {
+                int role = battle.Current.Combat.Players[presented.ActorIndex].RoleId;
+                // fight.c157-170: atk40 vs defense24 gives >=43 (a 43hp slot dies to it); atk35
+                // gives 33..38 with critical*3 and float*1..1.125 keeping every hit in 33..297.
+                AssertThat(presented.Damage >= 33 && presented.Damage <= 297).IsTrue();
+                if (role == 0) AssertThat(presented.Damage >= 43 && presented.TargetIndex == 0).IsTrue();
+                else AssertThat(presented.TargetIndex is 0 or 1).IsTrue();
+                AssertThat(battle.Current.Combat.Players[presented.ActorIndex].Counts.Attack).IsEqual(1);
+            }
+            foreach (int actor in new[] { 0, 1, 2 })
+            {
+                // A member either presented exactly one action or never reached its queue entry.
+                int expected = host.Actions.Any(a => a.ActorIndex == actor) ? 1 : 0;
+                AssertThat(battle.Current.Combat.Players[actor].Counts.Attack).IsEqual(expected);
+            }
+            // No enemy answered: the members keep their authored HP words.
+            AssertThat(battle.Current.Combat.Players.Select(p => p.Hp).ToArray()).IsEqual(new[] { 100, 95, 95 });
+            AssertThat(battle.Current.Combat.Enemies.Select(e => e.Hp).ToArray()).IsEqual(new[] { 0, 0 });
+            // Victory half-recovery settles per RoleId, not per party position.
+            AssertThat(battle.Current.Roles[0].Hp).IsEqual(125);
+            AssertThat(battle.Current.Roles[1].Hp).IsEqual(122);
+            AssertThat(battle.Current.Roles[2].Hp).IsEqual(122);
+            AssertThat(battle.Current.Roles[0].Mp).IsEqual(35);
+            AssertThat(battle.Current.Roles[1].Mp).IsEqual(35);
+            AssertThat(battle.Current.Roles[2].Mp).IsEqual(35);
+            AssertThat(observedParty).IsTrue();
+            AssertThat(ReferenceEquals(observedBattle, battle)).IsTrue();
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(old.GetChildren().OfType<Pal.Game.Resources.PalMapScene>().Single().Visible).IsTrue();
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Right)).IsFalse();
     }
 
     [TestCase(Timeout = 120000)]
@@ -514,6 +1620,107 @@ public class StoryRoundtripSceneTests
     }
 
     [TestCase(Timeout = 120000)]
+    public async Task NormalBattleFleeSucceedsWalksOffAndResumesTheFleeBranch()
+    {
+        // T17 (#145): the test-owned non-boss derivation of LostReload (fleeRate 999 vs the
+        // authored dex500 defense sum 524, playerHp 150) always escapes: the enemy slot strikes
+        // first, then the committed Q flee ends the battle Escaped (fight.c 4119-4152 +
+        // battle.c 1519-1527) after its own RandomLong(0, 524) draw, the living member walks
+        // off-screen (battle.c 1458-1528), no victory rewards are granted, and the trigger
+        // resumes at the authored flee branch (script.c 0x0007 operand2 -> message 3), never
+        // the victory dialog (message 2) or the loss branch (message 24).
+        using var fixture = new AuthoredStoryFixture("LostReload", playerHp: 150, fleeEscape: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            AssertThat(battle.Completion).IsNull();
+            // input.c kKeyFlee: two rapid Q presses commit one flee (the second cannot queue a
+            // second attempt behind the committed round).
+            host.Tap(Key.Q);
+            host.Tap(Key.Q);
+            await host.Wait(() => battle.Current.Combat.LastFleeAttempt is not null);
+            bool sawEscapeFailLabel = false, walkedOff = false, removed = false;
+            await host.Wait(() =>
+            {
+                var draw = old.StoryDrawSnapshot;
+                sawEscapeFailLabel |= draw?.FeedbackWord == Pal.Game.Dialogue.PalStoryBattleView.EscapeFailWord;
+                if (draw is { } snapshot && old.StoryBattleMode == StoryBattlePresentation.Feedback)
+                {
+                    Vector2 player = snapshot.PartyPlayers.Count > 0 ? snapshot.PartyPlayers[0].Position : snapshot.PlayerPosition;
+                    walkedOff |= player.X > 240 && player.Y > 170;
+                    removed |= player.X > 9000; // battle.c 1519-1526: pos 9999 removes the escaper
+                }
+                return old.StoryBattleMode != StoryBattlePresentation.Feedback;
+            });
+            AssertThat(sawEscapeFailLabel).IsFalse();
+            AssertThat(walkedOff).IsTrue();
+            AssertThat(removed).IsTrue();
+            await host.Wait(() => script.PendingBattle is null);
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Escaped);
+            var flee = battle.Current.Combat.LastFleeAttempt!;
+            AssertThat(flee.Escaped).IsTrue();
+            AssertThat(flee.FleeRate).IsEqual(999);
+            AssertThat(flee.EnemyFleeDefense).IsEqual(524); // dex500 + (level0+6)*4, fight.c 4128-4137
+            AssertThat(battle.Current.Combat.Players[0].Counts.Flee).IsEqual(0);
+            AssertThat(battle.Current.Roles[0].HiddenExperience["flee"].Count).IsEqual(0);
+            AssertThat(old.StoryCashGranted == 0 && old.StoryExperienceGranted == 0).IsTrue();
+            // The owned Escaped receipt resumes the authored flee branch (message 3), not the
+            // victory dialog (message 2) and not the loss branch (message 24).
+            await host.Wait(() => script.PendingDisplay is not null);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("败");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(old.GetChildren().OfType<Pal.Game.Resources.PalMapScene>().Single().Visible).IsTrue();
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Q)).IsFalse();
+    }
+
+    [TestCase]
+    public void NormalBattleFleeFinalPoseRemovesEveryMemberIncludingTheDead()
+    {
+        // battle.c 1493-1516: only the living walk off; battle.c 1519-1526 then removes EVERY
+        // player from the screen — the dead member stays visible through the walk-off (fight.c
+        // 952-957 keeps drawing it dead) and leaves with the party at the final removal frame.
+        var members = new ClassicBattlePlayerView[]
+        {
+            new(0, 1, 150, new ClassicBattleCounts(0, 0), null),
+            new(1, 2, 0, new ClassicBattleCounts(0, 0), null),
+        };
+        for (int pose = 0; pose < 16; pose++)
+        {
+            var walking = Pal.Game.StoryPlayerEscapePresentation.At(pose, members);
+            AssertThat(walking.Count).IsEqual(1);
+            AssertThat(walking[0].PartyIndex).IsEqual(0);
+            // Two-member column: the leading member steps +4/+6 per pose (battle.c 1485-1492).
+            AssertThat(walking[0].Offset == new Vector2(4 * (pose + 1), 6 * (pose + 1))).IsTrue();
+        }
+        // The final removal pose (Duration 17 -> pose 16) carries both members off the screen.
+        var removal = Pal.Game.StoryPlayerEscapePresentation.At(16, members);
+        AssertThat(removal.Count).IsEqual(2);
+        AssertThat(removal[0].PartyIndex).IsEqual(0);
+        AssertThat(removal[1].PartyIndex).IsEqual(1);
+        AssertThat(removal[0].Offset == new Vector2(9999, 9999)).IsTrue();
+        AssertThat(removal[1].Offset == new Vector2(9999, 9999)).IsTrue();
+    }
+
+    [TestCase(Timeout = 120000)]
     public async Task PartyLossCoversEnemyActionsMemberDeathPassAndLostClosure()
     {
         // PartyLoss: enemy slots (dex500) act before both members; every landed hit kills a
@@ -597,6 +1804,87 @@ public class StoryRoundtripSceneTests
             await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
             AssertThat(fresh.Main.Dialogue!.Session!.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
         }
+    }
+
+    [TestCase(Timeout = 120000)]
+    public async Task ZeroHpPuppetMemberEntersAtOneHpStaysDeadAndSettlesByIdentity()
+    {
+        // #139: a PartyLoss-derived author gives member 0 a dead entry carrying the puppet word
+        // (kStatusPuppet, statuses slot 4). PAL_StartBattle's entry loop (battle.c 1568-1583)
+        // revives it at exactly 1 HP and clears the puppet at the real battle start while the
+        // shared owner keeps the authored 0 HP until the owned ack; the dex500 enemies then kill
+        // it for real and the member stays dead through every later round (never revived per
+        // action) until the Lost settlement returns its true 0 HP, zero statuses and identity.
+        using var fixture = new AuthoredStoryFixture("PartyLoss", zeroHpPuppetEntry: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)]))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            Guid call = script.CallId;
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            // Entry normalization: authored 0 HP + puppet becomes exactly 1 HP with the puppet cleared.
+            AssertThat(battle.Current.Combat.Players[0].Hp).IsEqual(1);
+            AssertThat(battle.Current.Roles[0].Hp).IsEqual(1);
+            AssertThat(battle.Current.Roles[0].Statuses.All(value => value == 0)).IsTrue();
+            AssertThat(battle.Current.Roles[1].Hp).IsEqual(20);
+            var world = old.Dialogue!.FirstBattleWorld!;
+            AssertThat(world.RoleLiveState!.Roles[0].Hp).IsEqual(0);
+            AssertThat(world.RoleLiveState.Roles[0].Statuses[4]).IsEqual(1);
+            bool member0Dead = false;
+            while (script.PendingBattle is not null)
+            {
+                if (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                {
+                    var selecting = battle.Current.Combat.SelectingPlayerIndex;
+                    AssertThat(selecting.HasValue).IsTrue();
+                    if (member0Dead)
+                    {
+                        AssertThat(selecting!.Value != 0).IsTrue();
+                        AssertThat(battle.Current.Combat.Players[0].Hp).IsEqual(0);
+                    }
+                    while (old.StoryBattleMode == StoryBattlePresentation.AttackMenu)
+                    {
+                        await host.ConfirmMenu(StoryBattlePresentation.TargetMenu);
+                        await host.ConfirmMemberTarget(battle);
+                    }
+                }
+                await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.Feedback
+                    || old.StoryBattleMode == StoryBattlePresentation.AttackMenu || script.PendingBattle is null);
+                if (battle.Current.Combat.Players[0].Hp == 0) member0Dead = true;
+                if (script.PendingBattle is null) break;
+                await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback || script.PendingBattle is null);
+            }
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Lost);
+            AssertThat(member0Dead).IsTrue();
+            AssertThat(battle.Current.Combat.Players.All(p => p.Hp == 0)).IsTrue();
+            // In-battle death identity: the settled entry member keeps 0 HP (no revive-to-1), zero
+            // statuses and its own RoleId; the Lost settlement performs no recovery.
+            AssertThat(battle.Current.Roles[0].Hp).IsEqual(0);
+            AssertThat(battle.Current.Roles[0].Statuses.All(value => value == 0)).IsTrue();
+            AssertThat(battle.Current.Roles[0].RoleId).IsEqual(0);
+            AssertThat(battle.Current.Roles[1].Hp).IsEqual(0);
+            AssertThat(script.CallId).IsEqual(call);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("败");
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            // The owned ack merges the settled roles: member 0 stays dead in the shared owner too.
+            AssertThat(world.RoleLiveState.Roles[0].Hp).IsEqual(0);
+            AssertThat(world.RoleLiveState.Roles[0].Statuses.All(value => value == 0)).IsTrue();
+            AssertThat(old.StoryBattleMode).IsNull();
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
     }
 
     [TestCase(Timeout = 120000)]
@@ -894,15 +2182,151 @@ public class StoryRoundtripSceneTests
         AssertThat(Godot.FileAccess.GetSha256(fixture.StoryUri)).IsEqual(hash);
     }
 
-    [TestCase]
-    public void FailedStoryPreloadPublishesNoPartialScene()
+    [TestCase(Timeout = 20000)]
+    public async Task FailedStoryPreloadPublishesNoPartialScene()
     {
-        var selection = GameSceneConfiguration.FromArguments("--story-profile", "res://Assets/Missing-Story.tres",
+        var missing = GameSceneConfiguration.FromArguments("--story-profile", "res://Assets/Missing-Story.tres",
             "--battle-visual-profile", "res://Assets/Missing-Visual.tres");
-        using var host = new StoryHost(selection);
-        AssertThat(host.Main.Failure).IsNotNull();
-        AssertThat(host.Main.GetChildCount()).IsEqual(0);
-        AssertThat(host.Main.Exploration).IsNull();
+        using (var host = new StoryHost(missing))
+        {
+            AssertThat(host.Main.Failure).IsNotNull();
+            AssertThat(host.Main.GetChildCount()).IsEqual(0);
+            AssertThat(host.Main.Exploration).IsNull();
+        }
+
+        using var fixture = new AuthoredStoryFixture("PartyWin", heterogeneousEnemies: true);
+        string[] before = fixture.Snapshot();
+        var story = Pal.Game.Profiles.NativeStoryProfile.Load(fixture.StoryUri);
+        var visual = Pal.Game.Profiles.NativeBattleVisualProfile.Load(fixture.VisualUri, story);
+        AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemySprite!.SpriteId)
+            .SequenceEqual(new[] { 97, 98 })).IsTrue();
+        AssertThat(visual.Teams[18].EnemySlots.Select(s => s.EnemySprite!.FrameCount)
+            .SequenceEqual(new[] { 3, 4 })).IsTrue();
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--battle-seed", "1");
+        const string marker = "#136 owner-registered enemy slot1 texture failure";
+        var captured = new List<(int? Slot, ImageTexture Texture, ulong Id, bool InitiallyValid)>();
+        PalStoryBattleView? partial = null;
+        bool offTree = false, failedViewValid = true;
+        int referencesAtFailure = -1, partialChildrenAtFailure = -1, failures = 0;
+        bool[] releasedAtFailure = [];
+        Main failedMain;
+        try
+        {
+            using (var host = new StoryHost(selection, configure: main =>
+            {
+                main.StoryBattleViewFactory = () => partial = new PalStoryBattleView
+                {
+                    TextureOwned = (slot, texture) =>
+                    {
+                        captured.Add((slot, texture, texture.GetInstanceId(), GodotObject.IsInstanceValid(texture)));
+                        if (slot != 1) return;
+                        offTree = !partial!.IsInsideTree() && partial.GetParent() is null;
+                        throw new InvalidOperationException(marker);
+                    }
+                };
+                main.Failed += _ =>
+                {
+                    failures++;
+                    // Snapshot at the production failure boundary, before test cleanup.
+                    releasedAtFailure = captured.Select(item => !GodotObject.IsInstanceValid(item.Texture)
+                        && GodotObject.InstanceFromId(item.Id) is null).ToArray();
+                    referencesAtFailure = partial!.TextureReferenceCount;
+                    failedViewValid = GodotObject.IsInstanceValid(partial);
+                    partialChildrenAtFailure = main.GetChildren().OfType<PalStoryBattleView>().Count();
+                };
+            }))
+            {
+                failedMain = host.Main;
+                AssertThat(host.Main.Failure).IsNull();
+                host.Tap(Key.Enter);
+                await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is not null);
+                var display = host.Main.Dialogue!.Session!.PendingDisplay!.Display;
+                await host.Wait(() => display.Current.Phase == DialogueDisplayPhase.WaitingForAdvance);
+                host.Tap(Key.Enter);
+                await host.WaitForFailure();
+                GD.Print("PAL_136_PARTIAL_FAILURE:" + JsonSerializer.Serialize(new
+                {
+                    offTree, failures, referencesAtFailure, failedViewValid, partialChildrenAtFailure,
+                    textures = captured.Select((item, i) => new { item.Slot, item.Id, item.InitiallyValid, released = releasedAtFailure[i] }),
+                    error = host.Main.Failure
+                }));
+                AssertThat(captured.All(item => item.InitiallyValid && item.Id != 0)).IsTrue();
+                AssertThat(captured.Count(item => item.Slot == 0)).IsEqual(6); // three frames, two shifts
+                AssertThat(captured.Count(item => item.Slot == 1)).IsEqual(1);
+                AssertThat(captured.Where(item => item.Slot is not null).Select(item => item.Slot!.Value)
+                    .SequenceEqual(new[] { 0, 0, 0, 0, 0, 0, 1 })).IsTrue();
+                AssertThat(offTree).IsTrue();
+                AssertThat(failures).IsEqual(1);
+                AssertThat(host.Main.Failure!.Contains(marker, StringComparison.Ordinal)).IsTrue();
+                AssertThat(releasedAtFailure.Length).IsEqual(captured.Count);
+                AssertThat(releasedAtFailure.All(released => released))
+                    .OverrideFailureMessage("Every owner-registered native texture must be released before Main.Failed.").IsTrue();
+                AssertThat(referencesAtFailure).IsEqual(0);
+                AssertThat(failedViewValid).IsFalse();
+                AssertThat(partialChildrenAtFailure).IsEqual(0);
+                AssertThat(host.Main.StoryBattle).IsNull();
+                AssertThat(host.Main.StoryDrawSnapshot.HasValue).IsFalse();
+                partial!.ReleaseTextures(); // repeated cleanup is safe even after off-tree Free
+                AssertThat(partial.TextureReferenceCount).IsEqual(0);
+            }
+            AssertThat(GodotObject.IsInstanceValid(failedMain)).IsFalse();
+        }
+        finally
+        {
+            // A genuine RED must not leave task-owned ObjectDB entries in the shared host.
+            int rescued = 0;
+            foreach (var item in captured)
+                if (GodotObject.IsInstanceValid(item.Texture)) { item.Texture.Dispose(); rescued++; }
+            if (partial is not null && GodotObject.IsInstanceValid(partial)) partial.Free();
+            GD.Print($"PAL_136_PARTIAL_RESCUE:{rescued}");
+        }
+        AssertThat(fixture.Snapshot().SequenceEqual(before)).IsTrue();
+
+        bool first = false;
+        var healthyTextures = new List<(ImageTexture Texture, ulong Id)>();
+        Main healthyMain;
+        using (var fresh = new StoryHost(selection, [new(100, 120), new(128, 104)], [new(200, 176), new(256, 152)],
+            main =>
+            {
+                if (first || main.StoryBattle is null) return;
+                first = true; // first real UpdateCompleted, never wait for a matching state
+                var draw = main.StoryDrawSnapshot!.Value;
+                AssertThat(main.StoryBattleMode).IsEqual(StoryBattlePresentation.AttackMenu);
+                AssertThat(draw.EnemyIdleFrames.SequenceEqual(new[] { 0, 0 })).IsTrue();
+                AssertThat(draw.EnemyIdleCounters.SequenceEqual(new[] { 65534, 1 })).IsTrue();
+                AssertThat(draw.PartyEnemies.Select(e => e.Position)
+                    .SequenceEqual(new[] { new Vector2(100, 120), new Vector2(128, 104) })).IsTrue();
+                AssertThat(draw.PartyEnemies.Select(e => e.Hp).SequenceEqual(new[] { 43, 43 })).IsTrue();
+                AssertThat(draw.PartyEnemies.All(e => e.Visible)).IsTrue();
+                AssertThat(main.StoryBattle.Current.Combat.Enemies.Select(e => e.Id)
+                    .SequenceEqual(new[] { 7, 7 })).IsTrue();
+                AssertThat(healthyTextures.All(t => GodotObject.IsInstanceValid(t.Texture))).IsTrue();
+                AssertThat(healthyTextures.All(t => captured.All(old => old.Id != t.Id))).IsTrue();
+                GD.Print("PAL_136_SAME_URI_HEALTHY:" + JsonSerializer.Serialize(new
+                {
+                    fixture.StoryUri, fixture.VisualUri, draw.EnemyIdleFrames, draw.EnemyIdleCounters,
+                    textures = healthyTextures.Select(t => t.Id)
+                }));
+            }, configure: main => main.StoryBattleViewFactory = () => new PalStoryBattleView
+            {
+                TextureOwned = (_, texture) => healthyTextures.Add((texture, texture.GetInstanceId()))
+            }))
+        {
+            healthyMain = fresh.Main;
+            AssertThat(fresh.Main.Failure).IsNull();
+            fresh.Tap(Key.Enter);
+            await fresh.Wait(() => fresh.Main.Dialogue!.Session!.PendingDisplay is not null);
+            await fresh.FinishDisplay();
+            await fresh.Wait(() => first);
+            AssertThat(fresh.Main.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(healthyMain)).IsFalse();
+        AssertThat(healthyTextures.Count > captured.Count).IsTrue();
+        AssertThat(healthyTextures.All(t => !GodotObject.IsInstanceValid(t.Texture)
+            && GodotObject.InstanceFromId(t.Id) is null)).IsTrue();
+        AssertThat(fixture.Snapshot().SequenceEqual(before)).IsTrue();
+        GD.Print($"PAL_136_HEALTHY_RELEASED:{healthyTextures.Count}; source/output hashes unchanged");
     }
 
     private static System.Collections.Generic.HashSet<string> FriendDeathHookFirstDisplaysSet(bool zh) =>
@@ -1062,6 +2486,84 @@ public class StoryRoundtripSceneTests
     }
 
     [TestCase(Timeout = 120000)]
+    public async Task MainStoryControlFlowExecutesNestedCallsCountedGatesAndWritesBackTheReturnedEntry()
+    {
+        // #234 leaf (parent #129 T03): the control flow consumed by the formal story Main. The
+        // derived Midbattle stream calls an appended nested display with the inherited caller
+        // before the battle, starts the dying role hook with a counted root goto (owner = the
+        // hook participant word), and runs a settled inherited call with a counted gate owned by
+        // the event caller; its 0x0001 publishes the next instruction, which the production
+        // completion writes back to the searched object (play.c 153).
+        using var fixture = new AuthoredStoryFixture("Midbattle", controlFlow: true);
+        var selection = GameSceneConfiguration.FromArguments("--story-profile", fixture.StoryUri,
+            "--battle-visual-profile", fixture.VisualUri, "--story-language", "zh-Hans", "--battle-seed", "1");
+        var hookCounters = new List<int>();
+        Main old;
+        using (var host = new StoryHost(selection,
+            enemySlots: [new(100, 120), new(128, 104)], players: [new(200, 176), new(256, 152)],
+            updateObserver: main =>
+            {
+                if (main.Dialogue?.Session is { } running
+                    && running.RunningBattleHook is { Kind: Pal.Core.ClassicBattleHookKind.Dying }
+                    && main.Dialogue.FirstBattleWorld is { } world)
+                    hookCounters.Add(world.Objects.Single(o => o.Id == 1).TriggerIdleCount);
+            }))
+        {
+            old = host.Main;
+            AssertThat(old.Failure).IsNull();
+            host.Tap(Key.Enter);
+            await host.Wait(() => old.Dialogue!.Session!.PendingDisplay is not null);
+            var script = old.Dialogue!.Session!;
+            var origin = old.Interaction!.PendingTrigger!.Id;
+            Guid call = script.CallId;
+            // The nested callee display is the first observable boundary of the real call.
+            AssertThat(script.SourceRequestId).IsEqual((Guid?)origin);
+            AssertThat(script.Caller).IsEqual(1);
+            AssertThat(script.ReturnEntry).IsEqual(1);
+            AssertThat(script.PendingDisplay!.MessageReferences[0].StartMessageId).IsEqual(4);
+            AssertThat(old.Interaction!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)1);
+            AssertThat(old.Dialogue!.FirstBattleWorld!.Objects.Single(o => o.Id == 1).TriggerIdleCount).IsEqual(0);
+            await host.FinishDisplay();
+            // Word zero inherits the caller; the caller continuation resumes with its own word and
+            // the callee display is never replayed.
+            await host.Wait(() => script.PendingDisplay is { } prelude && prelude.MessageReferences[0].StartMessageId == 1);
+            AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("战");
+            AssertThat(script.Caller).IsEqual(1);
+            AssertThat(script.CallId).IsEqual(call);
+            await host.FinishDisplay();
+            await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
+            var battle = old.StoryBattle!;
+            while (script.PendingBattle is not null) await DriveMidbattleMenus(host, old);
+            AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
+            // The hook's own counted root goto incremented its participant owner before the display.
+            AssertThat(hookCounters.Count > 0).IsTrue();
+            AssertThat(hookCounters[0]).IsEqual(1);
+            AssertThat(hookCounters.All(value => value is 0 or 1)).IsTrue();
+            // The settled inherited call runs its counted gate and pauses on the Won display.
+            AssertThat(script.PendingDisplay!.MessageReferences[0].StartMessageId).IsEqual(2);
+            await host.FinishDisplay();
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(script.Phase).IsEqual(TriggerScriptPhase.Completed);
+            // 0x0001 published the next instruction; Main wrote it back to the runtime world the
+            // production save chain consumes (play.c 153), not the static exploration copy.
+            AssertThat(script.ReturnEntry).IsEqual(6);
+            AssertThat(old.Dialogue!.FirstBattleWorld!.Objects.Single(o => o.Id == 1).TriggerEntry)
+                .OverrideFailureMessage("The completed selected trigger must write its returned entry back to the runtime world the production host consumes, not the static exploration copy.")
+                .IsEqual((ushort)6);
+            AssertThat(old.Interaction!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)1);
+            // A further committed production update keeps the world-owned write-back; the host
+            // publishes the current leader into the same world on every committed update and
+            // never rewrites the static exploration copy.
+            await host.Wait(() => old.Interaction!.Phase == NpcInteractionPhase.Exploring);
+            AssertThat(old.Dialogue!.FirstBattleWorld!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)6);
+            AssertThat(old.Interaction!.Objects.Single(o => o.Id == 1).TriggerEntry).IsEqual((ushort)1);
+            AssertThat(old.Failure).IsNull();
+        }
+        AssertThat(GodotObject.IsInstanceValid(old)).IsFalse();
+        AssertThat(Input.IsKeyPressed(Key.Enter)).IsFalse();
+    }
+
+    [TestCase(Timeout = 120000)]
     public async Task FriendDeathHookHealsCovererAndBattleStillEndsWon()
     {
         // The cover scenario: once an enemy strike kills role1, the coverer role0's friend-death
@@ -1118,15 +2620,25 @@ public class StoryRoundtripSceneTests
             // The hook's changeHp +9999 healed the coverer full (capped at maxHp 150) before the
             // Won half recovery, and the boost panel exposed the applied boost registers.
             AssertThat(observedBoosts.Count > 0).IsTrue();
+            // Midbattle declares attack=40, magicPower=20, dexterity=100 and fleeRate=10.
+            // script.c 0x0030 scales each base word; the visible panel sums all five registers.
+            // Check the actual dialogue branch, not a union that accepts another branch's boost.
+            int expectedBoost = friendFirstText switch
+            {
+                "兄弟" => 2,    // L0044: 40 * 5 / 100
+                "我会胜" => 2,  // L0051: 20 * 10 / 100
+                "悲为力" => 15, // L0057-L0058: 40 * 25 / 100 + 20 * 25 / 100
+                "回家" => 99,   // L0062-L0063: 100 * 90 / 100 + 10 * 90 / 100
+                _ => throw new InvalidOperationException($"Unexpected friend-death dialogue block: {friendFirstText}.")
+            };
+            GD.Print($"PAL_FRIEND_BOOST_EXPECTED:block={friendFirstText};value={expectedBoost}");
             foreach (var panel in observedBoosts)
             {
                 GD.Print("PAL_BOOST_PANEL:" + string.Join('/', panel));
                 AssertThat(panel.Count).IsEqual(2);
                 AssertThat(panel[1]).IsEqual(0); // only the caller (coverer) is boosted
-                // Native battle content declares no base magicPower/flee panels (PalBattlePlayer),
-                // so only the attack/dexterity-scaled registers surface through the authored chain:
-                // 5% attack band=2, 25% band=10 (40*25%), 90% dexterity band=90 (100*90%).
-                AssertThat(panel[0] is 2 or 10 or 90).OverrideFailureMessage("panel=" + string.Join('/', panel)).IsTrue();
+                AssertThat(panel[0]).OverrideFailureMessage("panel=" + string.Join('/', panel)
+                    + $"; block={friendFirstText}; expected={expectedBoost}").IsEqual(expectedBoost);
             }
             GD.Print("PAL_BOOST_PANELS:" + string.Join("|", observedBoosts.Select(p => string.Join('/', p))));
             AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
@@ -1558,17 +3070,22 @@ public class StoryRoundtripSceneTests
         private PalDialogueDisplay? display;
         private readonly bool party;
         private readonly Vector2[] partyPlayers = [], partyEnemies = [];
-        internal StoryHost(GameSceneConfiguration selection, Vector2[]? enemySlots = null, Vector2[]? players = null)
+        private readonly Action<Main>? updateObserver;
+        private readonly int enemyImpactPose;
+        internal StoryHost(GameSceneConfiguration selection, Vector2[]? enemySlots = null, Vector2[]? players = null,
+            Action<Main>? updateObserver = null, int enemyImpactPose = 5, Action<Main>? configure = null)
         {
             // Party hosts reuse the same production scene; only the observer switches to party checks.
             party = enemySlots is not null;
             if (party)
             {
-                if (enemySlots!.Length != 2 || players is not { Length: 2 })
-                    throw new ArgumentException("Party hosts require exactly two enemy slots and two player origins.");
+                if (enemySlots!.Length is not (2 or 5) || players is not { Length: 1 or 2 or 3 })
+                    throw new ArgumentException("Multi-actor hosts require two or five enemy slots and one to three player origins.");
                 partyEnemies = enemySlots; partyPlayers = players!;
             }
-            Main.Configure(selection); Main.UpdateCompleted += Updated;
+            this.updateObserver = updateObserver;
+            this.enemyImpactPose = enemyImpactPose;
+            Main.Configure(selection); configure?.Invoke(Main); Main.UpdateCompleted += Updated;
             // Runner owns the container, so an actual Main removal can be inspected before final Free.
             var container = new Node();
             container.AddChild(Main);
@@ -1581,6 +3098,7 @@ public class StoryRoundtripSceneTests
             updates++;
             try
             {
+                updateObserver?.Invoke(Main);
                 var combat = Main.StoryBattle?.Current.Combat;
                 var pose = Main.StoryBattlePose;
                 var draw = Main.StoryDrawSnapshot;
@@ -1588,11 +3106,12 @@ public class StoryRoundtripSceneTests
                 if (party)
                 {
                     if (pose is { Pose: 0 } && previousPose is null) numberBornAt = null;
-                    if (draw is { PartyPlayers: { Count: 2 } members, PartyEnemies: { Count: 2 } slots } partyDraw)
+                    if (draw is { PartyPlayers: { Count: > 0 } members, PartyEnemies: { Count: 2 } slots } partyDraw)
                     {
                         var currentAction = combat?.LastAction;
                         bool feedback = Main.StoryBattleMode == StoryBattlePresentation.Feedback;
-                        for (int i = 0; i < 2; i++)
+                        AssertThat(members.Count).IsEqual(partyPlayers.Length);
+                        for (int i = 0; i < members.Count; i++)
                         {
                             bool animating = feedback && currentAction is { Attacker: ClassicBattleSide.Player, ActorIndex: var actor } && actor == i;
                             // fight.c:5012-5022: a covering member stands at the target's side with frame 3.
@@ -1601,7 +3120,15 @@ public class StoryRoundtripSceneTests
                                 AssertThat(members[i].Position == partyPlayers[currentAction.TargetIndex] + new Vector2(-24, -12)).IsTrue();
                                 AssertThat(members[i].Frame).IsEqual(3);
                             }
-                            else if (!animating) AssertThat(members[i].Position == partyPlayers[i]).IsTrue();
+                            else if (!animating)
+                            {
+                                Vector2 recoil = Vector2.Zero;
+                                if (feedback && currentAction is { Attacker: ClassicBattleSide.Enemy, TargetIndex: var target, CovererPartyIndex: null }
+                                    && target == i && pose is { } incomingPose)
+                                    recoil = incomingPose.Pose <= enemyImpactPose ? Vector2.Zero
+                                        : incomingPose.Pose == enemyImpactPose + 1 ? new(8, 4) : new(10, 5);
+                                AssertThat(members[i].Position == partyPlayers[i] + recoil).IsTrue();
+                            }
                         }
                         for (int slot = 0; slot < 2; slot++)
                         {
@@ -1620,13 +3147,13 @@ public class StoryRoundtripSceneTests
                     if (pose is { } partyPose && draw is { } numberDraw && combat?.LastAction is { } partyAction
                         && numberDraw.PartyEnemies.Count == 2)
                     {
-                        int birthPose = partyAction.Attacker == ClassicBattleSide.Player ? 7 : 4;
+                        int birthPose = partyAction.Attacker == ClassicBattleSide.Player ? 7 : enemyImpactPose - 1;
                         if (partyPose.Pose == birthPose && numberBornAt is null)
                         { numberBornAt = Main.StoryPresentationTicks; NumberBirths++; }
                         if (numberBornAt is { } birth)
                         {
                             uint elapsed = unchecked(Main.StoryPresentationTicks - birth);
-                            bool visible = elapsed < 440 && partyPose.Pose >= (partyAction.Attacker == ClassicBattleSide.Player ? 8 : 5);
+                            bool visible = elapsed < 440 && partyPose.Pose >= (partyAction.Attacker == ClassicBattleSide.Player ? 8 : enemyImpactPose);
                             var currentDigits = numberDraw.NumberDigits.Where(d => d.BornAt == birth).ToArray();
                             bool numeric = visible && !partyAction.Evaded && partyAction.Damage > 0;
                             AssertThat(currentDigits.Length > 0 == numeric).IsTrue();
@@ -1644,11 +3171,12 @@ public class StoryRoundtripSceneTests
                         }
                     }
                 }
-                if (!party && pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction
+                if (!party && !Main.StoryEscapeFeedback && pose is { } feedbackPose && draw is { } feedbackDraw && combat?.LastAction is { } feedbackAction
                     && feedbackDraw.FeedbackWord != PalStoryBattleView.EscapeFailWord)
                 {
                     // (#51) The failed-escape feedback carries its own label and no digits; the
-                    // strike-model assertions below apply only to real attack feedback.
+                    // strike-model assertions below apply only to real attack feedback. (#145)
+                    // The successful-escape walk-off likewise presents no strike model.
                     // Author B: idle1/magic1/attack1/wait0. fight.c5078 enqueues after the
                     // last prehit draw (4); Delay(FALSE) waits40 before its first impact UIUpdate (5).
                     int birthPose = feedbackAction.Attacker == ClassicBattleSide.Player ? 7 : 4;
@@ -1708,7 +3236,7 @@ public class StoryRoundtripSceneTests
                         AssertThat(playerDraw.EnemyIdleCounter).IsEqual(expected);
                     }
                 }
-                if (!party && pose is { } enemyPose && combat?.LastAction?.Attacker == ClassicBattleSide.Enemy && draw is { } enemyDraw
+                if (!party && !Main.StoryEscapeFeedback && pose is { } enemyPose && combat?.LastAction?.Attacker == ClassicBattleSide.Enemy && draw is { } enemyDraw
                     && previousPose is { } prevEnemyPose && previousDraw is { } prevEnemyDraw)
                 {
                     int expected = prevEnemyDraw.EnemyIdleCounter;
@@ -1737,8 +3265,10 @@ public class StoryRoundtripSceneTests
                 if (!party && pose is null && previousPose is { } finalPose && draw is { } returnedDraw && previousDraw is { } finalDraw)
                 {
                     // (#51) The authored flee feedback (11 poses, final pose 10) freezes the
-                    // scene instead of the enemy strike's final UpdateFighters tick.
-                    bool fleeEnded = finalPose.Pose == StoryPlayerFleePresentation.Duration - 1;
+                    // scene instead of the enemy strike's final UpdateFighters tick; (#145) the
+                    // successful-escape walk-off (17 poses, final pose 16) freezes it too.
+                    bool fleeEnded = finalPose.Pose == StoryPlayerFleePresentation.Duration - 1
+                        || finalPose.Pose == StoryPlayerEscapePresentation.Duration - 1;
                     int expected = !fleeEnded && previousCombat!.LastAction!.Attacker == ClassicBattleSide.Enemy
                         ? finalDraw.EnemyIdleCounter == 2 ? 1 : 2 : finalDraw.EnemyIdleCounter;
                     AssertThat(returnedDraw.EnemyIdleCounter).IsEqual(expected);
@@ -1759,8 +3289,9 @@ public class StoryRoundtripSceneTests
                         // Even the final pose must finish before feedback releases its action/overlay.
                         AssertThat(unchecked(Main.StoryPresentationTicks - beforePose.PoseStartedAt) >= 40).IsTrue();
                         if (beforePose.Pose != StoryPlayerFleePresentation.Duration - 1
+                            && beforePose.Pose != StoryPlayerEscapePresentation.Duration - 1
                             && previousCombat?.LastAction?.Attacker == ClassicBattleSide.Enemy)
-                            AssertThat(beforePose.Pose).IsEqual(15); // hit tick5 + eleven timed recovery ticks.
+                            AssertThat(beforePose.Pose).IsEqual(enemyImpactPose + 10); // Eleven timed recovery ticks, including impact.
                     }
                 }
                 if (pose is { } firstPose && previousPose is null)
@@ -1847,6 +3378,17 @@ public class StoryRoundtripSceneTests
                 if (observationFailure is not null) throw observationFailure;
                 if (Main.Failure is not null) throw new InvalidOperationException(Main.Failure);
                 if (Time.GetTicksMsec() - start > 5000) throw new TimeoutException("Story production boundary not observed; mode=" + Main.StoryBattleMode);
+                await runner.AwaitIdleFrame();
+            }
+            if (observationFailure is not null) throw observationFailure;
+        }
+        internal async Task WaitForFailure()
+        {
+            ulong start = Time.GetTicksMsec();
+            while (Main.Failure is null)
+            {
+                if (observationFailure is not null) throw observationFailure;
+                if (Time.GetTicksMsec() - start > 5000) throw new TimeoutException("Expected story initialization failure not observed.");
                 await runner.AwaitIdleFrame();
             }
             if (observationFailure is not null) throw observationFailure;

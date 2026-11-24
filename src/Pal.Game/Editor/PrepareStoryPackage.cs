@@ -64,7 +64,11 @@ public partial class PrepareStoryPackage : Node
             }
             Require(texts.ContainsKey("story-package.json") && texts.ContainsKey("events/index.json"), "story input requires story-package.json and events/index.json");
             using var metadata = JsonDocument.Parse(texts["story-package.json"]);
-            var (story, visual) = ReadMetadata(metadata.RootElement);
+            PalStoryProfile story;
+            PalBattleVisualProfile visual;
+            try { (story, visual) = ReadMetadata(metadata.RootElement); }
+            catch (InvalidDataException error)
+            { throw new InvalidDataException(Path.Combine(input, "story-package.json") + ": " + error.Message, error); }
             using var index = JsonDocument.Parse(texts["events/index.json"]);
             var eventTexts = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var file in index.RootElement.GetProperty("files").EnumerateArray())
@@ -79,11 +83,12 @@ public partial class PrepareStoryPackage : Node
             story.EventsIndex = uri + "/Events/index.json";
             string[] storySeeds = new[] { story.StaticResources + "/Scenes/Scene.tscn", story.StaticProfile, story.BattleContentUri,
                 story.DialogueDirectory + "/Font.tres", story.DialogueDirectory + "/Language.zh-Hans.tres", story.DialogueDirectory + "/Language.en.tres",
-                story.DialogueDirectory + "/Prompt-00.tres", story.DialogueDirectory + "/Prompt-01.tres", story.DialogueDirectory + "/Prompt-02.tres" }.Concat(story.Portraits.Values).ToArray();
-            string[] visualSeeds = new[] { visual.PlayerSpriteUri, visual.PaletteUri }
-                .Concat(visual.AttackEffectSpriteUri != "" ? new[] { visual.AttackEffectSpriteUri } : Array.Empty<string>())
+                story.DialogueDirectory + "/Prompt-00.tres", story.DialogueDirectory + "/Prompt-01.tres", story.DialogueDirectory + "/Prompt-02.tres" }.Concat(story.Portraits.Values).Concat(story.ItemBitmaps.Values).ToArray();
+            string[] visualSeeds = visual.Players.SelectMany(player => new[] { player.PlayerSpriteUri }
+                    .Concat(player.AttackEffectSpriteUri != "" ? new[] { player.AttackEffectSpriteUri } : Array.Empty<string>()))
+                .Concat(new[] { visual.PaletteUri })
                 .Concat(visual.NumberSpriteUri != "" ? new[] { visual.NumberSpriteUri } : Array.Empty<string>())
-                .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri, t.EnemySpriteUri })).ToArray();
+                .Concat(visual.Teams.SelectMany(t => new[] { t.BackgroundUri }.Concat(t.EnemySlots.Select(slot => slot.EnemySpriteUri).Where(uri => uri != "")))).ToArray();
             foreach (string root in new[] { story.StaticResources, story.DialogueDirectory })
             {
                 string path = DataPath(root, directory: true);
@@ -230,60 +235,132 @@ public partial class PrepareStoryPackage : Node
 
     private static (PalStoryProfile Story, PalBattleVisualProfile Visual) ReadMetadata(JsonElement root)
     {
-        Properties(root, "formatVersion", "sourceIdentity", "staticResources", "staticProfile", "bundleSha256", "entryFileId", "entryId", "ownerId", "entryAddress", "battleContentUri", "dialogueDirectory", "portraits", "visual");
+        PropertiesWithOptional(root, new[] { "itemBitmaps", "battleProjection" }, "formatVersion", "sourceIdentity", "staticResources", "staticProfile", "bundleSha256", "entryFileId", "entryId", "ownerId", "entryAddress", "battleContentUri", "dialogueDirectory", "portraits", "visual");
         Require(Int(root, "formatVersion") == 1, "story package formatVersion must be 1");
         var story = new PalStoryProfile { FormatVersion = 1, SourceIdentity = Text(root, "sourceIdentity"), StaticResources = Text(root, "staticResources"),
             StaticProfile = Text(root, "staticProfile"), BundleSha256 = Text(root, "bundleSha256"), EntryFileId = Text(root, "entryFileId"), EntryId = Text(root, "entryId"),
             OwnerId = Int(root, "ownerId"), EntryAddress = Int(root, "entryAddress"), BattleContentUri = Text(root, "battleContentUri"), DialogueDirectory = Text(root, "dialogueDirectory") };
         Require(root.GetProperty("portraits").ValueKind == JsonValueKind.Array, "portraits must be an array");
+        // #235: optional projection receipt expectation. The nested object is closed to exactly
+        // receiptSha256/receiptByteLength; a half declaration or malformed identity is rejected
+        // here, never silently treated as an unprojected legacy story. The receipt bytes stay
+        // offline: the strict story load compares this pair with the checked native source.
+        if (root.TryGetProperty("battleProjection", out JsonElement battleProjectionElement))
+        {
+            try
+            {
+                Properties(battleProjectionElement, "receiptSha256", "receiptByteLength");
+                string receiptSha256 = Text(battleProjectionElement, "receiptSha256");
+                Require(receiptSha256.Length == 64 && receiptSha256.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'),
+                    "battleProjection.receiptSha256 must be 64 lowercase hexadecimal characters");
+                var lengthElement = battleProjectionElement.GetProperty("receiptByteLength");
+                long receiptByteLength = 0;
+                Require(lengthElement.ValueKind == JsonValueKind.Number && lengthElement.TryGetInt64(out receiptByteLength) && receiptByteLength > 0,
+                    "battleProjection.receiptByteLength must be a positive Int64");
+                story.BattleProjectionReceiptSha256 = receiptSha256;
+                story.BattleProjectionReceiptByteLength = receiptByteLength;
+            }
+            catch (InvalidDataException error)
+            { throw new InvalidDataException("battleProjection: " + error.Message, error); }
+        }
         foreach (var portrait in root.GetProperty("portraits").EnumerateArray())
         {
             Properties(portrait, "id", "uri"); int id = Int(portrait, "id");
             Require(id is > 0 and <= ushort.MaxValue && !story.Portraits.ContainsKey(id), "invalid or duplicate portrait ID");
             story.Portraits.Add(id, Text(portrait, "uri"));
         }
-        var v = root.GetProperty("visual");
-        PropertiesWithOptional(v, new[] { "attackEffectSpriteUri", "attackEffectIndex", "numberSpriteUri" }, "roleId", "playerSpriteUri", "playerPosition", "paletteUri", "teams");
-        var visual = new PalBattleVisualProfile { FormatVersion = 1, SourceIdentity = story.SourceIdentity, RoleId = Int(v, "roleId"),
-            PlayerSpriteUri = Text(v, "playerSpriteUri"), PlayerPosition = Position(v, "playerPosition"), PaletteUri = Text(v, "paletteUri") };
-        if (v.TryGetProperty("numberSpriteUri", out _)) visual.NumberSpriteUri = Text(v, "numberSpriteUri");
-        if (v.TryGetProperty("attackEffectSpriteUri", out _)) visual.AttackEffectSpriteUri = Text(v, "attackEffectSpriteUri");
-        if (v.TryGetProperty("attackEffectIndex", out _)) visual.AttackEffectIndex = Int(v, "attackEffectIndex");
-        Require((visual.AttackEffectSpriteUri != "") == v.TryGetProperty("attackEffectIndex", out _), "attack effect fields must be paired");
-        Require(v.GetProperty("teams").ValueKind == JsonValueKind.Array, "teams must be an array");
-        visual.Teams = v.GetProperty("teams").EnumerateArray().Select(t =>
+        // #218: the optional BALL item-bitmap bindings (object WORD -> prepared sprite URI).
+        // NativeStoryProfile requires them to cover exactly the use-menu bindings with a
+        // nonzero bitmap word, so stories without an item context simply omit the key.
+        if (root.TryGetProperty("itemBitmaps", out JsonElement itemBitmapsElement))
         {
-            PropertiesWithOptional(t, new[] { "idleAnimSpeed", "enemies", "targetId", "enemyPosition" },
-                "teamId", "backgroundUri", "enemySpriteUri", "idleFrames", "magicFrames", "attackFrames", "actWaitFrames");
-            bool slots = t.TryGetProperty("enemies", out var enemies);
-            bool legacyTarget = t.TryGetProperty("targetId", out _);
-            bool legacyPosition = t.TryGetProperty("enemyPosition", out _);
-            Require(slots ? !(legacyTarget || legacyPosition) : legacyTarget && legacyPosition,
-                "a team declares either enemies slots or the legacy targetId/enemyPosition pair, never both or neither");
-            var team = new PalBattleVisualTeam { TeamId = Int(t, "teamId"), BackgroundUri = Text(t, "backgroundUri"),
-                EnemySpriteUri = Text(t, "enemySpriteUri"), IdleFrames = Int(t, "idleFrames"),
-                IdleAnimSpeed = t.TryGetProperty("idleAnimSpeed", out _) ? Int(t, "idleAnimSpeed") : -1,
-                MagicFrames = Int(t, "magicFrames"), AttackFrames = Int(t, "attackFrames"), ActWaitFrames = Int(t, "actWaitFrames") };
-            if (slots)
+            Require(itemBitmapsElement.ValueKind == JsonValueKind.Array, "itemBitmaps must be an array");
+            foreach (var bitmap in itemBitmapsElement.EnumerateArray())
             {
-                Require(enemies.ValueKind == JsonValueKind.Array && enemies.GetArrayLength() is >= 1 and <= 2,
-                    "enemies requires one or two enemy slots");
-                team.EnemySlots = enemies.EnumerateArray().Select(enemy =>
-                {
-                    Properties(enemy, "targetId", "enemyPosition");
-                    return new PalBattleVisualEnemySlot { TargetId = Int(enemy, "targetId"), EnemyPosition = Position(enemy, "enemyPosition") };
-                }).ToArray();
+                Properties(bitmap, "objectId", "uri"); int id = Int(bitmap, "objectId");
+                Require(id is > 0 and <= ushort.MaxValue && !story.ItemBitmaps.ContainsKey(id),
+                    "invalid or duplicate item bitmap object ID");
+                story.ItemBitmaps.Add(id, Text(bitmap, "uri"));
             }
-            else
+        }
+        var v = root.GetProperty("visual");
+        PropertiesWithOptional(v, new[] { "numberSpriteUri" }, "players", "paletteUri", "teams");
+        var visual = new PalBattleVisualProfile { FormatVersion = 2, SourceIdentity = story.SourceIdentity,
+            PaletteUri = Text(v, "paletteUri") };
+        if (v.TryGetProperty("numberSpriteUri", out _)) visual.NumberSpriteUri = Text(v, "numberSpriteUri");
+        // Typed per-role bindings in party order; the legacy scalar player declaration is
+        // rejected here (missing/unknown field), never folded or reinterpreted at runtime.
+        var playersElement = v.GetProperty("players");
+        Require(playersElement.ValueKind == JsonValueKind.Array && playersElement.GetArrayLength() is >= 1 and <= 3,
+            "players requires one to three per-role bindings (party order)");
+        visual.Players = playersElement.EnumerateArray().Select((player, playerOrdinal) =>
+        {
+            try
             {
-                team.TargetId = Int(t, "targetId");
-                team.EnemyPosition = Position(t, "enemyPosition");
+                PropertiesWithOptional(player, new[] { "attackEffectSpriteUri", "attackEffectIndex" }, "roleId", "playerSpriteUri", "playerPosition");
+                var binding = new PalBattleVisualPlayer { RoleId = Word(player, "roleId"),
+                    PlayerSpriteUri = Text(player, "playerSpriteUri"), PlayerPosition = Position(player, "playerPosition") };
+                if (player.TryGetProperty("attackEffectSpriteUri", out _)) binding.AttackEffectSpriteUri = Text(player, "attackEffectSpriteUri");
+                if (player.TryGetProperty("attackEffectIndex", out _)) binding.AttackEffectIndex = Word(player, "attackEffectIndex");
+                Require((binding.AttackEffectSpriteUri != "") == player.TryGetProperty("attackEffectIndex", out _),
+                    "attack effect fields must be paired");
+                return binding;
             }
-            return team;
+            catch (InvalidDataException error)
+            { throw new InvalidDataException("players[" + playerOrdinal + "]: " + error.Message, error); }
         }).ToArray();
-        foreach (var t in v.GetProperty("teams").EnumerateArray())
-            if (t.TryGetProperty("idleAnimSpeed", out _)) Require(Int(t, "idleAnimSpeed") is >= 0 and <= ushort.MaxValue, "idleAnimSpeed requires WORD");
-        if (v.TryGetProperty("attackEffectIndex", out _)) Require(visual.AttackEffectIndex is >= 0 and <= ushort.MaxValue, "attackEffectIndex requires WORD");
+        Require(v.GetProperty("teams").ValueKind == JsonValueKind.Array, "teams must be an array");
+        visual.Teams = v.GetProperty("teams").EnumerateArray().Select((t, teamOrdinal) =>
+        {
+            try
+            {
+                Properties(t, "teamId", "backgroundUri", "enemies");
+                var enemies = t.GetProperty("enemies");
+                Require(enemies.ValueKind == JsonValueKind.Array && enemies.GetArrayLength() is >= 1 and <= 5,
+                    "enemies requires one to five enemy slots");
+                return new PalBattleVisualTeam
+                {
+                    TeamId = Int(t, "teamId"), BackgroundUri = Text(t, "backgroundUri"),
+                    EnemySlots = enemies.EnumerateArray().Select((enemy, slotOrdinal) =>
+                    {
+                        try
+                        {
+                            // #141: per-slot presentation is an all-or-none group. An empty entry
+                            // declares only targetId/enemyPosition and binds the numeric empty
+                            // runtime slot at strict load; a loaded slot still requires all six.
+                            PropertiesWithOptional(enemy,
+                                new[] { "enemySpriteUri", "idleFrames", "idleAnimSpeed", "magicFrames", "attackFrames", "actWaitFrames" },
+                                "targetId", "enemyPosition");
+                            bool presentation = enemy.TryGetProperty("enemySpriteUri", out _);
+                            Require(presentation == enemy.TryGetProperty("idleFrames", out _)
+                                && presentation == enemy.TryGetProperty("idleAnimSpeed", out _)
+                                && presentation == enemy.TryGetProperty("magicFrames", out _)
+                                && presentation == enemy.TryGetProperty("attackFrames", out _)
+                                && presentation == enemy.TryGetProperty("actWaitFrames", out _),
+                                "enemy presentation fields must be declared together");
+                            var binding = new PalBattleVisualEnemySlot
+                            {
+                                TargetId = Int(enemy, "targetId"), EnemyPosition = Position(enemy, "enemyPosition")
+                            };
+                            if (presentation)
+                            {
+                                binding.EnemySpriteUri = Text(enemy, "enemySpriteUri");
+                                binding.IdleFrames = Word(enemy, "idleFrames", 1);
+                                binding.IdleAnimSpeed = Word(enemy, "idleAnimSpeed");
+                                binding.MagicFrames = Word(enemy, "magicFrames");
+                                binding.AttackFrames = Word(enemy, "attackFrames");
+                                binding.ActWaitFrames = Word(enemy, "actWaitFrames");
+                            }
+                            return binding;
+                        }
+                        catch (InvalidDataException error)
+                        { throw new InvalidDataException("enemies[" + slotOrdinal + "]: " + error.Message, error); }
+                    }).ToArray()
+                };
+            }
+            catch (InvalidDataException error)
+            { throw new InvalidDataException("visual.teams[" + teamOrdinal + "]: " + error.Message, error); }
+        }).ToArray();
         return (story, visual);
     }
     private static void Properties(JsonElement value, params string[] expected) => PropertiesWithOptional(value, Array.Empty<string>(), expected);
@@ -292,7 +369,10 @@ public partial class PrepareStoryPackage : Node
         Require(value.ValueKind == JsonValueKind.Object, "metadata must contain objects");
         var actual = value.EnumerateObject().Select(p => p.Name).ToArray();
         Require(actual.Distinct(StringComparer.Ordinal).Count() == actual.Length
-            && expected.All(actual.Contains) && actual.All(name => expected.Contains(name) || optional.Contains(name)), "metadata has missing, duplicate or unknown fields; expected " + string.Join(",", expected));
+            && expected.All(actual.Contains) && actual.All(name => expected.Contains(name) || optional.Contains(name)),
+            "metadata has missing, duplicate or unknown fields; missing: " + string.Join(",", expected.Except(actual))
+            + "; unknown: " + string.Join(",", actual.Except(expected.Concat(optional)))
+            + "; duplicate: " + string.Join(",", actual.GroupBy(name => name, StringComparer.Ordinal).Where(group => group.Count() > 1).Select(group => group.Key)));
     }
     private static string Text(JsonElement value, string key)
     {
@@ -301,12 +381,24 @@ public partial class PrepareStoryPackage : Node
         return field.GetString()!;
     }
     private static int Int(JsonElement value, string key)
-    { Require(value.GetProperty(key).TryGetInt32(out int number), key + " requires an integer"); return number; }
+    {
+        var field = value.GetProperty(key);
+        Require(field.ValueKind == JsonValueKind.Number && field.TryGetInt32(out _), key + " requires an integer type");
+        return field.GetInt32();
+    }
+    private static int Word(JsonElement value, string key, int minimum = 0)
+    {
+        int number = Int(value, key);
+        Require(number >= minimum && number <= ushort.MaxValue, key + " requires WORD in " + minimum + "..65535");
+        return number;
+    }
     private static Vector2I Position(JsonElement value, string key)
     {
         var field = value.GetProperty(key);
         Require(field.ValueKind == JsonValueKind.Array && field.GetArrayLength() == 2, key + " requires two SHORT coordinates");
+        Require(field[0].ValueKind == JsonValueKind.Number, key + " requires SHORT x");
         Require(field[0].TryGetInt32(out int x) && x is >= short.MinValue and <= short.MaxValue, key + " requires SHORT x");
+        Require(field[1].ValueKind == JsonValueKind.Number, key + " requires SHORT y");
         Require(field[1].TryGetInt32(out int y) && y is >= short.MinValue and <= short.MaxValue, key + " requires SHORT y");
         return new(x, y);
     }

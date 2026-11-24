@@ -16,6 +16,11 @@ public sealed class TriggerEventCollection
     public TriggerCommandSource GetSource(int sourceAddress) => _commands.TryGetValue(sourceAddress, out var command)
         ? command.Source : throw new ArgumentOutOfRangeException(nameof(sourceAddress));
 
+    /// <summary>Immutable supplied modern command, including semantic fields and diagnostic source.
+    /// Content retention does not grant execution capability.</summary>
+    public JsonElement GetCommandContent(int sourceAddress) => _commands.TryGetValue(sourceAddress, out var command)
+        ? command.Content : throw new ArgumentOutOfRangeException(nameof(sourceAddress));
+
     public TriggerEventEntry GetEntry(string fileId, string id) => _entries.TryGetValue((fileId, id), out var entry)
         ? entry : throw new InvalidDataException($"{fileId}.json: missing entry '{id}'.");
 
@@ -91,8 +96,16 @@ public sealed class TriggerEventCollection
             command.NextAddress = actual;
             if (command.TargetReference is not null)
             {
-                int target = collection.Resolve(command.TargetReference, command.Position.FileId, command.Position.ToString());
-                if (command.Op == "randomJump") command.TargetAddress = target;
+                int target = collection.Resolve(command.TargetReference, command.Position.FileId,
+                    command.Op is "changeCash" or "itemShortageJump" ? $"{command.Position} {command.Op}.to"
+                        : command.Op == "removeItem" ? $"{command.Position} removeItem.shortageTarget" : command.Position.ToString());
+                if (command.Op is "randomJump" or "changeCash" or "itemShortageJump" or "removeItem") command.TargetAddress = target;
+            }
+            foreach (var reference in command.ContentReferences)
+            {
+                int target = collection.Resolve(reference.Reference, command.Position.FileId, $"{command.Position} {command.Op}.{reference.Field}");
+                if (reference.RequiresNonzeroAddress && target == 0)
+                    throw new InvalidDataException($"{command.Position} {command.Op}.{reference.Field}: address zero must use null, not a reference.");
             }
             if (command.Op == "startBattle")
             {
@@ -158,7 +171,8 @@ public sealed class TriggerEventCollection
             {
                 "raw" => [],
                 "end" => EventJson.Text(node, "mode") == "redirect" ? ["mode", "to", "limit"] : ["mode"],
-                "goto" => ["to", "limit"], "addItem" => ["itemId", "count"],
+                "goto" => ["to", "limit"], "call" => ["to", "eventObjectId"], "advanceEntry" => [],
+                "addItem" => ["itemId", "count"],
                 "randomJump" => ["rate", "to"],
                 "changeHp" => ["scope", "amount"], "changeMp" => ["scope", "amount"],
                 "boostStat" => ["field", "percent", "roleOperand"],
@@ -201,12 +215,12 @@ public sealed class TriggerEventCollection
                 "redraw" => ["delayUnits", "updateGestures"],
                 "fadeScene" => ["speed"],
                 "markFailed" => [],
-                _ => throw new InvalidDataException($"Unknown op '{op}'.")
+                _ => TriggerNamedContentProfile.Fields(op, opcode)
             };
             EventJson.Keys(node, context, ["label", "op", "next", "source", ..fields]);
             var position = new TriggerPosition(fileId, label, address);
             var retainedSource = new TriggerCommandSource(position, opcode, Array.AsReadOnly(operands.Select(value => value.GetInt32()).ToArray()));
-            var command = new TriggerCommand(retainedSource, op, EventJson.Reference(node, "next"));
+            var command = new TriggerCommand(retainedSource, op, EventJson.Reference(node, "next"), node.Clone());
             switch (op)
             {
                 case "raw":
@@ -232,11 +246,40 @@ public sealed class TriggerEventCollection
                     if (opcode != 3) throw new InvalidDataException("Invalid goto mapping.");
                     ReadTarget(node, command);
                     break;
+                case "call":
+                    // script.c 0x0004: call the target entry, then resume at this instruction's
+                    // successor. Operand1 is a literal caller WORD; word zero inherits the current
+                    // caller and word 0xFFFF resolves to the global last event object inside the
+                    // nested entry (0xFFFF is not the host start-entry spelling here).
+                    if (opcode != 4) throw new InvalidDataException("Invalid call mapping.");
+                    command.TargetReference = EventJson.Reference(node, "to")
+                        ?? throw new InvalidDataException("call.to must be a reference, including address zero.");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
+                    break;
+                case "advanceEntry":
+                    // script.c 0x0008 (trigger) / 0x00A7 (auto): replace the returned entry with the
+                    // next instruction. The two switch-only twins stay distinct so the trigger and
+                    // auto closures each reject the other one's opcode.
+                    if (opcode is not (0x0008 or 0x00A7)) throw new InvalidDataException("Invalid advanceEntry mapping.");
+                    break;
                 case "addItem":
                     // #116: the frozen 0x001F verb is addItem (#100); the v1 placeholder giveItem is rejected.
                     if (opcode != 31) throw new InvalidDataException("Invalid addItem mapping.");
-                    _ = EventJson.Word(node, "itemId");
+                    command.ObjectId = EventJson.Word(node, "itemId");
                     if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("addItem.count must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "count");
+                    break;
+                case "removeItem":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.ObjectId = EventJson.Word(node, "itemId");
+                    command.Amount = EventJson.Word(node, "count");
+                    command.TargetReference = EventJson.Reference(node, "shortageTarget");
+                    break;
+                case "itemShortageJump":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.ObjectId = EventJson.Word(node, "itemId");
+                    command.Amount = EventJson.Number(node, "count");
+                    command.TargetReference = EventJson.Reference(node, "to");
                     break;
                 case "randomJump":
                     // script.c:3301-3312: draw RandomLong(1,100); the jump is taken when draw >= rate.
@@ -329,6 +372,19 @@ public sealed class TriggerEventCollection
                     if (opcode != 0x25) throw new InvalidDataException("Invalid setTriggerEntry mapping.");
                     command.EventObjectId = EventJson.Word(node, "eventObjectId");
                     command.Value = EventJson.Word(node, "entry");
+                    break;
+                case "showBuyMenu":
+                    // script.c 0x0026: PAL_MakeScene + PAL_BuyMenu(operand0) — the store table row
+                    // lprgStore[wStoreNum].rgwItems (uigame.c PAL_BuyMenu over the authored stores).
+                    if (opcode != 0x26) throw new InvalidDataException("Invalid showBuyMenu mapping.");
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.StoreId = EventJson.Word(node, "storeId");
+                    break;
+                case "showSellMenu":
+                    // script.c 0x0027: PAL_MakeScene + PAL_SellMenu() — the sold items come from
+                    // the player's bag (kItemFlagSellable rows), not from a store row.
+                    if (opcode != 0x27) throw new InvalidDataException("Invalid showSellMenu mapping.");
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
                     break;
                 case "setBattlefield":
                     // script.c 0x004A: wNumBattleField = operand0. Retail @09FD sets 24.
@@ -469,9 +525,21 @@ public sealed class TriggerEventCollection
                     if (opcode != 0x73) throw new InvalidDataException("Invalid fadeScene mapping.");
                     command.FadeSpeed = EventJson.Word(node, "speed");
                     break;
+                case "changeCash":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.Amount = EventJson.Number(node, "amount");
+                    command.TargetReference = EventJson.Reference(node, "to");
+                    break;
+                case "halveCash":
+                    _ = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    break;
                 case "markFailed":
                     // script.c 0x0041: g_fScriptSuccess = FALSE.
                     if (opcode != 0x41) throw new InvalidDataException("Invalid markFailed mapping.");
+                    break;
+                default:
+                    command.IsContentOnly = true;
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
                     break;
             }
             return command;
@@ -492,11 +560,14 @@ public sealed record TriggerPosition(string FileId, string Label, int SourceAddr
 
 public sealed record TriggerCommandSource(TriggerPosition Position, int Opcode, IReadOnlyList<int> Operands);
 
-internal sealed class TriggerCommand(TriggerCommandSource source, string op, string? nextReference)
+internal sealed class TriggerCommand(TriggerCommandSource source, string op, string? nextReference, JsonElement content)
 {
+    internal JsonElement Content { get; } = content;
     internal TriggerCommandSource Source { get; } = source;
     internal TriggerPosition Position => Source.Position;
     internal string Op { get; } = op;
+    internal bool IsContentOnly { get; set; }
+    internal IReadOnlyList<TriggerContentReference> ContentReferences { get; set; } = [];
     internal string? NextReference { get; } = nextReference;
     internal int? NextAddress { get; set; }
     internal string? TargetReference { get; set; }
@@ -547,6 +618,8 @@ internal sealed class TriggerCommand(TriggerCommandSource source, string op, str
     internal int Role2 { get; set; }
     internal int RunTriggers { get; set; }
     internal int UpdateGestures { get; set; }
+    // #217 script.c 0x0026 showBuyMenu's store-table row word (lprgStore index).
+    internal int StoreId { get; set; }
 }
 
 internal static class EventJson

@@ -275,6 +275,27 @@ public class DynamicEventSessionTests
     }
 
     [Fact]
+    public void Content_only_named_auto_rejects_during_construction_before_world_updates()
+    {
+        var fixture = new DynamicFixture();
+        fixture.Commands[16] = JsonNode.Parse("""
+            {"label":"L0016","op":"call","to":"scene#L0001","eventObjectId":65535,"next":"L0017",
+             "source":{"index":16,"opcode":4,"operands":[1,0,0]}}
+            """);
+        var events = fixture.Load();
+        var rules = fixture.Rules();
+        var error = Assert.Throws<InvalidDataException>(() => new DynamicEventSession(rules, DynamicFixture.Leader(),
+            events, Language(), events.GetEntry("scene", "npc"), 1, 0, 0));
+        // Trigger calls are supported since #237, but the auto switch still rejects them.
+        Assert.Contains("unsupported auto-script command", error.Message);
+        Assert.Contains("auto", error.Message);
+        Assert.Contains("call", error.Message);
+        Assert.Contains("scene.json#L0016 @0010", error.Message);
+        Assert.Equal(352, rules.Objects.Single(o => o.Id == 6).X);
+        Assert.Equal(15, rules.Objects.Single(o => o.Id == 6).AutoEntry);
+    }
+
+    [Fact]
     public void Touch_objects_and_unsupported_auto_commands_reject_before_any_side_effect()
     {
         var fixture = new DynamicFixture();

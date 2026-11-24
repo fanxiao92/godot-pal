@@ -60,18 +60,17 @@ public partial class PalTriggerDialogue : Node
     private CheckedStoryProfile? _story;
     private TriggerBattleContent? _previewContent;
     private IBattleRandom? _previewRandom;
-    /// <summary>Host factory for the preflight executor; the real @09C3 mixes world verbs with
-    /// battles, so its preview needs its own throwaway world (never the production one).</summary>
-    internal Func<TriggerScriptSession>? PreviewSessionFactory { private get; set; }
+    /// <summary>Transfers a throwaway executor and its owned native lifetime to StartCall.
+    /// The factory must release its own allocations if construction fails before transfer.</summary>
+    internal Func<(TriggerScriptSession Session, IDisposable Lifetime)>? PreviewSessionFactory { get; set; }
 
     /// <summary>The active 256-color scene palette, set by the host before the first-battle
     /// initialization (the #53 host owns the scene, not a story profile).</summary>
     public Color[]? PaletteFromScene { private get; set; }
 
-    /// <summary>#53 first-battle host: the same production dialogue/battle executor over the
-    /// strict-loaded resources the verified closure bound.</summary>
-    /// <summary>The dynamic world the first-battle host bound (script verbs mutate it); null
-    /// keeps the plain session whose dynamic verbs reject precisely at execution.</summary>
+    /// <summary>World supplied before initialization by the first-battle or checked Story host.
+    /// A shared world also binds its live role owner to the trigger; null preserves the legacy
+    /// battle-only session whose dynamic verbs reject precisely at execution.</summary>
     public Pal.Core.DynamicEventWorld? FirstBattleWorld { internal get; set; }
 
     public void Initialize(PalDialogueDisplay display, FirstBattleRealResources resources, string language, IBattleRandom random,
@@ -95,7 +94,9 @@ public partial class PalTriggerDialogue : Node
         _display = display; display.UpdateCompleted += OnDisplayUpdated;
     }
 
-    public void Initialize(PalDialogueDisplay display, CheckedStoryProfile story, IBattleRandom random)
+    public void Initialize(PalDialogueDisplay display, CheckedStoryProfile story, IBattleRandom random,
+        BattleEquipmentState? equipmentState = null, PartyPoisonState? partyPoisons = null,
+        CashLiveState? cashLiveState = null, InventoryLiveState? inventoryLiveState = null)
     {
         ArgumentNullException.ThrowIfNull(display); ArgumentNullException.ThrowIfNull(story); ArgumentNullException.ThrowIfNull(random);
         if (_display is not null || display.Session is { Current.Phase: not DialogueDisplayPhase.Completed })
@@ -103,13 +104,35 @@ public partial class PalTriggerDialogue : Node
         _story = story; _events = story.Events; _language = story.Language; _font = story.Font;
         _prompts = story.Prompts.ToArray(); _palette = story.Palette.ToArray();
         foreach (var pair in story.Portraits) _portraits.Add(pair.Key, pair.Value);
-        Session = new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random);
+        // #214: the checked-story host binds its shared equipment/poison owners so the next
+        // trigger battle consumes the current gear (#187 ForSharedRoles) instead of the frozen
+        // author snapshot. Without the world host there is no shared role owner to bind, so the
+        // shared-owner request itself rejects instead of silently dropping the binding.
+        // #217: the shop host additionally binds the shared wallet and bag so script.c 0x0026/
+        // 0x0027 (and the already-supported owner-gated commands) run over the same owners.
+        Session = FirstBattleWorld is { } world
+            ? TriggerScriptSession.ForSharedRoles(story.Events, story.Language, story.BattleContent, random,
+                world.RoleLiveState ?? throw new InvalidOperationException("The shared story world must bind its live role owner before trigger initialization."),
+                world, equipmentState: equipmentState, partyPoisons: partyPoisons,
+                cashLiveState: cashLiveState, inventoryLiveState: inventoryLiveState)
+            : equipmentState is null && partyPoisons is null && cashLiveState is null && inventoryLiveState is null
+                ? new TriggerScriptSession(story.Events, story.Language, story.BattleContent, random)
+                : throw new InvalidOperationException("Shared equipment, poison, cash or inventory owners require the shared story world host.");
         _display = display; display.UpdateCompleted += OnDisplayUpdated;
     }
 
     public bool AcknowledgeBattle(Guid requestId, ClassicBattleLifecycleSession.CompletionReceipt? completion)
     {
         if (Session is null || !Session.AcknowledgeBattle(requestId, completion)) return false;
+        BindPendingDisplay();
+        return true;
+    }
+
+    /// <summary>Receipts the host's closed shop menu (script.c 0x0026/0x0027); the resumed call
+    /// may park on a new display, which is bound immediately.</summary>
+    public bool AcknowledgeShop(Guid requestId)
+    {
+        if (Session is null || !Session.AcknowledgeShop(requestId)) return false;
         BindPendingDisplay();
         return true;
     }
@@ -150,30 +173,64 @@ public partial class PalTriggerDialogue : Node
         TriggerEventEntry entry = _events.GetEntry(fileId, entryId);
         if (_story is not null)
         {
-            if (entry != _story.Entry) throw new InvalidDataException("Story adapter only supports its checked selected entry.");
-            if (sourceRequestId is not { } requestId)
+            // The story adapter runs its checked selected entry, the checked item on-use
+            // entries (#215 play.c PAL_GameUseItem) and the checked magic on-use/on-success
+            // entries (#216 uigame.c PAL_InGameMagicMenu); any other entry stays unsupported.
+            if (entry != _story.Entry
+                && !(_story.ItemUseEntries.TryGetValue(entry.OwnerId, out var itemEntry) && entry == itemEntry)
+                && !(_story.MagicUseEntries.TryGetValue(entry.OwnerId, out var magicEntries)
+                    && (entry == magicEntries.OnUse || entry == magicEntries.OnSuccess)))
+                throw new InvalidDataException("Story adapter only supports its checked selected entry.");
+            if (sourceRequestId is null)
                 throw new InvalidOperationException("A story trigger requires its source interaction request.");
-            Session.Start(fileId, entryId, caller, requestId);
-            BindPendingDisplay();
-            return;
         }
-        ValidateOwner(entry);
-        // Preflight every selected display and native resource before modifying the real call.
-        // This separate executor uses the same public rules; it never advances request.Display.
-        var preview = PreviewSessionFactory is { } factory
-            ? factory()
-            : _previewContent is { } content && _previewRandom is { } previewRandom
-                ? new TriggerScriptSession(_events, _language, content, previewRandom, Session.Context.Color)
-                : new TriggerScriptSession(_events, _language, Session.Context.Color);
-        preview.Start(fileId, entryId, caller);
-        while (preview.PendingDisplay is { } request)
-        {
-            ValidateRequest(request);
-            while (request.Display.Current.Phase != DialogueDisplayPhase.Completed) request.Display.Update(request.Display.Current.Phase == DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
-            preview.AcknowledgeDisplay(request.Id);
-        }
-        Session.Start(fileId, entryId, caller);
+        else ValidateOwner(entry);
+        var requirements = Session.GetCurrentEntryRequirements(fileId, entryId, caller);
+        var stagedPortraits = ValidateResources(entry, requirements);
+        if (sourceRequestId is { } origin) Session.Start(fileId, entryId, caller, origin);
+        else Session.Start(fileId, entryId, caller);
+        foreach (var pair in stagedPortraits) _portraits.Add(pair.Key, pair.Value);
         BindPendingDisplay();
+    }
+
+    private Dictionary<int, PalDialogueIndexedImage> ValidateResources(TriggerEventEntry entry, TriggerEntryRequirements requirements)
+    {
+        var stagedPortraits = new Dictionary<int, PalDialogueIndexedImage>();
+        foreach (int id in requirements.PortraitIds)
+        {
+            if (id == 0) continue;
+            if (!_portraits.TryGetValue(id, out var portrait))
+            {
+                if (_story is not null || _previewContent is not null)
+                    throw new InvalidDataException($"{entry.FileId}.json entry {entry.Id} @{entry.SourceAddress:X4}: missing bound dialogue portrait {id}.");
+                portrait = Load<PalDialogueIndexedImage>($"Portrait-{id:D3}.tres");
+                stagedPortraits.Add(id, portrait);
+            }
+            try { portrait.Validate(); }
+            catch (InvalidDataException error) { throw new InvalidDataException($"{portrait.ResourcePath}: {error.Message}", error); }
+        }
+        foreach (var display in requirements.DisplayBlocks)
+        {
+            try { PalDialogueDisplay.ValidateContent(display.Content, Session!.Context.Color, _font!, null, _prompts, _palette); }
+            catch (InvalidDataException error) { throw new InvalidDataException($"{display.MessageReferences[0].Position}: {error.Message}", error); }
+        }
+        return stagedPortraits;
+    }
+
+    private (TriggerScriptSession Session, IDisposable? Lifetime) CreatePreviewSession()
+    {
+        if (PreviewSessionFactory is { } factory) return factory();
+        // Unknown legacy IBattleRandom implementations remain borrowed. Only the concrete
+        // Godot adapter promises a fork; Main always supplies its owned world + RNG factory.
+        var fork = (_previewRandom as GodotBattleRandom)?.Fork();
+        try
+        {
+            var preview = _previewContent is { } content && (fork ?? _previewRandom) is { } random
+                ? new TriggerScriptSession(_events!, _language!, content, random, Session!.Context.Color)
+                : new TriggerScriptSession(_events!, _language!, Session!.Context.Color);
+            return (preview, fork);
+        }
+        catch { fork?.Dispose(); throw; }
     }
 
     private void ValidateOwner(TriggerEventEntry entry)
@@ -256,5 +313,7 @@ public partial class PalTriggerDialogue : Node
         if (_display is not null) _display.UpdateCompleted -= OnDisplayUpdated;
         _display = null; Session = null; _story = null; _events = null; _language = null;
         _font = null; _scene = null; _prompts = []; _portraits.Clear(); _palette = [];
+        FirstBattleWorld = null; PreviewSessionFactory = null;
+        _previewContent = null; _previewRandom = null; PaletteFromScene = null;
     }
 }

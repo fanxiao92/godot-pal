@@ -102,6 +102,32 @@ public sealed class ClassicBattleLifecycleSessionTests
     }
 
     [Fact]
+    public void Cancel_selection_reopens_the_member_through_the_lifecycle_view_and_closes_after_the_settlement()
+    {
+        // uibattle.c 1225-1252: the cancel revert is a real selection edit through the lifecycle's
+        // active combat owner; the finished lifecycle no longer accepts any selection input.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), .. PlayerStrike()]);
+        var session = new ClassicBattleLifecycleSession([Role(4), Role(2)],
+            [new(4, 100, 150, 40, 20, 100), new(2, 100, 150, 40, 20, 90)],
+            [new(7, 0, 43, 0, 0, 0, 1)],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = Growth(), [2] = Growth() }, random);
+        session.SelectAttack(0, 0);
+        Assert.Equal(1, session.Current.Combat.SelectingPlayerIndex);
+        Assert.True(session.CancelSelection(), "Classic cancel must reopen the newest committed member selection.");
+        Assert.Equal(0, session.Current.Combat.SelectingPlayerIndex);
+        Assert.Null(session.Current.Combat.Players[0].SelectedEnemySlot);
+        Assert.True(session.Current.IsInBattle);
+        session.SelectAttack(0, 0);
+        session.SelectAttack(1, 0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Combat.Phase);
+        Assert.Throws<InvalidOperationException>(() => session.CancelSelection());
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Won, session.Completion!.Outcome);
+        Assert.Throws<InvalidOperationException>(() => session.CancelSelection()); // finished lifecycle
+        random.AssertExhausted();
+    }
+
+    [Fact]
     public void Role_and_growth_inputs_and_old_views_are_deeply_isolated()
     {
         BattleRoleSnapshot role = Role();
@@ -166,6 +192,10 @@ public sealed class ClassicBattleLifecycleSessionTests
         yield return [role with { Mp = 51 }, growth];
         yield return [role with { Magics = [] }, growth];
         yield return [role with { Statuses = [0, 0, 0, 0, 0, 0, 0, 0, 1000] }, growth];
+        // #139: only a zero-HP member's puppet word may enter (it is cleared at the battle start);
+        // a living member's puppet and any other dead-entry status stay unsupported.
+        yield return [role with { Statuses = [0, 0, 0, 0, 7, 0, 0, 0, 0] }, growth];
+        yield return [role with { Hp = 0, Statuses = [3, 0, 0, 0, 0, 0, 0, 0, 0] }, growth];
         yield return [role with { Equipment = [1, 0, 0, 0, 0, 0] }, growth];
         yield return [role with { Attack = 65536 }, growth];
         foreach (string name in new[] { "health", "magic", "attack", "magicPower", "defense", "dexterity", "flee" })
@@ -246,6 +276,34 @@ public sealed class ClassicBattleLifecycleSessionTests
     }
 
     [Fact]
+    public void Zero_hp_member_enters_at_one_hp_with_puppet_cleared_and_counts_reset_at_start()
+    {
+        // battle.c 1568-1583 (PAL_StartBattle): a zero-HP party member revives at exactly 1 HP and
+        // loses its puppet status at the real battle start, together with the whole party's hidden
+        // count reset; the authored snapshots stay untouched and no random is consumed.
+        var dead = Role(4) with { Hp = 0, Statuses = [0, 0, 0, 0, 7, 0, 0, 0, 0] };
+        var survivor = Role(2);
+        var random = new ScriptedRandom([]);
+        var session = new ClassicBattleLifecycleSession([dead, survivor],
+            [new(4, 0, 150, 40, 20, 100), new(2, 100, 150, 40, 20, 90)],
+            [new(7, 0, 43, 0, 0, 0, 1)],
+            new Dictionary<int, ClassicBattleGrowthData> { [4] = Growth(), [2] = Growth() }, random);
+        Assert.True(session.Current.IsInBattle);
+        var roles = session.Current.Roles;
+        Assert.Equal(1, roles[4].Hp);
+        Assert.Equal(1, session.Current.Combat.Players[0].Hp);
+        Assert.All(roles[4].Statuses, value => Assert.Equal(0, value));
+        Assert.All(roles[2].Statuses, value => Assert.Equal(0, value));
+        Assert.All(roles[4].HiddenExperience.Values, xp => Assert.Equal(0, xp.Count));
+        Assert.All(roles[2].HiddenExperience.Values, xp => Assert.Equal(0, xp.Count));
+        Assert.Equal(17, roles[4].PrimaryExperience.Count); // battle.c 1581: primary counts survive
+        Assert.Equal(0, dead.Hp);
+        Assert.Equal(7, dead.Statuses[4]);
+        Assert.Equal(55, dead.HiddenExperience["attack"].Count);
+        random.AssertExhausted();
+    }
+
+    [Fact]
     public void Hp_zero_with_unsupported_combat_is_rejected_without_reviving_or_resetting_source()
     {
         var role = Role() with { Hp = 0 };
@@ -287,6 +345,91 @@ public sealed class ClassicBattleLifecycleSessionTests
         foreach (string name in new[] { "magic", "magicPower", "defense", "dexterity", "flee" })
             Assert.Equal(new BattleExperienceSnapshot(7, 3, 0), settled.HiddenExperience[name]);
         Assert.Equal(new[] { 9, 10 }, settled.Magics.Take(2).ToArray());
+        random.AssertExhausted();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void In_battle_death_stays_dead_with_correct_identity_at_every_party_position(int dyingIndex)
+    {
+        // #139: a member killed by a real enemy strike stays dead at every party position — never
+        // revived per action — and settles with its own RoleId, frozen counts and half recovery.
+        int[] roleIds = [4, 2, 5];
+        int firstLiving = Enumerable.Range(0, 3).First(i => i != dyingIndex);
+        int secondLiving = Enumerable.Range(0, 3).Last(i => i != dyingIndex);
+        var random = new ScriptedRandom([
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 2, dyingIndex), I(0, 16, 0), I(0, 2, 0), I(0, 1, 0), I(1, 10, 1),
+            .. PlayerStrike(), .. PlayerStrike(),
+            F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), F(.9f, 1.1f, 1),
+            I(0, 2, firstLiving), I(0, 16, 15),
+            .. PlayerStrike(), .. PlayerStrike()]);
+        var session = new ClassicBattleLifecycleSession(roleIds.Select(id => Role(id) with { Hp = 20 }).ToArray(),
+            roleIds.Select(id => new ClassicBattlePlayer(id, 20, 150, 40, 20, 100)).ToArray(),
+            [new(7, 0, 172, 100, 0, 500, 1)],
+            roleIds.ToDictionary(id => id, _ => Growth()), random);
+        int dyingRole = roleIds[dyingIndex];
+        session.SelectAttack(0, 0);
+        session.SelectAttack(1, 0);
+        session.SelectAttack(2, 0);
+        // The dex500 enemy strikes first and its clamped 20 hit kills the designated member.
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(0, session.Current.Combat.Players[dyingIndex].Hp);
+        Assert.Equal((ClassicBattleSide.Enemy, dyingRole, dyingIndex, 20, false),
+            (session.Current.Combat.LastAction!.Attacker, session.Current.Combat.LastAction.TargetId,
+                session.Current.Combat.LastAction.TargetIndex, session.Current.Combat.LastAction.Damage,
+                session.Current.Combat.LastAction.Evaded));
+        // The party entries keep their queue positions (all were alive at the same halved speed
+        // when the round was built): each living member answers at its own party index while the
+        // dead member's own entry is a pass that draws nothing, presents nothing and never
+        // revives it to 1 HP.
+        var lastPresented = session.Current.Combat.LastAction;
+        foreach (int index in new[] { 0, 1, 2 })
+        {
+            Assert.True(session.ResolveNextAction());
+            var action = session.Current.Combat.LastAction;
+            if (index == dyingIndex)
+            {
+                Assert.Same(lastPresented, action);
+                Assert.Equal(0, session.Current.Combat.Players[dyingIndex].Hp);
+            }
+            else
+            {
+                Assert.Equal((index, roleIds[index], 43), (action!.ActorIndex,
+                    session.Current.Combat.Players[action.ActorIndex].RoleId, action.Damage));
+                lastPresented = action;
+            }
+        }
+        // The next round's selection skips the dead member; it cannot become the selecting player.
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Combat.Phase);
+        Assert.Equal(firstLiving, session.Current.Combat.SelectingPlayerIndex);
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.SelectAttack(dyingIndex, 0));
+        session.SelectAttack(firstLiving, 0);
+        session.SelectAttack(secondLiving, 0);
+        // The enemy's second strike is evaded; the survivors finish the 86hp remainder and the
+        // dead member keeps 0 HP through every later action until the Won half recovery.
+        Assert.True(session.ResolveNextAction());
+        Assert.True(session.Current.Combat.LastAction!.Evaded);
+        Assert.Equal(0, session.Current.Combat.Players[dyingIndex].Hp);
+        Assert.True(session.ResolveNextAction());
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Won, session.Completion!.Outcome);
+        Assert.True(session.OwnsCompletion(session.Completion));
+        var settled = session.Current.Roles;
+        Assert.Equal(75, settled[dyingRole].Hp); // 0 + (150-0)/2: recovery, not a per-action revive
+        Assert.Equal(35, settled[dyingRole].Mp);
+        Assert.Equal(0, settled[dyingRole].HiddenExperience["attack"].Count);
+        Assert.Equal(0, settled[dyingRole].HiddenExperience["health"].Count);
+        foreach (int living in new[] { firstLiving, secondLiving })
+        {
+            Assert.Equal(85, settled[roleIds[living]].Hp);
+            Assert.Equal(35, settled[roleIds[living]].Mp);
+            Assert.Equal(2, settled[roleIds[living]].HiddenExperience["attack"].Count);
+            Assert.Equal(4, settled[roleIds[living]].HiddenExperience["health"].Count);
+        }
+        Assert.All(settled.Values, role => Assert.All(role.Statuses, value => Assert.Equal(0, value)));
         random.AssertExhausted();
     }
 
@@ -512,6 +655,57 @@ public sealed class ClassicBattleLifecycleSessionTests
         random.AssertExhausted();
     }
 
+    [Fact]
+    public void Defend_count_lands_in_the_hidden_defense_track_through_the_lifecycle()
+    {
+        // fight.c 4113-4115: the performed defend adds the hidden defense experience count; the
+        // lifecycle syncs it into the role's defense track exactly like attack/health/flee,
+        // and the round end clears the runtime flag with the next selection.
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 0, 0), I(0, 16, 10)]);
+        var session = Start(Role(), random);
+        session.SelectDefend(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Combat.Phase);
+        session.ResolveNextAction();
+        Assert.Equal(2, session.Current.Role.HiddenExperience["defense"].Count);
+        Assert.Equal(0, session.Current.Role.HiddenExperience["attack"].Count);
+        Assert.True(session.Current.Combat.Players[0].IsDefending);
+        session.ResolveNextAction(); // the evaded enemy strike ends the round
+        Assert.Equal(ClassicBattlePhase.Selecting, session.Current.Combat.Phase);
+        Assert.Equal(2, session.Current.Role.HiddenExperience["defense"].Count);
+        Assert.False(session.Current.Combat.Players[0].IsDefending);
+        random.AssertExhausted();
+    }
+
+    [Fact]
+    public void Escaped_battle_settles_with_cleanup_only_no_rewards_growth_or_recovery()
+    {
+        // battle.c 1804-1830: kBattleResultFleed skips PAL_BattleWon entirely (no cash, growth,
+        // half recovery or enemy post-victory scripts) but still runs the common cleanup and
+        // releases the combat owner with a terminal completion receipt.
+        var role = Role();
+        var random = new ScriptedRandom([F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(0, 24, 24)]);
+        var session = new ClassicBattleLifecycleSession(role,
+            new(1, role.Hp, role.MaxHp, 40, 20, 100) { FleeRate = 25 },
+            new(7, 0, 43, 0, 0, 0, 1) { Experience = 120, Cash = 250 }, Growth(), random);
+        session.SelectFlee(0);
+        Assert.True(session.ResolveNextAction());
+        Assert.Equal(ClassicBattlePhase.Escaped, session.Completion!.Outcome);
+        Assert.True(session.OwnsCompletion(session.Completion));
+        Assert.Null(session.VictorySettlement);
+        Assert.Null(session.PendingBattleEndScript);
+        Assert.False(session.Current.IsInBattle);
+        // No victory half-recovery or reward grant: the settled role keeps its battle HP/MP and
+        // level, and a successful escape adds no hidden flee count (fight.c 4171 is failure-only).
+        Assert.Equal(100, session.Current.Role.Hp);
+        Assert.Equal(20, session.Current.Role.Mp);
+        Assert.Equal(2, session.Current.Role.Level);
+        Assert.Equal(0, session.Current.Role.HiddenExperience["flee"].Count);
+        Assert.Equal(0, session.Current.Role.HiddenExperience["attack"].Count);
+        Assert.All(session.Current.Role.Statuses, value => Assert.Equal(0, value));
+        Assert.Throws<InvalidOperationException>(() => session.SelectFlee(0));
+        random.AssertExhausted();
+    }
+
     private static BattleRoleSnapshot Role(int roleId = 1) => new(roleId, 2, 100, 150, 20, 50, new(5, 2, 17),
         new Dictionary<string, BattleExperienceSnapshot> {
             ["health"] = new(7, 3, 55), ["magic"] = new(7, 3, 55), ["attack"] = new(7, 3, 55),
@@ -527,6 +721,8 @@ public sealed class ClassicBattleLifecycleSessionTests
             enemies, new Dictionary<int, ClassicBattleGrowthData> { [role.RoleId] = growth ?? Growth() }, random);
     private static ScriptedRandom WinningRandom() => new(WinningDraws());
     private static Draw[] WinningDraws() => [F(.9f, 1.1f, 1), F(.9f, 1.1f, 1), I(1, 2, 1), I(0, 5, 1), F(1, 1.125f, 1), I(2, 3, 2)];
+    // One surviving player strike: +1 damage, no critical, scale 1, health count +2 (43 total).
+    private static Draw[] PlayerStrike() => [I(1, 2, 1), I(0, 5, 1), F(1, 1.125f, 1), I(2, 3, 2)];
     private sealed record Draw(bool Floating, float From, float To, float Value);
     private static Draw F(float from, float to, float value) => new(true, from, to, value);
     private static Draw I(int from, int to, int value) => new(false, from, to, value);

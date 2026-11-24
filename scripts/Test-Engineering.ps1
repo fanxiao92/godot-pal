@@ -54,7 +54,7 @@ function Invoke-Step([string]$Name, [string]$Script, [string[]]$Arguments, [stri
     # are positional values, unlike native executable argv. This list is fixed above.
     $bindings = [Collections.Generic.List[string]]::new()
     for ($i = 0; $i -lt $Arguments.Count; $i += 2) {
-        if ($i + 1 -ge $Arguments.Count -or $Arguments[$i] -notmatch '^-(RepositoryRoot|EvidenceDirectory|InputDirectory)$') { Fail 'arguments' 'Unexpected engineering step parameter.' }
+        if ($i + 1 -ge $Arguments.Count -or $Arguments[$i] -notmatch '^-(RepositoryRoot|EvidenceDirectory|InputDirectory|Mode)$') { Fail 'arguments' 'Unexpected engineering step parameter.' }
         $bindings.Add((Quote $Arguments[$i].Substring(1)) + '=' + (Quote $Arguments[$i + 1]))
     }
     $call = '& ' + (Quote $file) + ' @childParameters'
@@ -159,8 +159,11 @@ try {
     if ($Mode -eq 'Offline') {
         Invoke-Step 'syntax-regression' 'tests/Test-PowerShellSyntax.Tests.ps1' @('-EvidenceDirectory', (Join-Path $out 'syntax-cases')) @('PASS syntax regression: [1-9][0-9]* public invocations')
         Invoke-Step 'engineering-regression' 'tests/Test-Engineering.Tests.ps1' @('-EvidenceDirectory', (Join-Path $out 'engineering-cases')) @('PASS engineering regression: [1-9][0-9]* public invocations')
+        Invoke-Step 'agent-evidence-regression' 'tests/AgentEvidence.Tests.ps1' @('-EvidenceDirectory', (Join-Path $out 'agent-evidence-cases')) @('PASS agent evidence regression: [1-9][0-9]* public invocations;')
+        Invoke-Step 'agent-workflow-regression' 'tests/AgentWorkflow.Tests.ps1' @('-EvidenceDirectory', (Join-Path $out 'agent-workflow-cases')) @('PASS agent workflow regression: [1-9][0-9]* public invocations;')
+        Invoke-Step 'ci-workflow-regression' 'tests/Test-CiWorkflow.Tests.ps1' @('-Mode', 'Offline', '-EvidenceDirectory', (Join-Path $out 'ci-workflow-cases')) @('PASS offline CI workflow: [1-9][0-9]* controls;')
         Invoke-Step 'unit-boundary-regression' 'tests/UnitBoundary.Tests.ps1' @() @('PASS UnitBoundary public-command regression: [1-9][0-9]* cases; fixture cleaned\.')
-        Invoke-Step 'game-batches-regression' 'tests/Pal.Game.Tests/GameBatches.Tests.ps1' @() @('PASS: [1-9][0-9]* offline batch metadata groups;')
+        Invoke-Step 'game-batches-regression' 'tests/Pal.Game.Tests/GameBatches.Tests.ps1' @('-EvidenceDirectory', (Join-Path $out 'game-batches-cases')) @('PASS: [1-9][0-9]* offline batch metadata groups;')
         Invoke-Step 'process-snapshot-regression' 'tests/Pal.Game.Tests/ProcessSnapshot.Tests.ps1' @() @('PASS: ProcessSnapshot fake regression; real CIM invocations = 0\.')
         Invoke-Step 'gdunit-packages-regression' 'tests/Pal.Game.Tests/GdUnitPackages.Tests.ps1' @('-InputDirectory', $bundle) @('PASS: [1-9][0-9]* offline GdUnit package regression cases;')
         Invoke-Step 'cost-report-regression' 'tests/Pal.Game.Tests/TestCostReport.Tests.ps1' @('-EvidenceDirectory', (Join-Path $out 'cost-cases')) @('PASS: [1-9][0-9]* offline cost report groups; report invocations=[1-9][0-9]*;')

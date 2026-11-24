@@ -23,6 +23,11 @@ public sealed class GameSceneConfiguration
     /// DynamicEventSession instead of the battle story flow.</summary>
     internal string? DynamicProfile { get; private init; }
     internal ulong? BattleSeed { get; private init; }
+    /// <summary>#224: the controlled user:// namespace the formal save chain writes its five
+    /// manual slots into (default <c>user://saves</c>). A host-level directory selection like
+    /// the battle seed — save content still never chooses a path; the slot number alone picks
+    /// the file inside this one app-controlled namespace (#148 Story 53/Decision 21).</summary>
+    internal string SaveDirectory { get; private init; } = "user://saves";
     internal string Root { get; }
     internal string Profile { get; }
     internal bool StaticAcceptance { get; }
@@ -53,7 +58,7 @@ public sealed class GameSceneConfiguration
         }
         if (arguments.Any(a => a.StartsWith("--story-", StringComparison.Ordinal) || a.StartsWith("--battle-", StringComparison.Ordinal)))
         {
-            string? story = null, visual = null, language = null, seedText = null;
+            string? story = null, visual = null, language = null, seedText = null, saveDirectory = null;
             for (int i = 0; i < arguments.Length; i += 2)
             {
                 if (i + 1 == arguments.Length || arguments[i + 1].StartsWith("--", StringComparison.Ordinal))
@@ -64,12 +69,15 @@ public sealed class GameSceneConfiguration
                     case "--battle-visual-profile" when visual is null: visual = arguments[i + 1]; break;
                     case "--story-language" when language is null: language = arguments[i + 1]; break;
                     case "--battle-seed" when seedText is null: seedText = arguments[i + 1]; break;
+                    case "--save-directory" when saveDirectory is null: saveDirectory = arguments[i + 1]; break;
                     default: throw new InvalidDataException("Story: duplicate, mixed, or unknown " + arguments[i]);
                 }
             }
             if (story is null || visual is null) throw new InvalidDataException("Story requires both --story-profile and --battle-visual-profile");
             NativeExplorationProfile.ValidateUri(story); NativeExplorationProfile.ValidateUri(visual);
             if (language is not (null or "zh-Hans" or "en")) throw new InvalidDataException("Story language must be zh-Hans or en");
+            if (saveDirectory is not null && !PlayerSaveStorage.IsValidNamespace(saveDirectory))
+                throw new InvalidDataException("Save directory must be a controlled relative user:// namespace");
             ulong? seed = null;
             if (seedText is not null)
             {
@@ -77,7 +85,8 @@ public sealed class GameSceneConfiguration
                     throw new InvalidDataException("Battle seed must be an unsigned decimal ulong");
                 seed = value;
             }
-            return new("", "", false, null, null, language ?? "zh-Hans") { StoryProfile = story, VisualProfile = visual, BattleSeed = seed };
+            return new("", "", false, null, null, language ?? "zh-Hans")
+            { StoryProfile = story, VisualProfile = visual, BattleSeed = seed, SaveDirectory = saveDirectory ?? "user://saves" };
         }
         var selected = NativeSceneLoader.Arguments(arguments);
         return new(selected.Root, selected.Profile, selected.StaticAcceptance, selected.DialogueProfile, selected.BattleProfile, selected.Language);

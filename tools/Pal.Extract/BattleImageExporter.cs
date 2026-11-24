@@ -3,7 +3,7 @@ using static Pal.Extract.ExportSupport;
 
 namespace Pal.Extract;
 
-// export-battle-images (#92 abc, #93 ball, #94 f, #95 fbp): decodes every chunk of
+// export-battle-images (#92 abc, #93 ball, #94 f, #95 fbp, #146 fire): decodes every chunk of
 // the selected battle image MKF into a complete image package: index.json manifest,
 // one sprite document per chunk with authoritative indices/alpha planes, and PNG
 // frames colorized with pat.mkf chunk 0 day colors. abc and f chunks are the Windows
@@ -12,7 +12,9 @@ namespace Pal.Extract;
 // wSummonEffect+10); ball chunks are the raw item bitmaps itemmenu.c reads
 // un-decompressed through item.wBitmap; fbp chunks are the YJ2 battle backgrounds
 // battle.c PAL_LoadBattleBackground reads by wNumBattleField and PAL_FBPBlitToSurface
-// blits as one raw 320x200 screen.
+// blits as one raw 320x200 screen. fire chunks are Windows YJ2 magic-effect sprites:
+// fight.c's player defensive/offensive and enemy magic animations decompress the
+// MAGIC.wEffect chunk from fpFIRE before PAL_SpriteGetNumFrames/GetFrame + RLE.
 internal static class BattleImageExporter
 {
     private const int MaximumChunkBytes = 8 * 1024 * 1024;
@@ -20,7 +22,7 @@ internal static class BattleImageExporter
     private const int MaximumAggregateDecodedBytes = 256 * 1024 * 1024;
     private const int MaximumAggregatePixels = 128 * 1024 * 1024;
 
-    // One strategy record per battle image archive (#92 abc, #93 ball, #94 f, #95 fbp):
+    // One strategy record per battle image archive (#92 abc, #93 ball, #94 f, #95 fbp, #146 fire):
     // the required archives plus the decode/describe paths, so registering an archive
     // is one record here instead of parallel switches in Export plus a vocabulary
     // check in Program.cs. f.mkf is read with PAL_MKFDecompressChunk exactly like
@@ -53,6 +55,10 @@ internal static class BattleImageExporter
             (raw, remainingDecoded, _) => FbpImageDecoder.Decode(raw, Math.Min(remainingDecoded, MaximumDecodedChunkBytes)),
             (index, raw, sprite) => FbpImageDecoder.DescribeChunk(index, raw, sprite),
             (chunkIndex, archiveName, sprite) => FbpImageDecoder.DescribeSprite(chunkIndex, archiveName, sprite)),
+        ["fire"] = new(["fire.mkf", "pat.mkf"],
+            (raw, remainingDecoded, remainingPixels) => BattleImageDecoder.Decode(raw, Math.Min(remainingDecoded, MaximumDecodedChunkBytes), remainingPixels),
+            (index, raw, sprite) => BattleImageDecoder.DescribeChunk(index, raw, sprite),
+            (chunkIndex, archiveName, sprite) => BattleImageDecoder.DescribeSprite(chunkIndex, archiveName, sprite)),
     };
 
     internal static bool IsKnownArchive(string archive) => Archives.ContainsKey(archive);

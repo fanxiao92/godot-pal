@@ -59,6 +59,41 @@ public class NativeStoryProfileTests
     }
 
     [TestCase]
+    public void ProjectedNativeBattleContentRequiresAndMatchesTheAuthoredStoryExpectation()
+    {
+        // #235: a projected native battle source carries receipt identity; the Story expectation
+        // is the only binding and must be complete. A legacy non-projected numeric resource with
+        // a dangling expectation is equally invalid. The Story never opens the receipt bytes.
+        using var fixture = new NativeStoryProfileFixture();
+        var source = fixture.ProjectBattleContent();
+        fixture.Profile.BattleProjectionReceiptSha256 = source.ReceiptSha256;
+        fixture.Profile.BattleProjectionReceiptByteLength = source.ReceiptByteLength;
+        fixture.SaveProfile();
+        AssertThat(NativeStoryProfile.Load(fixture.Uri, "en").BattleContent.Teams[18].Id).IsEqual(1);
+
+        void Reject(string sha256, long byteLength, string expected)
+        {
+            fixture.Profile.BattleProjectionReceiptSha256 = sha256;
+            fixture.Profile.BattleProjectionReceiptByteLength = byteLength;
+            fixture.SaveProfile();
+            AssertThat(Failure(() => NativeStoryProfile.Load(fixture.Uri)).Contains(expected)).IsTrue();
+        }
+        Reject("", -1, "projected native battle content requires a story battleProjection receipt expectation");
+        Reject(source.ReceiptSha256, -1, "story battleProjection requires");
+        Reject("", source.ReceiptByteLength, "story battleProjection requires");
+        Reject("A" + source.ReceiptSha256[1..], source.ReceiptByteLength, "story battleProjection requires");
+        Reject(new string('d', 64), source.ReceiptByteLength, "does not match native battle content source");
+        Reject(source.ReceiptSha256, source.ReceiptByteLength + 1, "does not match native battle content source");
+
+        using var legacy = new NativeStoryProfileFixture();
+        legacy.Profile.BattleProjectionReceiptSha256 = source.ReceiptSha256;
+        legacy.Profile.BattleProjectionReceiptByteLength = source.ReceiptByteLength;
+        legacy.SaveProfile();
+        AssertThat(Failure(() => NativeStoryProfile.Load(legacy.Uri))
+            .Contains("requires projected native battle content")).IsTrue();
+    }
+
+    [TestCase]
     public void SelectedPartyClosureBindsTwoPlayersAndEnemySlots()
     {
         using var fixture = new NativeStoryProfileFixture(party: true);
@@ -224,8 +259,8 @@ public class NativeStoryProfileTests
         string expected;
         switch (fault)
         {
-            case "missing-map": fixture.Profile.Portraits.Remove(10); fixture.Profile.ResourceSha256.Remove(fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected entry"; break;
-            case "extra-map": fixture.Profile.Portraits.Add(11, fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected entry"; break;
+            case "missing-map": fixture.Profile.Portraits.Remove(10); fixture.Profile.ResourceSha256.Remove(fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected, item-use and magic entries"; break;
+            case "extra-map": fixture.Profile.Portraits.Add(11, fixture.Root + "/Portrait-10.tres"); expected = "exactly the selected, item-use and magic entries"; break;
             case "zero-map": fixture.Profile.Portraits.Add(0, fixture.Root + "/Portrait-10.tres"); expected = "nonzero WORD"; break;
             case "portrait": fixture.Save(new PalDialogueIndexedImage { SourceIdentity = "bad", Width = 2, Height = 1, PaletteIndices = [1], Alpha = [255] }, "Portrait-10.tres"); fixture.RefreshHashes(); expected = "Portrait-10.tres"; break;
             case "prompt": fixture.Save(new PalDialogueIndexedImage { Width = 1, Height = 1, PaletteIndices = [1], Alpha = [255] }, "Prompt-02.tres"); fixture.RefreshHashes(); expected = "Prompt-02.tres"; break;
@@ -335,6 +370,196 @@ public class NativeStoryProfileTests
         AssertThat(loaded.BattleContent.EnemyTeams[19].Count).IsEqual(2);
         AssertThat(loaded.BattleContent.EnemyTeams[19][0].Cash).IsEqual(1);
         AssertThat(loaded.Requirements.BattleTeamIds.SequenceEqual(new[] { 18 })).IsTrue();
+    }
+
+    [TestCase("clean")]
+    [TestCase("no-entry")]
+    [TestCase("duplicate-entry")]
+    [TestCase("disabled-entry")]
+    [TestCase("glyph")]
+    [TestCase("missing-portrait")]
+    public void UseMenuObjectsResolveOneEnabledItemEntryAndJoinBothLanguageBoundaries(string fault)
+    {
+        // #215: the native story load's item-use boundary. Every authored use-menu object must
+        // resolve exactly one enabled item.wScriptOnUse trigger entry, and those item entries
+        // join the both-language display-glyph loop and the exact portrait coverage union — the
+        // unselected language must never lose glyph or portrait coverage silently.
+        using var fixture = new NativeStoryProfileFixture(useMenu: true);
+        const string useEntry =
+            "{\"id\":\"use300\",\"owner\":{\"type\":\"object\",\"id\":300},\"slot\":\"item.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}";
+        if (fault == "missing-portrait")
+        {
+            fixture.Profile.Portraits.Remove(11);
+            fixture.Profile.ResourceSha256.Remove(fixture.Root + "/Portrait-11.tres");
+            fixture.SaveProfile();
+        }
+        else if (fault != "clean")
+        {
+            switch (fault)
+            {
+                case "no-entry":
+                    fixture.Edit("shared.json", "," + useEntry, "");
+                    break;
+                case "duplicate-entry":
+                    fixture.Edit("shared.json", useEntry, useEntry + ","
+                        + "{\"id\":\"use300b\",\"owner\":{\"type\":\"object\",\"id\":300},\"slot\":\"item.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}");
+                    break;
+                case "disabled-entry":
+                    fixture.Edit("shared.json", "\"target\":\"L000D\",\"sourceAddress\":13", "\"target\":null,\"sourceAddress\":0");
+                    break;
+                default:
+                    // Only the item entry's EN line uses 'E'; zh stays the selected language.
+                    fixture.Font.Glyphs.Remove(fixture.Font.Glyphs.Single(glyph => glyph.Codepoint == 69));
+                    fixture.Save(fixture.Font, "Font.tres");
+                    break;
+            }
+            fixture.RefreshHashes();
+            fixture.SaveProfile();
+        }
+        if (fault == "clean")
+        {
+            var profile = NativeStoryProfile.Load(fixture.Uri, "zh-Hans");
+            AssertThat(profile.ItemUseEntries.Keys.Order().SequenceEqual(new[] { 300 })).IsTrue();
+            AssertThat(profile.ItemUseEntries[300].SourceAddress).IsEqual(13);
+            AssertThat(profile.Portraits.Keys.Order().SequenceEqual(new[] { 7, 8, 9, 10, 11 })).IsTrue();
+            return;
+        }
+        string expected = fault is "no-entry" or "duplicate-entry" or "disabled-entry"
+            ? "requires exactly one enabled item.wScriptOnUse"
+            : fault == "glyph" ? "U+0045" : "exactly the selected, item-use and magic entries";
+        string error = Failure(() => NativeStoryProfile.Load(fixture.Uri, "zh-Hans"));
+        AssertThat(error.Contains(expected)).IsTrue();
+        if (fault == "glyph") AssertThat(error.Contains("Font.tres") && error.Contains("json#L")).IsTrue();
+    }
+
+    [TestCase("clean")]
+    [TestCase("sprite-id")]
+    [TestCase("source-archive")]
+    [TestCase("source-chunk")]
+    [TestCase("extra-binding")]
+    public void ItemBitmapsCarryTheBoundBallChunkIdentityOrRejectAtTheStoryBoundary(string fault)
+    {
+        // #218: the native story load's BALL item-bitmap boundary. A use-menu binding with a
+        // nonzero bitmap word must resolve exactly one prepared sprite whose WORD identity IS
+        // that binding's ball.mkf chunk (itemmenu.c/uigame.c read rgObject item.wBitmap from
+        // fpBALL for the selected row), and the bindings must cover exactly the nonzero-bitmap
+        // objects: a wrong SpriteId, a wrong Source archive/chunk or an extra entry rejects —
+        // never a placeholder picture and never a silent skip.
+        using var fixture = new NativeStoryProfileFixture(useMenu: true);
+        // The plain use-menu binding gains the nonzero BALL chunk word 37 (object 300); the
+        // authored sprite and metadata binding are test-owned literals, like AuthoredStoryFixture.
+        fixture.Numeric.UseMenuBitmaps = [37];
+        fixture.Save(fixture.Numeric, "Numeric.tres");
+        fixture.RefreshHashes();
+        PalSprite ItemBitmap(int spriteId, int chunk, string archive)
+        {
+            var sprite = new PalSprite { SpriteId = spriteId, FrameCount = 1, DecodedByteLength = 10,
+                Source = new Godot.Collections.Dictionary { ["archive"] = archive, ["chunk"] = chunk,
+                    ["encoding"] = "uncompressed PAL RLE bitmap",
+                    ["frameLayout"] = "single RLE bitmap: optional 0x00000002 header, WORD width/height, RLE runs" } };
+            sprite.Frames.Add(new PalFrame { Index = 0, SourceOffset = 6, Width = 2, Height = 2,
+                Indices = [37, 38, 39, 40], Alpha = [255, 255, 255, 255] });
+            return sprite;
+        }
+        void Bind(int objectId, string name, PalSprite sprite)
+        {
+            fixture.Save(sprite, name);
+            fixture.Profile.ItemBitmaps.Add(objectId, fixture.Root + "/" + name);
+            fixture.Profile.ResourceSha256.Add(fixture.Root + "/" + name,
+                Godot.FileAccess.GetSha256(fixture.Root + "/" + name));
+        }
+        Bind(300, "ItemBitmap-37.tres", fault switch
+        {
+            "sprite-id" => ItemBitmap(99, 37, "ball.mkf"),
+            "source-archive" => ItemBitmap(37, 37, "fire.mkf"),
+            "source-chunk" => ItemBitmap(37, 41, "ball.mkf"),
+            _ => ItemBitmap(37, 37, "ball.mkf"),
+        });
+        if (fault == "extra-binding")
+            // Object 302 keeps the reference's empty-chunk word 0 (no binding required); a
+            // prepared-but-unbound entry must not survive the exact-coverage union either.
+            Bind(302, "ItemBitmap-extra.tres", ItemBitmap(9, 9, "ball.mkf"));
+        fixture.SaveProfile();
+        if (fault == "clean")
+        {
+            var profile = NativeStoryProfile.Load(fixture.Uri, "zh-Hans");
+            AssertThat(profile.ItemBitmaps.Keys.Order().SequenceEqual(new[] { 300 })).IsTrue();
+            var bitmap = profile.ItemBitmaps[300];
+            AssertThat((bitmap.SpriteId, bitmap.FrameCount, bitmap.Frames[0].Index)).IsEqual((37, 1, 0));
+            AssertThat((bitmap.Source["archive"].AsString(), bitmap.Source["chunk"].AsInt32())).IsEqual(("ball.mkf", 37));
+            return;
+        }
+        string expected = fault == "sprite-id" ? "item bitmap must be the single frame of BALL chunk 37"
+            : fault == "extra-binding" ? "ItemBitmaps must cover exactly the use-menu objects with a nonzero bitmap word"
+            : "item bitmap Source must declare the ball.mkf chunk 37";
+        AssertThat(Failure(() => NativeStoryProfile.Load(fixture.Uri, "zh-Hans")).Contains(expected)).IsTrue();
+    }
+
+    [TestCase("clean")]
+    [TestCase("no-on-use-entry")]
+    [TestCase("no-on-success-entry")]
+    [TestCase("duplicate-entry")]
+    [TestCase("disabled-entry")]
+    [TestCase("glyph")]
+    public void MagicMenuObjectsResolveBothEntriesAndJoinBothLanguageBoundaries(string fault)
+    {
+        // #216: the native story load's magic-cast boundary. Every authored magic-menu object
+        // must resolve exactly one enabled magic.wScriptOnUse AND magic.wScriptOnSuccess
+        // trigger entry, and those entries join the both-language display-glyph loop and the
+        // exact portrait coverage union — the unselected language must never lose coverage.
+        using var fixture = new NativeStoryProfileFixture(useMagic: true);
+        const string onUseEntry =
+            "{\"id\":\"use310OnUse\",\"owner\":{\"type\":\"object\",\"id\":310},\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}";
+        const string onSuccessEntry =
+            "{\"id\":\"use310OnSuccess\",\"owner\":{\"type\":\"object\",\"id\":310},\"slot\":\"magic.wScriptOnSuccess\",\"kind\":\"trigger\",\"target\":\"L0010\",\"sourceAddress\":16}";
+        if (fault == "glyph")
+        {
+            // Only the magic entries' EN line uses 'E'; zh stays the selected language.
+            fixture.Font.Glyphs.Remove(fixture.Font.Glyphs.Single(glyph => glyph.Codepoint == 69));
+            fixture.Save(fixture.Font, "Font.tres");
+            fixture.RefreshHashes();
+            fixture.SaveProfile();
+        }
+        else if (fault != "clean")
+        {
+            switch (fault)
+            {
+                case "no-on-use-entry":
+                    fixture.Edit("shared.json", "," + onUseEntry, "");
+                    break;
+                case "no-on-success-entry":
+                    fixture.Edit("shared.json", "," + onSuccessEntry, "");
+                    break;
+                case "duplicate-entry":
+                    fixture.Edit("shared.json", onUseEntry, onUseEntry + ","
+                        + "{\"id\":\"use310OnUseB\",\"owner\":{\"type\":\"object\",\"id\":310},\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}");
+                    break;
+                default:
+                    fixture.Edit("shared.json", "\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}",
+                        "\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":null,\"sourceAddress\":0}");
+                    break;
+            }
+            fixture.RefreshHashes();
+            fixture.SaveProfile();
+        }
+        if (fault == "clean")
+        {
+            var profile = NativeStoryProfile.Load(fixture.Uri, "zh-Hans");
+            AssertThat(profile.MagicUseEntries.Keys.Order().SequenceEqual(new[] { 310 })).IsTrue();
+            AssertThat((profile.MagicUseEntries[310].OnUse.Id, profile.MagicUseEntries[310].OnUse.SourceAddress)).IsEqual(("use310OnUse", 13));
+            AssertThat((profile.MagicUseEntries[310].OnSuccess.Id, profile.MagicUseEntries[310].OnSuccess.SourceAddress)).IsEqual(("use310OnSuccess", 16));
+            AssertThat(profile.BattleContent.MagicMenu.SequenceEqual(new[]
+                { new BattleMagicMenuBinding(310, 5, false, true) })).IsTrue();
+            AssertThat(profile.Portraits.Keys.Order().SequenceEqual(new[] { 7, 8, 9, 10, 11 })).IsTrue();
+            return;
+        }
+        string expected = fault is "no-on-use-entry" or "duplicate-entry" or "disabled-entry"
+            ? "requires exactly one enabled magic.wScriptOnUse"
+            : fault == "no-on-success-entry" ? "requires exactly one enabled magic.wScriptOnSuccess"
+            : "U+0045";
+        string error = Failure(() => NativeStoryProfile.Load(fixture.Uri, "zh-Hans"));
+        AssertThat(error.Contains(expected)).IsTrue();
+        if (fault == "glyph") AssertThat(error.Contains("Font.tres") && error.Contains("json#L")).IsTrue();
     }
 
     private static void ReadOnly(Action action)

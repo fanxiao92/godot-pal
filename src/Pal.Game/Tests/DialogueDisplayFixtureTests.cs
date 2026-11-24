@@ -277,6 +277,6 @@ public class DialogueDisplayFixtureTests
     }
 
     private static T Load<T>(string name) where T : Resource =>
-        ResourceLoader.Load<T>($"res://Tests/Fixtures/{name}")
+        ResourceLoader.Load<T>($"res://Tests/Fixtures/{name}", cacheMode: ResourceLoader.CacheMode.IgnoreDeep)
         ?? throw new InvalidOperationException($"Synthetic dialogue fixture is missing: {name}");
 }

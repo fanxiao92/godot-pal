@@ -17,6 +17,10 @@ public sealed class DynamicEventObject(SceneObject initial)
     // script.c wScriptIdleFrameCountAuto: one counter per object, shared by the auto
     // end-redirect/goto limits and the auto frame wait; reset on fall-through.
     public int AutoIdleCount { get; internal set; }
+    // script.c nScriptIdleFrame: the trigger counter for 0x0002/0x0003, independent of the auto
+    // counter; the trigger gate pre-increments while below the limit and resets on fall-through.
+    // Owned by the event object (the reference's pEvtObj field) and therefore per caller.
+    public int TriggerIdleCount { get; internal set; }
     internal SceneObject Initial { get; } = initial;
 }
 
@@ -40,12 +44,47 @@ public sealed class DynamicEventWorld
     public int Battlefield { get; internal set; }
     /// <summary>Party role HP/MP words changed by script.c 0x001D/0x0022. Entries exist only
     /// for roles the host initialized from its own pre-battle profile.</summary>
-    public IReadOnlyDictionary<int, DynamicRoleVitals> PartyVitals => partyVitals;
+    public IReadOnlyDictionary<int, DynamicRoleVitals> PartyVitals => new System.Collections.ObjectModel.ReadOnlyDictionary<int, DynamicRoleVitals>(partyVitals);
     private readonly Dictionary<int, DynamicRoleVitals> partyVitals = new();
+    /// <summary>Explicit shared owner, or null for the legacy lightweight world-only path.</summary>
+    public RoleLiveState? RoleLiveState { get; }
     public IReadOnlyDictionary<int, System.Tuple<int, int>> SceneScripts => sceneScripts;
     public IReadOnlyDictionary<(int ObjectId, int SlotIndex), int> ObjectScripts => objectScripts;
 
     internal event Action? WorldChanged;
+
+    /// <summary>Copies the current world and all live roles into independently owned mutable
+    /// storage. Call under the world's normal single-update ownership; no events execute and
+    /// no WorldChanged subscribers are retained. Frozen static identity may remain shared.</summary>
+    public DynamicEventWorld CreateIsolatedCopy() => new(this);
+
+    private DynamicEventWorld(DynamicEventWorld source)
+    {
+        objects = Array.AsReadOnly(source.objects.Select(obj => new DynamicEventObject(obj.Initial)
+        {
+            X = obj.X, Y = obj.Y, Direction = obj.Direction, CurrentFrame = obj.CurrentFrame,
+            State = obj.State, VanishTime = obj.VanishTime, TriggerMode = obj.TriggerMode,
+            TriggerEntry = obj.TriggerEntry, AutoEntry = obj.AutoEntry, AutoIdleCount = obj.AutoIdleCount,
+            TriggerIdleCount = obj.TriggerIdleCount
+        }).ToArray());
+        SceneId = source.SceneId;
+        Leader = source.Leader;
+        PartyRoles = Array.AsReadOnly(source.PartyRoles.ToArray());
+        Battlefield = source.Battlefield;
+        foreach (var (sceneId, scripts) in source.sceneScripts) sceneScripts.Add(sceneId, scripts);
+        foreach (var (slot, entry) in source.objectScripts) objectScripts.Add(slot, entry);
+        if (source.RoleLiveState is { } owner)
+        {
+            RoleLiveState = new RoleLiveState(owner.Roles.Values.ToArray());
+            foreach (int roleId in RoleLiveState.Roles.Keys)
+                partyVitals.Add(roleId, new DynamicRoleVitals(RoleLiveState, roleId));
+        }
+        else
+        {
+            foreach (var (roleId, vitals) in source.partyVitals)
+                partyVitals.Add(roleId, new DynamicRoleVitals(vitals.Hp, vitals.MaxHp, vitals.Mp, vitals.MaxMp));
+        }
+    }
 
     /// <summary>Host update ownership for a world-wired trigger call: advances one parked
     /// scene-wait (0x0009) or walk movement (0x0010) step exactly like the dynamic host's
@@ -83,8 +122,50 @@ public sealed class DynamicEventWorld
     public static DynamicEventWorld ForHost(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport)
         => new(rules, leader, sceneId, onEnter, onTeleport);
 
+    /// <summary>Shared path: vitals are live views of the supplied owner, never seeded again.</summary>
+    public static DynamicEventWorld ForHost(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport,
+        RoleLiveState roleLiveState)
+    {
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        return new(rules, leader, sceneId, onEnter, onTeleport, roleLiveState);
+    }
+
+    /// <summary>Shared path with the host's ordered initial party, independent of owner record
+    /// count and battle capacity. The party is copied once, not rebound during the session.</summary>
+    public static DynamicEventWorld ForHost(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport,
+        RoleLiveState roleLiveState, IReadOnlyList<int> initialPartyRoleIds)
+    {
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        ArgumentNullException.ThrowIfNull(initialPartyRoleIds);
+        var partyRoles = initialPartyRoleIds.ToArray();
+        // script.c 0x0075 has three party slots; six owner records do not enlarge the party.
+        if (partyRoles.Length is < 1 or > 3 || partyRoles.Distinct().Count() != partyRoles.Length
+            || partyRoles.Any(roleId => roleId is < 0 or > 5 || !roleLiveState.Roles.ContainsKey(roleId)))
+            throw new InvalidDataException("Initial party requires one to three unique RoleId 0..5 records from the shared owner.");
+        return new(rules, leader, sceneId, onEnter, onTeleport, roleLiveState)
+        {
+            PartyRoles = Array.AsReadOnly(partyRoles)
+        };
+    }
+
+    private DynamicEventWorld(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport,
+        RoleLiveState roleLiveState) : this(rules, leader, sceneId, onEnter, onTeleport)
+    {
+        RoleLiveState = roleLiveState;
+        foreach (int roleId in roleLiveState.Roles.Keys)
+            partyVitals.Add(roleId, new DynamicRoleVitals(roleLiveState, roleId));
+    }
+
     /// <summary>Host hook over the internal initializer: publish one role's HP/MP words.</summary>
     public void InitializePartyVitals(int roleId, int hp, int maxHp, int mp, int maxMp) => InitializeVitals(roleId, hp, maxHp, mp, maxMp);
+
+    /// <summary>#224 host hook: publish the exploration session's current committed leader words
+    /// into the world, exactly like the dynamic host tracks it after every walk ("the walk moved
+    /// the party; the world tracks it"). Story-profile hosts whose exploration lives in another
+    /// session call this once per committed production update so the world's leader — the v1
+    /// save's leader domain — stays the current one instead of the static construction position.
+    /// Pure word publication: no object, script or tick advances here.</summary>
+    public void PublishLeader(StaticLeader leader) => Leader = leader ?? throw new ArgumentNullException(nameof(leader));
 
     internal DynamicEventWorld(StaticSceneRules rules, StaticLeader leader, int sceneId, int onEnter, int onTeleport)
     {
@@ -242,22 +323,35 @@ public sealed class DynamicEventWorld
     /// <summary>Host hook: publish one role's current words before 0x001D/0x0022 can run.</summary>
     internal void InitializeVitals(int roleId, int hp, int maxHp, int mp, int maxMp)
     {
+        if (RoleLiveState is not null)
+            throw new InvalidOperationException("Shared world vitals are already seeded by their RoleLiveState owner.");
         if (roleId is < 0 or > 5 || maxHp is < 0 or > 65535 || maxMp is < 0 or > 65535
             || hp is < 0 or > 65535 || mp is < 0 or > 65535 || hp > maxHp || mp > maxMp)
             throw new InvalidDataException($"party vitals for role {roleId} are outside the WORD domain.");
         partyVitals[roleId] = new DynamicRoleVitals(hp, maxHp, mp, maxMp);
     }
 
-    /// <summary>script.c 0x001D (PAL_IncreaseHPMP): the same signed amount moves HP and MP,
-    /// clamped to 0..max; scope 0 is the caller role, nonzero the whole party.</summary>
-    internal void ChangeHpMp(int scope, int callerRole, int amount, TriggerPosition position)
+    /// <summary>global.c PAL_IncreaseHPMP: only alive roles change; assignment narrows to
+    /// WORD before the signed SHORT test and maximum check. Return actual word change.</summary>
+    internal bool ChangeHpMp(int scope, int callerRole, int amount, TriggerPosition position)
     {
+        bool changed = false;
         foreach (int role in VitalTargets(scope, callerRole, position))
         {
             var vitals = partyVitals[role];
-            vitals.Hp = Math.Clamp(vitals.Hp + amount, 0, vitals.MaxHp);
-            vitals.Mp = Math.Clamp(vitals.Mp + amount, 0, vitals.MaxMp);
+            int hp = vitals.Hp, mp = vitals.Mp;
+            if (hp == 0) continue;
+            vitals.Hp = IncreaseWord(hp, amount, vitals.MaxHp);
+            vitals.Mp = IncreaseWord(mp, amount, vitals.MaxMp);
+            changed |= hp != vitals.Hp || mp != vitals.Mp;
         }
+        return changed;
+    }
+
+    private static int IncreaseWord(int value, int amount, int maximum)
+    {
+        int word = unchecked((ushort)(value + (short)amount));
+        return (short)word < 0 ? 0 : Math.Min(word, maximum);
     }
 
     /// <summary>script.c 0x0022: dead roles return with maxHP * tenths / 10; the reference also
@@ -381,6 +475,8 @@ public sealed class DynamicEventSession
         {
             if (address == 0 || !visited.Add(address)) continue;
             var command = events.CommandAt(address);
+            if (command.IsContentOnly)
+                throw new InvalidDataException($"{command.Position}: content-only command '{command.Op}' is unsupported in auto context.");
             switch (command.Op)
             {
                 case "end" when command.Mode == "keep":
@@ -589,7 +685,9 @@ public sealed class DynamicEventSession
 
     private StaticSceneRules BuildRules() => exploration.Rules.WithObjects(world.Objects.Select(ObjectView));
 
-    private static SceneObject ObjectView(DynamicEventObject obj) => obj.Initial with
+    // #226: internal so the world restore plan reuses the exact projection the live dynamic
+    // session applies — the restored view and the live view can never drift apart.
+    internal static SceneObject ObjectView(DynamicEventObject obj) => obj.Initial with
     {
         X = (ushort)obj.X, Y = (ushort)obj.Y, Direction = (ushort)obj.Direction, CurrentFrame = (ushort)obj.CurrentFrame,
         State = (short)obj.State, VanishTime = (short)obj.VanishTime,
@@ -602,8 +700,27 @@ public sealed class DynamicEventSession
 /// <summary>Mutable party HP/MP words for one role (script.c 0x001D/0x0022 writes).</summary>
 public sealed class DynamicRoleVitals(int hp, int maxHp, int mp, int maxMp)
 {
-    public int Hp { get; internal set; } = hp;
-    public int MaxHp { get; } = maxHp;
-    public int Mp { get; internal set; } = mp;
-    public int MaxMp { get; } = maxMp;
+    private readonly RoleLiveState? owner;
+    private readonly int roleId;
+    private int hp = hp;
+    private int mp = mp;
+
+    internal DynamicRoleVitals(RoleLiveState owner, int roleId) : this(0, 0, 0, 0)
+    {
+        this.owner = owner;
+        this.roleId = roleId;
+    }
+
+    public int Hp
+    {
+        get => owner is null ? hp : owner.Roles[roleId].Hp;
+        internal set { if (owner is null) hp = value; else owner.SetVitals(roleId, value, Mp); }
+    }
+    public int MaxHp => owner is null ? maxHp : owner.Roles[roleId].MaxHp;
+    public int Mp
+    {
+        get => owner is null ? mp : owner.Roles[roleId].Mp;
+        internal set { if (owner is null) mp = value; else owner.SetVitals(roleId, Hp, value); }
+    }
+    public int MaxMp => owner is null ? maxMp : owner.Roles[roleId].MaxMp;
 }

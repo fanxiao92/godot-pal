@@ -12,9 +12,15 @@ public sealed record ClassicBattlePlayer(int RoleId, int Hp, int MaxHp, int Atta
     public IReadOnlyList<int> Equipment { get; init; } = [];
     public IReadOnlyList<int> Statuses { get; init; } = [];
     public IReadOnlyList<int> Poisons { get; init; } = [];
+    public int? NameObjectId { get; init; }
     public int DyingScript { get; init; }
     public int FriendDeathScript { get; init; }
     public int? CoveredByRoleId { get; init; }
+    /// <summary>The authored attack-all word (PLAYERROLES rgwAttackAll, data-schema "是否全体攻击"):
+    /// the transportable capability declaration through the formal authored/native chain. The
+    /// fixed reference engine itself scans only equipment effects (PAL_PlayerCanAttackAll,
+    /// global.c 2048-2080); a declared true word here is an authored extension of that same
+    /// capability, not retail engine behavior.</summary>
     public bool AttackAll { get; init; }
     /// <summary>Base magical-attack and flee panels; the #49 temporary percent boosts scale these
     /// (script.c 0x0030 reads the base PLAYERROLES words), so combat content declares them.</summary>
@@ -36,10 +42,15 @@ public sealed record ClassicBattleEnemy(int Id, int Level, int Hp, int Attack, i
     public int AttackEquivItemRate { get; init; }
     public int Experience { get; init; }
     public int Cash { get; init; }
+    /// <summary>PAL_StartBattle's zero source row (battle.c:1617-1717): a real runtime slot whose
+    /// wObjectID stays 0. Only an empty slot admits the canonical id 0/hp 0 spelling; it never
+    /// reads the enemy table, draws action random, runs hooks or contributes rewards. A killed
+    /// non-empty enemy keeps its slot identity and stays IsEmpty=false.</summary>
+    public bool IsEmpty { get; init; }
 }
 
 public sealed record ClassicBattleDefinition(IReadOnlyList<ClassicBattlePlayer> Players, IReadOnlyList<ClassicBattleEnemy> Enemies);
-public enum ClassicBattlePhase { Selecting, Resolving, Won, Lost, RoleHook }
+public enum ClassicBattlePhase { Selecting, Resolving, Won, Lost, Escaped, RoleHook }
 public enum ClassicBattleSide { Player, Enemy }
 public enum ClassicBattleHookKind { Dying, FriendDeath }
 /// <summary>One mid-battle role script paused on the fight.c 768-880 post-action check.
@@ -52,6 +63,14 @@ public sealed record ClassicBattleAction(int Round, ClassicBattleSide Attacker, 
     public int TargetIndex { get; init; }
     /// <summary>True on the second strike of a dual attack; one queue action still counts once (fight.c:3628).</summary>
     public bool SecondStrike { get; init; }
+    /// <summary>True when this strike targeted every applicable enemy at once (fight.c 3686-3735):
+    /// the record is one per-target result in reference hit order; Damage is the applied WORD
+    /// delta (previous HP minus the float-truncated new HP), unlike the single-target branch's
+    /// possibly-overkill raw strike value.</summary>
+    public bool AttackAll { get; init; }
+    /// <summary>True on both strikes of a dual attack action (kStatusDualAttack); presentation
+    /// keeps a dual attack-all actor at its home position (fight.c 2080-2101).</summary>
+    public bool DualAttack { get; init; }
     /// <summary>Party index of the member that covered the enemy strike (fight.c:4959-4973); null when nobody covered.</summary>
     public int? CovererPartyIndex { get; init; }
 }
@@ -69,8 +88,24 @@ public sealed record ClassicBattlePlayerView(int PartyIndex, int RoleId, int Hp,
     public int BoostDefense { get; init; }
     public int BoostDexterity { get; init; }
     public int BoostFlee { get; init; }
+    /// <summary>PAL_PlayerCanAttackAll (global.c 2048-2080): the authored player word or any
+    /// non-zero equipment rgwAttackAll register grants the all-target attack selection.</summary>
+    public bool CanAttackAll { get; init; }
+    /// <summary>True when this member committed the round's all-target attack selection
+    /// (reference sTarget -1); SelectedEnemySlot stays null for such a commitment.</summary>
+    public bool SelectedAttackAll { get; init; }
+    /// <summary>fight.c 4114 fDefending: set when this member's defend action performs and cleared
+    /// at the round end / next selection (fight.c 1599-1604, 1068); enemy physical strikes
+    /// against it double the defense word (fight.c 4924-4927) and the pose holds frame 3
+    /// (fight.c 977-980 UpdateFighters).</summary>
+    public bool IsDefending { get; init; }
 }
-public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp);
+public sealed record ClassicBattleEnemyView(int Slot, int Id, int Hp)
+{
+    /// <summary>True only for a source-empty runtime slot (wObjectID 0); a killed real enemy stays
+    /// IsEmpty=false with its original battle id, so the two zero-HP kinds never merge.</summary>
+    public bool IsEmpty { get; init; }
+}
 public sealed record ClassicBattleQueueEntry(ClassicBattleSide Side, int ActorIndex, ushort Dexterity);
 
 /// <summary>One enemy's post-victory script. PAL_BattleWon runs wScriptOnBattleEnd for every enemy
@@ -90,6 +125,9 @@ public sealed record ClassicBattleCounts(int Attack, int Health)
     /// <summary>Failed escape attempts this battle (fight.c 4171: rgFleeExp.wCount += 2 per attempt);
     /// the attack/health counters grow only on real attack actions.</summary>
     public int Flee { get; init; }
+    /// <summary>Performed defends this battle (fight.c 4113-4115: rgDefenseExp.wCount += 2 at the
+    /// defend action's perform time); a pass never fakes it and a strike never adds it.</summary>
+    public int Defense { get; init; }
 }
 /// <summary>One resolved flee attempt (fight.c 4119-4173): the reference always consumes the
 /// RandomLong(0, defense) draw, and a boss battle fails the escape regardless of the draw.</summary>
@@ -105,6 +143,10 @@ public sealed record ClassicBattleView(ClassicBattlePhase Phase, int Round, int 
     public int? SelectingPlayerIndex { get; init; }
     /// <summary>The role script paused on the post-action check; non-null only in the RoleHook phase.</summary>
     public ClassicBattleRoleHook? PendingRoleHook { get; init; }
-    /// <summary>The newest resolved flee attempt; published once per failed boss escape, replacing any prior attempt.</summary>
+    /// <summary>The newest resolved flee attempt; published once per performed attempt (one per
+    /// committed fleer), replacing any prior attempt.</summary>
     public ClassicBattleFleeAttempt? LastFleeAttempt { get; init; }
+    /// <summary>Per-target results of the newest presented strike in hit order (single-element for
+    /// single-target and enemy actions); one all-target strike publishes one record per hit slot.</summary>
+    public IReadOnlyList<ClassicBattleAction> LastActionTargets { get; init; } = [];
 }

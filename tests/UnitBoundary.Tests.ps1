@@ -45,6 +45,15 @@ function Check([string]$Name, [int]$Exit, [string]$Diagnostic, [string[]]$Select
 try {
     Reset-Fixture
     Check 'pure projects / Chinese and spaces / foreign cwd / production Exe I/O allowed' 0 'PASS unit-boundary: cli-unit'
+    Put '.packages/gdunit/cached.nupkg' 'artificial cache bytes: File.ReadAllText is not a unit compilation source'
+    $cachePath = Join-Path $root '.packages/gdunit/cached.nupkg'
+    $cacheBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes($cachePath))
+    Check 'approved local package cache coexists with pure projects' 0 'PASS unit-boundary: cli-unit'
+    if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($cachePath)) -cne $cacheBefore) { throw 'Source inspection changed package cache bytes.' }
+    Reset-Fixture
+    Put '.packages' 'a file cannot impersonate the approved cache directory'
+    Check 'package cache root-file spoof rejected' 1 '[boundary:root-files] Unexpected root file: .packages'
+    Reset-Fixture
     Put '_pb2.py' '# one-off patch helper accidentally committed at the fixture root'
     Check 'unexpected root file rejected (stray helper script)' 1 "[boundary:root-files] Unexpected root file: _pb2.py"
     Reset-Fixture

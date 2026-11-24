@@ -6,6 +6,450 @@ namespace Pal.Core.Tests;
 public sealed class ModernBattleContentTests
 {
     [Fact]
+    public void Physical_battle_without_event_host_rejects_selected_battle_end_hook()
+    {
+        var data = PartyData();
+        data["teams"]![0]!["enemies"]![1]!["battleEndScript"] = 65535;
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        ModernBattleContent.Validate(content);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(content, 18));
+        Assert.Contains("teams[18].enemies[1].battleEndScript", error.Message);
+        Assert.Contains("event host", error.Message);
+        Assert.Equal(65535, content.EnemyTeams[18][1].BattleEndScript);
+    }
+
+    [Theory]
+    [InlineData("dyingScript", 0)]
+    [InlineData("dyingScript", 1)]
+    [InlineData("friendDeathScript", 0)]
+    [InlineData("friendDeathScript", 1)]
+    public void Physical_battle_requires_event_host_for_each_party_hook(string field, int partyIndex)
+    {
+        var data = PartyData();
+        data["players"]![partyIndex]![field] = 123;
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(content, 18));
+        Assert.Contains($"players[{partyIndex}].{field}", error.Message);
+        Assert.Contains("event host", error.Message);
+        Assert.Equal(123, field == "dyingScript" ? content.Players[partyIndex].DyingScript : content.Players[partyIndex].FriendDeathScript);
+    }
+
+    [Theory]
+    [InlineData("roles.0.level", 100)]
+    [InlineData("roles.0.maxHp", 32768)]
+    [InlineData("roles.0.statuses.0", 1)]
+    [InlineData("roles.0.equipment.0", 42)]
+    [InlineData("roles.0.hiddenExperience.attack.level", 100)]
+    [InlineData("growth.0.levelUpExperience.1", 0)]
+    [InlineData("growth.0.levelUpExperience.99", 0)]
+    [InlineData("players.0.statuses.0", 1)]
+    [InlineData("players.0.poisons.0", 1)]
+    [InlineData("teams.0.enemies.0.hp", 32768)]
+    [InlineData("teams.0.enemies.0.statuses.0", 1)]
+    [InlineData("teams.0.enemies.0.poisons.0", 1)]
+    [InlineData("teams.0.enemies.0.turnStartScript", 1)]
+    [InlineData("teams.0.enemies.0.readyScript", 1)]
+    [InlineData("teams.0.enemies.0.magicId", 1)]
+    [InlineData("teams.0.enemies.0.magicId", 65535)]
+    [InlineData("teams.0.enemies.0.dualMove", 1)]
+    [InlineData("teams.0.enemies.0.attackEquivItem", 1)]
+    [InlineData("teams.0.enemies.0.attackEquivItemRate", 1)]
+    public void Physical_battle_reuses_existing_numeric_capability_gates(string path, int value)
+    {
+        var data = Data();
+        Set(data, path, JsonValue.Create(value));
+        if (path == "roles.0.maxHp") data["players"]![0]!["maxHp"] = value;
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        ModernBattleContent.Validate(content); // Each rejection below is capability, not malformed format.
+        string before = System.Text.Json.JsonSerializer.Serialize(content);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(content, 18));
+        Assert.Contains("teams[18]", error.Message);
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(content));
+    }
+
+    [Fact]
+    public void Physical_battle_executes_the_authored_attack_all_word_through_the_trigger_chain()
+    {
+        // #143 (T15): the authored player attackAll word is now an executable capability through
+        // the formal validation and trigger chains, not merely a preserved format field.
+        var data = Data();
+        data["players"]![0]!["attackAll"] = true;
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        ModernBattleContent.ValidatePhysicalBattle(content, 18);
+        Assert.True(content.Player.AttackAll);
+        var random = new BattleRandom();
+        var script = Script(content, random);
+        script.Start("shared", "npc", 28);
+        Assert.True(script.PendingBattle!.Lifecycle.Current.Combat.Players[0].CanAttackAll);
+    }
+
+    [Theory]
+    [InlineData(-1, "expected team ID")]
+    [InlineData(65536, "expected team ID")]
+    [InlineData(19, "missing selected battle team")]
+    public void Physical_battle_rejects_invalid_or_missing_selection(int teamId, string diagnostic)
+    {
+        var content = ModernBattleContent.Parse(Data().ToJsonString());
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(content, teamId));
+        Assert.Contains($"teams[{teamId}]", error.Message);
+        Assert.Contains(diagnostic, error.Message);
+    }
+
+    [Fact]
+    public void Physical_battle_rejects_null_content_with_existing_format_diagnostic()
+    {
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(null!, 18));
+        Assert.Contains("content is null", error.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Physical_battle_checks_all_format_but_only_selected_enemy_capabilities(bool malformed)
+    {
+        var data = Data();
+        var other = data["teams"]![0]!.DeepClone();
+        other["teamId"] = 65535;
+        other["enemies"]![0]!["magicId"] = 65535;
+        other["enemies"]![0]!["battleEndScript"] = 123;
+        data["teams"]!.AsArray().Add(other);
+        var source = ModernBattleContent.Parse(data.ToJsonString());
+        var teams = source.EnemyTeams.ToDictionary(x => x.Key, x => x.Value);
+        if (malformed) teams[65535] = [teams[65535][0] with { Attack = 32768 }];
+        var content = new TriggerBattleContent(source.InitialRoles.Values.ToArray(), source.Players, source.GrowthByRole, teams);
+        if (malformed)
+        {
+            var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(content, 18));
+            Assert.Contains("teams[65535].enemies[0].attack", error.Message);
+        }
+        else
+        {
+            ModernBattleContent.ValidatePhysicalBattle(content, 18);
+            Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(content, 65535));
+            Assert.Equal(65535, content.EnemyTeams[65535][0].MagicId);
+            Assert.Equal(123, content.EnemyTeams[65535][0].BattleEndScript);
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void Physical_battle_accepts_entry_normalization_and_growth_without_applying_them(int hp)
+    {
+        var data = PartyData();
+        foreach (var role in data["roles"]!.AsArray()) { role!["hp"] = hp; role["level"] = 0; }
+        foreach (var player in data["players"]!.AsArray()) player!["hp"] = hp;
+        foreach (var growth in data["growth"]!.AsArray()) growth!["levelUpExperience"]![0] = 0;
+        data["teams"]![0]!["teamId"] = 0;
+        data["teams"]![0]!["enemies"]![0]!["attack"] = -32768;
+        data["teams"]![0]!["enemies"]![1]!["defense"] = 32767;
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        string before = System.Text.Json.JsonSerializer.Serialize(content);
+        ModernBattleContent.ValidatePhysicalBattle(content, 0);
+        ModernBattleContent.ValidatePhysicalBattle(content, 0);
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(content));
+        Assert.Equal(new[] { 4, 1 }, content.Players.Select(x => x.RoleId));
+        Assert.Equal(new[] { 7, 7 }, content.EnemyTeams[0].Select(x => x.Id));
+        Assert.All(content.InitialRoles.Values, role =>
+        {
+            Assert.Equal(hp, role.Hp); // PAL_StartBattle HP0->1 is validated, never committed here.
+            Assert.Equal(0, role.Level);
+            Assert.Equal(new BattleExperienceSnapshot(5, 2, 17), role.PrimaryExperience);
+            Assert.All(role.HiddenExperience.Values, xp => Assert.Equal(new BattleExperienceSnapshot(7, 3, 55), xp));
+        });
+        Assert.All(content.GrowthByRole.Values, growth => Assert.Equal(0, growth.LevelUpExperience[0]));
+    }
+
+    [Theory]
+    [InlineData("cooperativeMagic", 351, false)]
+    [InlineData("battleSprite", 6, false)]
+    [InlineData("attackAll", 0, true)]
+    [InlineData("cooperativeMagic", 0, true)]
+    [InlineData("attackAll", 1, true)]
+    [InlineData("attackAll", 65535, true, 0)]
+    public void Physical_battle_reuses_selected_equipment_closure_without_mutating_it(string field, int value, bool supported, int effectRole = 1)
+    {
+        var data = Data();
+        data["roles"]![0]!["equipment"]![0] = 42;
+        data["players"]![0]!["equipment"]![0] = 42;
+        var grid = new JsonArray();
+        var effects = new JsonArray();
+        for (int role = 0; role < 6; role++)
+        {
+            grid.Add(new JsonArray(role <= 1 ? 42 : 0, 0, 0, 0, 0, 0));
+            effects.Add(JsonNode.Parse("""{"attack":3,"defense":2,"dexterity":1,"battleSprite":0,"statuses":[0,0,0,0,0,0,0,0,0]}"""));
+        }
+        effects[effectRole]![field] = value;
+        data["roleEquipment"] = grid;
+        data["equipments"] = new JsonArray(new JsonObject { ["objectId"] = 42, ["effects"] = effects });
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        string before = System.Text.Json.JsonSerializer.Serialize(content);
+        if (supported)
+        {
+            ModernBattleContent.ValidatePhysicalBattle(content, 18);
+            ModernBattleContent.ValidatePhysicalBattle(content, 18);
+            Assert.Equal(43, BattleEquipmentState.Initialize(content).EffectiveAttack(1, 40));
+        }
+        else Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(content, 18));
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(content));
+        Assert.Equal(40, content.Player.Attack);
+        Assert.Equal(42, content.InitialRole.Equipment[0]);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void Typed_name_object_rejects_outside_WORD(int nameObjectId)
+    {
+        var content = NamedParty(nameObjectId, nameObjectId, 0, 0);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(content));
+        Assert.Contains("players[0].nameObjectId", error.Message);
+        Assert.Contains("expected integer in 0..65535", error.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void Typed_name_object_rejects_partial_mapping(int mappedIndex)
+    {
+        var content = NamedParty(mappedIndex == 0 ? 37 : null, mappedIndex == 1 ? 37 : null, 0, 0);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(content));
+        Assert.Contains("nameObjectId", error.Message);
+        Assert.Contains("declared together", error.Message);
+    }
+
+    [Theory]
+    [InlineData("dyingScript", false)]
+    [InlineData("dyingScript", true)]
+    [InlineData("friendDeathScript", false)]
+    [InlineData("friendDeathScript", true)]
+    public void Typed_same_name_rejects_conflicting_hook_seeds(string slot, bool reverse)
+    {
+        var source = NamedParty(37, 37, 0, 0);
+        var players = source.Players.ToArray();
+        players[1] = slot == "dyingScript" ? players[1] with { DyingScript = 1 } : players[1] with { FriendDeathScript = 1 };
+        if (reverse) Array.Reverse(players);
+        var content = new TriggerBattleContent(source.InitialRoles.Values.ToArray(), players, source.GrowthByRole, source.EnemyTeams);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(content));
+        Assert.Contains("players[1]." + slot, error.Message);
+        Assert.Contains("same nameObjectId", error.Message);
+    }
+
+    [Theory]
+    [InlineData(null, null, 0, 0)]
+    [InlineData(0, 0, 0, 0)]
+    [InlineData(65535, 65535, 65535, 65535)]
+    [InlineData(37, 37, 123, 456)]
+    [InlineData(0, 65535, 123, 456)]
+    [InlineData(36, 37, 123, 456)]
+    public void Typed_name_object_accepts_legacy_matching_and_distinct_identities(int? firstName, int? secondName, int dying, int friend)
+    {
+        var content = NamedParty(firstName, secondName, dying, friend);
+        ModernBattleContent.Validate(content);
+        Assert.Equal(new[] { 4, 1 }, content.Players.Select(x => x.RoleId));
+        Assert.Equal(new int?[] { firstName, secondName }, content.Players.Select(x => x.NameObjectId));
+        Assert.All(content.Players, player =>
+        {
+            Assert.Equal(dying, player.DyingScript);
+            Assert.Equal(friend, player.FriendDeathScript);
+        });
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0)]
+    [InlineData(65535)]
+    public void Typed_name_object_survives_defensive_projection_and_record_with(int? nameObjectId)
+    {
+        var legacy = ModernBattleContent.Parse(Data().ToJsonString());
+        Assert.Null(legacy.Player.NameObjectId);
+        int[] equipment = new int[6];
+        var player = legacy.Player with { NameObjectId = nameObjectId, DyingScript = 123, FriendDeathScript = 456, Equipment = equipment };
+        var content = new TriggerBattleContent(legacy.InitialRole, player, legacy.Growth, legacy.Teams);
+        equipment[0] = 99;
+        ModernBattleContent.Validate(content);
+        Assert.Equal(nameObjectId, content.Player.NameObjectId);
+        Assert.Equal(0, content.Player.Equipment[0]);
+        var copy = content.Player with { Attack = 999 };
+        Assert.Equal(nameObjectId, copy.NameObjectId);
+        Assert.Equal(123, copy.DyingScript);
+        Assert.Equal(456, copy.FriendDeathScript);
+        Assert.Equal(999, copy.Attack);
+        Assert.Equal(40, content.Player.Attack);
+        var renamed = copy with { NameObjectId = 37 };
+        Assert.Equal(37, renamed.NameObjectId);
+        Assert.Equal(nameObjectId, content.Player.NameObjectId);
+    }
+
+    [Theory]
+    [InlineData(null, null, 0, 0)]
+    [InlineData(0, 0, 0, 0)]
+    [InlineData(65535, 65535, 65535, 65535)]
+    [InlineData(37, 37, 123, 456)]
+    [InlineData(0, 65535, 123, 456)]
+    [InlineData(36, 37, 123, 456)]
+    public void JSON_name_object_preserves_legacy_aliases_and_distinct_names(int? firstName, int? secondName, int dying, int friend)
+    {
+        var data = PartyData();
+        if (firstName.HasValue) data["players"]![0]!["nameObjectId"] = firstName.Value;
+        if (secondName.HasValue) data["players"]![1]!["nameObjectId"] = secondName.Value;
+        foreach (var player in data["players"]!.AsArray())
+        {
+            player!["dyingScript"] = dying;
+            player["friendDeathScript"] = friend;
+        }
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        Assert.Equal(new[] { 4, 1 }, content.Players.Select(x => x.RoleId));
+        Assert.Equal(new[] { 1, 4 }, content.InitialRoles.Keys.OrderBy(x => x));
+        Assert.Equal(4, content.InitialRoles[4].RoleId);
+        Assert.Equal(1, content.InitialRoles[1].RoleId);
+        Assert.Equal(new[] { 1, 4 }, content.GrowthByRole.Keys.OrderBy(x => x));
+        Assert.Equal(firstName, content.Players[0].NameObjectId);
+        Assert.Equal(secondName, content.Players[1].NameObjectId);
+        Assert.Equal(dying, content.Players[0].DyingScript);
+        Assert.Equal(friend, content.Players[0].FriendDeathScript);
+        Assert.Equal(dying, content.Players[1].DyingScript);
+        Assert.Equal(friend, content.Players[1].FriendDeathScript);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("\"0\"")]
+    [InlineData("1.5")]
+    [InlineData("1.0")]
+    [InlineData("-1")]
+    [InlineData("65536")]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    public void JSON_name_object_rejects_non_WORD(string token)
+    {
+        var data = Data();
+        data["players"]![0]!["nameObjectId"] = 0;
+        string property = "\"nameObjectId\":" + token;
+        string json = data.ToJsonString().Replace("\"nameObjectId\":0", property, StringComparison.Ordinal);
+        Assert.Contains(property, json, StringComparison.Ordinal);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(json));
+        Assert.Contains("battle-data.json.$.players[0].nameObjectId", error.Message);
+        Assert.Contains("expected integer in 0..65535", error.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void JSON_name_object_requires_complete_mapping(int mappedIndex)
+    {
+        var data = PartyData();
+        data["players"]![mappedIndex]!["nameObjectId"] = 37;
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("nameObjectId", error.Message);
+        Assert.Contains("declared together", error.Message);
+    }
+
+    [Theory]
+    [InlineData("dyingScript", false)]
+    [InlineData("dyingScript", true)]
+    [InlineData("friendDeathScript", false)]
+    [InlineData("friendDeathScript", true)]
+    public void JSON_same_name_rejects_conflicting_seeds(string slot, bool reverse)
+    {
+        var data = PartyData();
+        foreach (var player in data["players"]!.AsArray())
+        {
+            player!["nameObjectId"] = 37;
+            player["dyingScript"] = 0;
+            player["friendDeathScript"] = 0;
+        }
+        data["players"]![1]![slot] = 1;
+        if (reverse)
+        {
+            var first = data["players"]![0]!.DeepClone();
+            var second = data["players"]![1]!.DeepClone();
+            data["players"] = new JsonArray(second, first);
+        }
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("players[1]." + slot, error.Message);
+        Assert.Contains("same nameObjectId", error.Message);
+    }
+
+    [Fact]
+    public void JSON_duplicate_name_object_key_is_rejected()
+    {
+        var data = Data();
+        data["players"]![0]!["nameObjectId"] = 0;
+        string property = "\"nameObjectId\":0";
+        string duplicate = property + "," + property;
+        string json = data.ToJsonString().Replace(property, duplicate, StringComparison.Ordinal);
+        Assert.Contains(duplicate, json, StringComparison.Ordinal);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(json));
+        Assert.Contains("duplicate JSON key 'nameObjectId'", error.Message);
+    }
+
+    [Fact]
+    public void JSON_name_object_key_is_case_sensitive()
+    {
+        var data = Data();
+        data["players"]![0]!["nameObjectId"] = 0;
+        string json = data.ToJsonString().Replace("\"nameObjectId\":0", "\"NameObjectId\":0", StringComparison.Ordinal);
+        Assert.Contains("\"NameObjectId\":0", json, StringComparison.Ordinal);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(json));
+        Assert.Contains("unknown field 'NameObjectId'", error.Message);
+    }
+
+    private static TriggerBattleContent NamedParty(int? firstName, int? secondName, int dying, int friend)
+    {
+        var source = ModernBattleContent.Parse(PartyData().ToJsonString());
+        var players = source.Players.Select((player, index) => player with
+        {
+            NameObjectId = index == 0 ? firstName : secondName,
+            DyingScript = dying,
+            FriendDeathScript = friend
+        }).ToArray();
+        return new TriggerBattleContent(source.InitialRoles.Values.ToArray(), players, source.GrowthByRole, source.EnemyTeams);
+    }
+
+    [Theory]
+    [InlineData("magicPower", -1)]
+    [InlineData("magicPower", 65536)]
+    [InlineData("fleeRate", -1)]
+    [InlineData("fleeRate", 65536)]
+    public void Typed_player_panels_reject_values_outside_WORD_with_field_location(string field, int value)
+    {
+        var content = ModernBattleContent.Parse(Data().ToJsonString());
+        var player = field == "magicPower" ? content.Player with { MagicPower = value } : content.Player with { FleeRate = value };
+        var invalid = new TriggerBattleContent(content.InitialRole, player, content.Growth, content.Teams);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(invalid));
+        Assert.Contains("players[0]." + field, error.Message);
+        Assert.Contains("expected integer in 0..65535", error.Message);
+    }
+
+    [Theory]
+    [InlineData(321, 654)]
+    [InlineData(0, 65535)]
+    [InlineData(65535, 0)]
+    [InlineData(0, 0)]
+    public void Typed_player_panel_WORDs_validate_and_feed_public_boss_flee(int magicPower, int fleeRate)
+    {
+        var legacy = ModernBattleContent.Parse(Data().ToJsonString());
+        Assert.Equal(0, legacy.Player.MagicPower);
+        Assert.Equal(0, legacy.Player.FleeRate);
+        var content = new TriggerBattleContent(legacy.InitialRole, legacy.Player with { MagicPower = magicPower, FleeRate = fleeRate },
+            legacy.Growth, legacy.Teams);
+        ModernBattleContent.Validate(content);
+        Assert.Equal(magicPower, content.Player.MagicPower);
+        Assert.Equal(fleeRate, content.Player.FleeRate);
+        var script = Script(content, new BattleRandom());
+        script.Start("shared", "npc", 28);
+        var battle = script.PendingBattle!.Lifecycle;
+        battle.SelectFlee(0);
+        Assert.True(battle.ResolveNextAction());
+        // fight.c: enemy dex0 + (level0+6)*4; draw0 cannot escape a boss even at WORD max.
+        Assert.Equal(new ClassicBattleFleeAttempt(1, 0, 1, fleeRate, 24, 0, false), battle.Current.Combat.LastFleeAttempt);
+        Assert.Null(battle.Completion);
+    }
+
+    [Fact]
     public void Two_roles_and_duplicate_enemy_slots_enter_the_same_owned_lifecycle()
     {
         var data = PartyData();
@@ -15,6 +459,33 @@ public sealed class ModernBattleContentTests
         Assert.Equal(0, random.Draws);
         Assert.Equal(new[] { 4, 1 }, script.PendingBattle!.Lifecycle.Current.Combat.Players.Select(x => x.RoleId));
         Assert.Equal(new[] { 7, 7 }, script.PendingBattle.Lifecycle.Current.Combat.Enemies.Select(x => x.Id));
+    }
+
+    [Fact]
+    public void Three_roles_enter_the_same_owned_lifecycle_and_four_roles_are_rejected()
+    {
+        var data = PartyData();
+        foreach (string key in new[] { "roles", "players", "growth" })
+        {
+            var third = data[key]![1]!.DeepClone();
+            third["roleId"] = 0;
+            data[key]!.AsArray().Add(third);
+        }
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        var random = new BattleRandom();
+        var script = Script(content, random);
+        script.Start("shared", "npc", 28);
+        Assert.Equal(0, random.Draws);
+        Assert.Equal(new[] { 4, 1, 0 }, script.PendingBattle!.Lifecycle.Current.Combat.Players.Select(x => x.RoleId));
+        Assert.Equal(new[] { 7, 7 }, script.PendingBattle.Lifecycle.Current.Combat.Enemies.Select(x => x.Id));
+        foreach (string key in new[] { "roles", "players", "growth" })
+        {
+            var fourth = data[key]![2]!.DeepClone();
+            fourth["roleId"] = 3;
+            data[key]!.AsArray().Add(fourth);
+        }
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("unique matching RoleId keys", error.Message);
     }
 
     [Theory]
@@ -134,9 +605,145 @@ public sealed class ModernBattleContentTests
             var parent = field == "enemies" ? data["teams"]![0]! : data;
             if (kind == 0) parent[field] = null;
             else if (kind == 1) parent[field]!.AsArray().Clear();
-            else parent[field]!.AsArray().Add(parent[field]![0]!.DeepClone());
+            else
+            {
+                int limit = field == "enemies" ? 5 : 2;
+                while (parent[field]!.AsArray().Count <= limit)
+                    parent[field]!.AsArray().Add(parent[field]![0]!.DeepClone());
+            }
             Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
         }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void Party_schema_preserves_one_to_five_complete_enemy_slots_without_merging_duplicate_ids(int count)
+    {
+        var data = PartyData();
+        var enemies = data["teams"]![0]!["enemies"]!.AsArray();
+        var enemy = enemies[0]!.DeepClone();
+        enemies.Clear();
+        for (int slot = 0; slot < count; slot++)
+        {
+            var row = enemy.DeepClone();
+            row["hp"] = 100 + slot;
+            enemies.Add(row);
+        }
+
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        var team = Assert.Single(content.EnemyTeams).Value;
+        Assert.Equal(count, team.Count);
+        Assert.Equal(Enumerable.Repeat(7, count), team.Select(e => e.Id));
+        Assert.Equal(Enumerable.Range(100, count), team.Select(e => e.Hp));
+        enemies[0]!["hp"] = 1;
+        Assert.Equal(100, team[0].Hp);
+    }
+
+    [Fact]
+    public void Sparse_zero_slots_parse_as_canonical_empty_runtime_slots_and_enter_the_trigger_chain()
+    {
+        var data = Data();
+        var loaded = data["teams"]![0]!["enemies"]![0]!.DeepClone();
+        var enemies = data["teams"]![0]!["enemies"]!.AsArray();
+        enemies.Clear();
+        enemies.Add(loaded);
+        enemies.Add(EmptyJsonEnemy());
+        enemies.Add(loaded.DeepClone());
+        enemies.Add(EmptyJsonEnemy());
+        var content = ModernBattleContent.Parse(data.ToJsonString());
+        ModernBattleContent.Validate(content);
+        ModernBattleContent.ValidatePhysicalBattle(content, 18);
+        Assert.Equal(new[] { (7, 43, false), (0, 0, true), (7, 43, false), (0, 0, true) },
+            content.EnemyTeams[18].Select(e => (e.Id, e.Hp, e.IsEmpty)));
+        var random = new BattleRandom();
+        var script = Script(content, random);
+        script.Start("shared", "npc", 28);
+        Assert.Equal(0, random.Draws);
+        var combat = script.PendingBattle!.Lifecycle.Current.Combat;
+        Assert.Equal(new[] { (0, 7, 43, false), (1, 0, 0, true), (2, 7, 43, false), (3, 0, 0, true) },
+            combat.Enemies.Select(e => (e.Slot, e.Id, e.Hp, e.IsEmpty)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => script.PendingBattle.Lifecycle.SelectAttack(0, 1));
+        script.PendingBattle.Lifecycle.SelectAttack(0, 0);
+        Assert.Equal(0, script.PendingBattle.Lifecycle.Current.Combat.Players[0].SelectedEnemySlot);
+    }
+
+    [Theory]
+    [InlineData("id", 7)]
+    [InlineData("hp", 43)]
+    [InlineData("attack", 1)]
+    [InlineData("experience", 1)]
+    [InlineData("cash", 1)]
+    [InlineData("battleEndScript", 1)]
+    public void JSON_empty_slots_reject_any_nonzero_word(string field, int value)
+    {
+        var data = Data();
+        var empty = (JsonObject)EmptyJsonEnemy();
+        empty[field] = value;
+        data["teams"]![0]!["enemies"]![0] = empty;
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("isEmpty", error.Message);
+        Assert.Contains("canonical", error.Message);
+    }
+
+    [Fact]
+    public void JSON_empty_status_words_follow_the_same_canonical_rule()
+    {
+        var data = Data();
+        var empty = (JsonObject)EmptyJsonEnemy();
+        empty["statuses"] = new JsonArray(1, 0, 0, 0, 0, 0, 0, 0, 0);
+        data["teams"]![0]!["enemies"]![0] = empty;
+        Assert.Contains("isEmpty", Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString())).Message);
+    }
+
+    [Fact]
+    public void JSON_isEmpty_accepts_only_booleans()
+    {
+        var data = Data();
+        data["teams"]![0]!["enemies"]![0]!["isEmpty"] = 1;
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("isEmpty", error.Message);
+        Assert.Contains("expected boolean", error.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void JSON_non_empty_id_zero_keeps_the_legacy_rejection(bool declared)
+    {
+        var data = Data();
+        if (declared) data["teams"]![0]!["enemies"]![0]!["isEmpty"] = false;
+        data["teams"]![0]!["enemies"]![0]!["id"] = 0;
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.Parse(data.ToJsonString()));
+        Assert.Contains("enemies[0].id", error.Message);
+        Assert.Contains("expected integer in 1..65535", error.Message);
+    }
+
+    [Fact]
+    public void Typed_empty_slots_require_canonical_zeros_and_all_empty_teams_reject_before_side_effects()
+    {
+        var content = ModernBattleContent.Parse(Data().ToJsonString());
+        var loaded = content.Teams[18];
+        var empty = loaded with { Id = 0, Hp = 0, PhysicalResistance = 0, IsEmpty = true };
+        var growth = new Dictionary<int, ClassicBattleGrowthData> { [1] = content.Growth };
+        var sparse = new TriggerBattleContent([content.InitialRole], [content.Player], growth,
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = [loaded, empty, loaded] });
+        string before = System.Text.Json.JsonSerializer.Serialize(sparse);
+        ModernBattleContent.Validate(sparse);
+        ModernBattleContent.ValidatePhysicalBattle(sparse, 18);
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(sparse));
+        var allEmpty = new TriggerBattleContent([content.InitialRole], [content.Player], growth,
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = [empty, empty] });
+        ModernBattleContent.Validate(allEmpty);
+        var error = Assert.Throws<InvalidDataException>(() => ModernBattleContent.ValidatePhysicalBattle(allEmpty, 18));
+        Assert.Contains("teams[18]", error.Message);
+        Assert.Contains("non-empty enemy", error.Message);
+        var illegal = new TriggerBattleContent([content.InitialRole], [content.Player], growth,
+            new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>> { [18] = [loaded, empty with { Attack = 1 }] });
+        Assert.Contains("isEmpty", Assert.Throws<InvalidDataException>(() => ModernBattleContent.Validate(illegal)).Message);
     }
 
     private static JsonObject PartyData()
@@ -446,13 +1053,17 @@ public sealed class ModernBattleContentTests
     }
 
     [Fact]
-    public void True_attack_all_is_preserved_but_not_executable()
+    public void True_attack_all_is_preserved_and_consumed_by_the_session_selection()
     {
         var data = Data();
         data["players"]![0]!["attackAll"] = true;
         var content = ModernBattleContent.Parse(data.ToJsonString());
         Assert.True(content.Player.AttackAll);
-        AssertUnsupported(content);
+        var session = new ClassicBattleSession(new([content.Player], content.EnemyTeams[18]), new BattleRandom());
+        Assert.True(session.Current.Players[0].CanAttackAll);
+        session.SelectAttackAll(0);
+        Assert.Equal(ClassicBattlePhase.Resolving, session.Current.Phase);
+        Assert.True(session.Current.Players[0].SelectedAttackAll);
     }
 
     [Theory]
@@ -788,6 +1399,12 @@ public sealed class ModernBattleContentTests
         data["growth"]![0]!["levelUpExperience"] = new JsonArray(Enumerable.Repeat(100, 100).Select(x => JsonValue.Create(x) as JsonNode).ToArray());
         return data;
     }
+
+    private static JsonNode EmptyJsonEnemy() => JsonNode.Parse("""
+        {"isEmpty":true,"id":0,"level":0,"hp":0,"attack":0,"defense":0,"dexterity":0,"physicalResistance":0,
+         "statuses":[0,0,0,0,0,0,0,0,0],"poisons":[],"turnStartScript":0,"readyScript":0,"battleEndScript":0,
+         "magicId":0,"dualMove":0,"attackEquivItem":0,"attackEquivItemRate":0,"experience":0,"cash":0}
+        """)!;
 
     private static TriggerScriptSession Script(TriggerBattleContent content, IBattleRandom random)
     {

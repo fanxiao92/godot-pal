@@ -21,10 +21,11 @@ function Put([string]$Name, [string]$Text) {
     return $file
 }
 function Quote([string]$Text) { "'" + $Text.Replace("'", "''") + "'" }
-function Check([string]$Name, [string[]]$Paths, [int]$Expected, [string]$Diagnostic, [switch]$Default) {
+function Check([string]$Name, [string[]]$Paths, [int]$Expected, [string]$Diagnostic, [switch]$Default, [switch]$RejectParameterlessWaitForExit) {
     $number = $records.Count + 1
     $code = "& $(Quote $entry) -RepositoryRoot $(Quote $fixture)"
     if (-not $Default) { $code += ' -Path @(' + ((@($Paths | ForEach-Object { Quote $_ })) -join ',') + ')' }
+    if ($RejectParameterlessWaitForExit) { $code += ' -RejectParameterlessWaitForExit' }
     $tokens = $null; $errors = $null
     $null = [Management.Automation.Language.Parser]::ParseInput($code, [ref]$tokens, [ref]$errors)
     if ($errors.Count) { throw 'Regression invocation must parse before execution.' }
@@ -71,6 +72,33 @@ try {
     [IO.File]::WriteAllText($external, 'Write-Output "只解析"', $utf8)
     Check 'one explicit generated external file can be prechecked' @($external) 0 'PASS syntax: 1 file'
     Check 'external directory is not recursively scanned' @($evidence) 1 '\[syntax:range\]'
+    $wait = Put 'ast/wait.ps1' ('$process.WaitForExit()' + "`n" + "[IO.File]::WriteAllText($(Quote $marker),'executed')")
+    Check 'default remains syntax-only for parameterless WaitForExit' @($wait) 0 'PASS syntax: 1 file'
+    Check 'AST rejects actual parameterless WaitForExit with source location' @($wait) 1 'wait\.ps1:1:1: WaitForExit\(\)' -RejectParameterlessWaitForExit
+    $nested = Put 'ast/nested.psm1' 'function Wait-Fixture { $process.WaitForExit(1000); & { $process.wAiTfOrExIt( ) } }'
+    Check 'AST visits nested scriptblocks and case-insensitive calls' @($nested) 1 '\[syntax:parameterless-wait-for-exit\]' -RejectParameterlessWaitForExit
+    $quoted = Put 'ast/quoted.ps1' '$process."WaitForExit"()'
+    Check 'AST rejects quoted literal member invocation' @($quoted) 1 '\[syntax:parameterless-wait-for-exit\]' -RejectParameterlessWaitForExit
+    $null = Put 'ast/allowed/mentions.ps1' @'
+# $process.WaitForExit()
+<# $process.WaitForExit() #>
+$text = '$process.WaitForExit()'
+$moreText = "$process.WaitForExit()"
+$here = @"
+$process.WaitForExit()
+"@
+$process.WaitForExit
+$process.WaitForExit(1000)
+$process.WaitForExit($milliseconds)
+$process.WaitForExitAsync()
+$process.WaitForExitAsync($cancellationToken)
+$process.Other('WaitForExit')
+'@
+    $null = Put 'ast/allowed/not-powershell.txt' '$process.WaitForExit()'
+    Check 'AST allows timed and async waits and ignores non-call mentions and non-PS text' @('ast/allowed') 0 'PASS syntax: 1 file' -RejectParameterlessWaitForExit
+    Check 'AST failure is not hidden by a later valid file' @($wait, $good) 1 '\[syntax:parameterless-wait-for-exit\]' -RejectParameterlessWaitForExit
+    Check 'AST still parses syntax errors' @($bracket) 1 '\[syntax:error\]' -RejectParameterlessWaitForExit
+    if (Test-Path -LiteralPath $marker) { throw 'AST checker executed its target.' }
     $completed = $true
     Write-Host "PASS syntax regression: $($records.Count) public invocations; no target execution."
 } finally {

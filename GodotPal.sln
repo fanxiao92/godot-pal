@@ -8,9 +8,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pal.Core", "src\Pal.Core\Pal.Core.csproj", "{A0E8F77F-1750-4CAE-9588-6670D78C4EAE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pal.Game", "src\Pal.Game\Pal.Game.csproj", "{A9DDA4B9-98B1-438F-A942-1779F3663AA6}"
-	ProjectSection(ProjectDependencies) = postProject
-		{7C39AD8B-ED9C-4B22-A1AF-3A8BF37BC2AF} = {7C39AD8B-ED9C-4B22-A1AF-3A8BF37BC2AF}
-	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject

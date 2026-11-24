@@ -11,6 +11,7 @@ public sealed class ClassicBattleLifecycleSession
     private readonly Dictionary<int, BattleRoleState> roles;
     private readonly IReadOnlyDictionary<int, ClassicBattleGrowthData> growth;
     private readonly IBattleRandom random;
+    private readonly CashLiveState? cashLiveState;
     private readonly ClassicBattleEndScript[] battleEndScripts;
     private int battleEndScriptIndex = -1;
     private ClassicBattleSession? activeCombat;
@@ -31,6 +32,12 @@ public sealed class ClassicBattleLifecycleSession
     public ClassicBattleLifecycleSession(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
         IReadOnlyList<ClassicBattleEnemy> enemies, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth, IBattleRandom random,
         BattleEquipmentState? equipment = null, bool runEnemyBattleEndScripts = false, bool isBossBattle = false)
+        : this(roles, players, enemies, growth, random, equipment, runEnemyBattleEndScripts, isBossBattle, null) { }
+
+    internal ClassicBattleLifecycleSession(IReadOnlyList<BattleRoleSnapshot> roles, IReadOnlyList<ClassicBattlePlayer> players,
+        IReadOnlyList<ClassicBattleEnemy> enemies, IReadOnlyDictionary<int, ClassicBattleGrowthData> growth, IBattleRandom random,
+        BattleEquipmentState? equipment, bool runEnemyBattleEndScripts, bool isBossBattle,
+        Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript, CashLiveState? cashLiveState = null)
     {
         ArgumentNullException.ThrowIfNull(random);
         Validate(roles, players, enemies, growth, equipment);
@@ -41,14 +48,24 @@ public sealed class ClassicBattleLifecycleSession
         if (battleEndScripts.Length > 0 && !runEnemyBattleEndScripts)
             throw new InvalidDataException("Classic combat requires the capable script executor to run a declared enemy battle-end script.");
         var byId = roles.ToDictionary(x => x.RoleId);
-        var combat = new ClassicBattleSession(new(players.Select(x => x with { Hp = Math.Max(1, byId[x.RoleId].Hp) }).ToArray(), enemies), random, equipment, isBossBattle);
+        var combat = new ClassicBattleSession(new(players.Select(x => x with { Hp = Math.Max(1, byId[x.RoleId].Hp) }).ToArray(), enemies),
+            random, equipment, isBossBattle, readRoleHookScript);
         this.roles = byId.ToDictionary(x => x.Key, x => new BattleRoleState(x.Value));
         this.growth = growth.ToDictionary(x => x.Key, x => new ClassicBattleGrowthData(
             Array.AsReadOnly(x.Value.LevelUpExperience.ToArray()), Array.AsReadOnly(x.Value.LevelUpMagics.ToArray())));
         this.random = random;
+        this.cashLiveState = cashLiveState;
         foreach (var role in this.roles.Values)
         {
-            role.Hp = Math.Max(1, role.Hp);
+            // PAL_StartBattle's entry loop (battle.c 1568-1583): every zero-HP party member
+            // revives at exactly 1 HP and loses its puppet status at the actual battle start,
+            // where the whole party's hidden action counts also reset; validation and preflight
+            // never produce these side effects.
+            if (role.Hp == 0)
+            {
+                role.Hp = 1;
+                role.Statuses[BattleEquipmentState.PuppetStatusIndex] = 0;
+            }
             if (equipment is { Declared: true })
             {
                 // PAL_UpdateEquipments re-runs the equip scripts (global.c:1352): the persistent good
@@ -77,12 +94,42 @@ public sealed class ClassicBattleLifecycleSession
         Current = View(activeCombat.Current);
     }
 
-    /// <summary>The whole-party boss flee attempt (fight.c 4119-4173); only a boss battle supports it.</summary>
+    /// <summary>The all-target attack selection forwarded to the active combat owner (reference
+    /// sTarget -1; the classic Attack confirm commits it without a target menu, uibattle.c 1611-1617).</summary>
+    public void SelectAttackAll(int partyIndex)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.SelectAttackAll(partyIndex);
+        Current = View(activeCombat.Current);
+    }
+
+    /// <summary>The whole-party flee attempt (fight.c 4119-4173): a boss battle always fails but
+    /// still consumes its draw; a normal battle ends Escaped on success, settling with the common
+    /// cleanup only — no victory rewards, growth or enemy post-victory scripts (battle.c 1804-1830).</summary>
     public void SelectFlee(int partyIndex)
     {
         if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
         activeCombat.SelectFlee(partyIndex);
         Current = View(activeCombat.Current);
+    }
+
+    /// <summary>uibattle.c 1166-1171 (PAL_CLASSIC kKeyDefend in the main move menu): the defend
+    /// commit forwarded to the active combat owner; no target menu exists for it.</summary>
+    public void SelectDefend(int partyIndex)
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        activeCombat.SelectDefend(partyIndex);
+        Current = View(activeCombat.Current);
+    }
+
+    /// <summary>uibattle.c 1225-1252 (PAL_CLASSIC kKeyMenu): the classic cancel revert through
+    /// the lifecycle's active combat owner; the published view follows the reopened member.</summary>
+    public bool CancelSelection()
+    {
+        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
+        bool reopened = activeCombat.CancelSelection();
+        Current = View(activeCombat.Current);
+        return reopened;
     }
 
     public bool ResolveNextAction()
@@ -111,6 +158,7 @@ public sealed class ClassicBattleLifecycleSession
             role.Hp = player.Hp;
             role.HiddenExperience["attack"].Count = player.Counts.Attack;
             role.HiddenExperience["health"].Count = player.Counts.Health;
+            role.HiddenExperience["defense"].Count = player.Counts.Defense;
             role.HiddenExperience["flee"].Count = player.Counts.Flee;
         }
     }
@@ -160,6 +208,9 @@ public sealed class ClassicBattleLifecycleSession
     {
         experienceGranted = activeCombat!.ExperienceGained;
         cashGranted = activeCombat.CashGained;
+        // battle.c:1054: the Won settlement credits cash before growth/enemy-end scripts.
+        // Completion is only a handoff of these facts; acknowledging it must not grant again.
+        cashLiveState?.Credit((uint)cashGranted);
         var growthReports = new List<ClassicBattleRoleGrowth>();
         foreach (var player in combat.Players)
         {
@@ -295,27 +346,29 @@ public sealed class ClassicBattleLifecycleSession
 
     /// <summary>Role-hook side effects (script.c 0x001B/0x001C/0x0030) land on the live battle state;
     /// only a running hook's caller context may route them, never a host input.</summary>
-    internal void ApplyRoleHookHp(int partyIndex, int delta)
-    {
-        if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
-        activeCombat.HealRoleHookHp(partyIndex, delta);
-        SyncPartyFromCombat();
-        Current = View(activeCombat.Current);
-    }
+    internal bool ApplyRoleHookHp(int partyIndex, int delta) => ApplyRoleHookHpMp(partyIndex, delta, 0);
 
-    internal void ApplyRoleHookMp(int partyIndex, int delta)
+    internal bool ApplyRoleHookMp(int partyIndex, int delta) => ApplyRoleHookHpMp(partyIndex, 0, delta);
+
+    private bool ApplyRoleHookHpMp(int partyIndex, int hpDelta, int mpDelta)
     {
         if (activeCombat is null) throw new InvalidOperationException("This battle lifecycle has finished.");
         var player = activeCombat.Current.Players[partyIndex];
         var role = roles[player.RoleId];
-        // PAL_IncreaseHPMP only changes alive players (global.c:1272).
-        if (role.Hp > 0)
+        int beforeHp = role.Hp, beforeMp = role.Mp;
+        bool wasAlive = beforeHp > 0;
+        activeCombat.HealRoleHookHp(partyIndex, hpDelta);
+        SyncPartyFromCombat();
+        // PAL_IncreaseHPMP checks life once, before either word changes. MP still normalizes
+        // with delta zero when this HP operation has just reduced the alive caller to zero.
+        if (wasAlive)
         {
-            int mp = unchecked((ushort)(role.Mp + delta));
+            int mp = unchecked((ushort)(role.Mp + mpDelta));
             if ((short)mp < 0) mp = 0;
             role.Mp = Math.Min(mp, role.MaxMp);
         }
         Current = View(activeCombat.Current);
+        return role.Hp != beforeHp || role.Mp != beforeMp;
     }
 
     internal void ApplyRoleHookStatBoost(int partyIndex, int statField, int percent)
@@ -356,9 +409,12 @@ public sealed class ClassicBattleLifecycleSession
         bool equipmentAgrees = equipment is not { Declared: true }
             ? role.Equipment is { Count: 6 } && role.Equipment.All(x => x == 0)
             : role.Equipment is { Count: 6 } && role.Equipment.SequenceEqual(equipment.Equipment(role.RoleId));
-        bool statusesAgree = equipment is not { Declared: true }
-            ? role.Statuses is { Count: 9 } && role.Statuses.All(x => x == 0)
-            : role.Statuses is { Count: 9 } && SettledStatusesAgree(equipment.StatusOverlay(role.RoleId), role.Statuses);
+        // battle.c 1568-1576: only a zero-HP member's puppet word may enter the settled domain —
+        // the battle start clears it — while a living member's puppet is the unopened mid-battle
+        // puppet action domain and every other non-good status stays rejected in either spelling.
+        bool statusesAgree = role.Statuses is { Count: 9 } && DeadEntryPuppetAgrees(role) && (equipment is not { Declared: true }
+            ? role.Statuses.Where((_, status) => status != BattleEquipmentState.PuppetStatusIndex).All(x => x == 0)
+            : SettledStatusesAgree(equipment.StatusOverlay(role.RoleId), role.Statuses, role.Hp == 0));
         if (role.RoleId != player.RoleId || role.Hp != player.Hp || role.MaxHp != player.MaxHp
             || role.Hp is < 0 or > 32767 || role.MaxHp is < 1 or > 65535 || role.Hp > role.MaxHp
             || !Word(role.Mp) || !Word(role.MaxMp) || role.Mp > role.MaxMp || role.Level is < 0 or > 99
@@ -384,13 +440,21 @@ public sealed class ClassicBattleLifecycleSession
     private static bool Word(int value) => value is >= 0 and <= 65535;
     private static bool ValidExperience(BattleExperienceSnapshot? xp) => xp is not null && Word(xp.Value) && Word(xp.Level) && Word(xp.Count);
 
+    /// <summary>battle.c 1574-1576: the battle start clears a zero-HP member's puppet word, so any
+    /// WORD spelling may enter; a living member's puppet stays outside the supported domain.</summary>
+    private static bool DeadEntryPuppetAgrees(BattleRoleSnapshot role) =>
+        role.Hp == 0 ? Word(role.Statuses[BattleEquipmentState.PuppetStatusIndex])
+            : role.Statuses[BattleEquipmentState.PuppetStatusIndex] == 0;
+
     /// <summary>Timed statuses (1..999) and extra temporary effects are not part of this domain; the settled
     /// state may only carry persistent equipment statuses (global.c:2255 good branch, >999 preserved by
-    /// the battle-end cleanup of global.c:2304) at or below the declared overlay value.</summary>
-    private static bool SettledStatusesAgree(IReadOnlyList<int> overlay, IReadOnlyList<int> statuses)
+    /// the battle-end cleanup of global.c:2304) at or below the declared overlay value. A dead entry's
+    /// puppet slot is exempt: PAL_StartBattle clears it before the battle runs (battle.c:1576).</summary>
+    private static bool SettledStatusesAgree(IReadOnlyList<int> overlay, IReadOnlyList<int> statuses, bool deadEntryPuppet)
     {
         for (int status = 0; status < BattleEquipmentState.StatusCount; status++)
         {
+            if (deadEntryPuppet && status == BattleEquipmentState.PuppetStatusIndex) continue;
             int value = statuses[status];
             if (status < BattleEquipmentState.GoodStatusFirstIndex)
             {

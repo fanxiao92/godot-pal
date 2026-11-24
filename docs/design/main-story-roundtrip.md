@@ -7,9 +7,10 @@ Checkpoint C adds an explicit **normal Main** mode, not a second fixture battle 
 ```
 --story-profile <res:// URI> --battle-visual-profile <res:// URI>
 [--story-language zh-Hans|en] [--battle-seed <unsigned decimal ulong>]
+[--save-directory <relative user:// namespace>]
 ```
 
-Both profiles are mandatory. This mode is exclusive with M2, M3 and frozen M4 selections. Duplicates, missing values, unknown flags, mixed modes, invalid URIs/languages and non-decimal/overflow seeds are rejected. `GameSceneConfiguration.FromArguments` is shared by shipped `GameStartup` and embedded Main. Old selections retain their existing parser and diagnostics.
+Both profiles are mandatory. This mode is exclusive with M2, M3 and frozen M4 selections. Duplicates, missing values, unknown flags, mixed modes, invalid URIs/languages and non-decimal/overflow seeds are rejected. `--save-directory` (#224) defaults to `user://saves` and must name one controlled relative `user://` namespace — no `..` traversal, backslash separator, trailing slash, second scheme or length over 160 — anything else is rejected before the save namespace is ever touched. `GameSceneConfiguration.FromArguments` is shared by shipped `GameStartup` and embedded Main. Old selections retain their existing parser and diagnostics.
 
 Main strictly loads Story and Visual and requires reference-presentation and UI capabilities before instantiating the map, creating sessions/RNG or publishing scene children. Base-format-valid old visuals without effect/speed now fail normal Story startup explicitly; format loading remains compatible. `CheckedStoryProfile` retains the same `IgnoreDeep`-loaded PackedScene it validated; Main instantiates it without reloading its URI. Native Resources remain mutable isolated prepared instances, consumed read-only by convention, **not deep-immutable objects**. Hashes bind complete native data, including both language files and the font, not engine/code/cache or authorship.
 
@@ -17,9 +18,9 @@ Every Main owns one Godot `RandomNumberGenerator`: `Randomize()` by default, or 
 
 ## Search, ownership and return
 
-`NpcInteractionSession.ForSelectedEntry(rules, leader, entry)` shares the original search, held-direction, 100ms late-no-catchup and 50ms return implementation. The old three-argument constructor remains owner60/@0188-only. This is **not a general event scheduler or return VM**: the currently supported closure only ends with `end keep`; other end modes fail the real VM's preflight.
+`NpcInteractionSession.ForSelectedEntry(rules, leader, entry)` shares the original search, held-direction, 100ms late-no-catchup and 50ms return implementation; Main passes the optional trailing runtime world, while the old three-argument call remains the owner60/@0188-only static host. This is **not a general event scheduler or return VM**: the checked dispatch closure runs the T03 control flow (call, goto and `end` keep/advance/redirect, with counted gates resolved against the bound runtime world) that the formal preflight validated; anything outside that checked closure fails the real VM's preflight before display or side effects.
 
-A successful real `TriggerScriptSession.Start(file, entry, caller, sourceRequestId)` publishes a new `CallId`, its actual `StartedEntry` and read-only `SourceRequestId`; an empty origin or failed preflight leaves all old call facts intact. Legacy three-argument Start publishes a null origin. Main passes the actual pending search Guid into typed story Start, then binds that same origin, object and CallId once to the pending search. Calls originating from older searches (even previously completed objects) or other interactions cannot bind; no history registry or wall-clock fence is used. Typed story Start without an origin is rejected. A second bind cannot replace it. Completion additionally requires that same object/CallId, Guid, caller, Completed phase and original ReturnEntry. A reused object started again cannot claim the old search. Legacy unbound owner60 receipt semantics remain unchanged.
+A successful real `TriggerScriptSession.Start(file, entry, caller, sourceRequestId)` publishes a new `CallId`, its actual `StartedEntry` and read-only `SourceRequestId`; an empty origin or failed preflight leaves all old call facts intact. Legacy three-argument Start publishes a null origin. Main passes the actual pending search Guid into typed story Start, then binds that same origin, object and CallId once to the pending search. Calls originating from older searches (even previously completed objects) or other interactions cannot bind; no history registry or wall-clock fence is used. Typed story Start without an origin is rejected. A second bind cannot replace it. Completion requires that same object/CallId, Guid, caller and Completed phase with `StartedEntry` still the checked entry; the published `ReturnEntry` need not equal the authored entry (end advance/redirect may publish any legal WORD) and is written back to the bound runtime world's object (`play.c` 153), the retained state the save chain captures (matrix D11), so a committed load rebuilds the interaction over the restored world word instead of rejecting it. A reused object started again cannot claim the old search. Legacy unbound owner60 receipt semantics remain unchanged.
 
 `PalTriggerDialogue.Initialize(display, checkedStory, random)` directly consumes checked events, language, font, portraits, prompts, palette and battle content. No URI reload, battle-crossing dialogue preview, substitute RNG or simulated win is used. The display alone advances dialogue; the adapter only binds and receipts completed displays/battles.
 
@@ -32,6 +33,14 @@ Main alone owns battle input, lifecycle advancement and feedback:
 5. Result dialogue → actual keep stop → shared 50ms return → independent exploration. Direction presses/releases still reach the retained exploration input while blocked; search is not forwarded through battle/dialogue transitions.
 
 Exit disconnects host subscriptions, releases the overlay/textures and RNG, drops retained session/resource references and leaves no shared battle state. Initialization failure frees owned unpublished nodes; no fallback mode or partial story is exposed.
+
+## Independent actor counts (#203 / #136 runtime leaf)
+
+The existing content contract accepts one to three players independently of one to five enemy slots (#210 outer migration of the #207 Core capacity). The battle view uses per-actor draw arrays whenever **either** side has multiple actors; player count must not hide a second enemy. Scalar snapshot fields still project actor zero, and the one-player/one-enemy path is unchanged. Duplicate enemy definition IDs retain separate slot positions and HP.
+
+`SinglePlayerTwoEnemiesDrawBothDuplicateSlotsOnFirstBattleUpdateAndFreshMain` derives an owned one-player copy of the synthetic PartyWin input, keeping the RoleId sets in `roles`, `players` and `growth` consistent. It passes through formal Prepare and normal Main, checking both id7 slots at (100,120)/(128,104), each HP43, and the player at (240,170) in the first battle `UpdateCompleted`. A second Main reuses the same prepared URIs and checks the same initial state. The snapshot is the one consumed by `_Draw`; this is headless wiring coverage, not GPU pixel verification.
+
+This leaf does **not** complete #136: team-wide sprite/frame metadata, independent per-slot animation and death/fade, complete FirstBattle source proofs and heterogeneous prepared visuals remain separate work. It neither adds a compatibility loader nor migrates the visual schema.
 
 ## UI data and bounded presentation
 

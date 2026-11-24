@@ -6,7 +6,7 @@
 
 初始 #68 库存以 `d9bc96e4cb4166600cab6027a7d6370221d01d55` 为 base，覆盖 `scripts/` 全部已跟踪文件（含模块和锁文件）。本次原生 Unit 调整基于 `a93e9e3694ef0c8a286f4e85559edcf0f75dea3c` 复查受影响的 workflow/维护回归调用；脚本本体未改。搜索含 `.github/`、`scripts/`、`tests/`、`src/`、当前文档，排除 `reference/` 和 `docs/archive/`。下表区分实际运行调用、仅定义加载、回归夹具与文档入口；字符串命中不直接等同执行。
 
-**外部调用方一律未知**：不覆盖未跟踪文件、工作区外工具、旧提交、其他仓库、用户手工命令或服务端临时调度。仓内无调用不证明可删除。源码/调用方变化时同步本表；当前运行能力仍以脚本、配置和对应任务证据为准，本次文档核对没有运行这些工具。
+**外部调用方一律未知**：不覆盖未跟踪文件、工作区外工具、旧提交、其他仓库、用户手工命令或服务端临时调度。仓内无调用不证明可删除。源码/调用方变化时同步本表；当前运行能力仍以脚本、配置和对应任务证据为准，各次实测以对应任务收据为准。
 
 路径均相对 `scripts/`；“保留”指保留当前职责，不为未执行层补签通过。
 
@@ -17,7 +17,10 @@
 | [`Test-Unit.ps1`](../../scripts/Test-Unit.ps1) | 维护用 Unit 边界、发现/执行集合与证据编排 | `tests/UnitEntry.Tests.ps1`；[Unit 专题](unit-entry.md)；CI 契约检查其不成为默认入口 | 显式维护；保留，不替代 agent 直接命令 |
 | [`Test-Range.ps1`](../../scripts/Test-Range.ps1) | 明确选择 CLI integration、Prepare、Game 批次及范围证据 | `tests/Test-Range.Tests.ps1`；[范围入口](range-regression.md)与 Game README | 显式非完整门；保留 |
 | [`Test-Engineering.ps1`](../../scripts/Test-Engineering.ps1) | Source、Offline、OwnedProcess 三类工程检查 | `tests/Test-Engineering.Tests.ps1`；[工程检查](engineering-checks.md)；当前自动 workflow 不调用 | 显式工程入口；保留，不进入默认 Unit |
-| [`Test-PowerShellSyntax.ps1`](../../scripts/Test-PowerShellSyntax.ps1) | 仅解析选定 PowerShell 源码，拒绝语法错误 | `Test-Engineering.ps1`；`tests/Test-PowerShellSyntax.Tests.ps1` | 显式 Source／被调用工具；保留 |
+| [`Test-AgentEvidence.ps1`](../../scripts/Test-AgentEvidence.ps1) | 只读 current 与 xUnit/Game 显式 RED/GREEN 分类 | AgentEvidence 回归、Engineering Offline、CI 离线 guard；[契约](agent-evidence.md) | 显式强分类，不授予执行权 |
+| [`Export-AgentHandoff.ps1`](../../scripts/Export-AgentHandoff.ps1) | idle current 原件备份、能力收据精简与显式 SHA 保护替换 | AgentWorkflow 回归（Engineering Offline/CI）；[固定交接](../agents/runtime-workflow.md) | 默认不改 current，不检查 fleet |
+| [`Export-AgentSourceSnapshot.ps1`](../../scripts/Export-AgentSourceSnapshot.ps1) | 原始字节源码图与允许路径比较 | AgentWorkflow 回归（Engineering Offline/CI）；固定交接 | 工作树外全新输出，不认证 runtime |
+| [`Test-PowerShellSyntax.ps1`](../../scripts/Test-PowerShellSyntax.ps1) | 解析选定 PowerShell 源码；可选无参 WaitForExit AST 规则 | Engineering、CI guard、Syntax 回归；[范围](engineering-checks.md#ast-与生成脚本预检) | 默认仅语法；规则显式选范围 |
 | [`Test-UnitBoundary.ps1`](../../scripts/Test-UnitBoundary.ps1) | 校验 Unit 项目、引用与源码边界 | `Test-Engineering.ps1`、`Test-Unit.ps1`；`tests/UnitBoundary.Tests.ps1` | 显式边界检查；保留；静态边界不等于产品 Unit 通过 |
 | [`Get-TestCostReport.ps1`](../../scripts/Get-TestCostReport.ps1) | 只读既有证据生成成本报告，不运行测试 | `Test-CiFullProof.ps1`；`tests/Pal.Game.Tests/TestCostReport.Tests.ps1`；[成本口径](test-cost-report.md) | 显式只读工具；保留 |
 | [`Get-TestProcesses.ps1`](../../scripts/Get-TestProcesses.ps1) | 输出隐私受限的 Godot／本仓测试执行器快照 | `Test-M0.ps1`、`Prepare-DialoguePackage.ps1`、`Test-RealDialogueGpu.ps1`、`Write-StaticScene4Profile.ps1`；ProcessSnapshot 回归 | 显式诊断／准备前保护；保留，不用于全机详细采集 |
@@ -27,8 +30,10 @@
 | 路径 | 职责 | 已知调用方／边界 | 入口身份与处置 |
 | --- | --- | --- | --- |
 | [`DotnetCheckedDefinition.ps1`](../../scripts/DotnetCheckedDefinition.ps1) | dotnet root/双流共用预算、自有清理与原始退出留证 | `Test-M0.ps1`、`Test-Range.ps1`；DotnetBoundary 回归 | 内部定义；保留，不单独当测试入口 |
-| [`GameTestBatches.ps1`](../../scripts/GameTestBatches.ps1) | Game 发现/批次及共享 TRX 身份图定义 | M0、Range、TestCostReport；Unit 维护工具及保留的旧 CI executor **仅加载定义**；GameBatches/RangeIdentity/强审计回归 | 内部定义；保留；原生 Unit workflow 不加载它，加载不表示启动 Godot |
-| [`TestRunDefinitions.ps1`](../../scripts/TestRunDefinitions.ps1) | xUnit discovery、Unit TRX 与发现/执行集合校验 | `Test-Unit.ps1`、`Test-Range.ps1`、保留的 `Invoke-CiUnit.ps1`；RangeIdentity/Test-CiUnit 维护回归 | 内部定义；保留；原生 Unit workflow 不调用 |
+| [`GameTestBatches.ps1`](../../scripts/GameTestBatches.ps1) | Game 批次、共享 TRX 身份图及 headless GPU 继承保护 | M0、Range、TestCostReport、AgentEvidence；Unit 维护工具及保留的旧 CI executor **仅加载定义**；GameBatches/RangeIdentity/强审计回归 | 内部定义；CI 离线回归会加载，加载不表示启动 Godot |
+| [`TestRunDefinitions.ps1`](../../scripts/TestRunDefinitions.ps1) | xUnit discovery、Unit TRX 与发现/执行集合校验 | `Test-Unit.ps1`、`Test-Range.ps1`、`Test-AgentEvidence.ps1`、保留的 `Invoke-CiUnit.ps1`；RangeIdentity/Test-CiUnit 维护回归 | 内部定义；保留；产品 Unit 步骤不调用，CI 离线分类回归会加载 |
+| [`AgentEvidenceJson.psm1`](../../scripts/AgentEvidenceJson.psm1) | 严格 JSON、命令对象/数组读取、日期保真与新产物写入 | AgentEvidence、Handoff、SourceSnapshot；AgentEvidence/AgentWorkflow 回归 | 内部模块，不执行产品测试 |
+| [`agent-evidence.schema.json`](../../scripts/agent-evidence.schema.json) | current 与显式反馈 JSON 契约 | Test-AgentEvidence 只读加载；AgentEvidence 回归 | 非执行数据，不含运行授权 |
 | [`TestCostReport.psm1`](../../scripts/TestCostReport.psm1) | 成本解析、证据完整性与可比性逻辑 | `Get-TestCostReport.ps1` 导入；TestCostReport 回归 | 内部模块；保留 |
 
 ## 资源准备与工具链（均非 Unit 前置）
@@ -47,7 +52,7 @@
 
 ## CI／验收证据（当前自动、显式与暂停分开）
 
-当前原生 workflow 直接执行两个项目与 `tests/unit.runsettings`，不调用本节脚本。`tests/Test-CiWorkflow.Tests.ps1` 显式验证实际 block/真实 dotnet；下列强审计工具保留原契约，不因退出默认调用链而删除，取舍见 [ADR-0003](../adr/0003-native-unit-feedback.md)。
+当前原生 workflow 直接执行两个项目与 `tests/unit.runsettings`，不调用本节脚本。`tests/Test-CiWorkflow.Tests.ps1 -Mode Offline` 验证实际 block/合成 guard，默认 OwnedProcess 另验证真实 dotnet；下列强审计工具保留原契约，不因退出默认调用链而删除，取舍见 [ADR-0003](../adr/0003-native-unit-feedback.md)。
 
 | 路径 | 职责 | 已知调用方／边界 | 入口身份与处置 |
 | --- | --- | --- | --- |

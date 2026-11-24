@@ -56,6 +56,9 @@ try {
     $fakeSteps = @{
         'tests/Test-PowerShellSyntax.Tests.ps1' = 'PASS syntax regression: 1 public invocations'
         'tests/Test-Engineering.Tests.ps1' = 'PASS engineering regression: 1 public invocations'
+        'tests/AgentEvidence.Tests.ps1' = 'PASS agent evidence regression: 1 public invocations;'
+        'tests/AgentWorkflow.Tests.ps1' = 'PASS agent workflow regression: 1 public invocations;'
+        'tests/Test-CiWorkflow.Tests.ps1' = 'PASS offline CI workflow: 7 controls;'
         'tests/UnitBoundary.Tests.ps1' = 'PASS UnitBoundary public-command regression: 1 cases; fixture cleaned.'
         'tests/Pal.Game.Tests/GameBatches.Tests.ps1' = 'PASS: 1 offline batch metadata groups;'
         'tests/Pal.Game.Tests/ProcessSnapshot.Tests.ps1' = 'PASS: ProcessSnapshot fake regression; real CIM invocations = 0.'
@@ -64,7 +67,7 @@ try {
         'tests/Pal.Game.Tests/DotnetBoundary.Tests.ps1' = 'PASS: 1 real dotnet-boundary cases;'
         'tests/UnitEntry.Tests.ps1' = 'PASS regression: 1 public invocations;'
     }
-    foreach ($p in $fakeSteps.Keys) { Put $p ("param([string]`$EvidenceDirectory,[string]`$InputDirectory)`nWrite-Output '$($fakeSteps[$p])'") }
+    foreach ($p in $fakeSteps.Keys) { Put $p ("param([string]`$EvidenceDirectory,[string]`$InputDirectory,[string]`$Mode)`nWrite-Output '$($fakeSteps[$p])'") }
     # Four literal synthetic files validate orchestration only, not actual package provenance.
     $bundle = Join-Path $fixture '人工 bundle'; $null = [IO.Directory]::CreateDirectory($bundle)
     $assets = @(foreach ($n in @('a', 'b', 'provenance.json', 'SHA256SUMS')) {
@@ -89,7 +92,20 @@ try {
     $r = Check 'same-size corrupt bundle fails before child steps' 'Offline' 1 'Length/hash mismatch' -Bundle $badBundle
     Assert (@($r.steps).Count -eq 0) 'Invalid package input started child steps.'
     $r = Check 'offline runs the exact fixed fixture sequence' 'Offline' 0 -Bundle $bundle
-    Assert ((@($r.steps.name) -join ',') -ceq 'ast,unit-boundary,syntax-regression,engineering-regression,unit-boundary-regression,game-batches-regression,process-snapshot-regression,gdunit-packages-regression,cost-report-regression') 'Offline wiring omitted or reordered a step.'
+    Assert ((@($r.steps.name) -join ',') -ceq 'ast,unit-boundary,syntax-regression,engineering-regression,agent-evidence-regression,agent-workflow-regression,ci-workflow-regression,unit-boundary-regression,game-batches-regression,process-snapshot-regression,gdunit-packages-regression,cost-report-regression') 'Offline wiring omitted or reordered a step.'
+    Assert (($r.steps | Where-Object name -eq 'ci-workflow-regression').scriptArguments[1] -ceq 'Offline') 'CI regression selected real SDK mode.'
+    foreach ($tool in @(
+        @{path='tests/AgentEvidence.Tests.ps1'; step='agent-evidence-regression'},
+        @{path='tests/AgentWorkflow.Tests.ps1'; step='agent-workflow-regression'},
+        @{path='tests/Test-CiWorkflow.Tests.ps1'; step='ci-workflow-regression'},
+        @{path='tests/Pal.Game.Tests/GameBatches.Tests.ps1'; step='game-batches-regression'}
+    )) {
+        Put $tool.path "param([string]`$EvidenceDirectory,[string]`$Mode)`n[Console]::Error.WriteLine('OFFLINE_EXPECTED_EXIT7'); exit 7"
+        $r = Check "$($tool.step) preserves failure and stops later tools" 'Offline' 7 "$($tool.step) exited 7" -Bundle $bundle
+        Assert ($r.steps[-1].name -ceq $tool.step -and $r.steps[-1].exitKnown -and $r.steps[-1].exitCode -eq 7) 'Offline failure lost or later step ran.'
+        Assert ([IO.File]::ReadAllText((Join-Path $r.evidenceDirectory "$($tool.step)/stderr.log")).Contains('OFFLINE_EXPECTED_EXIT7')) 'Offline failure original missing.'
+        Put $tool.path ("param([string]`$EvidenceDirectory,[string]`$Mode)`nWrite-Output '$($fakeSteps[$tool.path])'")
+    }
     $r = Check 'SDK mode is wired but fixtures do not execute SDK' 'OwnedProcess' 0
     Assert ((@($r.steps.name) -join ',') -ceq 'ast,unit-boundary,dotnet-boundary,unit-entry') 'OwnedProcess wiring missing.'
     Boundary "[Console]::Out.WriteLine('{`"状态`":`"中文失败`"}'); [Console]::Error.WriteLine('原始失败日志'); exit 7"

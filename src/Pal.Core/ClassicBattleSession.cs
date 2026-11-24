@@ -14,6 +14,7 @@ public sealed class ClassicBattleSession
     private readonly int?[] targets;
     private ClassicBattleQueueEntry[] queue = [];
     private readonly IBattleRandom random;
+    private readonly Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript;
     private int actionIndex;
     private bool pendingSecondStrike;
     // fight.c 595: per-action HP backup read by the post-action role-hook checks.
@@ -24,6 +25,19 @@ public sealed class ClassicBattleSession
     private readonly ClassicBattlePlayer[] basePlayers;
     // fight.c 1965-1978 (CLASSIC): a committed flee feeds kKeyFlee to every later member's menu.
     private readonly bool[] fleeing;
+    // fight.c 4114 fDefending: the runtime defending flag of a performed defend action. The
+    // selection commit (defendingSelection) is only the member's edit until the action performs
+    // (fight.c 4110-4116); the flag lasts exactly its own round (fight.c 1599-1604, 1068).
+    private readonly bool[] defendingSelection;
+    private readonly bool[] defending;
+    // PAL_PlayerCanAttackAll (global.c 2048-2080): the authored player word or any non-zero
+    // equipment rgwAttackAll register; the all-target selection (reference sTarget -1) exists only here.
+    private readonly bool[] canAttackAll;
+    // fight.c 3686-3690: the frozen hit set of the current all-target action. PostActionCheck
+    // (fight.c 735-765) clears KO'd enemies only after the whole action, so both strikes of a
+    // dual attack keep striking enemies killed by the first strike.
+    private int[]? pendingAttackAllTargets;
+    private const int AllTargets = -1;
     // PAL_StartBattle's fIsBoss (battle.c 1754): boss battles never allow a successful escape.
     private readonly bool isBossBattle;
     // battle.c 753-754: each KO accumulates its enemy's WORD reward once, granted by the
@@ -36,12 +50,17 @@ public sealed class ClassicBattleSession
 
     public ClassicBattleSession(ClassicBattleDefinition definition, IBattleRandom random, BattleEquipmentState? equipment = null,
         bool isBossBattle = false)
+        : this(definition, random, equipment, isBossBattle, null) { }
+
+    internal ClassicBattleSession(ClassicBattleDefinition definition, IBattleRandom random, BattleEquipmentState? equipment,
+        bool isBossBattle, Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(random);
         Validate(definition, equipment);
         this.random = random;
         this.isBossBattle = isBossBattle;
+        this.readRoleHookScript = readRoleHookScript;
         players = definition.Players.ToArray();
         basePlayers = definition.Players.ToArray();
         enemies = definition.Enemies.ToArray();
@@ -70,7 +89,11 @@ public sealed class ClassicBattleSession
         boostDexterity = new int[players.Length];
         boostFlee = new int[players.Length];
         fleeing = new bool[players.Length];
+        defendingSelection = new bool[players.Length];
+        defending = new bool[players.Length];
         counts = players.Select(_ => new ClassicBattleCounts(0, 0)).ToArray();
+        canAttackAll = players.Select((p, i) => p.AttackAll
+            || EquipmentGrantsAttackAll(p.RoleId, equipment)).ToArray();
         targets = new int?[players.Length];
         Current = new(ClassicBattlePhase.Selecting, 0, playerHp[0], enemyHp[0], counts[0], null);
         Publish();
@@ -92,8 +115,69 @@ public sealed class ClassicBattleSession
         if (partyIndex != Current.SelectingPlayerIndex) throw new ArgumentOutOfRangeException(nameof(partyIndex));
         if (enemySlot < 0 || enemySlot >= enemies.Length || enemyHp[enemySlot] == 0)
             throw new ArgumentOutOfRangeException(nameof(enemySlot));
-        targets[partyIndex] = enemySlot;
-        if (!Enumerable.Range(0, players.Length).Any(i => playerHp[i] > 0 && targets[i] is null))
+        // PAL_BattlePlayerValidateAction (fight.c 3489-3494): an attack-all member's specific
+        // target normalizes to the all-target selection; the classic UI never enters a single
+        // target menu for such a member (uibattle.c 1094-1099).
+        if (canAttackAll[partyIndex]) CommitAttackAll(partyIndex);
+        else
+        {
+            targets[partyIndex] = enemySlot;
+            CommitRoundWhenComplete();
+        }
+        Publish();
+    }
+
+    /// <summary>The all-target attack selection (reference sTarget -1). The classic Attack confirm
+    /// commits it directly without a target menu (uibattle.c 1094-1099 and 1611-1617); a member
+    /// without the capability never reaches it and the request is rejected before any state change.</summary>
+    public void SelectAttackAll(int partyIndex)
+    {
+        if (Current.Phase != ClassicBattlePhase.Selecting) throw new InvalidOperationException("This battle is not selecting an action.");
+        if (partyIndex != Current.SelectingPlayerIndex) throw new ArgumentOutOfRangeException(nameof(partyIndex));
+        if (!canAttackAll[partyIndex])
+            throw new InvalidOperationException("This member cannot select the all-target attack.");
+        CommitAttackAll(partyIndex);
+        Publish();
+    }
+
+    private void CommitAttackAll(int partyIndex)
+    {
+        targets[partyIndex] = AllTargets;
+        CommitRoundWhenComplete();
+    }
+
+    /// <summary>uibattle.c 1166-1171 (PAL_CLASSIC kKeyDefend in the main move menu): commits the
+    /// defend action directly without a target menu. The commit itself consumes no random and
+    /// no resource; the queue priority (fight.c 1535-1537), the runtime flag and the hidden
+    /// defense count land only when the action performs (fight.c 4110-4116).</summary>
+    public void SelectDefend(int partyIndex)
+    {
+        if (Current.Phase != ClassicBattlePhase.Selecting) throw new InvalidOperationException("This battle is not selecting an action.");
+        if (partyIndex != Current.SelectingPlayerIndex) throw new ArgumentOutOfRangeException(nameof(partyIndex));
+        defendingSelection[partyIndex] = true;
+        CommitRoundWhenComplete();
+        Publish();
+    }
+
+    private void CommitRoundWhenComplete()
+    {
+        if (!Enumerable.Range(0, players.Length).Any(i => playerHp[i] > 0 && targets[i] is null && !defendingSelection[i]))
+        {
+            BuildQueue();
+            Current = Current with { Phase = ClassicBattlePhase.Resolving, Round = Current.Round + 1 };
+        }
+    }
+
+    /// <summary>fight.c 4119-4173: the committer and every later living member flee together
+    /// (CLASSIC fFlee re-feed); a boss attempt always fails but still consumes its draw, and a
+    /// normal battle's successful attempt ends the whole battle (battle.c 1458-1528).</summary>
+    public void SelectFlee(int partyIndex)
+    {
+        if (Current.Phase != ClassicBattlePhase.Selecting) throw new InvalidOperationException("This battle is not selecting an action.");
+        if (partyIndex != Current.SelectingPlayerIndex) throw new ArgumentOutOfRangeException(nameof(partyIndex));
+        for (int i = partyIndex; i < players.Length; i++)
+            if (playerHp[i] > 0 && targets[i] is null) fleeing[i] = true;
+        if (!Enumerable.Range(0, players.Length).Any(i => playerHp[i] > 0 && targets[i] is null && !fleeing[i] && !defendingSelection[i]))
         {
             BuildQueue();
             Current = Current with { Phase = ClassicBattlePhase.Resolving, Round = Current.Round + 1 };
@@ -101,22 +185,27 @@ public sealed class ClassicBattleSession
         Publish();
     }
 
-    /// <summary>fight.c 4119-4173: the committer and every later living member flee together
-    /// (CLASSIC fFlee re-feed); a boss attempt always fails but still consumes its draw.</summary>
-    public void SelectFlee(int partyIndex)
+    /// <summary>uibattle.c 1225-1252 (PAL_CLASSIC kKeyMenu in the main move menu): the classic
+    /// cancel reverts the newest committed member selection so that member selects again; the
+    /// first selectable member has nothing editable above it and the request is a side-effect
+    /// free no-op that publishes nothing. A committed flee never coexists with selection (it
+    /// commits every later member and starts the round), so clearing the target is the complete
+    /// revert; no item reservation exists in this domain yet.</summary>
+    public bool CancelSelection()
     {
         if (Current.Phase != ClassicBattlePhase.Selecting) throw new InvalidOperationException("This battle is not selecting an action.");
-        if (!isBossBattle)
-            throw new InvalidOperationException("Classic combat does not yet support a non-boss flee; the successful-escape domain is unimplemented.");
-        if (partyIndex != Current.SelectingPlayerIndex) throw new ArgumentOutOfRangeException(nameof(partyIndex));
-        for (int i = partyIndex; i < players.Length; i++)
-            if (playerHp[i] > 0 && targets[i] is null) fleeing[i] = true;
-        if (!Enumerable.Range(0, players.Length).Any(i => playerHp[i] > 0 && targets[i] is null && !fleeing[i]))
+        int selecting = Current.SelectingPlayerIndex ?? throw new InvalidOperationException("No member is selecting an action.");
+        for (int i = selecting - 1; i >= 0; i--)
         {
-            BuildQueue();
-            Current = Current with { Phase = ClassicBattlePhase.Resolving, Round = Current.Round + 1 };
+            // The reference revert loop skips members that cannot re-select; in this domain only
+            // the dead ones qualify, and a dead member never committed a selection.
+            if (targets[i] is null && !defendingSelection[i]) continue;
+            targets[i] = null;
+            defendingSelection[i] = false;
+            Publish();
+            return true;
         }
-        Publish();
+        return false;
     }
 
     private void BuildQueue()
@@ -139,6 +228,8 @@ public sealed class ClassicBattleSession
             speed = Math.Min(speed, 999);
             // fight.c 1546: a committed flee action halves the member's queue dexterity.
             if (fleeing[i]) speed /= 2;
+            // fight.c 1535-1537: a committed defend multiplies it by five (one commit per member).
+            else if (defendingSelection[i]) speed *= 5;
             if (playerHp[i] < Math.Min(100, player.MaxHp / 5)) speed /= 2;
             entries.Add(new(ClassicBattleSide.Player, i, playerHp[i] == 0 ? (ushort)0
                 : unchecked((ushort)(speed * random.NextInclusive(.9f, 1.1f)))));
@@ -167,34 +258,49 @@ public sealed class ClassicBattleSession
         var entry = queue[actionIndex];
         if (entry.Side == ClassicBattleSide.Player)
         {
-            if (playerHp[entry.ActorIndex] > 0)
+            if (playerHp[entry.ActorIndex] == 0)
             {
-                if (fleeing[entry.ActorIndex])
-                {
-                    AttemptFlee(entry.ActorIndex);
-                    actionIndex++;
-                }
-                // fight.c:3628: kStatusDualAttack doubles the strike loop of one attack action.
-                else if (pendingSecondStrike)
-                {
-                    pendingSecondStrike = false;
-                    AttackEnemy(entry.ActorIndex, secondStrike: true);
-                    CompletePlayerAction(entry.ActorIndex);
-                    actionIndex++;
-                }
-                else if (playerStatuses[entry.ActorIndex][StatusDualAttack] > 0)
-                {
-                    pendingSecondStrike = true;
-                    AttackEnemy(entry.ActorIndex, secondStrike: false);
-                }
-                else
-                {
-                    AttackEnemy(entry.ActorIndex, secondStrike: false);
-                    CompletePlayerAction(entry.ActorIndex);
-                    actionIndex++;
-                }
+                // fight.c 1730-1735: a member dead at its queue slot performs the reference's
+                // internal pass regardless of its committed action; the pass branch is empty
+                // (fight.c 4409-4410) — no strike, no counts, no defending flag, no random.
+                actionIndex++;
             }
-            else actionIndex++;
+            else if (fleeing[entry.ActorIndex])
+            {
+                AttemptFlee(entry.ActorIndex);
+                actionIndex++;
+                // battle.c 774: the successful escape ended the battle mid-round (kBattleResultFleed);
+                // the remaining queue entries never run and the round never reopens selection.
+                if (Current.Phase == ClassicBattlePhase.Escaped) { Publish(); return true; }
+            }
+            else if (defendingSelection[entry.ActorIndex])
+            {
+                // fight.c 4110-4116 (kBattleActionDefend, PAL_CLASSIC): the runtime flag and the
+                // hidden defense count land at perform time; no attack/health counter grows.
+                defending[entry.ActorIndex] = true;
+                counts[entry.ActorIndex] = counts[entry.ActorIndex] with
+                    { Defense = unchecked((ushort)(counts[entry.ActorIndex].Defense + 2)) };
+                actionIndex++;
+            }
+            // fight.c:3628: kStatusDualAttack doubles the strike loop of one attack action.
+            else if (pendingSecondStrike)
+            {
+                pendingSecondStrike = false;
+                Strike(entry.ActorIndex, secondStrike: true);
+                CompletePlayerAction(entry.ActorIndex);
+                actionIndex++;
+            }
+            else if (playerStatuses[entry.ActorIndex][StatusDualAttack] > 0)
+            {
+                pendingSecondStrike = true;
+                Strike(entry.ActorIndex, secondStrike: false);
+            }
+            else
+            {
+                Strike(entry.ActorIndex, secondStrike: false);
+                CompletePlayerAction(entry.ActorIndex);
+                actionIndex++;
+            }
         }        else
         {
             if (enemyHp[entry.ActorIndex] > 0)
@@ -228,6 +334,10 @@ public sealed class ClassicBattleSession
         {
             Array.Clear(targets);
             Array.Clear(fleeing);
+            Array.Clear(defendingSelection);
+            // fight.c 1599-1604 (round end) and 1068 (the member becomes ready to select
+            // again): fDefending lives exactly inside its own round.
+            Array.Clear(defending);
             queue = [];
             Current = Current with { Phase = ClassicBattlePhase.Selecting };
         }
@@ -244,8 +354,10 @@ public sealed class ClassicBattleSession
             if (playerHp[i] >= previousPlayerHp[i] || playerHp[i] != 0) continue;
             int coverer = PartyIndexOfRole(players[i].CoveredByRoleId);
             if (coverer < 0 || playerHp[coverer] == 0 || Unresponsive(coverer)) continue;
-            if (players[coverer].FriendDeathScript != 0)
-                return Hook(new(ClassicBattleHookKind.FriendDeath, coverer, players[coverer].RoleId, players[coverer].FriendDeathScript));
+            int friendDeathScript = readRoleHookScript is null ? players[coverer].FriendDeathScript
+                : readRoleHookScript(players[coverer], ClassicBattleHookKind.FriendDeath);
+            if (friendDeathScript != 0)
+                return Hook(new(ClassicBattleHookKind.FriendDeath, coverer, players[coverer].RoleId, friendDeathScript));
         }
         for (int i = 0; i < players.Length; i++)
         {
@@ -255,8 +367,10 @@ public sealed class ClassicBattleSession
                 || previousPlayerHp[i] < players[i].MaxHp / 5) continue;
             int coverer = PartyIndexOfRole(players[i].CoveredByRoleId);
             if (coverer < 0 || playerHp[coverer] == 0 || Unresponsive(coverer)) continue;
-            if (players[i].DyingScript != 0)
-                return Hook(new(ClassicBattleHookKind.Dying, i, players[i].RoleId, players[i].DyingScript));
+            int dyingScript = readRoleHookScript is null ? players[i].DyingScript
+                : readRoleHookScript(players[i], ClassicBattleHookKind.Dying);
+            if (dyingScript != 0)
+                return Hook(new(ClassicBattleHookKind.Dying, i, players[i].RoleId, dyingScript));
             return true; // fight.c 880: the crossing itself ends the check even without a script.
         }
         return false;
@@ -293,15 +407,28 @@ public sealed class ClassicBattleSession
         Current = Current with
         {
             PlayerHp = playerHp[0], EnemyHp = enemyHp[0], Counts = counts[0],
-            Players = Array.AsReadOnly(players.Select((p, i) => new ClassicBattlePlayerView(i, p.RoleId, playerHp[i], counts[i], targets[i])
-            { Attack = EffectivePanel(p.Attack, boostAttack[i]), Defense = EffectivePanel(p.Defense, boostDefense[i]),
-                Dexterity = EffectivePanel(p.Dexterity, boostDexterity[i]), BoostAttack = boostAttack[i], BoostMagicPower = boostMagicPower[i],
-                BoostDefense = boostDefense[i], BoostDexterity = boostDexterity[i], BoostFlee = boostFlee[i] }).ToArray()),
-            Enemies = Array.AsReadOnly(enemies.Select((e, i) => new ClassicBattleEnemyView(i, e.Id, enemyHp[i])).ToArray()),
+            Players = Array.AsReadOnly(players.Select((p, i) =>
+            {
+                int? selected = targets[i];
+                return new ClassicBattlePlayerView(i, p.RoleId, playerHp[i], counts[i], selected == AllTargets ? null : selected)
+                { Attack = EffectivePanel(p.Attack, boostAttack[i]), Defense = EffectivePanel(p.Defense, boostDefense[i]),
+                    Dexterity = EffectivePanel(p.Dexterity, boostDexterity[i]), BoostAttack = boostAttack[i], BoostMagicPower = boostMagicPower[i],
+                    BoostDefense = boostDefense[i], BoostDexterity = boostDexterity[i], BoostFlee = boostFlee[i],
+                    CanAttackAll = canAttackAll[i], SelectedAttackAll = selected == AllTargets, IsDefending = defending[i] };
+            }).ToArray()),
+            Enemies = Array.AsReadOnly(enemies.Select((e, i) => new ClassicBattleEnemyView(i, e.Id, enemyHp[i]) { IsEmpty = e.IsEmpty }).ToArray()),
             ActionQueue = Array.AsReadOnly(queue.ToArray()),
             SelectingPlayerIndex = Current.Phase == ClassicBattlePhase.Selecting
-                ? Enumerable.Range(0, players.Length).Where(i => playerHp[i] > 0 && targets[i] is null && !fleeing[i]).Select(i => (int?)i).FirstOrDefault() : null
+                ? Enumerable.Range(0, players.Length).Where(i => playerHp[i] > 0 && targets[i] is null && !fleeing[i] && !defendingSelection[i]).Select(i => (int?)i).FirstOrDefault() : null
         };
+    }
+
+    /// <summary>One strike of the member's attack action: the single-target branch
+    /// (fight.c 3624-3673) or the all-target branch (fight.c 3686-3735) by the committed selection.</summary>
+    private void Strike(int partyIndex, bool secondStrike)
+    {
+        if (targets[partyIndex] == AllTargets) AttackAllEnemies(partyIndex, secondStrike);
+        else AttackEnemy(partyIndex, secondStrike);
     }
 
     private void AttackEnemy(int partyIndex, bool secondStrike)
@@ -340,18 +467,70 @@ public sealed class ClassicBattleSession
             experienceGained += enemy.Experience;
             cashGained += enemy.Cash;
         }
-        Current = Current with { LastAction = new(Current.Round, ClassicBattleSide.Player, enemy.Id, damage, critical, false)
-            { ActorIndex = partyIndex, TargetIndex = slot, SecondStrike = secondStrike } };
+        var record = new ClassicBattleAction(Current.Round, ClassicBattleSide.Player, enemy.Id, damage, critical, false)
+        { ActorIndex = partyIndex, TargetIndex = slot, SecondStrike = secondStrike,
+            DualAttack = playerStatuses[partyIndex][StatusDualAttack] > 0 };
+        Current = Current with { LastAction = record, LastActionTargets = Array.AsReadOnly([record]) };
+    }
+
+    /// <summary>fight.c 3686-3735 (PAL_CLASSIC attack-all): one critical roll covers the whole
+    /// strike (bravery keeps the draw in the stream); the hit order is {2,1,0,4,3}; each hit
+    /// target takes the base damage (resistance-divided SHORT) scaled by the critical multiplier
+    /// and divided by the running FLOAT division (1,2,4,8,16), then the WORD health subtracts
+    /// the float with truncation. No additive, role-0 bonus or final-scale draw exists here.
+    /// The hit set freezes at the action start: PostActionCheck (fight.c 735-765) clears KO'd
+    /// enemies only after the whole action, so a dual attack's second strike still strikes
+    /// first-strike kills, and empty or previously-killed slots neither draw nor advance division.</summary>
+    private void AttackAllEnemies(int partyIndex, bool secondStrike)
+    {
+        var player = players[partyIndex];
+        pendingAttackAllTargets ??= new int[] { 2, 1, 0, 4, 3 }
+            .Where(slot => slot < enemies.Length && !enemies[slot].IsEmpty && enemyHp[slot] > 0).ToArray();
+        bool critical = random.NextInclusive(0, 5) == 0 || playerStatuses[partyIndex][StatusBravery] > 0;
+        bool dualAttack = playerStatuses[partyIndex][StatusDualAttack] > 0;
+        var records = new List<ClassicBattleAction>();
+        int division = 1;
+        foreach (int slot in pendingAttackAllTargets)
+        {
+            var enemy = enemies[slot];
+            int defense = unchecked((ushort)(enemy.Defense + (enemy.Level + 6) * 4));
+            short baseDamage = BaseDamage(EffectivePanel(player.Attack, boostAttack[partyIndex]), defense);
+            if (enemy.PhysicalResistance != 0) baseDamage = (short)(baseDamage / enemy.PhysicalResistance);
+            float strike = baseDamage;
+            if (critical) strike *= 3;
+            strike /= division;
+            if (strike <= 0) strike = 1;
+            int previousHp = enemyHp[slot];
+            enemyHp[slot] = Math.Max(0, (int)(previousHp - strike));
+            if (previousHp > 0 && enemyHp[slot] == 0)
+            {
+                experienceGained += enemy.Experience;
+                cashGained += enemy.Cash;
+            }
+            records.Add(new(Current.Round, ClassicBattleSide.Player, enemy.Id, previousHp - enemyHp[slot], critical, false)
+            { ActorIndex = partyIndex, TargetIndex = slot, SecondStrike = secondStrike,
+                AttackAll = true, DualAttack = dualAttack });
+            division *= 2;
+        }
+        Current = Current with { LastAction = records[^1], LastActionTargets = Array.AsReadOnly(records.ToArray()) };
     }
 
     /// <summary>fight.c 4119-4173: str = effective flee rate versus every living enemy's
     /// dex + (level+6)*4; the RandomLong(0, defense) draw is consumed even in a boss battle,
-    /// which never escapes. A failed attempt spends the action and adds 2 to the flee track.</summary>
+    /// which never escapes. A failed attempt spends the action and adds 2 to the flee track; a
+    /// successful escape (never in a boss battle) ends the battle immediately.</summary>
     private void AttemptFlee(int partyIndex)
     {
+        // fight.c 3597 + 4128-4137: def is a WORD accumulator — every dex and (level+6)*4 store
+        // wraps at 65536 (the same WORD arithmetic as the attack defense sum below); only the
+        // final (SHORT)def < 0 clamps to zero before the RandomLong(0, def) draw.
         int defense = 0;
         for (int i = 0; i < enemies.Length; i++)
-            if (enemyHp[i] > 0) defense += enemies[i].Dexterity + (enemies[i].Level + 6) * 4;
+            if (enemyHp[i] > 0)
+            {
+                defense = unchecked((ushort)(defense + enemies[i].Dexterity));
+                defense = unchecked((ushort)(defense + (enemies[i].Level + 6) * 4));
+            }
         if ((short)defense < 0) defense = 0;
         int fleeRate = EffectivePanel(players[partyIndex].FleeRate, boostFlee[partyIndex]);
         int draw = random.NextInclusive(0, defense);
@@ -360,13 +539,23 @@ public sealed class ClassicBattleSession
             counts[partyIndex] = counts[partyIndex] with { Flee = unchecked((ushort)(counts[partyIndex].Flee + 2)) };
         Current = Current with { LastFleeAttempt = new(Current.Round, partyIndex, players[partyIndex].RoleId,
             fleeRate, defense, draw, escaped) };
+        if (escaped)
+            // battle.c 1519-1527: PAL_BattlePlayerEscape sets kBattleResultFleed after the walk-off;
+            // the battle main loop then breaks (battle.c 774) without running the remaining queue.
+            Finish(ClassicBattlePhase.Escaped);
     }
 
-    /// <summary>fight.c:3753-3755: the attack and health counts grow once per attack action, not per strike.</summary>
+    /// <summary>fight.c:3753-3755: the attack and health counts grow once per attack action, not
+    /// per strike. The defense/flee tracks are never touched here — only PAL_StartBattle
+    /// (battle.c 1583) resets them — so the record is updated in place, not rebuilt.</summary>
     private void CompletePlayerAction(int partyIndex)
     {
-        counts[partyIndex] = new(unchecked((ushort)(counts[partyIndex].Attack + 1)),
-            unchecked((ushort)(counts[partyIndex].Health + random.NextInclusive(2, 3))));
+        pendingAttackAllTargets = null;
+        counts[partyIndex] = counts[partyIndex] with
+        {
+            Attack = unchecked((ushort)(counts[partyIndex].Attack + 1)),
+            Health = unchecked((ushort)(counts[partyIndex].Health + random.NextInclusive(2, 3)))
+        };
     }
 
     private void AttackPlayer(int enemySlot)
@@ -384,8 +573,10 @@ public sealed class ClassicBattleSession
         if (!evaded)
         {
             int strength = Math.Max(0, enemy.Attack + (enemy.Level + 6) * 6);
-            short hit = BaseDamage(unchecked((ushort)(strength + random.NextInclusive(0, 2))),
-                EffectivePanel(player.Defense, boostDefense[target]));
+            int defense = EffectivePanel(player.Defense, boostDefense[target]);
+            // fight.c 4924-4927: a defending target's defense doubles before the damage formula.
+            if (defending[target]) defense = unchecked((ushort)(defense * 2));
+            short hit = BaseDamage(unchecked((ushort)(strength + random.NextInclusive(0, 2))), defense);
             hit = (short)(hit / 2);
             hit = unchecked((short)(hit + random.NextInclusive(0, 1)));
             // fight.c 5086-5090: protect halves the enemy strike before the HP clamp.
@@ -396,8 +587,9 @@ public sealed class ClassicBattleSession
         playerHp[target] -= damage;
         // A covered strike is not an evade: the coverer intercepted it (fight.c:4959-4973 keeps
         // the target's frame; only a plain defend roll shows the evade frame).
-        Current = Current with { LastAction = new(Current.Round, ClassicBattleSide.Enemy, player.RoleId, damage, false, evaded && coverer is null)
-            { ActorIndex = enemySlot, TargetIndex = target, CovererPartyIndex = coverer } };
+        var record = new ClassicBattleAction(Current.Round, ClassicBattleSide.Enemy, player.RoleId, damage, false, evaded && coverer is null)
+        { ActorIndex = enemySlot, TargetIndex = target, CovererPartyIndex = coverer };
+        Current = Current with { LastAction = record, LastActionTargets = Array.AsReadOnly([record]) };
     }
 
     /// <summary>fight.c 4943-4947: a dying target or one held by confused/paralyzed/sleep needs cover.</summary>
@@ -426,6 +618,16 @@ public sealed class ClassicBattleSession
 
     /// <summary>global.c 1736-1886: the effective panel is the base plus every effect register (WORD sum).</summary>
     private static int EffectivePanel(int panel, int boost) => unchecked((ushort)(panel + boost));
+
+    /// <summary>PAL_PlayerCanAttackAll (global.c 2048-2080): any non-zero equipment rgwAttackAll
+    /// register over the seven effect registers grants the all-target attack.</summary>
+    private static bool EquipmentGrantsAttackAll(int roleId, BattleEquipmentState? equipment)
+    {
+        if (equipment is null) return false;
+        for (int register = 0; register < BattleEquipmentState.RegisterCount; register++)
+            if (equipment.AttackAllWord(roleId, register) is int word && word != 0) return true;
+        return false;
+    }
 
     /// <summary>script.c 0x001B/0x001C via PAL_IncreaseHPMP (global.c:1254): only alive players change,
     /// the WORD sum wraps first and then clamps below zero to zero and above the maximum.</summary>
@@ -470,10 +672,11 @@ public sealed class ClassicBattleSession
 
     internal static void Validate(ClassicBattleDefinition definition, BattleEquipmentState? equipment)
     {
-        if (definition.Players is not { Count: >= 1 and <= 2 } || definition.Enemies is not { Count: >= 1 and <= 2 }
+        if (definition.Players is not { Count: >= 1 and <= 3 } || definition.Enemies is not { Count: >= 1 and <= 5 }
             || definition.Players.Any(p => p is null) || definition.Enemies.Any(e => e is null)
-            || definition.Players.Select(p => p.RoleId).Distinct().Count() != definition.Players.Count)
-            throw new InvalidDataException("Classic combat requires one or two living players with distinct roles and one or two living enemies.");
+            || definition.Players.Select(p => p.RoleId).Distinct().Count() != definition.Players.Count
+            || !definition.Enemies.Any(e => !e.IsEmpty))
+            throw new InvalidDataException("Classic combat requires one to three living players with distinct roles and one to five enemy slots with at least one non-empty enemy.");
         foreach (var p in definition.Players) ValidatePlayer(p, equipment);
         foreach (var e in definition.Enemies) ValidateEnemy(e);
     }
@@ -492,14 +695,35 @@ public sealed class ClassicBattleSession
                 && !equipment.OverridesBattleSprite(p.RoleId);
         // Role hook scripts (fight.c 768-880) are the formal execution of non-zero DyingScript and
         // FriendDeathScript addresses; they pause the battle as a pending role hook.
+        // The authored attack-all word and non-zero equipment rgwAttackAll registers are the
+        // supported capability sources (PAL_PlayerCanAttackAll global.c 2048-2080 + the authored
+        // battle word); cooperativeMagic equipment words stay unopened.
         if (!equipmentAgrees || !Zero(p.Statuses, 9) || !Zero(p.Poisons)
             || p.DyingScript is < 0 or > 65535 || p.FriendDeathScript is < 0 or > 65535
-            || p.CoveredByRoleId is < 0 or > 5 || p.AttackAll)
-            throw new InvalidDataException("Classic combat does not yet support statuses, poisons, attack-all or an equipment battle-sprite override; equipment requires its declared closure and cover must name a role 0..5.");
+            || p.CoveredByRoleId is < 0 or > 5)
+            throw new InvalidDataException("Classic combat does not yet support statuses, poisons or an equipment battle-sprite override; equipment requires its declared closure and cover must name a role 0..5.");
+        if (equipment is not null)
+            for (int register = 0; register < BattleEquipmentState.RegisterCount; register++)
+            {
+                if (equipment.CooperativeMagicWord(p.RoleId, register) is int cooperativeMagic && cooperativeMagic != 0)
+                    throw new InvalidDataException($"Classic combat does not yet support equipment cooperativeMagic for role {p.RoleId} at register {register}.");
+            }
     }
 
     private static void ValidateEnemy(ClassicBattleEnemy e)
     {
+        // battle.c:1617-1717: a zero source row keeps wObjectID 0 as a real runtime slot; it never
+        // reads the enemy table, so an empty slot admits exactly the canonical all-zero spelling.
+        if (e.IsEmpty)
+        {
+            if (e.Id != 0 || e.Level != 0 || e.Hp != 0 || e.Attack != 0 || e.Defense != 0 || e.Dexterity != 0
+                || e.PhysicalResistance != 0 || !Zero(e.Statuses, 9) || !Zero(e.Poisons)
+                || e.TurnStartScript != 0 || e.ReadyScript != 0 || e.BattleEndScript != 0 || e.MagicId != 0
+                || e.DualMove != 0 || e.AttackEquivItem != 0 || e.AttackEquivItemRate != 0
+                || e.Experience != 0 || e.Cash != 0)
+                throw new InvalidDataException("An empty enemy slot must be canonical: id 0, hp 0 and all-zero abilities, hooks and rewards.");
+            return;
+        }
         if (e.Id is < 1 or > 65535 || !Word(e.Level) || e.Hp is < 1 or > 32767
             || !SignedWord(e.Attack) || !SignedWord(e.Defense) || !SignedWord(e.Dexterity) || !Word(e.PhysicalResistance))
             throw new InvalidDataException("Classic combat has invalid or unsupported numeric data (current HP must be 1..32767).");

@@ -1,5 +1,9 @@
 # Agent instructions
 
+## 执行环境
+
+每个 fresh 会话开工前必读[执行环境契约](docs/agents/execution-environment.md)，核对本次 host/cwd/工具能力；普通 Pi worker 同样适用，不假定继承私人全局规则。
+
 ## 查阅与事实来源
 
 - README 用于项目概览与常用入口；实现前按下方工作流读取目标 Issue 正文、评论及直接依赖，核对实时状态，不据旧路线描述重做已完成任务。
@@ -23,9 +27,13 @@
 采用 single-context：根目录 `GLOSSARY.md` 与 `docs/adr/`。
 读取规则见 `docs/agents/domain.md`。
 
-## 长任务协调
+## 单票执行
 
-执行多票里程碑、协调子代理或恢复长会话前，读取[长任务信息分工](docs/agents/large-task-handoffs.md)。
+实施单票、处理失败或 review repair 时，读取[单任务执行与有界纠正](docs/agents/task-execution.md)。本机长期编排入口与权限见 [long-running-agent](tools/long-running-agent/README.md)。
+
+## 多票协调
+
+仅协调多个 ticket 或恢复协调会话时，读取[多票协调与恢复](docs/agents/large-task-handoffs.md)；单票实施不默认读取。
 
 - 里程碑交付合入 main 后，显式收尾清理本轮隔离 worktree 与已合并分支（`git worktree remove` / `git worktree prune`、删除已合并分支）；有未合并或未提交残留时单独列出，丢弃前取得明确授权。pi-subagents 的 worktree 清理是显式受审操作，不是自动 post-action，须由协调者主动发起。
 

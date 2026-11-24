@@ -17,20 +17,46 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
     public PalBattleVisualProfile Profile { get; }
     public PalBattleVisualTeam Team => Profile.Teams[0];
     public PalSprite Player { get; } = Sprite(41, 10);
+    // Distinct second member sprite: role1 draws its own frames, never the head's.
+    public PalSprite SecondPlayer { get; } = Sprite(42, 10);
     public PalSprite Enemy { get; } = Sprite(97, 3);
     public PalPalette Palette { get; } = new() { Rgb = new byte[768] };
     public PalDialogueIndexedImage Background { get; } = new()
     { SourceIdentity = "authored synthetic background", Width = 320, Height = 200, PaletteIndices = new byte[64000], Alpha = Enumerable.Repeat((byte)255, 64000).ToArray() };
     public string[] ExpectedPaths { get; }
 
-    public NativeBattleVisualProfileFixture(bool party = false)
+    public NativeBattleVisualProfileFixture(bool party = false, bool fiveEnemies = false, bool emptySlots = false)
     {
         Party = party;
-        Story = new NativeStoryProfileFixture(party);
+        if (emptySlots && fiveEnemies)
+            throw new ArgumentException("The empty-slot visual variant is its own three-slot team.", nameof(emptySlots));
+        Story = new NativeStoryProfileFixture(party, fiveEnemies: fiveEnemies, emptyEnemies: emptySlots);
         CheckedStory = NativeStoryProfile.Load(Story.Uri);
-        var team = new PalBattleVisualTeam { TeamId = 18, BackgroundUri = Root + "/Background.tres",
-            EnemySpriteUri = Root + "/Enemy.tres", IdleFrames = 1, MagicFrames = 1, AttackFrames = 1, ActWaitFrames = 0 };
-        if (party)
+        var team = new PalBattleVisualTeam { TeamId = 18, BackgroundUri = Root + "/Background.tres" };
+        if (fiveEnemies)
+        {
+            // #210 five authored slot positions; resources may be shared, slot identity is not.
+            team.EnemySlots =
+            [
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(128, 104) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(156, 88) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(184, 72) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(212, 56) }
+            ];
+        }
+        else if (emptySlots)
+        {
+            // #141 mixed runtime slots: the numeric empty slot keeps an overlay binding
+            // (TargetId 0, authored position, slot order) and declares no sprite or frames.
+            team.EnemySlots =
+            [
+                new PalBattleVisualEnemySlot { TargetId = 0, EnemyPosition = new(72, 136) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) },
+                new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(128, 104) }
+            ];
+        }
+        else if (party)
         {
             // Two story enemy slots share enemy definition id 7; positions use distinct authored slots.
             team.EnemySlots =
@@ -39,20 +65,32 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
                 new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(128, 104) }
             ];
         }
-        else { team.TargetId = 7; team.EnemyPosition = new(100, 120); }
+        else { team.EnemySlots = [new PalBattleVisualEnemySlot { TargetId = 7, EnemyPosition = new(100, 120) }]; }
+        // Loaded slots keep strict sprite/frame bindings; the #141 empty slot stays declaration-free.
+        foreach (var slot in team.EnemySlots.Where(slot => slot.TargetId != 0))
+        {
+            slot.EnemySpriteUri = Root + "/Enemy.tres";
+            slot.IdleFrames = 1; slot.IdleAnimSpeed = 0; slot.MagicFrames = 1;
+            slot.AttackFrames = 1; slot.ActWaitFrames = 0;
+        }
         Profile = new PalBattleVisualProfile
         {
-            FormatVersion = 1, SourceIdentity = "literal synthetic visuals; no provenance authentication", RoleId = 0,
-            PlayerSpriteUri = Root + "/Player.tres", PaletteUri = Root + "/BattlePalette.tres",
-            PlayerPosition = party ? new(200, 176) : new(240, 170),
+            FormatVersion = 2, SourceIdentity = "literal synthetic visuals; no provenance authentication",
+            Players = party
+                ? [PlayerEntry(0, Root + "/Player.tres", new(200, 176)), PlayerEntry(1, Root + "/Player2.tres", new(256, 152))]
+                : [PlayerEntry(0, Root + "/Player.tres", new(240, 170))],
+            PaletteUri = Root + "/BattlePalette.tres",
             Teams = [team]
         };
-        ExpectedPaths = new[] { "Player.tres", "Enemy.tres", "BattlePalette.tres", "Background.tres" }.Select(x => Root + "/" + x).ToArray();
+        ExpectedPaths = (party ? new[] { "Player.tres", "Player2.tres" } : new[] { "Player.tres" })
+            .Concat(new[] { "Enemy.tres", "BattlePalette.tres", "Background.tres" }).Select(x => Root + "/" + x).ToArray();
         SaveLeaves(); RefreshHashes(); Save();
     }
     public void SaveLeaves()
     {
-        Story.Save(Player, "Player.tres"); Story.Save(Enemy, "Enemy.tres");
+        Story.Save(Player, "Player.tres");
+        if (Party) Story.Save(SecondPlayer, "Player2.tres");
+        Story.Save(Enemy, "Enemy.tres");
         Story.Save(Palette, "BattlePalette.tres"); Story.Save(Background, "Background.tres");
     }
     public void RefreshHashes()
@@ -74,6 +112,8 @@ internal sealed class NativeBattleVisualProfileFixture : IDisposable
         Save();
     }
 
+    private static PalBattleVisualPlayer PlayerEntry(int roleId, string uri, Vector2I position) =>
+        new() { RoleId = roleId, PlayerSpriteUri = uri, PlayerPosition = position };
     private static PalSprite Sprite(int id, int count)
     {
         var sprite = new PalSprite { SpriteId = id, FrameCount = count, DecodedByteLength = 200,

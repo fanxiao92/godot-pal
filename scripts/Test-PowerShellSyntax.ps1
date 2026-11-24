@@ -1,8 +1,9 @@
-# Syntax only: Parser never executes, imports or dot-sources a selected file.
+# Parse only (with optional AST rule): never executes, imports or dot-sources a selected file.
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Split-Path $PSScriptRoot -Parent),
-    [AllowEmptyCollection()][AllowEmptyString()][string[]]$Path
+    [AllowEmptyCollection()][AllowEmptyString()][string[]]$Path,
+    [switch]$RejectParameterlessWaitForExit
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -58,9 +59,19 @@ try {
     foreach ($file in $files) {
         try {
             $tokens = $null; $errors = $null
-            $null = [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+            $ast = [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
             foreach ($errorRecord in $errors) {
                 Diagnostic 'error' ("{0}:{1}:{2}: {3}" -f $file, $errorRecord.Extent.StartLineNumber, $errorRecord.Extent.StartColumnNumber, $errorRecord.Message)
+            }
+            if ($RejectParameterlessWaitForExit) {
+                $calls = $ast.FindAll({ param($node)
+                    $node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and
+                    $node.Member -is [Management.Automation.Language.StringConstantExpressionAst] -and
+                    $node.Member.Value -ieq 'WaitForExit' -and $node.Arguments.Count -eq 0
+                }, $true)
+                foreach ($call in $calls) {
+                    Diagnostic 'parameterless-wait-for-exit' ("{0}:{1}:{2}: WaitForExit() requires an explicit timeout argument." -f $file, $call.Extent.StartLineNumber, $call.Extent.StartColumnNumber)
+                }
             }
         } catch { Diagnostic 'read' "${file}: $($_.Exception.Message)" }
     }

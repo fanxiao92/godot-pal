@@ -1,0 +1,15 @@
+{
+  "subagents": {
+    "agentOverrides": {
+      "worker": {
+        "inheritProjectContext": true,
+        "inheritGlobalContext": false,
+        "defaultReads": [
+          "context.md",
+          "plan.md",
+          "docs/agents/execution-environment.md"
+        ]
+      }
+    }
+  }
+}

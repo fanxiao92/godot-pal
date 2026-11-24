@@ -1,0 +1,35 @@
+name: Long-running agent offline guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harness-offline:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tools/long-running-agent/package-lock.json
+      - name: Install locked local SDK without lifecycle scripts
+        run: npm ci --prefix tools/long-running-agent --ignore-scripts
+      - name: Typecheck harness
+        run: npm --prefix tools/long-running-agent run typecheck
+      - name: Offline policy, integration and installed SDK wiring
+        shell: pwsh
+        run: |
+          $env:PAL_PI_SDK_ROOT = Join-Path $env:GITHUB_WORKSPACE 'tools/long-running-agent/node_modules/@earendil-works/pi-coding-agent'
+          npm --prefix tools/long-running-agent test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

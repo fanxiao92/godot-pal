@@ -31,6 +31,31 @@ wrapper 必需且仅一次 `-InputPath/-OutputPath`，可选 `-GodotPath/-Timeou
 
 输出事件按输入原始 bytes 完整复制，不裁剪未选文件、raw、零地址或 Won/Lost/flee 分支。事件格式沿现有 `TriggerEventCollection.Parse`；输出再由正常 Story loader/TriggerEventLoader 严格读全套。不是提取器、事件语义重编码器或另一版 JSON→Resource→JSON pipeline。
 
+## #136：统一逐槽 author 与原生输出
+
+Prepare 只接受下述当前 schema：team 恰好声明 `teamId/backgroundUri/enemies`，单敌也是一槽。
+每个 `enemies` 项必须声明 `targetId/enemyPosition`；展示字段 `enemySpriteUri` 与五个帧字段是
+一个全有或全无的组（#141），按数组 ordinal 与数值战斗敌位一一对应；重复 TargetId 不合并。
+数值空敌位（#140 typed isEmpty，TargetId 0）的项只声明 `targetId/enemyPosition`，不写精灵/帧字段；
+其余项必须完整六字段。即使槽声明齐全，team 混写任何旧身份、位置、URI、
+帧字段仍拒绝；旧 scalar-only、缺字段、未知/重复字段也拒绝，不从 team、槽0或引用表推测补值；
+空槽绑定错 TargetId 或携带精灵/帧由正式 loader 在 staging/final 严格回读时拒绝。
+`idleFrames` 为1..65535，其余四个帧字段为0..65535；速度0与动作等待0原样保留，不夹成1。
+输入字段错误定位到 story-package.json、team/slot ordinal 和字段；依赖/hash/实际可寻址帧仍经正式 loader 核对。
+
+只写显式 `EnemySlots` 原生数组，staging 与 final 均由生产 loader 严格回读（含两语 Story）。
+旧 author/native 应在新/空目录显式重新准备，不提供 dual loader、中间 bridge 或 runtime fallback。
+冻结来源/历史产物不改签；Win/Loss/LostReload/Rewards/Midbattle/PartyEquip/PartyLoss/PartyWin 八份
+活跃副本已统一完整逐槽声明，9个team/13个slot的敌定义7、重复槽顺序、位置、来源文字与语言保持，Dynamic无战斗不变。
+`PalSprite.SpriteId` 是 URI 指向的实际图像身份（这些人工图为97），`TargetId` 是敌定义（7）；
+`Source` 只是来源声明，不是原档认证，不另添同义 SpriteId 字段。
+
+既有 `PublicPreparePublishesExplicitEnemySlotsForASingleSlotTeam` 覆盖8份活跃输入逐份公开Prepare、
+双语严格回读和源快照，并包含人工异种97/98、重复TargetId7、不同metadata/尺寸的正式Prepare→native正反例。
+Game及正式wrapper/editor测试构造同步当前契约，未新增测试identity/登记或native loader。
+本叶用户明确批准最小12路径原子迁移例外（8输入+生产者+2测试+本文），不扩为通用迁移框架或#136完成承诺；
+异种正式Main与GPU/桌面等未由此补签。
+
 ## 新 metadata v1 schema
 
 根必须**恰好**以下字段；所有对象未知/缺失/重复字段均拒绝，JSON 不接受注释/尾逗号。字符串非空，整数必须 int32；位置是长度2的 SHORT 整数数组。下例 URI 是布局示意，须替换成实际正式 prepared/native 作者资源，不能从清洁检出直接运行：
@@ -50,22 +75,27 @@ wrapper 必需且仅一次 `-InputPath/-OutputPath`，可选 `-GodotPath/-Timeou
   "dialogueDirectory": "res://Assets/MyDialogue",
   "portraits": [{ "id": 7, "uri": "res://Assets/MyDialogue/Portrait-7.tres" }],
   "visual": {
-    "roleId": 0,
-    "playerSpriteUri": "res://Assets/MyVisual/Player.tres",
-    "playerPosition": [240, 170],
+    "players": [{
+      "roleId": 0,
+      "playerSpriteUri": "res://Assets/MyVisual/Player.tres",
+      "playerPosition": [240, 170]
+    }],
     "paletteUri": "res://Assets/MyStatic/Palettes/Palette.tres",
     "teams": [{
-      "teamId": 18, "targetId": 7,
+      "teamId": 18,
       "backgroundUri": "res://Assets/MyVisual/Background.tres",
-      "enemySpriteUri": "res://Assets/MyVisual/Enemy.tres",
-      "enemyPosition": [100, 120],
-      "idleFrames": 1, "magicFrames": 1, "attackFrames": 1, "actWaitFrames": 0
+      "enemies": [{
+        "targetId": 7,
+        "enemySpriteUri": "res://Assets/MyVisual/Enemy.tres",
+        "enemyPosition": [100, 120],
+        "idleFrames": 1, "idleAnimSpeed": 2, "magicFrames": 1, "attackFrames": 1, "actWaitFrames": 0
+      }]
     }]
   }
 }
 ```
 
-`portraits` 可为空；非零 WORD id 唯一，实际精确集合由 Story 所选闭包严格验证。`visual.teams` 精确匹配 requirements，team/target/role、WORD metadata、完整 nominal frames 与 aliases、palette 一致性由既有 Visual loader 校验，不再复制 validator。writer 显式写 typed roots 的 `FormatVersion=1`。`EventsIndex` 与两个 `ResourceSha256` 不由 metadata 作者填写：生产函数确定输出路径，并通过共享 `NativeContentDependencies` 计算各自**精确** data graph 和每条文件 SHA-256。Story 的 hash 另包含完整现代事件集合。
+`portraits` 可为空；非零 WORD id 唯一，实际精确集合由 Story 所选闭包严格验证。根可选 `battleProjection: {receiptSha256, receiptByteLength}` 只表达已准备投影数值的 receipt 期望：两字段必须同时出现，SHA 为 64 位小写十六进制、长度为正 Int64；Prepare 把结构化值写入 Story，严格 Load 再与 checked native `BattleProjectionSourceInfo` 核对。未声明且 native 无来源保持旧入口；有投影 native 而省略或悬空期望、半声明/坏值/未知字段一律拒绝，Story 不读取 receipt 原件。`visual.players` 按 party 顺序逐角色声明（见 #209 统一逐角色绑定），`visual.teams` 精确匹配 requirements，team/target/role、WORD metadata、完整 nominal frames 与 aliases、palette 一致性由既有 Visual loader 校验，不再复制 validator。writer 显式写 Story root 的 `FormatVersion=1` 与 Visual root 的 `FormatVersion=2`。`EventsIndex` 与两个 `ResourceSha256` 不由 metadata 作者填写：生产函数确定输出路径，并通过共享 `NativeContentDependencies` 计算各自**精确** data graph 和每条文件 SHA-256。Story 的 hash 另包含完整现代事件集合。
 
 静态场景实际 owner 的 `wTriggerScript` 必须指向匹配的具名 entry；profile/bundle/实际 scene 身份必须一致，初始 role0 限制不变。两语内容、画像与真实 font/prompts 均走正常 Story 检查。仅格式合法的未选 numeric 内容不因此获可执行能力授权。
 
@@ -88,7 +118,7 @@ wrapper 必需且仅一次 `-InputPath/-OutputPath`，可选 `-GodotPath/-Timeou
 
 ## 本轮证据与剩余边界
 
-`PrepareStoryPackageTests` direct31 覆盖完整 typed准备/严格读取、完整事件/hash、双语 glyph/owner/visual拒绝后清理、UTF8/schema/大小/文件数、caller目录/无覆盖、规范大小写/缺祖先、input/events/output/native junction拒绝。Prepare process10 覆盖正常 wrapper+真实 Editor发布、argv exit/marker和严格 metadata诊断；它们是离线契约，不是 Main 交互/GPU验收。
+`PrepareStoryPackageTests` direct53 覆盖完整 typed准备/严格读取、完整事件/hash、8份活跃输入双语回读、逐槽缺失/混写/WORD及异种资源正反例、双语 glyph/owner/visual拒绝后清理、UTF8/schema/大小/文件数、caller目录/无覆盖、规范大小写/缺祖先、input/events/output/native junction拒绝。Prepare process10 覆盖正常 wrapper+真实 Editor发布、argv exit/marker和严格 metadata诊断；它们是离线契约，不是 Main 交互/GPU验收。
 
 本 checkpoint A 不接 Main/input/HUD、不推进动作/动画、不绑定 attack effect；后续B交付可见人工数据但尚不签桌面验收、真实Main战斗往返或 #47+。#46 和 M4 仍未完成；冻结真实内容由 #53 完整接入，不能用人工资产替代。
 
@@ -100,7 +130,7 @@ wrapper 必需且仅一次 `-InputPath/-OutputPath`，可选 `-GodotPath/-Timeou
 
 ## D2-A optional visual author fields
 
-Within the same formatVersion1 metadata, `visual.attackEffectSpriteUri` and `visual.attackEffectIndex` may be supplied **together** (nonempty native PalSprite URI and WORD group, including0). Each team may supply `idleAnimSpeed` (WORD including0). Omission preserves old C's absent sentinels; explicit −1 in author JSON is not a default and is rejected. Duplicate/unknown fields remain errors. Native writer stays1/root default−1; no separate converter or Resource→JSON round-trip exists.
+Historical D2-A checkpoint: within the same formatVersion1 metadata, `visual.attackEffectSpriteUri` and `visual.attackEffectIndex` could be supplied **together** (nonempty native PalSprite URI and WORD group, including0). Each team could supply `idleAnimSpeed` (WORD including0); omission preserved old C's absent sentinels. This team-level speed contract is historical: the [current #136 author contract](#136统一逐槽-author-与原生输出) requires `idleAnimSpeed` on every enemy slot and rejects it on the team. The paired attack-effect fields remain optional. Explicit −1 in author JSON is not a default and is rejected. Duplicate/unknown fields remain errors. Native writer stays1/root default−1; no separate converter or Resource→JSON round-trip exists.
 
 The normal public Prepare includes effect seeds in the existing `HashSet<string>` native dependency closure and `Dictionary<string,string>` SHA-256 manifest, with the same stable-read lease/path/no-overwrite/owned cleanup checks. Strict native loading validates any supplied data even without selecting the reference-presentation capability; consumers select that capability with `checkedVisual.RequireReferencePresentation()` without reloading resources. See [the full native contract](native-battle-visuals.md#46-d2-a-optional-reference-presentation-data-not-playback). This checkpoint prepares/binds data, not animation playback. Changed source bytes require **fresh** Story outputs; old outputs are not repaired or declared hash-consistent.
 

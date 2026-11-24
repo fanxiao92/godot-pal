@@ -1,4 +1,14 @@
-# Shared gate metadata only. No SDK, engine, process or resource operations.
+# Shared gate metadata and read-only environment checks. No SDK, engine, process or resource operations.
+function Assert-HeadlessGpuEnvironment {
+    # These two inherited opt-ins change process tests from headless to GPU readback.
+    $nonempty = @(foreach ($key in @('PAL_STATIC_GPU_EVIDENCE', 'PAL_EXPLORATION_GPU_EVIDENCE')) {
+        if (-not [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($key))) { $key }
+    })
+    if ($nonempty.Count) {
+        throw "[headless:gpu-inheritance] Nonempty GPU evidence environment variable(s): $($nonempty -join ', '). Use an explicit GPU entry instead; inherited values were not changed."
+    }
+}
+
 function Assert-ExactTestNames([string[]]$Actual, [string[]]$Expected, [string]$Context) {
     $actualSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $expectedSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -73,11 +83,19 @@ function Get-GameSourceInventory([string]$Directory) {
 $script:LocalOnlyRealMatches = @('Pal.Game.Tests.RealFirstBattleFlowTests.')
 # ---------------------------------------------------------------------------------------
 
+# Independently approved Prepare cardinality, shared by Range and the full gate.
+# Keep this lightweight: Prepare-only must not enumerate Game source inventory.
+function Get-PrepareTestCount {
+    $count = 129
+    if ($count -isnot [int] -or $count -le 0) { throw 'Approved Prepare case count must be a positive Int32.' }
+    return $count
+}
+
 function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committable')][string]$Scope = 'full') {
     $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
     $definitions = @(
         @{ name = 'process'; count = 85; classes = @('StoryMainProcessTests', 'MainProcessTests', 'ExplorationProcessTests') }
-        @{ name = 'scene-dialogue'; count = 74; classes = @('ExplorationSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests') }
+        @{ name = 'scene-dialogue'; count = 135; classes = @('ExplorationSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests', 'MenuSceneTests', 'ShopSceneTests', 'SystemSaveSceneTests', 'SystemLoadSceneTests'); excludeMatches = @('Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_'); sessionTimeoutMs = 300000 }
         @{ name = 'scene-dynamic'; count = 2; classes = @('DynamicSceneTests') }
         @{ name = 'scene-battle-heavy-a'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
             'Pal.Game.Tests.StoryRoundtripSceneTests.ActiveBattleExit', 'Pal.Game.Tests.StoryRoundtripSceneTests.DeadMember',
@@ -91,19 +109,21 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
             'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:1',
             'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:2',
             'NormalMainSearchBattleAndResultReturnThroughOwnedLifecycle:3') }
-        @{ name = 'scene-battle-heavy-d'; count = 5; classes = @('StoryRoundtripSceneTests'); matches = @(
-            'Pal.Game.Tests.StoryRoundtripSceneTests.PartyLoss', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwo',
+        @{ name = 'scene-battle-heavy-d'; count = 4; classes = @('StoryRoundtripSceneTests'); matches = @(
+            'Pal.Game.Tests.StoryRoundtripSceneTests.PartyLoss',
             'Pal.Game.Tests.StoryRoundtripSceneTests.RemovingTheDual', 'Pal.Game.Tests.StoryRoundtripSceneTests.VictorySettlement') }
-        @{ name = 'scene-battle-light'; count = 28; classes = @('StoryRoundtripSceneTests', 'MainSceneTests'); matches = @(
+        @{ name = 'scene-battle-light'; count = 30; classes = @('StoryRoundtripSceneTests', 'MainSceneTests'); matches = @(
             'Pal.Game.Tests.MainSceneTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.BaseFormat', 'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyFeedback',
             'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyIdleWord', 'Pal.Game.Tests.StoryRoundtripSceneTests.EnemyPhysicalReference',
             'Pal.Game.Tests.StoryRoundtripSceneTests.FailedStoryPreload', 'Pal.Game.Tests.StoryRoundtripSceneTests.FloatingNumber',
             'Pal.Game.Tests.StoryRoundtripSceneTests.InclusiveGodotRandom', 'Pal.Game.Tests.StoryRoundtripSceneTests.NativeWordsRemain',
             'Pal.Game.Tests.StoryRoundtripSceneTests.NonterminalActions', 'Pal.Game.Tests.StoryRoundtripSceneTests.NormalStoryArguments',
             'Pal.Game.Tests.StoryRoundtripSceneTests.PlayerPhysical', 'Pal.Game.Tests.StoryRoundtripSceneTests.StoryBattlePoseClock',
-            'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects') }
-        @{ name = 'native-map'; count = 412; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
-        @{ name = 'scene-realfull'; count = 3; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.') }
+            'Pal.Game.Tests.StoryRoundtripSceneTests.StoryParserRejects',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.SinglePlayerTwoEnemiesDrawBothDuplicateSlotsOnFirstBattleUpdateAndFreshMain',
+            'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedHeterogeneousSlotsUseOwnActionsTargetsAndFreshMain') }
+        @{ name = 'native-map'; count = 782; sessionTimeoutMs = 300000; classes = @('AuthoredBattlePackageTests', 'PrepareStoryPackageTests', 'PrepareFireEffectsTests', 'PrepareItemBitmapsTests', 'NativeBattleVisualProfileTests', 'NativeStoryProfileTests', 'PrepareBattleDataTests', 'NativeExplorationProfileTests', 'NativeFirstMandatoryBattleProfileTests', 'NativeBattleContentTests', 'PalMapSceneTests', 'ViewportTests') }
+        @{ name = 'scene-realfull'; count = 45; classes = @('RealFirstBattleFlowTests', 'SyntheticFirstBattleClosureTests', 'StoryRoundtripSceneTests', 'TriggerDialogueFixtureTests'); sessionTimeoutMs = 300000; matches = @('Pal.Game.Tests.RealFirstBattleFlowTests.', 'Pal.Game.Tests.SyntheticFirstBattleClosureTests.', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyTwoPlayersPickTargetsByCyclingExecuteQueueAndWin', 'Pal.Game.Tests.StoryRoundtripSceneTests.PartyThreePlayersPickTargetsByCyclingExecuteQueueAndWin', 'Pal.Game.Tests.StoryRoundtripSceneTests.ZeroHpPuppetMemberEntersAtOneHpStaysDeadAndSettlesByIdentity', 'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedMixedEmptySlotsUseRuntimeIndicesTargetLoadedOnlyAndSettleOnceThroughFreshMain', 'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedThreePlayersCancelTargetsRevertEarlierSelectionsAndSettleOnce', 'Pal.Game.Tests.StoryRoundtripSceneTests.AttackAllMemberCommitsWithoutTargetMenuStrikesBothLoadedSlotsAndSettlesOnce', 'Pal.Game.Tests.StoryRoundtripSceneTests.AttackAllPresentationCoversEveryStruckEnemyWithOneAnim', 'Pal.Game.Tests.StoryRoundtripSceneTests.PreparedThreePlayersDefendCommitPoseCountsAndSettleOnce', 'Pal.Game.Tests.StoryRoundtripSceneTests.NormalBattleFlee', 'Pal.Game.Tests.StoryRoundtripSceneTests.MainStoryControlFlowExecutesNestedCallsCountedGatesAndWritesBackTheReturnedEntry', 'Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_') }
     )
     $localOnly = if ($Scope -ceq 'committable') {
         @($inventory | Where-Object { $name = $_.name; $script:LocalOnlyRealMatches | Where-Object { $name -CLike "*$_*" } } | ForEach-Object name)
@@ -133,8 +153,14 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         } else {
             @($inventory | Where-Object class -CIn $definition.classes | ForEach-Object name)
         }
+        # The same name-level exclusion must apply to both source identities and runtime.
+        # World-bound first-battle adapter tests use the existing full-flow batch budget.
+        foreach ($excludedMatch in $definition.excludeMatches) {
+            $names = @($names | Where-Object { -not $_.Contains($excludedMatch, [StringComparison]::Ordinal) })
+            $filter = "($filter)&FullyQualifiedName!~$excludedMatch"
+        }
         $expected = [int]$definition.count - @($localOnly | Where-Object { $name = $_; @($definition.matches) | Where-Object { $name -CLike "*$_*" } }).Count
-        if ($names.Count -ne $expected) { throw "Batch $($definition.name) $Scope source count differs: $($names.Count)/$expected." }
+        if ($names.Count -ne $expected) { throw "[range:source-count] Batch $($definition.name) $Scope source count differs: $($names.Count)/$expected." }
         [pscustomobject]@{ name = $definition.name; count = $expected; classes = $definition.classes; expected = $names; filter = $filter; sessionTimeoutMs = [int]($definition.sessionTimeoutMs ?? 120000) }
     }
     $controls = @($inventory | Where-Object class -CEQ 'FailureControlTests')
@@ -142,15 +168,27 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
     Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
     Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.class -CNE 'FailureControlTests' -and $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 626) { throw "Game inventory differs: $($inventory.Count)/626." }
+    if ($inventory.Count -ne 1100) { throw "Game inventory differs: $($inventory.Count)/1100." }
+    $spriteFieldsPositive = 'Pal.Game.Tests.NativeBattleVisualProfileTests.StandaloneCheckedSpriteMatchesIndependentFieldsAndSourceBoundaries'
+    $spriteFieldsCases = @($inventory | Where-Object name -CEQ $spriteFieldsPositive)
+    $spriteFieldsOwners = @($batches | Where-Object { $_.expected -ccontains $spriteFieldsPositive })
+    if ($spriteFieldsCases.Count -ne 1 -or $spriteFieldsOwners.Count -ne 1 -or $spriteFieldsOwners[0].name -cne 'native-map') {
+        throw 'Checked sprite fields/Source matrix must have exactly one identity owned only by native-map.'
+    }
+    $storyHookPositive = 'Pal.Game.Tests.TriggerDialogueFixtureTests.Story_current_world_hook_uses_live_entry_and_owned_display_ack'
+    $storyHookCases = @($inventory | Where-Object name -CEQ $storyHookPositive)
+    $storyHookOwners = @($batches | Where-Object { $_.expected -ccontains $storyHookPositive })
+    if ($storyHookCases.Count -ne 1 -or $storyHookOwners.Count -ne 1 -or $storyHookOwners[0].name -cne 'scene-dialogue') {
+        throw 'Story current-hook positive must have exactly one identity owned only by scene-dialogue.'
+    }
     # Explicit serial project execution replaces solution test, not solution restore/build.
     $projects = @(
-        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 928; skipped = 0 }
-        [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 464; skipped = 0 }
-        [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 360; skipped = 2 }
-        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = 89; skipped = 0 }
-        # 623 full-scope positives; committable scope executes one fewer (#76 local-only split).
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (623 - $localOnly.Count); skipped = 0 }
+        [pscustomobject]@{ name = 'core'; path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; passed = 1598; skipped = 0 }
+        [pscustomobject]@{ name = 'cli-unit'; path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; passed = 537; skipped = 0 }
+        [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 419; skipped = 2 }
+        [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = (Get-PrepareTestCount); skipped = 0 }
+        # 1097 full-scope positives; committable scope executes one fewer (#76 local-only split).
+        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (1097 - $localOnly.Count); skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {
@@ -291,7 +329,7 @@ function Assert-GameDiscovery([string]$Text, $Plan) {
 # Twice during M4 (#49/#50 authored content, #53 aea456d binding Require) a change under the
 # guarded roots below shipped without rerunning the native-map batch and only the full gate
 # caught it. Writing the rule down did not prevent recurrence, so Test-Range now enforces it:
-# a Game run whose selection does not include native-map requires a recorded native-map
+# a Game run other than unfiltered native-map requires a recorded native-map
 # verification whose guarded-content fingerprint still matches.
 $script:NativeMapGuardedRoots = @('src/Pal.Game/Scripts/Profiles', 'src/Pal.Game/Scripts/Resources', 'src/Pal.Game/Editor', 'samples/authored-battle', 'src/Pal.Game/Samples')
 function Get-NativeMapGuardFingerprint([string]$RepositoryRoot) {
@@ -315,7 +353,7 @@ function Get-NativeMapVerificationPath([string]$RepositoryRoot) { Join-Path (Joi
 function Read-NativeMapVerification([string]$RepositoryRoot) {
     $path = Get-NativeMapVerificationPath $RepositoryRoot
     if (-not [IO.File]::Exists($path)) { return $null }
-    try { return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable) } catch { return @{ invalid = $true } }
+    try { return (Get-Content -LiteralPath $path -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable) } catch { return @{ invalid = $true } }
 }
 function Write-NativeMapVerification([string]$RepositoryRoot, [string]$Head) {
     $directory = Join-Path $RepositoryRoot 'TestResults'
@@ -323,10 +361,10 @@ function Write-NativeMapVerification([string]$RepositoryRoot, [string]$Head) {
     $record = @{ recordedUtc = [DateTime]::UtcNow.ToString('o'); head = $Head; fingerprint = (Get-NativeMapGuardFingerprint $RepositoryRoot) }
     [IO.File]::WriteAllText((Get-NativeMapVerificationPath $RepositoryRoot), ($record | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 }
-function Test-NativeMapAffectedBatchGuard([string]$RepositoryRoot, [string]$Head, [string[]]$GameBatches) {
+function Test-NativeMapAffectedBatchGuard([string]$RepositoryRoot, [string]$Head, [string[]]$GameBatches, [string]$Filter) {
     $fingerprint = Get-NativeMapGuardFingerprint $RepositoryRoot
     if ($null -eq $fingerprint) { return @{ status = 'none' } }
-    if ($GameBatches -ccontains 'native-map') { return @{ status = 'self-verifying'; fingerprint = $fingerprint } }
+    if ($GameBatches -ccontains 'native-map' -and -not $Filter) { return @{ status = 'self-verifying'; fingerprint = $fingerprint } }
     $record = Read-NativeMapVerification $RepositoryRoot
     if ($record -is [hashtable] -and -not $record.invalid -and $record.fingerprint -ceq $fingerprint) {
         return @{ status = 'satisfied'; fingerprint = $fingerprint; verifiedHead = $record.head }

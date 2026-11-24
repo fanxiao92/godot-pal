@@ -37,7 +37,9 @@
 
 - [Unit 反馈短指南](testing/getting-started.md)：新人和 work agent 的唯一默认上手入口，选工程、直接运行、判定与停止留证；[Unit 专题](testing/unit-entry.md)维护协议和显式维护工具细则，无需先读编排脚本。
 - [测试职责矩阵](testing/test-layers.md)：需要非 Unit 契约时，按依赖和证据选择 CLI 文件集成、Prepare、SceneRunner 或真实进程；不按耗时分类。
-- [工程检查与分层回归](testing/engineering-checks.md)：显式 Source、Offline、OwnedProcess 的边界、退出和证据规则，不是默认 Unit 或当前自动 CI。
+- [工程检查与分层回归](testing/engineering-checks.md)：显式 Source、Offline、OwnedProcess 的边界与证据；CI 复用独立离线 guard，不调用聚合入口或改变原生产品 Unit。
+- [固定快照与交接](agents/runtime-workflow.md)：需要冻结原始字节源码身份或精简 current 时使用；[六项短收据](agents/large-task-handoffs.md#结构化交接)用于正常回传，原件按需读取、最终独立评审仍必读。
+- [证据分类工具](testing/agent-evidence.md)：显式 current/命令账本及 xUnit/Game GREEN/指定 RED 校验；SOURCE/OFFLINE 合成回归不替代实际 Game 验收。
 - [scripts 用途清单](testing/script-inventory.md)：公开入口、内部支持、准备与 CI/验收证据的逐项职责、调用方和静态搜索限制；本批只盘点，不删除工具。
 - [显式范围回归](testing/range-regression.md)：选择 CLI integration、Prepare 或 Game 现有批次；明确参数、准备顺序和非完整门证据。
 - [时序验证细则](testing/time-boundaries.md)：业务时间、输入更新边界、相关断言、Game 迁移或调度偶发时先读；普通选层不加载长细则。

@@ -11,11 +11,12 @@ param(
     [switch]$SkipAffectedBatchGuard
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
+if ('game' -cin $Scope) { Assert-HeadlessGpuEnvironment }
 $utf8 = [Text.UTF8Encoding]::new($false)
 $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
-. (Join-Path $PSScriptRoot 'GameTestBatches.ps1')
 # Warning baseline: strict shape; a missing scope key is a guard malfunction, not a pass.
 $warningBaselinePath = Join-Path $PSScriptRoot 'warning-baseline.json'
 try { $warningBaseline = [Collections.Generic.Dictionary[string, int]]::new(); foreach ($p in (Get-Content -LiteralPath $warningBaselinePath -Raw | ConvertFrom-Json -AsHashtable).GetEnumerator()) { if ($p.Key -cne '_comment') { $warningBaseline[$p.Key] = [int]$p.Value } } } catch { throw "warning-baseline: cannot read $warningBaselinePath : $($_.Exception.Message)" }
@@ -185,8 +186,27 @@ try {
     }
     $runIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $executionIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    # Entire selected Prepare scope completes before Game build/discovery/execution.
+    # Prepare needs a build-only Game host first; its entire scope still completes
+    # before the regular selected Game build/discovery/execution phase.
     foreach ($s in $Scope) {
+        if ($s -ceq 'prepare') {
+            $hostProject = Join-Path $root $paths['game']
+            $hostBuild = Invoke-RangeCommand 'prepare.host.build' @('build', $hostProject, '--configuration', 'Debug', '--nologo')
+            $hostWarnings = [regex]::Matches($hostBuild, 'warning CS\d+:').Count
+            $report.prepareHost = @{ project = $paths['game']; command = 'prepare.host.build'; warningCount = $hostWarnings; warningBaseline = $warningBaseline['game']; assembly = $null; artifacts = @() }
+            Save-Report
+            if ($hostWarnings -gt $warningBaseline['game']) { Fail 'warning-delta' "Prepare host build emitted $hostWarnings compiler warnings (Game baseline $($warningBaseline['game']))." }
+            $hostMatches = [regex]::Matches($hostBuild, '(?m)^\s*Pal\.Game -> (.+\.dll)\s*\r?$')
+            if ($hostMatches.Count -ne 1) { Fail 'artifact' 'Host build did not identify exactly one Pal.Game assembly.' }
+            $hostAssembly = [IO.Path]::GetFullPath($hostMatches[0].Groups[1].Value.Trim())
+            if ([IO.Path]::GetFileName($hostAssembly) -cne 'Pal.Game.dll') { Fail 'artifact' "Host build identified an unexpected assembly: $hostAssembly" }
+            foreach ($required in @($hostAssembly, [IO.Path]::ChangeExtension($hostAssembly, '.pdb'), [IO.Path]::ChangeExtension($hostAssembly, '.runtimeconfig.json'))) {
+                if (-not [IO.File]::Exists($required)) { Fail 'artifact' "Required host artifact missing: $required" }
+            }
+            $report.prepareHost.assembly = $hostAssembly
+            $report.prepareHost.artifacts = @(foreach ($f in Get-ChildItem -LiteralPath (Split-Path $hostAssembly -Parent) -File | Where-Object { $_.Extension -in @('.dll','.pdb') -or $_.Name -match '\.(deps|runtimeconfig)\.json$' }) { @{ path = $f.FullName; sha256 = (Hash-File $f.FullName) } })
+            Save-Report
+        }
         $project = Join-Path $root $paths[$s]
         $build = Invoke-RangeCommand "$s.build" @('build', $project, '--configuration', 'Debug', '--nologo')
         # Warning baseline: a freshly compiled project must not gain compiler warnings beyond the
@@ -215,7 +235,7 @@ try {
             $null = Assert-GameDiscovery $listed $plan
             # Affected-batch guard: the guarded native content fingerprint must match the last
             # verified native-map run unless this selection verifies it itself (see GameTestBatches.ps1).
-            $guard = Test-NativeMapAffectedBatchGuard -RepositoryRoot $root -Head $report.head -GameBatches $batches
+            $guard = Test-NativeMapAffectedBatchGuard -RepositoryRoot $root -Head $report.head -GameBatches $batches -Filter $Filter
             if ($SkipAffectedBatchGuard) { $guard = @{ status = 'skipped'; bypass = $true; fingerprint = $guard.fingerprint } }
             $report.nativeMapGuard = $guard
             if ($guard.status -ceq 'required') { Fail 'affected-batches' $guard.message }
@@ -237,7 +257,10 @@ try {
             $snapshot = @{ all = $plan.inventory; selected = $selectedInventory; actualFilter = $actualFilter }
         } else {
             $discovery = Read-Version7Discovery -Name $s -DiagnosticPath $diag -Assembly $assembly
-            if ($s -ceq 'prepare' -and $discovery.total -ne 89) { Fail 'discovery' "Prepare must discover exactly the 89 approved cases, got $($discovery.total)." }
+            if ($s -ceq 'prepare') {
+                try { $prepareCount = Get-PrepareTestCount } catch { Fail 'discovery' $_.Exception.Message }
+                if ($discovery.total -ne $prepareCount) { Fail 'discovery' "Prepare must discover exactly the $prepareCount approved cases, got $($discovery.total)." }
+            }
             $selected = @($discovery.cases | Where-Object { Match-Method $_.FullyQualifiedName })
             if (-not $selected.Count) { Fail 'filter-empty' 'No independent discovered cases match the selected filter.' }
             $expected = @($selected.Id)
@@ -285,6 +308,16 @@ try {
             $artifact.afterSha256 = Hash-File $artifact.path
             if ($artifact.afterSha256 -cne $artifact.sha256 -and -not ($s -ceq 'game' -and $runnerAdded -and $artifact.path -cin @($assembly, [IO.Path]::ChangeExtension($assembly, '.pdb')))) { Fail 'identity' "Unexpected built artifact change after discovery: $($artifact.path)" }
         }
+        if ($s -ceq 'prepare') {
+            # End this identity interval before a later legitimate Game build or
+            # GdUnit runner installation can recompile the host.
+            foreach ($artifact in $report.prepareHost.artifacts) {
+                if (-not [IO.File]::Exists($artifact.path)) { Fail 'identity' "Host artifact removed during Prepare: $($artifact.path)" }
+                $artifact.afterSha256 = Hash-File $artifact.path
+                if ($artifact.afterSha256 -cne $artifact.sha256) { Fail 'identity' "Host artifact changed during Prepare: $($artifact.path)" }
+            }
+            $report.prepareHost.verifiedThrough = 'prepare.test'
+        }
         $report.projects += @{ scope = $s; project = $paths[$s]; assembly = $assembly; artifacts = $artifacts; discovery = "$s.discovery.json"; expected = $expected; executed = $identity.names; runId = $identity.runId; executionIds = $identity.executionIds; filter = $actualFilter; trx = "$s/results.trx" }
         Save-Report
     }
@@ -306,7 +339,7 @@ try {
     foreach ($tool in $report.toolIdentity) { if ((Hash-File $tool.path) -cne $tool.sha256) { Fail 'source-changed' "Entry/helper changed during the run: $($tool.path)" } }
     if ($recordingError) { Fail 'evidence' 'Cannot finalize an incomplete journal.' }
     $report.status = 'completed'; $exitCode = 0
-    if ($Scope -ccontains 'game' -and $batches -ccontains 'native-map' -and -not $SkipAffectedBatchGuard) {
+    if ($Scope -ccontains 'game' -and $batches -ccontains 'native-map' -and -not $Filter -and -not $SkipAffectedBatchGuard) {
         Write-NativeMapVerification -RepositoryRoot $root -Head $report.head
     }
 } catch {

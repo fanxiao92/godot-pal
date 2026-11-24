@@ -1,5 +1,102 @@
 # ClassicBattleSession：Core 普攻与整轮选令
 
+## 当前 #145：普通战斗逃跑（T17）
+
+非 boss 战斗的逃跑成功域经同一选令/动作队列接通（fight.c 4119-4152；battle.c 1458-1527 + 774），不新增队列、随机源或第二套状态。公开 seam：`ClassicBattleSession.SelectFlee` → `AttemptFlee` 观察面 `ClassicBattleView.LastFleeAttempt`（`ClassicBattleFleeAttempt.EnemyFleeDefense/Draw/Escaped`）与新终局 `ClassicBattlePhase.Escaped`；经 `TriggerScriptSession.AcknowledgeBattle`（script.c 0x0007 operand[2] → fleeTarget 分支）与正常 Main 表现接通。
+
+- **提交与传播**：`SelectFlee(partyIndex)` 要求 Selecting 且当前选令成员；提交者与其后全部存活成员一起逃跑（CLASSIC kKeyFlee 回喂，fight.c 1965-1978 + 1797-1799）；逃跑减半队列速度（fight.c 1546）。成功即战斗立刻结束于 `Escaped`（主循环中断，队列余项不执行、无胜利现金/经验/物品、无逃跑隐藏经验计数）；失败只消耗该动作并加 2 到 flee 计数。boss 战即使数值够也必败，但抽取照常消费。
+- **判定数学（WORD 累加器）**：def 在 fight.c 3597 声明为 WORD，逐敌 `def += dex` 与 `def += (level+6)*4` 每次存回即 mod 65536（与 AttackEnemy 的 WORD 回绕先例同款），最终仅 `(SHORT)def < 0` 归零后进入 `RandomLong(0, def)`。回归例：单敌 level 65535 → 262164 回绕为 20（fleeRate 25 必逃脱）；双敌 dex −32768 → 逐项回绕为 48（非钳 0、非负上界；其 WORD 回绕队列速度 32786 在 SHORT 嵌套比较下为 −32750 排最后）。既有求和/负 SHORT 例（52、40024）不越界，行为不变。
+- **回执路由**：Escaped 回执按 startBattle operand[2] 路由到 fleeTarget；Lost 仍走 lossTarget；过期/重复/非 owned 回执保持惰性，不二次执行剧情。
+- **Main 表现**：成功逃跑播放 16 姿势队列步进行走（仅活人，battle.c 1493-1516），最终移除帧把全部成员（含死亡——战中死亡成员持续可见，fight.c 952-957）移出画面 (9999, 9999)（battle.c 1519-1526）；随后经自有回执释放战斗并续跑 fleeTarget 剧情。
+- **覆盖**：`ClassicBattleSessionTests` 逃跑族（boss 抽取/必败、有效面板、成功无奖励、边界相等、失败计数、存活敌求和、负 SHORT 钳零、WORD 回绕、后续队员不再尝试、经典提交覆盖）+ `TriggerScriptBattleBindingTests`（fleeTarget 路由与惰性重复回执）+ scene-realfull 两个 `NormalBattleFlee` 测试（正式 Prepare 链 Main 流程与最终帧全员离屏表现）。计数：Core 1473、Game 1015 positives（scene-realfull 44）。敌方逃跑、脚本强制逃跑、战败读档不在本票。
+
+## 当前 #143：普通攻击全体（T15）
+
+有参考全体攻击能力的队员经同一攻击选令与动作队列提交一次全体目标选令，不新增队列、随机源或第二套状态。能力来源 = 授权玩家字 `ClassicBattlePlayer.AttackAll`（正式 authored/native 链可运输的声明，PLAYERROLES rgwAttackAll；固定参考引擎本身只扫装备效果）∨ 任一非零装备 `AttackAllWord` 寄存器（`PAL_PlayerCanAttackAll`，global.c 2048-2080 原文）。旧拒绝面（玩家字 + 装备字）迁移为能力正例；cooperativeMagic 装备字仍拒绝。
+
+- **选令**：`ClassicBattleSession.SelectAttackAll(partyIndex)`（`ClassicBattleLifecycleSession` 同名转发）要求 Selecting、当前选令成员且具备能力，否则无副作用拒绝；提交即参考 sTarget -1，全员选完才建队。有能力的成员用 `SelectAttack(partyIndex, enemySlot)` 提交具体目标时按 `PAL_BattlePlayerValidateAction`（fight.c 3489-3494）归一化为全体；视图发布 `Players[i].CanAttackAll/SelectedAttackAll`（全体提交时 `SelectedEnemySlot` 保持 null）。`CancelSelection` 清全体承诺与其余承诺一致。
+- **执行**（fight.c 3686-3735）：一击一次 `RandomLong(0,5)` 会心掷骰（bravery 保留掷骰恒取会心）覆盖整击；命中序固定 {2,1,0,4,3}；命中集在动作开始时冻结（存活非空槽，空槽与先前动作已杀槽既不命中也不推进除数；PostActionCheck 在整动作后才清 KO，双击第二击仍打第一击击杀目标，applied 伤害 0、不重复计奖）。逐目标：`BaseDamage`→抗性整除（SHORT）→float ×3（会心）→ `/division`（1,2,4,8,16 逐目标加倍，float 除）→ ≤0 抬 1 → WORD 截断扣血（截断可观察，如 1000-10.5→989）；无 +1..2、role0 加成或末尾 float 摆动。双击每击重掷会心并重置除数；attack/health 计数与 KO 奖励每动作一次；胜负与回合只在整动作后结算。
+- **观察面**：`ClassicBattleView.LastActionTargets` 逐目标记录（单体/敌方动作单元素；全体一击每命中槽一条，按命中序）；`ClassicBattleAction.AttackAll/DualAttack` 标记全体语义与双击动作；全体记录的 `Damage` 是 applied WORD 差（前 HP 减截断后 HP），区别于单体分支可能过量的原始伤害。
+- **Main 接线**：AttackMenu 确认时选令成员 `CanAttackAll` 则直接 `SelectAttackAll`（uibattle.c 1094-1099 + 1611-1617，经典全体成员不进目标选单）；一击一次表现动画：非双击走向固定 (150,100) 中心，双击+全体钉在本位（fight.c 2080-2101：首击 -8/-4、第二击 -20/-12），FX 同帧绘在每个命中敌位（2173-2190，无逐帧偏移），全体受击色偏（8-9 拍）与纯水平震动（10-12 拍 -8/-4/-6，2198-2256），逐目标伤害数字在各命中敌位同时入队（DisplayStatChange 语义）。
+- **覆盖**：Core 新增四例（`ClassicBattlePartySessionTests`：全体顺序/除数/截断字面值、无能力拒绝与提交边界、会心单掷与双击重掷/计数一次、冻结命中集与单次奖励；装备闭包同时携带 rgwAttackAll 与双击状态）；`ClassicBattleEquipmentSessionTests` attackAll 字（1/65535）迁移为四入口能力正例；`TriggerScriptBattleBindingTests` attackAll 迁移为可开战 + 卸装备后能力消失；`ModernBattleContentTests` 两事实与装备闭包理论行迁移为可执行；scene-realfull 新增全体成员 Main 流程与全体攻击表现字面表（两个新增测试均注册于 range 可执行的 scene-realfull，表现字面表由此获得执行证据；scene-battle-light 保持其原有 30 例）。法术、道具、自动选令与法术型全体（kMagicTypeAttackAll）不在本票。
+
+## 当前 #142：经典选令取消与目标返回（T14）
+
+选令编辑接入固定参考的 PAL_CLASSIC 取消分支，不新增队列、随机或第二套状态。公开 seam：`ClassicBattleSession.CancelSelection()` → `ClassicBattleLifecycleSession.CancelSelection()`（同一 active combat owner，发布视图跟随重开成员）。
+
+- **主选单取消（uibattle.c 1224-1252）**：仅 Selecting 阶段可用；一次取消恰好回退最新已提交且可重选的一名成员，使其重新选令；参考回退循环跳过死亡/不可选者（本域只有死亡成员，且死亡成员从未提交选令）；首位可选成员之上无可编辑项，请求为无副作用 no-op（不 Publish、不消费随机、不动队列）；其他成员已提交目标保持不变。最终成员提交后进入 Resolving，编辑关闭（InvalidOperationException）；已结束的 lifecycle 同样拒绝。已提交逃跑与可编辑选令不会共存（它提交后续全部成员并直接开轮），故清目标即完整回退；本域尚无物品预留。
+- **目标选单取消（uibattle.c 1512）**：返回动作选单，未提交任何内容，无 Core 调用；重进目标选单从首个存活槽重新开始（无 previous-target 记忆，battle.c:1771 初始 -1 语义不变）。
+- **Main 接线（input.c 66-70）**：`_Input` 捕获 kKeyMenu 键族（Escape/Insert/Alt/KP_0），仅在 story 战斗 AttackMenu/TargetMenu（不含 HookDialogue/Feedback/Settlement，不含探索）；每帧丢弃取用，stale/echo 取消不会入队；`ProcessStoryBattle` 的 AttackMenu 分支调 `lifecycle.CancelSelection()`，TargetMenu 分支仅切回动作选单并清 cycle。
+- **覆盖**：`ClassicBattlePartySessionTests` 三例（新建承诺回退/首位边界、死亡成员不重开/末员提交关闭、混合空槽下回退与重选仅限存活槽）、`ClassicBattleLifecycleSessionTests` 一例（经 lifecycle 视图回退并在结算后关闭），及 scene-realfull 的正式 Prepare 链 Main 流程（见 `src/Pal.Game/Tests/README.md` #142 小节）。
+
+## 当前 #207/#210：一至五个实有敌位贯通 Core 与外层门（#138）
+
+`ClassicBattleSession` 与 typed `TriggerBattleContent.EnemyTeams` 接受 **1..5 个完整、非 null 的敌位**；玩家接受域为 1..3（#137）。沿用正式 trigger → `ClassicBattleLifecycleSession` → combat 链，不新增接口或第二套战斗引擎。0、6、null 槽和已有不支持能力仍在 RNG/玩法副作用前拒绝，typed team 容量诊断带 teamId。此节更新后文历史检查点的 Core 敌方上限，不覆盖其他能力限制。
+
+- `EnemyTeams[teamId][slot]` / `Current.Enemies[slot]` 的 ordinal 是实例地址；重复 ID7 的五槽仍各有独立 HP、队列与目标。typed 内容深拷贝全部槽及嵌套状态/毒数组；调用者替换输入数组或后续推进不改变已发布快照。
+- 不改既有排序与重定向：选齐存活玩家后才按 E0..E4、P0..P1 抽身法；完整13项参考队列作 WORD 截断、SHORT 严格嵌套比较，不替换为稳定排序。死亡队列位置 pass、不消费动作随机；执行时目标死亡，从原 slot 循环找存活目标。最后一敌 KO 才 Won，终态保留唯一回执。
+- 固定只读参考：`palcommon.h:60` 的 `MAX_ENEMIES_IN_TEAM=5`；`fight.c:87–129` 自动目标、`1450–1601` 经典队列、`1705–1770` 死亡 pass、`3624–3670/3753–3757` 普攻和计数；不编译或运行参考。
+
+公开 Unit 独立字面预期位于 `ClassicBattlePartySessionTests` 与 `TriggerScriptBattleBindingTests`：
+
+| 行为 | 独立输入 / 预期 |
+| --- | --- |
+| 容量、身份与拒绝 | 1..5 敌 × 1/2 玩家可构造；重复 ID7 的0..4均可选；-1/5拒绝且快照/RNG不变；0/6/null槽、三玩家和槽4法术仍拒绝 |
+| 同速与非稳定反例 | 五敌 level0/dex0、两玩家 dex18、七次倍率1 → `E0:18,E1:18,E2:18,E3:18,E4:18,P0:18,P1:18`；玩家1/100 → `P1:100,E1:18,E2:18,E3:18,E4:18,E0:18,P0:1`，另有不同倍率截断例 |
+| 死亡目标与回执 | attack40、防御有效24、+1、无暴击、倍率1 → 每击43；五敌HP43，两人同选4，先杀4再绕至0，1/2/3仍存活；后续公开回合杀3/1/2才Won，死敌pass无额外随机，旧快照保留HP43 |
+| 五敌逐槽行动 | 敌速度118..114先于玩家100/90；敌强度36..40对防20，目标0/1/0/1/0 → 伤害20..24，玩家最终HP134/156；每个 ActorIndex 及敌自身HP100..104独立 |
+| trigger / lifecycle / continuation | 单角色HP300/max350、五敌HP43，按4/0/1/2/3依次击杀，剩敌合计10次伤害20；rawHP100，五个战后钩子按 caller0..4真实执行后半恢复HP225/MP35，仅 owned ACK 提交并进入新五槽战斗；旧/重复回执无效。五轮随机请求数30/24/18/12/6合计90，无成长抽取 |
+
+存量 `ClassicBattleSessionTests.UnsupportedDefinitions` 和 `ModernBattleContentTests` 的解析容量负例原以三敌代表超限，同步改为六敌，并独立覆盖解析后1..5槽的顺序、重复ID及HP。`ModernBattleContent.Parse` 委托 `TriggerBattleContent` 构造并验证，因此该纯Core解析入口也获得1..5容量，不是仍停留在双敌的外层门。这是同一容量契约必要的调用方/测试迁移，不能保留与新接受域矛盾的断言。
+
+**#210 外层迁移与证据边界**：#207 的 Core 1..5 接受域已贯通外层链，这是对 #207 期间按票面边界刻意保留的双敌门的有意迁移，不是回退：`BattleDataProjector` 投影 dense 实有敌位 1..5（源槽仍仅 0..4，零槽、零 objectId 与空队仍拒绝）；非投影 native 链在 `NativeBattleContent.CreateChecked`（读回）与 `Write(content, null)`（无 receipt 的 Prepare 写出）按同一 1..5 loaded 域拒绝 0/>5（诊断带 teamId）；投影槽行 `BattleProjectionSourceInfo` 每队 1..5 loaded；`PrepareStoryPackage` author schema 的 `visual.teams[].enemies` 接受 1..5 逐槽绑定并与数值敌位一一对应。重复敌人定义多槽仍不合并。测试迁移：投影 `three` 拒绝例删除并由五槽正例取代、native `enemies-overcapacity` 与 Prepare `three-slots` 拒绝例迁至六槽，投影 `three-loaded` 缺陷例改经投影/native 槽数不匹配路径拒绝；新增非投影、投影槽行与 Prepare 五槽正例。零空槽/FFFF skip 与数据表零槽语义仍归 T13b（#140）；正式 Main 的五敌目标循环、所选敌队参考布局与 #138 余项未在本叶验收，不解除 #140 的父依赖。Extract Unit 与 native-map headless 证据不替代 Prepare 进程/私有真实资源/GPU/Windows人工/远端CI。空槽、三角色、新动作、敌方法术/双动与旧失败支线不在本叶。敌方 HP/目标/队列仍由 combat 唯一持有，lifecycle 结算角色、trigger 在 owned ACK 后提交；不新增持久化 schema 或另一份真状态。
+
+## 当前 #140：敌队 0xFFFF 跳过项与 0 空槽的数值/Core 契约（T13b）
+
+本节更新上文 #210 刻意保留的零槽边界，不是回退。`ClassicBattleEnemy` 新增可选 `IsEmpty`（缺省 false，typed/JSON/record-with 均保留）：仅 `IsEmpty=true` 允许 canonical `id=0`、`hp=0` 与全零能力/奖励/钩子/状态/毒，`ClassicBattleSession.ValidateEnemy` 与 `ModernBattleContent.Validate` 在 RNG/玩法副作用前拒绝其它拼写；`ClassicBattleEnemyView.IsEmpty` 发布明确空状态，战中 HP=0 的实有敌保留原战内 id 且 `IsEmpty=false`，两类零值不合并。团队仍要求 1..5 槽且**至少一个非空敌**（全空队拒绝）；空槽不可选为目标、不抽行动随机、不进队列、不运行钩子、不贡献奖励，死亡目标循环重定向与最后一实有敌 KO→Won 沿用既有规则。
+
+投影按 `PAL_StartBattle`（battle.c:1617-1717）：FFFF 不占运行时槽，0 保留 `wObjectID=0` 运行时槽；数值 `id` 仍是战内 target ID = 运行时槽+1，重复对象不合并，收据逐行保留 sourceSlot→运行时槽（`compactSlot`/`battleId`）映射与 `empty-0` disposition（仅四个共享键），dense 队输出与 #210 逐字节一致。外层 native/Main 接线域在 T13c 前仍显式拒绝空槽：`NativeBattleContent.Write` 遇 `IsEmpty` 敌位带 teamId/slot 拒绝（不静默丢字段），`ProjectedBattleSource`/`BattleProjectionSourceInfo` 对 `empty-0` 槽行按 unknown disposition 拒绝，非投影 1..5 loaded 域不变。本票不宣称 native/Prepare/Main 已支持空槽；Core/Extract Unit 证据不替代引擎层验收。
+
+## 当前 #160：live Name 角色钩子所有权（Core 窄契约）
+
+本节同步 [#160](https://github.com/fanxiao92/godot-pal/issues/160) 的当前 Core 实现；**后文 #47/#48/#49/#46 等是历史检查点**，其中单人、零钩子及静态初始入口等描述不覆盖本节的现行 seam。本票仍未整票验收、未集成，不代表原生资源/Main 或 M6 交付，也不增加故事验收计数。
+
+### 唯一 bank、声明与启动顺序
+
+- 唯一可变入口存储是既有 [`DynamicEventWorld.ObjectScripts`](../../src/Pal.Core/DynamicEventSession.cs)，键为显式 `(NameObjectId, slot)`：slot0=`FriendDeath`，slot1=`Dying`。`NameObjectId=null` 是未映射的 legacy 静态路径；Name WORD `0`、`0xFFFF` 都是真实名字对象身份，与脚本 entry0 的禁用语义不同。相同 Name 的角色 alias 同一双槽，且声明的 FriendDeath、Dying seed **各自**必须相等；不同 Name 即使 seed 相同也不 alias。
+- [`TriggerScriptSession`](../../src/Pal.Core/TriggerScriptSession.cs) 对选中闭包中可达的 mapped battle 做小型、纯 typed 能力检查：只要有玩家声明 Name，就要求全体玩家映射、Name 在 WORD 范围内、同 Name seeds 一致，并且实际 Start/当前查询绑定 world。不是调用完整 modern 数值格式 validator；legacy 简写数组及既有格式诊断顺序不变。
+- 构造器、`ForSharedRoles`、纯查询均不 seed、不重绑 world/角色 owner。成功 `Start` 先完成全部纯预检，再为实际结构可达 mapped battle 的相关双槽**仅补缺失键**，之后才创建 CallId、改 caller/success/PC、执行前缀及消耗生产 RNG。已有值0优先于声明 seed；无 battle 或 entry0 不因传入 content 而 seed。基本、world-only、battle-only、shared+world 绑定仍各守原能力边界，不从未映射内容制造 owner。
+
+### 实际参与者的 live reader 与真实完成回写
+
+- 正式路径为 Trigger `Continue(startBattle)` → [`ClassicBattleLifecycleSession`](../../src/Pal.Core/ClassicBattleLifecycleSession.cs) → [`ClassicBattleSession`](../../src/Pal.Core/ClassicBattleSession.cs)。仅 internal overload 借用 `Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript`，每次真实检测按实际 player 的 Name 与 kind 读当前 bank：Dying 读濒死本人，FriendDeath 读实际 coverer，而非死者。live0 是禁用，不是缺失。既有 public 独立 combat/lifecycle 构造器仍传 null、读静态声明，不创建新 bank。
+- 钩子 caller 是实际 `RoleId`，0 合法，不是 Name、party index 或 EVENTOBJECT count owner。只有外层 `Start` 的 caller `0xFFFF` 继承 `_lastCaller`；Name `0xFFFF` 与根 RoleId0 都不是继承标记。这不引入 [#129](https://github.com/fanxiao92/godot-pal/issues/129) 的嵌套 VM/call、保存入口或 count 语义。
+- `StartBattleHook` 仍先预检**实际 pending entry X**，通过后捕获不可变 `(NameObjectId, slot, X)`；X 不取声明 seed、此刻 bank、返回 PC 或外层 `ReturnEntry`。真实 hook 内 `0090/setObjectScript` 写自身槽Y后等待 display 时保持Y；只有正常根 `keep` 或真实到达 PC0 的完成才把X写回捕获槽，**先写 bank，再清临时 hook owner，再 lifecycle `AcknowledgeRoleHook`**，随后恢复外层 caller。外层 `ReturnEntry` 不是 hook bank；其他 Name/slot 不受该回写影响。
+- 真实用例覆盖 pending5→另一个 executor 写 bank31→hook 自写0→display 等待仍0→真实 display 完成且 owned ACK 后终止→回写5、恢复 outer caller28。仅 display 完成而未 ACK、早到/foreign/stale/重复 display 或 battle 回执均不提交回写；重复回执也不能覆盖后来真实写入。跨文件位置仅用于诊断和寻址，文件名不是 bank key。enemy battle-end 按实际 enemy slot 作 caller，丢弃脚本返回 WORD，没有 Name owner。
+- 同一 world 的后续 battle/新 executor 都读当前 bank；`CreateIsolatedCopy` 复制**当前**入口值且后续变更隔离，再次复制也取复制时的当前值。共享入口不自动共享 legacy executor 的角色 HP；真正结束 battle 的 settled roles 仍仅由该生命周期 owned completion 的合法 ACK 发布给事件，再用于下一场。
+
+### 纯结构闭包及有界性
+
+现有 walker 从选中 Event 根及结构可达 battle 出发，以当前 world 值（包括0）覆盖缺失键的声明 seeds；把每条结构可达 `0090` 对相关 Name/slot 的 literal 写值加入未来 hook 根，迭代至有限不动点。实现按 key 记录先发现的写入，相关 key 每个仅激活一次；后来发现的写入直接入工作表，根按 `(key, entry)` 去重。因此覆盖写在发现 battle/key 之前、初始0后来启用、随机双分支、hook 再写另一 hook、backedge 及 alias。相关闭包内坏/越界入口、raw、content-only、不支持命令或缺失语言在 CallId/caller/success/PC/前缀/角色/music/RNG/seed 副作用前失败；`source` 只作诊断，不路由执行 opcode。无关 Name 与 slots2..5 仍只是存储，不成为玩家 hook 根。
+
+设N为事件集合命令数、W为可达 literal 写候选数、K为相关 Name/slot 键数。现有最多两角色×两槽，K≤4；`visited(Address, Context)` 的 Context 仅 Event/RoleHook/BattleEnd，至多3N。按 key 索引的工作表开销为 O(N+W+K)，加上既有显示解析/校验代价D，总计 O(N+W+K+D)。这不是实测 benchmark、显示恒定成本或脚本运行终止证明；没有 WORD 状态笛卡尔积枚举、深度截断、新 VM、运行时递归推进或推测性 cache。
+
+### 当前纯查询与静态入口的边界
+
+```csharp
+public TriggerEntryRequirements GetCurrentEntryRequirements(string fileId, string entryId, int caller);
+```
+
+该既有公开方法绑定当前 `BattleRoles`、`Context.Color`、events/language/content 及相关 world keys，返回既有深不可变 [`TriggerEntryRequirements`](../../src/Pal.Core/TriggerEntryRequirements.cs)（`DisplayBlocks`/消息引用、`PortraitIds`、`BattleTeamIds`），不创建生产调用、seed、重绑、消耗 RNG 或改变 CallId/caller/PC。它与 `Start` 共用 `ValidateSelectedStart` 纯 guard：阻塞中的 active call 抛 `InvalidOperationException`，非 WORD caller 抛 `ArgumentOutOfRangeException`，入口/Name 映射/world 可用性/闭包/语言问题抛带文件或命令位置的 `InvalidDataException`。caller `0xFFFF` 仅保留对 `_lastCaller` 的继承约定，不更新它；查询结果不是跨后续更新有效的授权，真正 `Start` 必须重查。
+
+静态 `ValidateEntry` 仍是 initial-content、纯且无计数器的预检，以初始角色及声明入口保守纳入相关未来 `0090` 写根，不要求 live world、不读取当前 bank。它不获得 #129 的 call/goto/count 能力或 `ValidateReturnEntryPreserved` checker 权限；当前查询也不扩大既有构造绑定的执行能力。
+
+### 已有 Core 用例与尚未交付的外层
+
+[`MidbattleRoleHookTests`](../../tests/Pal.Core.UnitTests/MidbattleRoleHookTests.cs) 经公开构造、选令、真实动作、display.Update 与 owned ACK 覆盖上述行为，不注入假 hook/receipt：例如 `Current_entry_requirements_are_pure_and_do_not_seed_or_advance_last_caller`、`Aliased_Name_zero_Dying_hooks_use_the_shared_current_entry_and_keep_the_captured_return`（Role0/1 同 Name0）、`Dying_root_keep_restores_the_captured_actual_Name_entry_after_its_own_write`，以及 `Ended_battle_owned_ACK_starts_the_next_battle_with_settled_roles_and_the_current_mapped_Dying_entry`（第一场真实 Won/结算及 owned ACK 后，第二场真实检测当前入口；不是第二场结算证据）。同文件另有实际 coverer FriendDeath、PC0、跨文件、真实 foreign display、同 world 新 executor 与当前副本/local keep 用例；预期来自独立 authored 字面值及参考核对，不由被测实现生成。
+
+D1 的生产 Start 前当前查询与完整资源预检、D2 的正常 Main/资源/真实输入/`UpdateCompleted`+ACK，以及未来 #129 集成、完整 M6 保存/66条C故事，均不由本 Core 前置票实现或验收。[`NativeStoryProfile`](../../src/Pal.Game/Scripts/Profiles/NativeStoryProfile.cs) 的静态双语检查和 [`PalTriggerDialogue`](../../src/Pal.Game/Scripts/Dialogue/PalTriggerDialogue.cs) 到 battle 即停的 preview 不能证明当前 live 资源闭包；Core 反馈不替代 Game/native/Main、GPU、人工、私有真实资源或远端 CI 门禁，`.packages` 正式 Source 基线要求不豁免。
+
 ## #47 纯 Core 多人检查点
 
 同一 `ClassicBattleSession` 现支持每侧1或2个初始存活参与者；不是全游戏战斗或 #47 整票交付。下文 #46 的 lifecycle/trigger/modern/native 入口仍保持单人单敌，后继 unit 才扩展这些正式 typed 契约与 Main。装备、双击、掩护、状态、钩子、奖励和成长的非零能力仍在副作用前拒绝。
@@ -61,7 +158,7 @@ Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 fra
 
 无成长闭包在创建可变角色/抽 RNG 前证明：role level 与七 hidden level 均0..99，所有 XP/level/count 为 WORD，primary XP 严格小于 **role.Level** 对应阈值，七 hidden XP 各严格小于自身 level 对应阈值；阈值完整且正 WORD。七项 hidden 名称按 Ordinal 精确匹配，不因调用方字典使用大小写不敏感比较器而接受别名；规范键配合该比较器仍合法。不是 `reward==0` 就跳过规则：旧 XP 已达阈值、需要 level clamp、任意可新增法术等均拒绝。逐行检查当前等级可学法术，已知/零 ID/未来等级不新增；32槽全满时按 `PAL_AddMagic` 不会新增。非零奖励仍由 combat 预检拒绝。这是合法数据下没有永久成长的封闭子集，不是 #50 通用成长实现。
 
-参考 `PAL_StartBattle` 开场将 HP0 抬至1（零 status 所以 puppet 已为零），七 hidden count 归零而 primary count 保留；不放松底层 combat HP1..32767。每个真实动作后将真实 attack/health counts 写回角色，包括最后 **Lost**；其他五项仍为开场0。Won 在零结束钩子后按 `(max-current)/2` 截断恢复 HP/MP；Lost 不恢复，保留 HP0。清理真实 owned role status（参考 `<=999` 条件），并释放 active combat owner；本子集从不接收/产生 inventory-in-use、毒或 extra-equipment effect，不声称验证这些非零系统的清理，也不删除 hand-slot/dual。
+参考 `PAL_StartBattle` 开场循环（battle.c 1568-1583）将 HP0 参战队员抬至1 并同时清其 puppet 状态（kStatusPuppet，statuses[4]）；任何 WORD 拼写的死入场 puppet 都可被接受，但只在真实开战构造内清零，预检/验证不产生该副作用。活成员携带 puppet（未开放的战中傀儡行动域）及死入场的其它非良好状态仍拒绝；七 hidden count 归零而 primary count 保留；不放松底层 combat HP1..32767。#139 勘误：旧草案 T13 “死亡角色不被自动补成 1HP”与固定参考不符，已按参考执行入场恢复；战中死亡仍按正确身份/目标处理，不在每帧或每个动作中补 1HP，仅 Won 半恢复/下一场入场规范化触碰它。每个真实动作后将真实 attack/health counts 写回角色，包括最后 **Lost**；其他五项仍为开场0。Won 在零结束钩子后按 `(max-current)/2` 截断恢复 HP/MP；Lost 不恢复，保留 HP0。清理真实 owned role status（参考 `<=999` 条件），并释放 active combat owner；本子集从不接收/产生 inventory-in-use、毒或 extra-equipment effect，不声称验证这些非零系统的清理，也不删除 hand-slot/dual。
 
 独立 `ClassicBattleLifecycleSession.CompletionReceipt` 仅在真实 KO、适用结算及清理之后发布，与 raw combat receipt 类型不同，无公开构造或任意结果入口。终态推进返回 false，选令拒绝，快照和 receipt 身份不变；`OwnsCompletion` 只对自身非空 receipt 的对象身份返回 true（两个 null 不匹配）。它不消费 receipt；后续事件请求仍须绑定准确 active lifecycle session，并自行实现一次性继续，不能接受另一 session、枚举或 raw KO。下述 trigger binding 复用此入口，不以 raw combat KO 绕过结算。
 
@@ -109,6 +206,7 @@ Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 fra
 | 敌目标选择 int0..maxPartyIndex；无魔法不请求魔法概率 | fight.c:4521–4547、4576–4581、4656–4659 |
 | 敌攻加 `(level+6)*6` 后截零，int0..16>=10闪避；命中时 strength int0..2，基础伤害/2，再 int0..1；截至HP再最小1 | fight.c:4913–4938、5052–5074 |
 | 命中后即使等效道具概率0，仍请求 int1..10；短路不请求毒抗 int1..100 | fight.c:5139–5146 |
+| 入场规范化：HP0→1 并清 kStatusPuppet（仅死入场队员），全队七 hidden count 归零、primary count 保留；战后恢复另算 | battle.c:1568–1583 |
 | KO、零奖励累计；战内动作计数不等于成长 | fight.c:744–776；battle.c:1228–1262 |
 | 整数/float包含端点、退化区间不抽熵 | util.c:222–278 |
 | 玩家有效攻防身法来自原属性加装备效果（本检查点装备全零） | global.c:1736–1765、1800–1867 |

@@ -46,6 +46,23 @@ jobs:
           # M5 retro (#121): #113 shipped a unit test doing File/Directory I/O that only this
           # script catches; dotnet test alone stayed green. Seconds-level source scan.
           & (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-UnitBoundary.ps1')
+      - name: Guard agent evidence tooling (offline)
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-PowerShellSyntax.ps1')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'tests/AgentEvidence.Tests.ps1') -EvidenceDirectory (Join-Path $env:RUNNER_TEMP 'agent-evidence-regression')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'tests/AgentWorkflow.Tests.ps1') -EvidenceDirectory (Join-Path $env:RUNNER_TEMP 'agent-workflow-regression')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'tests/Test-PowerShellSyntax.Tests.ps1') -EvidenceDirectory (Join-Path $env:RUNNER_TEMP 'syntax-regression')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'tests/Pal.Game.Tests/GameBatches.Tests.ps1') -EvidenceDirectory (Join-Path $env:RUNNER_TEMP 'game-batches-regression')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'tests/Test-CiWorkflow.Tests.ps1') -Mode Offline -EvidenceDirectory (Join-Path $env:RUNNER_TEMP 'ci-workflow-regression')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Guard committable trees against LFS pointers
         shell: pwsh
         timeout-minutes: 5
@@ -86,6 +103,11 @@ jobs:
           path: |
             ${{ runner.temp }}/unit-results/core/results.trx
             ${{ runner.temp }}/unit-results/cli-unit/results.trx
+            ${{ runner.temp }}/agent-evidence-regression/**
+            ${{ runner.temp }}/agent-workflow-regression/**
+            ${{ runner.temp }}/syntax-regression/**
+            ${{ runner.temp }}/game-batches-regression/**
+            ${{ runner.temp }}/ci-workflow-regression/**
 
   full-check:
     # #76 informational committable-scope full gate: the real Test-M0 entry on the

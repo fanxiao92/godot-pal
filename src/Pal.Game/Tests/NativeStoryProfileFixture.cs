@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Godot;
+using Pal.Core;
+using Pal.Game.Profiles;
 using Pal.Game.Resources;
 
 namespace Pal.Game.Tests;
@@ -22,54 +24,247 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     public string[] ExpectedPaths { get; }
 
     public bool Party { get; }
-    public NativeStoryProfileFixture(bool party = false)
+    public NativeStoryProfileFixture(bool party = false, bool hiddenCurrentGlyph = false, bool currentHookPositive = false,
+        bool seedDyingGlyph = false, bool futureDyingWrite = false, bool secondOrderDyingWrite = false,
+        bool randomDyingBranch = false, bool titleDyingGlyph = false, bool forceCurrentFriendDeath = false,
+        bool fiveEnemies = false, bool emptyEnemies = false, bool useMenu = false, bool useMagic = false)
     {
-        Party = party;
+        if (fiveEnemies && (hiddenCurrentGlyph || currentHookPositive || futureDyingWrite || secondOrderDyingWrite
+            || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
+            throw new ArgumentException("The five-enemy-slot variant requires the plain story graph.", nameof(fiveEnemies));
+        if (emptyEnemies && (party || fiveEnemies || hiddenCurrentGlyph || currentHookPositive || futureDyingWrite || secondOrderDyingWrite
+            || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
+            throw new ArgumentException("The empty-slot variant requires the plain single-member story graph.", nameof(emptyEnemies));
+        if (useMenu && (party || fiveEnemies || emptyEnemies || hiddenCurrentGlyph || currentHookPositive || seedDyingGlyph
+            || futureDyingWrite || secondOrderDyingWrite || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath))
+            throw new ArgumentException("The use-menu variant requires the plain story graph.", nameof(useMenu));
+        if (useMagic && (party || fiveEnemies || emptyEnemies || hiddenCurrentGlyph || currentHookPositive || seedDyingGlyph
+            || futureDyingWrite || secondOrderDyingWrite || randomDyingBranch || titleDyingGlyph || forceCurrentFriendDeath || useMenu))
+            throw new ArgumentException("The use-magic variant requires the plain story graph.", nameof(useMagic));
+        if (forceCurrentFriendDeath && (!currentHookPositive || !secondOrderDyingWrite || randomDyingBranch || titleDyingGlyph))
+            throw new ArgumentException("The controlled FriendDeath variant requires only the second-order current-hook graph.", nameof(forceCurrentFriendDeath));
+        if (titleDyingGlyph && (!futureDyingWrite || randomDyingBranch || secondOrderDyingWrite))
+            throw new ArgumentException("The title variant requires only the future-write graph.", nameof(titleDyingGlyph));
+        if (randomDyingBranch && (!futureDyingWrite || secondOrderDyingWrite))
+            throw new ArgumentException("The random variant requires only the future-write graph.", nameof(randomDyingBranch));
+        if (secondOrderDyingWrite && !futureDyingWrite)
+            throw new ArgumentException("The second-order variant requires the future-write fixture.", nameof(secondOrderDyingWrite));
+        if (seedDyingGlyph && (!currentHookPositive || hiddenCurrentGlyph))
+            throw new ArgumentException("The seed glyph variant requires the clean current-hook positive fixture.", nameof(seedDyingGlyph));
+        if (futureDyingWrite && (!currentHookPositive || hiddenCurrentGlyph || seedDyingGlyph))
+            throw new ArgumentException("The future-write variant requires the clean, non-seed current-hook positive fixture.", nameof(futureDyingWrite));
+        Party = party || currentHookPositive;
+        bool currentHookGraph = hiddenCurrentGlyph || currentHookPositive;
         Directory.CreateDirectory(ProjectSettings.GlobalizePath(Root));
-        var owner = Static.AddObject();
+        if (currentHookGraph) Static.ConfigureStaticScene4();
+        var owner = currentHookGraph ? Static.Scene.Objects.Single(obj => obj.Id == 60) : Static.AddObject();
         owner.WTriggerScript = 1; owner.WTriggerMode = 1;
         Static.Scene.Palette = new PalPalette { Rgb = new byte[768] };
         Save(Static.Scene.Palette, "Palette.tres");
         Static.Scene.Palette = ResourceLoader.Load<PalPalette>(Root + "/Palette.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
         Static.Scene.Sprites[0].Frames[0].Texture = ResourceLoader.Load<Texture2D>(TextureSource);
         Static.SavePacked();
-        Write("index.json", Index);
-        Write("shared.json", Shared);
-        Write("outcomes.json", Outcomes);
-        Numeric = Numbers(party);
+        Write("index.json", currentHookGraph ? Index.Replace("\"instructionCount\":13,\"byteLength\":104", "\"instructionCount\":64,\"byteLength\":512") : useMenu ? Index.Replace("\"instructionCount\":13,\"byteLength\":104", "\"instructionCount\":16,\"byteLength\":128") : useMagic ? Index.Replace("\"instructionCount\":13,\"byteLength\":104", "\"instructionCount\":17,\"byteLength\":136") : Index);
+        Write("shared.json", currentHookGraph ? HiddenCurrentGlyphShared(seedDyingGlyph, futureDyingWrite, secondOrderDyingWrite, randomDyingBranch) : useMenu ? UseMenuShared() : useMagic ? UseMagicShared() : Shared);
+        Write("outcomes.json", futureDyingWrite ? FutureOutcomes
+            : currentHookGraph ? Outcomes.Replace("\"next\":null", "\"next\":\"shared#L000D\"") : useMenu || useMagic ? Outcomes.Replace("\"next\":null", "\"next\":\"shared#L000D\"") : Outcomes);
+        Numeric = Numbers(Party);
+        if (useMenu)
+        {
+            // #215: one authored use-menu binding — object 300, consuming, single-target.
+            // #218: the plain story graph keeps the reference's empty-chunk bitmap word 0
+            // (no item picture); bitmap-consuming variants live in the menu scene fixtures.
+            Numeric.UseMenuObjects = [300];
+            Numeric.UseMenuConsuming = [1];
+            Numeric.UseMenuApplyToAll = [0];
+            Numeric.UseMenuBitmaps = [0];
+        }
+        if (useMagic)
+        {
+            // #216: one authored magic-menu binding — object 310, cost 5, single-target, usable
+            // outside battle, with both script entries authored in shared.json.
+            Numeric.MagicMenuObjects = [310];
+            Numeric.MagicMenuCostMp = [5];
+            Numeric.MagicMenuApplyToAll = [0];
+            Numeric.MagicMenuUsableOutsideBattle = [1];
+        }
+        if (hiddenCurrentGlyph && !currentHookPositive)
+        {
+            Numeric.Players[0].HasNameObjectId = true;
+            Numeric.Players[0].NameObjectId = 0;
+            Numeric.Players[0].DyingScript = 40;
+        }
+        if (currentHookPositive)
+        {
+            // Literal two-role/one-enemy Dying control; persistent HP must match each player.
+            Numeric.Roles[0].Hp = 100; Numeric.Roles[0].MaxHp = 200;
+            Numeric.Roles[0].Mp = 20; Numeric.Roles[0].MaxMp = 50;
+            Numeric.Roles[0].CoveredByRoleId = 2; Numeric.Roles[0].PanelDeclared = false;
+            Numeric.Roles[1].Hp = 60; Numeric.Roles[1].MaxHp = 240;
+            Numeric.Roles[1].Mp = 10; Numeric.Roles[1].MaxMp = 240;
+            Numeric.Roles[1].CoveredByRoleId = 0; Numeric.Roles[1].PanelDeclared = false;
+            Numeric.Players[0].Hp = 100; Numeric.Players[0].MaxHp = 200;
+            Numeric.Players[0].Attack = 40; Numeric.Players[0].Defense = 20; Numeric.Players[0].Dexterity = 100;
+            Numeric.Players[0].HasNameObjectId = true; Numeric.Players[0].NameObjectId = 37;
+            Numeric.Players[0].DyingScript = 0; Numeric.Players[0].FriendDeathScript = 0;
+            Numeric.Players[0].HasCoveredByRoleId = true; Numeric.Players[0].CoveredByRoleId = 2;
+            Numeric.Players[1].Hp = 60; Numeric.Players[1].MaxHp = 240;
+            Numeric.Players[1].Attack = 20; Numeric.Players[1].Defense = 0; Numeric.Players[1].Dexterity = 100;
+            Numeric.Players[1].HasNameObjectId = true; Numeric.Players[1].NameObjectId = 0;
+            Numeric.Players[1].DyingScript = 40; Numeric.Players[1].FriendDeathScript = 0;
+            Numeric.Players[1].HasCoveredByRoleId = true; Numeric.Players[1].CoveredByRoleId = 0;
+            Numeric.Teams[0].Enemies = forceCurrentFriendDeath ? [Enemy(), Enemy()] : [Enemy()];
+            foreach (var enemy in Numeric.Teams[0].Enemies)
+            {
+                // Optional two real hits: 60 -> 16 (Dying), then 16 -> 0 (coverer's FriendDeath).
+                enemy.Attack = 8; enemy.Dexterity = 500;
+            }
+        }
+        if (fiveEnemies)
+        {
+            // #210 five-slot authored team: repeated enemy definition 7 stays five
+            // independent slots with per-slot HP, never merged by definition ID.
+            Numeric.Teams[0].Enemies = [Enemy(43), Enemy(44), Enemy(45), Enemy(46), Enemy(47)];
+        }
+        if (emptyEnemies)
+        {
+            // #141 mixed runtime slots: PAL_StartBattle's zero row keeps a real empty slot
+            // (canonical id 0 / hp 0, #140) between two loaded id7 neighbours.
+            Numeric.Teams[0].Enemies = [EmptySlot(), Enemy(43), Enemy(44)];
+        }
         Save(Numeric.Roles[0], "Role.tres");
         Numeric.Roles = [ResourceLoader.Load<PalBattleRole>(Root + "/Role.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep), .. Numeric.Roles[1..]];
         Save(Numeric, "Numeric.tres");
         Font = new PalDialogueFont { SourceIdentity = "synthetic-story-font" };
         foreach (int codepoint in new[] { 65, 66, 67, 68, 0x7532, 0x4e59, 0x4e19, 0x4e01 })
             Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = codepoint, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
+        if (useMenu || useMagic) foreach (int codepoint in new[] { 0x620A, 69 })
+            Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = codepoint, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
+        if (seedDyingGlyph || futureDyingWrite)
+            Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = 69, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
+        if (secondOrderDyingWrite)
+            Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = 70, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
+        if (randomDyingBranch || titleDyingGlyph)
+            Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = 71, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
+        if (titleDyingGlyph)
+            Font.Glyphs.Add(new PalDialogueGlyph { Codepoint = 58, Width = 8, Height = 15, RowBytes = 1, Bitmap = new byte[15] });
         Save(Font.Glyphs[0], "Glyph.tres");
         Font.Glyphs[0] = ResourceLoader.Load<PalDialogueGlyph>(Root + "/Glyph.tres", cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
         Save(Font, "Font.tres");
-        Chinese = Language("zh-Hans", ["甲", "乙", "丙", "丁"]);
-        English = Language("en", ["A", "B", "C", "D"]);
+        Chinese = Language("zh-Hans", randomDyingBranch ? ["甲", "乙", "丙", "丁", "乙", "乙", "乙"]
+            : secondOrderDyingWrite ? ["甲", "乙", "丙", "丁", "乙", "乙", "乙"]
+            : futureDyingWrite ? ["甲", "乙", "丙", "丁", "乙", "乙"]
+            : currentHookPositive ? ["甲", "乙", "丙", "丁", "乙"]
+            : hiddenCurrentGlyph || useMenu || useMagic ? ["甲", "乙", "丙", "丁", "戊"] : ["甲", "乙", "丙", "丁"]);
+        English = Language("en", randomDyingBranch ? ["A", "B", "C", "D", "B", "E", "G"]
+            : secondOrderDyingWrite ? ["A", "B", "C", "D", "B", "E", "F"]
+            : futureDyingWrite ? ["A", "B", "C", "D", "B", "E"]
+            : currentHookPositive ? ["A", "B", "C", "D", seedDyingGlyph ? "E" : "B"]
+            : hiddenCurrentGlyph || useMenu || useMagic ? ["A", "B", "C", "D", "E"] : ["A", "B", "C", "D"]);
+        if (titleDyingGlyph)
+            foreach (var language in new[] { Chinese, English })
+                language.Messages.Single(message => message.StartMessageId == 66).Entries.Insert(0,
+                    new PalDialogueMessageEntry { Text = "G:" });
         Save(Chinese, "Language.zh-Hans.tres"); Save(English, "Language.en.tres");
         for (int i = 0; i < 3; i++) Save(Image("prompt-" + i), $"Prompt-{i:D2}.tres");
-        foreach (int id in new[] { 7, 8, 9, 10 }) Save(Image("portrait-" + id), $"Portrait-{id}.tres");
+        foreach (int id in useMenu || useMagic ? new[] { 7, 8, 9, 10, 11 } : new[] { 7, 8, 9, 10 })
+            Save(Image("portrait-" + id), $"Portrait-{id}.tres");
         Profile = new PalStoryProfile
         {
             FormatVersion = 1, StaticResources = Static.ResourceRoot, StaticProfile = Static.Uri,
             BundleSha256 = new string('a', 64), EventsIndex = Root + "/index.json", EntryFileId = "shared", EntryId = "npc",
-            OwnerId = 1, EntryAddress = 1, BattleContentUri = Root + "/Numeric.tres", DialogueDirectory = Root,
+            OwnerId = currentHookGraph ? 60 : 1, EntryAddress = 1, BattleContentUri = Root + "/Numeric.tres", DialogueDirectory = Root,
             SourceIdentity = "synthetic authored content, not source authentication",
             Portraits = new Godot.Collections.Dictionary<int, string>
             { [7] = Root + "/Portrait-7.tres", [8] = Root + "/Portrait-8.tres", [9] = Root + "/Portrait-9.tres", [10] = Root + "/Portrait-10.tres" }
         };
+        if (useMenu) Profile.Portraits[11] = Root + "/Portrait-11.tres";
+        if (useMagic) Profile.Portraits[11] = Root + "/Portrait-11.tres";
         // Independent literal manifest; never use production dependency enumeration to author expectations.
         ExpectedPaths = new[] { Static.ResourceRoot + "/Scenes/Scene.tscn", Static.Uri, TextureSource, TextureSource + ".import" }
             .Concat(new[] { "index.json", "shared.json", "outcomes.json", "Numeric.tres", "Role.tres", "Palette.tres", "Font.tres", "Glyph.tres",
                 "Language.zh-Hans.tres", "Language.en.tres", "Prompt-00.tres", "Prompt-01.tres", "Prompt-02.tres",
-                "Portrait-7.tres", "Portrait-8.tres", "Portrait-9.tres", "Portrait-10.tres" }.Select(name => Root + "/" + name)).ToArray();
+                "Portrait-7.tres", "Portrait-8.tres", "Portrait-9.tres", "Portrait-10.tres" }
+                .Concat(useMenu || useMagic ? new[] { "Portrait-11.tres" } : Array.Empty<string>())
+                .Select(name => Root + "/" + name)).ToArray();
         RefreshHashes(); SaveProfile();
     }
 
     public void Save(Resource resource, string name) => NativeProfileFixture.SaveResource(resource, Root + "/" + name);
     public void SaveProfile() => NativeProfileFixture.SaveResource(Profile, Uri);
+
+    /// <summary>#235 test-owned projection: rewrite numeric enemy battle ids to their runtime
+    /// slots and save a projected native resource with a literal checked source.</summary>
+    public BattleProjectionSourceInfo ProjectBattleContent()
+    {
+        foreach (var team in Numeric.Teams)
+        {
+            int runtime = 0;
+            foreach (var enemy in team.Enemies)
+            {
+                runtime++;
+                if (!enemy.IsEmpty) enemy.Id = runtime;
+            }
+        }
+        var content = NativeBattleContent.CreateCore(Numeric, "fixture projected battle content");
+        var source = ProjectionSource(content);
+        var projected = NativeBattleContent.Write(content, source);
+        // Preserve the fixture's existing external Role.tres dependency; ExpectedPaths/ResourceSha256
+        // intentionally pin that exact story graph while only the optional projection fields change.
+        string roleUri = Root + "/Role.tres";
+        if (Godot.FileAccess.FileExists(roleUri))
+        {
+            var externalRole = ResourceLoader.Load<PalBattleRole>(roleUri, cacheMode: ResourceLoader.CacheMode.IgnoreDeep);
+            int roleIndex = Array.FindIndex(projected.Roles, role => role.RoleId == externalRole.RoleId);
+            if (roleIndex >= 0) projected.Roles[roleIndex] = externalRole;
+        }
+        Save(projected, "Numeric.tres");
+        RefreshHashes(); SaveProfile();
+        return source;
+    }
+
+    private static BattleProjectionSourceInfo ProjectionSource(TriggerBattleContent content)
+    {
+        var slots = new List<BattleProjectionEnemySlot>();
+        foreach (var team in content.EnemyTeams)
+        {
+            int runtime = 0;
+            for (int sourceSlot = 0; sourceSlot < 5; sourceSlot++)
+            {
+                if (sourceSlot >= team.Value.Count)
+                {
+                    slots.Add(new(team.Key, sourceSlot, 65535, "skip-FFFF"));
+                    continue;
+                }
+                var enemy = team.Value[sourceSlot];
+                if (enemy.IsEmpty) slots.Add(new(team.Key, sourceSlot, 0, "empty-0"));
+                else slots.Add(new(team.Key, sourceSlot, enemy.Id, "loaded", enemy.Id, runtime, runtime + 1));
+                runtime++;
+            }
+        }
+        return new BattleProjectionSourceInfo(1, "m5-base-table-physical-projection",
+            "independent-base-table-context-not-natural-save", new string('a', 64), 1234, new string('b', 64), 2048,
+            ProjectionInputs(), content.Players.Select(player => player.RoleId).ToArray(), content.EnemyTeams.Keys.ToArray(), slots);
+    }
+
+    private static BattleProjectionModernInput[] ProjectionInputs() => [
+        new("battle-effect-index.json", new string('0', 64), 1), new("battle-field.json", new string('1', 64), 102),
+        new("enemy-pos.json", new string('2', 64), 103), new("enemy-team.json", new string('3', 64), 104),
+        new("enemy.json", new string('4', 64), 105), new("event-object.json", new string('5', 64), 106),
+        new("index.json", new string('6', 64), 107), new("level-up-exp.json", new string('7', 64), 108),
+        new("level-up-magic.json", new string('8', 64), 109), new("magic.json", new string('9', 64), 110),
+        new("object.json", new string('a', 64), 111), new("player-roles.json", new string('b', 64), 112),
+        new("scene.json", new string('c', 64), 113), new("store.json", new string('d', 64), 114)];
+
+    /// <summary>#137 test-owned third party member: role2 mirrors the authored role1 numeric row
+    /// and re-saves the story numeric/profile in place so 1..3-member hosts share one fixture.</summary>
+    public void AddThirdPartyRole()
+    {
+        Numeric.Roles = [.. Numeric.Roles, Role(2, 95)];
+        Numeric.Players = [.. Numeric.Players, Player(2, hp: 95, attack: 35, defense: 18)];
+        Numeric.Growth = [.. Numeric.Growth, Growth(2)];
+        Save(Numeric, "Numeric.tres"); RefreshHashes(); SaveProfile();
+    }
     public void Write(string name, string text) => File.WriteAllText(ProjectSettings.GlobalizePath(Root + "/" + name), text);
     public string Read(string name) => File.ReadAllText(ProjectSettings.GlobalizePath(Root + "/" + name));
     public void Edit(string name, string before, string after)
@@ -88,7 +283,7 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     private static PalDialogueLanguage Language(string id, string[] texts)
     {
         var language = new PalDialogueLanguage { Language = id, SourceIdentity = "synthetic-" + id };
-        for (int i = 0; i < 4; i++) language.Messages.Add(new PalDialogueMessageRange
+        for (int i = 0; i < texts.Length; i++) language.Messages.Add(new PalDialogueMessageRange
         {
             StartMessageId = 61 + i, EndMessageId = 61 + i,
             Entries = [new PalDialogueMessageEntry { Text = texts[i] }]
@@ -118,7 +313,8 @@ internal sealed class NativeStoryProfileFixture : IDisposable
     private static PalBattlePlayer Player(int roleId, int hp, int attack, int defense) => new() { RoleId = roleId, Hp = hp, MaxHp = 150,
         Attack = attack, Defense = defense, Dexterity = 100, Equipment = new int[6], Statuses = new int[9], Poisons = [0] };
     private static PalBattleGrowth Growth(int roleId) => new() { RoleId = roleId, LevelUpExperience = Enumerable.Repeat(100, 100).ToArray(), LevelUpMagics = [] };
-    private static PalBattleEnemy Enemy() => new() { Id = 7, Hp = 43, PhysicalResistance = 1, Statuses = new int[9], Poisons = [0] };
+    private static PalBattleEnemy Enemy(int hp = 43) => new() { Id = 7, Hp = hp, PhysicalResistance = 1, Statuses = new int[9], Poisons = [0] };
+    private static PalBattleEnemy EmptySlot() => new() { Id = 0, Hp = 0, Statuses = new int[9], Poisons = [0], IsEmpty = true };
     private static PalBattleExperience Experience() => new() { Value = 7, Level = 3, Count = 55 };
 
     public void Dispose()
@@ -126,6 +322,132 @@ internal sealed class NativeStoryProfileFixture : IDisposable
         Static.Dispose();
         Directory.Delete(ProjectSettings.GlobalizePath(Root), true);
     }
+
+    // Independent WORD layout: default seed40 keeps; the opt-in seed40 displays E then keeps42.
+    // Default live20 remains reachable only after a real public 0090.
+    private static string HiddenCurrentGlyphShared(bool seedDyingGlyph, bool futureDyingWrite, bool secondOrderDyingWrite,
+        bool randomDyingBranch)
+    {
+        const string entries = """
+        {"id":"seed","owner":{"type":"object","id":0},"slot":"player.wScriptOnDying","kind":"trigger","target":"L0028","sourceAddress":40},
+        {"id":"setter","owner":{"type":"object","id":0},"slot":"item.wScriptOnUse","kind":"trigger","target":"L0032","sourceAddress":50}
+        """;
+        string shared = (futureDyingWrite ? FutureShared : Shared)
+            .Replace("\"type\":\"eventObject\",\"id\":1", "\"type\":\"eventObject\",\"id\":60")
+            .Replace("],\"commands\":[", "," + entries + "],\"commands\":[");
+        var commands = new List<string>();
+        for (int address = futureDyingWrite ? 8 : 13; address < 64; address++)
+        {
+            // Only the opt-in graph moves loss/flee to13..18; every WORD still occurs exactly once.
+            if (futureDyingWrite && address is >= 13 and <= 18) continue;
+            string next = futureDyingWrite && address == 12 ? "\"outcomes#L000D\""
+                : address == 63 ? "null" : "\"L" + (address + 1).ToString("X4") + "\"";
+            string command = address switch
+            {
+                20 => "\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":7,\"color\":0,\"rngWord\":0",
+                21 => "\"op\":\"showDialog\",\"messageId\":65,\"descriptionLineWord\":0",
+                24 when randomDyingBranch => "\"op\":\"randomJump\",\"rate\":50,\"to\":\"L0020\"",
+                25 when randomDyingBranch => "\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":7,\"color\":0,\"rngWord\":0",
+                26 when randomDyingBranch => "\"op\":\"showDialog\",\"messageId\":66,\"descriptionLineWord\":0",
+                27 or 34 when randomDyingBranch => "\"op\":\"end\",\"mode\":\"keep\"",
+                32 when randomDyingBranch => "\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":7,\"color\":0,\"rngWord\":0",
+                33 when randomDyingBranch => "\"op\":\"showDialog\",\"messageId\":67,\"descriptionLineWord\":0",
+                24 when futureDyingWrite => "\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":7,\"color\":0,\"rngWord\":0",
+                25 when futureDyingWrite => "\"op\":\"showDialog\",\"messageId\":66,\"descriptionLineWord\":0",
+                // Write another Name/slot: completing Y still writes back its own Name0/Dying24.
+                26 when secondOrderDyingWrite => "\"op\":\"setObjectScript\",\"objectId\":37,\"value\":32,\"slotIndex\":0",
+                26 when futureDyingWrite => "\"op\":\"end\",\"mode\":\"keep\"",
+                27 or 34 when secondOrderDyingWrite => "\"op\":\"end\",\"mode\":\"keep\"",
+                32 when secondOrderDyingWrite => "\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":7,\"color\":0,\"rngWord\":0",
+                33 when secondOrderDyingWrite => "\"op\":\"showDialog\",\"messageId\":67,\"descriptionLineWord\":0",
+                40 when seedDyingGlyph => "\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":7,\"color\":0,\"rngWord\":0",
+                41 when seedDyingGlyph => "\"op\":\"showDialog\",\"messageId\":65,\"descriptionLineWord\":0",
+                42 when seedDyingGlyph => "\"op\":\"end\",\"mode\":\"keep\"",
+                22 or 40 or 51 => "\"op\":\"end\",\"mode\":\"keep\"",
+                50 => "\"op\":\"setObjectScript\",\"objectId\":0,\"value\":20,\"slotIndex\":1",
+                _ => "\"op\":\"raw\""
+            };
+            string source = address switch
+            {
+                20 => "\"opcode\":60,\"operands\":[7,0,0]",
+                21 => "\"opcode\":65535,\"operands\":[65,0,0]",
+                24 when randomDyingBranch => "\"opcode\":6,\"operands\":[50,32,0]",
+                25 or 32 when randomDyingBranch => "\"opcode\":60,\"operands\":[7,0,0]",
+                26 when randomDyingBranch => "\"opcode\":65535,\"operands\":[66,0,0]",
+                27 or 34 when randomDyingBranch => "\"opcode\":0,\"operands\":[0,0,0]",
+                33 when randomDyingBranch => "\"opcode\":65535,\"operands\":[67,0,0]",
+                24 when futureDyingWrite => "\"opcode\":60,\"operands\":[7,0,0]",
+                25 when futureDyingWrite => "\"opcode\":65535,\"operands\":[66,0,0]",
+                26 when secondOrderDyingWrite => "\"opcode\":144,\"operands\":[37,32,0]",
+                26 when futureDyingWrite => "\"opcode\":0,\"operands\":[0,0,0]",
+                27 or 34 when secondOrderDyingWrite => "\"opcode\":0,\"operands\":[0,0,0]",
+                32 when secondOrderDyingWrite => "\"opcode\":60,\"operands\":[7,0,0]",
+                33 when secondOrderDyingWrite => "\"opcode\":65535,\"operands\":[67,0,0]",
+                40 when seedDyingGlyph => "\"opcode\":60,\"operands\":[7,0,0]",
+                41 when seedDyingGlyph => "\"opcode\":65535,\"operands\":[65,0,0]",
+                42 when seedDyingGlyph => "\"opcode\":0,\"operands\":[0,0,0]",
+                22 or 40 or 51 => "\"opcode\":0,\"operands\":[0,0,0]",
+                50 => "\"opcode\":144,\"operands\":[0,20,1]",
+                _ => "\"opcode\":134,\"operands\":[0,65535,8]"
+            };
+            commands.Add("{\"label\":\"L" + address.ToString("X4") + "\"," + command
+                + ",\"next\":" + next + ",\"source\":{\"index\":" + address + "," + source + "}}");
+        }
+        return shared[..^2] + "," + string.Join(",", commands) + "]}";
+    }
+
+    // A fully linear opt-in prefix: real0090 follows the prelude ACK; no unsupported goto.
+    private const string FutureShared = """
+    {"formatVersion":1,"profile":"faithful","fileId":"shared","entries":[{"id":"npc","owner":{"type":"eventObject","id":1},"slot":"wTriggerScript","kind":"trigger","target":"L0001","sourceAddress":1}],"commands":[
+    {"label":"L0000","op":"raw","next":"L0001","source":{"index":0,"opcode":134,"operands":[0,65535,8]}},
+    {"label":"L0001","op":"setDialog","box":"upper","portraitId":7,"color":0,"rngWord":0,"next":"L0002","source":{"index":1,"opcode":60,"operands":[7,0,0]}},
+    {"label":"L0002","op":"showDialog","messageId":61,"descriptionLineWord":0,"next":"L0003","source":{"index":2,"opcode":65535,"operands":[61,0,0]}},
+    {"label":"L0003","op":"setObjectScript","objectId":0,"value":24,"slotIndex":1,"next":"L0004","source":{"index":3,"opcode":144,"operands":[0,24,1]}},
+    {"label":"L0004","op":"startBattle","enemyTeamId":18,"lossTarget":"outcomes#L000D","isBoss":false,"fleeTarget":"outcomes#L0010","next":"L0005","source":{"index":4,"opcode":7,"operands":[18,13,16]}},
+    {"label":"L0005","op":"setDialog","box":"upper","portraitId":8,"color":0,"rngWord":0,"next":"L0006","source":{"index":5,"opcode":60,"operands":[8,0,0]}},
+    {"label":"L0006","op":"showDialog","messageId":62,"descriptionLineWord":0,"next":"L0007","source":{"index":6,"opcode":65535,"operands":[62,0,0]}},
+    {"label":"L0007","op":"end","mode":"keep","next":"L0008","source":{"index":7,"opcode":0,"operands":[0,0,0]}}]}
+    """;
+    private const string FutureOutcomes = """
+    {"formatVersion":1,"profile":"faithful","fileId":"outcomes","entries":[],"commands":[
+    {"label":"L000D","op":"setDialog","box":"upper","portraitId":9,"color":0,"rngWord":0,"next":"L000E","source":{"index":13,"opcode":60,"operands":[9,0,0]}},
+    {"label":"L000E","op":"showDialog","messageId":63,"descriptionLineWord":0,"next":"L000F","source":{"index":14,"opcode":65535,"operands":[63,0,0]}},
+    {"label":"L000F","op":"end","mode":"keep","next":"L0010","source":{"index":15,"opcode":0,"operands":[0,0,0]}},
+    {"label":"L0010","op":"setDialog","box":"upper","portraitId":10,"color":0,"rngWord":0,"next":"L0011","source":{"index":16,"opcode":60,"operands":[10,0,0]}},
+    {"label":"L0011","op":"showDialog","messageId":64,"descriptionLineWord":0,"next":"L0012","source":{"index":17,"opcode":65535,"operands":[64,0,0]}},
+    {"label":"L0012","op":"end","mode":"keep","next":"shared#L0013","source":{"index":18,"opcode":0,"operands":[0,0,0]}}]}
+    """;
+
+    // #215 item-use closure: object 300's item.wScriptOnUse entry draws a portrait-11 line with
+    // message 65 (zh 戊 / en E) in both languages; the tail rechains outcomes#L000C into it.
+    private static string UseMenuShared() => Shared
+        .Replace(
+            "\"sourceAddress\":1}],\"commands\":[",
+            "\"sourceAddress\":1},"
+            + "{\"id\":\"use300\",\"owner\":{\"type\":\"object\",\"id\":300},\"slot\":\"item.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13}],\"commands\":[")
+        .Replace(
+            "\"next\":\"outcomes#L0007\",\"source\":{\"index\":6,\"opcode\":0,\"operands\":[0,0,0]}}]}",
+            "\"next\":\"outcomes#L0007\",\"source\":{\"index\":6,\"opcode\":0,\"operands\":[0,0,0]}},"
+            + "{\"label\":\"L000D\",\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":11,\"color\":0,\"rngWord\":0,\"next\":\"L000E\",\"source\":{\"index\":13,\"opcode\":60,\"operands\":[11,0,0]}},"
+            + "{\"label\":\"L000E\",\"op\":\"showDialog\",\"messageId\":65,\"descriptionLineWord\":0,\"next\":\"L000F\",\"source\":{\"index\":14,\"opcode\":65535,\"operands\":[65,0,0]}},"
+            + "{\"label\":\"L000F\",\"op\":\"end\",\"mode\":\"keep\",\"next\":null,\"source\":{\"index\":15,\"opcode\":0,\"operands\":[0,0,0]}}]}");
+
+    // #216 magic-cast closure: object 310's magic.wScriptOnUse entry draws a portrait-11 line
+    // with message 65 (zh 戊 / en E) in both languages; the on-success entry ends keep. The
+    // tail rechains outcomes#L000C into the pair.
+    private static string UseMagicShared() => Shared
+        .Replace(
+            "\"sourceAddress\":1}],\"commands\":[",
+            "\"sourceAddress\":1},"
+            + "{\"id\":\"use310OnUse\",\"owner\":{\"type\":\"object\",\"id\":310},\"slot\":\"magic.wScriptOnUse\",\"kind\":\"trigger\",\"target\":\"L000D\",\"sourceAddress\":13},"
+            + "{\"id\":\"use310OnSuccess\",\"owner\":{\"type\":\"object\",\"id\":310},\"slot\":\"magic.wScriptOnSuccess\",\"kind\":\"trigger\",\"target\":\"L0010\",\"sourceAddress\":16}],\"commands\":[")
+        .Replace(
+            "\"next\":\"outcomes#L0007\",\"source\":{\"index\":6,\"opcode\":0,\"operands\":[0,0,0]}}]}",
+            "\"next\":\"outcomes#L0007\",\"source\":{\"index\":6,\"opcode\":0,\"operands\":[0,0,0]}},"
+            + "{\"label\":\"L000D\",\"op\":\"setDialog\",\"box\":\"upper\",\"portraitId\":11,\"color\":0,\"rngWord\":0,\"next\":\"L000E\",\"source\":{\"index\":13,\"opcode\":60,\"operands\":[11,0,0]}},"
+            + "{\"label\":\"L000E\",\"op\":\"showDialog\",\"messageId\":65,\"descriptionLineWord\":0,\"next\":\"L000F\",\"source\":{\"index\":14,\"opcode\":65535,\"operands\":[65,0,0]}},"
+            + "{\"label\":\"L000F\",\"op\":\"end\",\"mode\":\"keep\",\"next\":\"L0010\",\"source\":{\"index\":15,\"opcode\":0,\"operands\":[0,0,0]}},"
+            + "{\"label\":\"L0010\",\"op\":\"end\",\"mode\":\"keep\",\"next\":null,\"source\":{\"index\":16,\"opcode\":0,\"operands\":[0,0,0]}}]}");
 
     private const string Index = """
     {"formatVersion":1,"profile":"faithful","source":{"archive":"SSS.MKF","chunk":4,"byteOrder":"little","instructionCount":13,"byteLength":104,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"files":["outcomes","shared"]}

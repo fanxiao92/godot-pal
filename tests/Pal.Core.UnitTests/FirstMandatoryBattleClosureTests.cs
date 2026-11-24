@@ -30,6 +30,83 @@ public sealed class FirstMandatoryBattleClosureTests
     }
 
     [Fact]
+    public void Explicit_cash_capability_preflights_both_languages_and_all_branches_without_execution()
+    {
+        var (profile, fixture) = PreparedProfile();
+        var commands = fixture.EventFile["commands"]!.AsArray();
+        // Independent modern literals: a debit then halve would change every nonzero seed if run.
+        // The shortage goes straight to battle; preflight must still walk the normal path too.
+        void CashCommand(int address, string op, int opcode, int? amount = null, int target = 0x09fe)
+        {
+            var command = new JsonObject
+            {
+                ["label"] = $"L{address:X4}", ["op"] = op, ["next"] = $"L{address + 1:X4}",
+                ["source"] = new JsonObject { ["index"] = address, ["opcode"] = opcode,
+                    ["operands"] = new JsonArray(amount is null ? 0 : 65535, target, 0) }
+            };
+            if (amount is not null) { command["amount"] = amount.Value; command["to"] = $"L{target:X4}"; }
+            commands[address] = command;
+        }
+        CashCommand(0x09c5, "changeCash", 0x001e, -1);
+        CashCommand(0x09c6, "halveCash", 0x008f);
+        var events = fixture.Events();
+        var content = fixture.Content();
+        string eventBytes = fixture.EventFile.ToJsonString();
+        string contentBytes = System.Text.Json.JsonSerializer.Serialize(content);
+        string authorBytes = System.Text.Json.JsonSerializer.Serialize(profile.World);
+        var chinese = fixture.Chinese();
+        var english = fixture.English();
+        Assert.Contains("cash owner", Assert.Throws<InvalidDataException>(() =>
+            FirstMandatoryBattleClosure.Verify(profile, events, chinese, english, content, Images())).Message);
+        foreach (uint initial in new uint[] { 0, 10, 2147483648, 4294967295 })
+        {
+            var cash = new CashLiveState(initial);
+            for (int repeat = 0; repeat < 2; repeat++)
+            {
+                // Designated RED: the API shell ignores the explicit owner at @09C5.
+                var receipt = FirstMandatoryBattleClosure.Verify(profile, events, chinese, english, content,
+                    Images(), cashLiveState: cash);
+                Assert.Equal(new[] { 18 }, receipt.VerifiedBattleTeamIds);
+                Assert.Equal(profile.ContextSha256, receipt.ContextSha256);
+                Assert.Equal(0x09c3, receipt.TriggerEntryAddress);
+                Assert.Equal(initial, cash.Cash);
+            }
+        }
+        // The receipt never supplies a default owner for a later unbound caller.
+        Assert.Contains("cash owner", Assert.Throws<InvalidDataException>(() =>
+            FirstMandatoryBattleClosure.Verify(profile, events, chinese, english, content, Images(), cashLiveState: null)).Message);
+
+        // Both language checks must remain in force after cash capability was added. Message11
+        // is on the Won continuation, after the cash prefix; no execution reaches that boundary.
+        var missingWon = new DialogueLanguagePackage("en",
+            Enumerable.Range(10, 15).Where(id => id != 11).Select(id => english.Resolve(id, 0))
+                .Concat(Enumerable.Range(0, 4).Select(band => english.Resolve(13 + band * 2, 1))));
+        var unchanged = new CashLiveState(10);
+        Assert.Contains("11", Assert.Throws<InvalidDataException>(() =>
+            FirstMandatoryBattleClosure.Verify(profile, events, chinese, missingWon, content, Images(), unchanged)).Message);
+        Assert.Equal(10u, unchanged.Cash);
+
+        // Positive credit can never take shortage at runtime, but its target is still raw and
+        // must reject. Do not prune the branch using balance or the sign of the cash amount.
+        CashCommand(0x09c5, "changeCash", 0x001e, 7, 0x0a33);
+        var unsupported = fixture.Events();
+        foreach (uint initial in new uint[] { 0, 4294967295 })
+        {
+            var cash = new CashLiveState(initial);
+            var error = Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleClosure.Verify(profile,
+                unsupported, chinese, english, content, Images(), cash));
+            Assert.Contains("@0A33", error.Message);
+            Assert.Equal(initial, cash.Cash);
+        }
+        // Restore only our authored test command; the production checker must not change inputs.
+        CashCommand(0x09c5, "changeCash", 0x001e, -1);
+        Assert.Equal(eventBytes, fixture.EventFile.ToJsonString());
+        Assert.Equal(contentBytes, System.Text.Json.JsonSerializer.Serialize(content));
+        Assert.Equal(authorBytes, System.Text.Json.JsonSerializer.Serialize(profile.World));
+        // No random interface is supplied to Verify: battle execution/RNG is not this seam.
+    }
+
+    [Fact]
     public void Search_opens_the_trigger_only_once_and_parks_exploration()
     {
         (FirstMandatoryBattleProfile profile, RealClosureFixture fixture) = PreparedProfile();
@@ -92,6 +169,669 @@ public sealed class FirstMandatoryBattleClosureTests
         InvalidDataException error = Assert.Throws<InvalidDataException>(() => FirstMandatoryBattleClosure.Verify(profile,
             fixture.Events(), fixture.Chinese(), fixture.English(), fixture.Content(), Images()));
         Assert.Equal(string.Format(FirstMandatoryBattleClosure.ContractOnlyDiagnostic, profile.Closure.Entries[0].Id), error.Message);
+    }
+
+    [Fact]
+    public void Owned_call_completes_returns_and_requires_a_fresh_origin_for_the_next_search()
+    {
+        var session = VerifiedSession();
+        var trigger = ReturnTrigger();
+        Assert.Equal(Guid.Empty, session.PendingRequestId);
+        session.PressSearch();
+        Assert.True(session.Update(0));
+        Guid first = session.PendingRequestId;
+        Assert.NotEqual(Guid.Empty, first);
+        trigger.Start("return", "owner28", 28, first);
+        Assert.True(session.BindTrigger(first, trigger));
+        Assert.False(session.CompleteTrigger(first, trigger, 100));
+        FinishReturnDisplay(trigger);
+        Assert.True(session.CompleteTrigger(first, trigger, 100));
+        Assert.Null(session.PendingTrigger);
+        Assert.Equal(Guid.Empty, session.PendingRequestId);
+        Assert.Equal(0x09c3, session.Rules.Objects.Single().TriggerEntry);
+        Assert.Equal(0x09c3, session.Objects.Single().TriggerEntry);
+        Assert.Equal(0x09c3, session.State.World.EventObjects.Single(o => o.OwnerId == 28).TriggerEntry);
+        Assert.False(session.Update(149));
+        Assert.True(session.Update(150));
+        session.PressSearch();
+        Assert.True(session.Update(250));
+        Guid second = session.PendingRequestId;
+        Assert.NotEqual(first, second);
+        Assert.Equal(new FirstMandatoryBattleTriggerRequest(0x09c3, 28), session.PendingTrigger);
+        Assert.False(session.BindTrigger(second, trigger));
+        Assert.False(session.CompleteTrigger(second, trigger, 250));
+        trigger.Start("return", "owner28", 28, second);
+        Assert.True(session.BindTrigger(second, trigger));
+        FinishReturnDisplay(trigger);
+        Assert.True(session.CompleteTrigger(second, trigger, 350));
+        Assert.True(session.Update(400));
+    }
+
+    [Fact]
+    public void Binding_rejects_unstarted_presearch_foreign_and_wrong_entry_calls_without_changing_exploration()
+    {
+        var session = VerifiedSession();
+        var trigger = ReturnTrigger(false);
+        Assert.False(session.BindTrigger(Guid.NewGuid(), trigger));
+        Assert.False(session.CompleteTrigger(Guid.NewGuid(), trigger, 0));
+        trigger.Start("return", "owner28", 28); // Real completed call, but before this search.
+        session.PressSearch();
+        Assert.True(session.Update(0));
+        Guid id = session.PendingRequestId;
+        var pending = session.PendingTrigger;
+        var current = session.Current;
+        var rules = session.Rules;
+        string world = System.Text.Json.JsonSerializer.Serialize(session.State.World);
+        Assert.False(session.BindTrigger(id, trigger));
+        Assert.False(session.BindTrigger(id, ReturnTrigger(false)));
+        Assert.Throws<ArgumentNullException>(() => session.BindTrigger(id, null!));
+        Assert.Throws<ArgumentNullException>(() => session.CompleteTrigger(id, null!, 100));
+        trigger.Start("return", "owner28", 28, Guid.NewGuid());
+        Assert.False(session.BindTrigger(id, trigger));
+        foreach (var wrong in new[]
+        {
+            ReturnTrigger(false, owner: 29),
+            ReturnTrigger(false, ownerType: "scene", slot: "wScriptOnEnter"),
+            ReturnTrigger(false, address: 0x09c4)
+        })
+        {
+            wrong.Start("return", "owner28", 28, id);
+            Assert.False(session.BindTrigger(id, wrong));
+            Assert.False(session.CompleteTrigger(id, wrong, 100));
+        }
+        trigger.Start("return", "owner28", 29, id);
+        Assert.False(session.BindTrigger(id, trigger));
+        trigger.Start("return", "owner28", 28, id);
+        Assert.False(session.BindTrigger(Guid.Empty, trigger));
+        Assert.False(session.BindTrigger(Guid.NewGuid(), trigger));
+        Assert.False(session.CompleteTrigger(id, trigger, 100)); // Completed but unbound.
+        Assert.Same(pending, session.PendingTrigger);
+        Assert.Equal(id, session.PendingRequestId);
+        Assert.Same(current, session.Current);
+        Assert.Same(rules, session.Rules);
+        Assert.Equal(world, System.Text.Json.JsonSerializer.Serialize(session.State.World));
+        Assert.True(session.BindTrigger(id, trigger));
+        Assert.True(session.CompleteTrigger(id, trigger, 100));
+        Assert.False(session.Update(149));
+        Assert.True(session.Update(150));
+    }
+
+    [Fact]
+    public void Bound_call_rejects_unfinished_foreign_duplicate_and_restarted_call_identity()
+    {
+        var session = VerifiedSession();
+        session.PressSearch(); session.Update(0);
+        Guid id = session.PendingRequestId;
+        var trigger = ReturnTrigger();
+        var foreign = ReturnTrigger(false);
+        trigger.Start("return", "owner28", 28, id);
+        foreign.Start("return", "owner28", 28, id);
+        Assert.True(session.BindTrigger(id, trigger));
+        Assert.False(session.BindTrigger(id, trigger));
+        Assert.False(session.BindTrigger(id, foreign));
+        var current = session.Current;
+        var rules = session.Rules;
+        Assert.False(session.CompleteTrigger(id, trigger, 100)); // WaitingForDisplay.
+        Assert.False(session.CompleteTrigger(id, foreign, 100));
+        Assert.False(session.Update(100));
+        FinishReturnDisplay(trigger);
+        Guid call = trigger.CallId;
+        Assert.Throws<InvalidDataException>(() => trigger.Start("return", "missing", 28, id));
+        Assert.Equal(call, trigger.CallId);
+        Assert.Equal(id, trigger.SourceRequestId);
+        trigger.Start("return", "owner28", 28, id);
+        FinishReturnDisplay(trigger);
+        Assert.NotEqual(call, trigger.CallId);
+        Assert.False(session.BindTrigger(id, trigger));
+        Assert.False(session.CompleteTrigger(id, trigger, 100));
+        Assert.Equal(id, session.PendingRequestId);
+        Assert.Same(current, session.Current);
+        Assert.Same(rules, session.Rules);
+        Assert.False(session.Update(1000));
+
+        var lost = VerifiedSession();
+        lost.PressSearch(); lost.Update(0);
+        var reload = ReturnTrigger(false, reload: true);
+        reload.Start("return", "owner28", 28, lost.PendingRequestId);
+        Assert.True(lost.BindTrigger(lost.PendingRequestId, reload));
+        Assert.Equal(TriggerScriptPhase.WaitingForLostReload, reload.Phase);
+        Assert.False(lost.CompleteTrigger(lost.PendingRequestId, reload, 100));
+        Assert.False(lost.Update(1000));
+    }
+
+    [Fact]
+    public void Bound_real_WaitingForBattle_call_cannot_release_or_publish_exploration()
+    {
+        var (profile, fixture) = PreparedProfile();
+        var events = fixture.Events();
+        var language = fixture.English();
+        var content = fixture.Content();
+        var receipt = FirstMandatoryBattleClosure.Verify(profile,
+            events, fixture.Chinese(), language, content, Images());
+        var session = new FirstMandatoryBattleSession(profile, 2, Rules(), ReturnLeader(), receipt);
+        var owner = new RoleLiveState(content.InitialRoles.Values.ToArray());
+        var world = DynamicEventWorld.ForHost(session.Rules, session.Current.Leader, 2, 0, 0, owner);
+        var random = new ClosureRandom();
+        var trigger = new TriggerScriptSession(events, language, content, random, world);
+        Assert.True(session.InitializeTrigger(trigger));
+        session.PressSearch(); Assert.True(session.Update(0));
+        Guid id = session.PendingRequestId;
+        trigger.Start("story", "owner28", 28, id);
+        Assert.True(session.BindTrigger(id, trigger));
+        var display = Assert.IsType<TriggerDialogueRequest>(trigger.PendingDisplay);
+        display.Display.Update(24, false, true);
+        display.Display.Update(100, true, false);
+        Assert.Equal(DialogueDisplayPhase.Completed, display.Display.Current.Phase);
+        Assert.True(trigger.AcknowledgeDisplay(display.Id));
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, trigger.Phase);
+        var battle = Assert.IsType<TriggerBattleRequest>(trigger.PendingBattle);
+        var combat = battle.Lifecycle.Current;
+        var pending = session.PendingTrigger;
+        var current = session.Current;
+        var rules = session.Rules;
+        Guid call = trigger.CallId;
+        string legacy = System.Text.Json.JsonSerializer.Serialize(session.State.World);
+        string actual = System.Text.Json.JsonSerializer.Serialize(world);
+        var roles = owner.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
+        string roleWords = System.Text.Json.JsonSerializer.Serialize(owner.Roles);
+        int draws = random.Draws;
+        session.PressSearch(); session.Press(ExplorationKey.SouthPrimary);
+        Assert.False(session.CompleteTrigger(id, trigger, 100));
+        Assert.False(session.BindTrigger(id, trigger));
+        Assert.False(session.Update(1000));
+        Assert.Same(pending, session.PendingTrigger);
+        Assert.Equal(id, session.PendingRequestId);
+        Assert.Same(current, session.Current);
+        Assert.Same(rules, session.Rules);
+        Assert.Equal(legacy, System.Text.Json.JsonSerializer.Serialize(session.State.World));
+        Assert.Equal(actual, System.Text.Json.JsonSerializer.Serialize(world));
+        Assert.Same(owner, world.RoleLiveState);
+        foreach (var pair in roles) Assert.Same(pair.Value, owner.Roles[pair.Key]);
+        Assert.Equal(roleWords, System.Text.Json.JsonSerializer.Serialize(owner.Roles));
+        Assert.Equal(draws, random.Draws);
+        Assert.Equal((call, id), (trigger.CallId, trigger.SourceRequestId));
+        Assert.Equal(TriggerScriptPhase.WaitingForBattle, trigger.Phase);
+        Assert.Same(battle, trigger.PendingBattle);
+        Assert.Same(combat, battle.Lifecycle.Current);
+    }
+
+    [Fact]
+    public void Every_earlier_completed_object_stays_stale_across_four_real_searches()
+    {
+        var session = VerifiedSession();
+        var earlier = new List<(Guid Origin, Guid Call, TriggerScriptSession Trigger)>();
+        for (uint search = 0; search < 4; search++)
+        {
+            uint ticks = search * 250;
+            session.PressSearch(); Assert.True(session.Update(ticks));
+            Guid id = session.PendingRequestId;
+            Assert.NotEqual(Guid.Empty, id);
+            var pending = session.PendingTrigger;
+            var current = session.Current;
+            var rules = session.Rules;
+            string legacy = System.Text.Json.JsonSerializer.Serialize(session.State.World);
+            foreach (var old in earlier)
+            {
+                Assert.NotEqual(old.Origin, id);
+                Assert.Equal((old.Call, old.Origin), (old.Trigger.CallId, old.Trigger.SourceRequestId));
+                Assert.Equal(TriggerScriptPhase.Completed, old.Trigger.Phase);
+                Assert.False(session.BindTrigger(id, old.Trigger));
+                Assert.False(session.BindTrigger(old.Origin, old.Trigger));
+                Assert.False(session.CompleteTrigger(id, old.Trigger, ticks + 1000));
+                Assert.False(session.CompleteTrigger(old.Origin, old.Trigger, ticks + 1000));
+                Assert.Same(pending, session.PendingTrigger);
+                Assert.Equal(id, session.PendingRequestId);
+                Assert.Same(current, session.Current);
+                Assert.Same(rules, session.Rules);
+                Assert.Equal(legacy, System.Text.Json.JsonSerializer.Serialize(session.State.World));
+                Assert.False(session.Update(ticks + 100));
+            }
+            var trigger = ReturnTrigger(false);
+            trigger.Start("return", "owner28", 28, id);
+            Assert.True(session.BindTrigger(id, trigger));
+            Assert.True(session.CompleteTrigger(id, trigger, ticks + 100));
+            Assert.False(session.CompleteTrigger(id, trigger, ticks + 1000));
+            Assert.False(session.Update(ticks + 149));
+            Assert.True(session.Update(ticks + 150)); // Neither replay nor duplicate resets the deadline.
+            Assert.Null(session.PendingTrigger);
+            Assert.Equal(Guid.Empty, session.PendingRequestId);
+            earlier.Add((id, trigger.CallId, trigger));
+        }
+        Assert.Equal(4, earlier.Count);
+    }
+
+    private sealed class ClosureRandom : IBattleRandom
+    {
+        public int Draws { get; private set; }
+        public int NextInclusive(int from, int to) { Draws++; return from; }
+        public float NextInclusive(float from, float to) { Draws++; return from; }
+    }
+
+    [Fact]
+    public void Synchronous_endkeep_and_failed_Start_preserve_owned_completion_and_session_isolation()
+    {
+        var (profile, fixture) = PreparedProfile();
+        var receipt = FirstMandatoryBattleClosure.Verify(profile,
+            fixture.Events(), fixture.Chinese(), fixture.English(), fixture.Content(), Images());
+        var template = Rules();
+        var session = new FirstMandatoryBattleSession(profile, 2, template, ReturnLeader(), receipt);
+        var second = new FirstMandatoryBattleSession(profile, 2, template, ReturnLeader(), receipt);
+        var untouched = second.Current;
+        string original = System.Text.Json.JsonSerializer.Serialize(profile.World);
+        session.PressSearch(); session.Update(0);
+        Guid id = session.PendingRequestId;
+        var trigger = ReturnTrigger(false);
+        trigger.Start("return", "owner28", 28, id);
+        Assert.Equal(TriggerScriptPhase.Completed, trigger.Phase);
+        Assert.True(session.BindTrigger(id, trigger));
+        Guid call = trigger.CallId;
+        var entry = trigger.StartedEntry;
+        Assert.Throws<InvalidDataException>(() => trigger.Start("return", "missing", 28, id));
+        Assert.Equal((call, id, entry), (trigger.CallId, trigger.SourceRequestId, trigger.StartedEntry));
+        Assert.False(session.CompleteTrigger(Guid.NewGuid(), trigger, 50));
+        Assert.True(session.CompleteTrigger(id, trigger, 100));
+        Assert.False(session.CompleteTrigger(id, trigger, 500)); // Must not move the return deadline.
+        session.Press(ExplorationKey.SouthPrimary);
+        Assert.False(session.Update(149));
+        Assert.True(session.Update(150));
+        Assert.Equal((1248, 256), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y));
+        Assert.Same(untouched, second.Current);
+        Assert.Equal(Guid.Empty, second.PendingRequestId);
+        Assert.Null(second.PendingTrigger);
+        Assert.Equal(1264, second.State.World.Leader.X);
+        Assert.Equal(template.Objects, second.Objects);
+        Assert.Equal(original, System.Text.Json.JsonSerializer.Serialize(profile.World));
+    }
+
+    [Theory]
+    [InlineData(100u, 149u, 150u, 249u, 250u)]
+    [InlineData(100u, 149u, 900u, 999u, 1000u)]
+    [InlineData(4294967275u, 28u, 29u, 128u, 129u)]
+    public void Return_uses_reference_50ms_then_one_100ms_step_clearing_search_but_retaining_held_alias_priority(
+        uint completed, uint early, uint due, uint beforeNext, uint next)
+    {
+        var session = VerifiedSession();
+        session.PressSearch(); Assert.True(session.Update(unchecked(completed - 100)));
+        Guid id = session.PendingRequestId;
+        var trigger = ReturnTrigger(false);
+        trigger.Start("return", "owner28", 28, id);
+        Assert.True(session.BindTrigger(id, trigger));
+        session.Press(ExplorationKey.WestPrimary);
+        session.Press(ExplorationKey.SouthPrimary);
+        session.Press(ExplorationKey.SouthAlternate);
+        session.Press(ExplorationKey.NorthPrimary, repeat: true);
+        session.PressSearch();
+        Assert.True(session.CompleteTrigger(id, trigger, completed));
+        session.Release(ExplorationKey.SouthPrimary);
+        var standing = session.Current;
+        Assert.False(session.Update(early));
+        Assert.Same(standing, session.Current);
+        session.PressSearch(); // Delivered during the return delay must also be cleared.
+        Assert.True(session.Update(due));
+        Assert.Null(session.PendingTrigger);
+        Assert.Equal((1248, 256, 0, 1), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y,
+            session.Current.Leader.Direction, session.Current.Leader.StepPhase));
+        Assert.Equal((1248, 256), (session.State.World.Leader.X, session.State.World.Leader.Y));
+        Assert.False(session.Update(unchecked(due + 1)));
+        Assert.False(session.Update(beforeNext));
+        session.Release(ExplorationKey.SouthAlternate); // Fall back to the older held west.
+        Assert.True(session.Update(next));
+        Assert.Equal((1232, 248, 1, 2), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y,
+            session.Current.Leader.Direction, session.Current.Leader.StepPhase));
+        session.Release(ExplorationKey.WestPrimary);
+        Assert.True(session.Update(unchecked(next + 100)));
+        Assert.False(session.Current.IsWalking);
+        Assert.Equal((1232, 248), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y));
+    }
+
+    [Theory]
+    [InlineData(17)]
+    [InlineData(65535)]
+    public void Owned_world_endkeep_retains_the_opaque_source_auto_idle_word(int sourceCounter)
+    {
+        var context = BattleContextTestFixture.Valid();
+        var source = context.Document["snapshot"]!["world"]!["eventObjects"]![0]!;
+        source["autoEntry"] = 0;
+        source["autoIdleFrameCount"] = sourceCounter;
+        var profile = Load(context, prepared: true);
+        var fixture = new RealClosureFixture("none");
+        var receipt = FirstMandatoryBattleClosure.Verify(profile,
+            fixture.Events(), fixture.Chinese(), fixture.English(), fixture.Content(), Images());
+        var template = Rules();
+        var session = new FirstMandatoryBattleSession(profile, 2, template, ReturnLeader(), receipt);
+        var second = new FirstMandatoryBattleSession(profile, 2, template, ReturnLeader(), receipt);
+        string original = System.Text.Json.JsonSerializer.Serialize(profile.World);
+        var world = DynamicEventWorld.ForHost(session.Rules, session.Current.Leader, 2, 0, 0);
+        var trigger = ReturnTrigger(false, world: world);
+        Assert.Equal(0, world.Objects.Single().AutoIdleCount); // Not materialized by this route.
+        Assert.True(session.InitializeTrigger(trigger));
+        session.PressSearch(); Assert.True(session.Update(0));
+        Guid id = session.PendingRequestId;
+        trigger.Start("return", "owner28", 28, id);
+        Assert.Equal(TriggerScriptPhase.Completed, trigger.Phase);
+        Assert.True(session.BindTrigger(id, trigger));
+        Assert.True(session.CompleteTrigger(id, trigger, 100));
+        Assert.Equal(sourceCounter, session.State.World.EventObjects.Single().AutoIdleFrameCount);
+        Assert.Equal(0, session.State.World.EventObjects.Single().AutoEntry);
+        Assert.Equal(sourceCounter, second.State.World.EventObjects.Single().AutoIdleFrameCount);
+        Assert.Null(second.PendingTrigger);
+        Assert.Equal(Guid.Empty, second.PendingRequestId);
+        Assert.Equal(original, System.Text.Json.JsonSerializer.Serialize(profile.World));
+        Assert.Equal((1280, 256, 0x09c3), ((int)template.Objects.Single().X,
+            (int)template.Objects.Single().Y, (int)template.Objects.Single().TriggerEntry));
+    }
+
+    [Fact]
+    public void Initialized_actual_world_follows_movement_before_the_first_Start()
+    {
+        var session = VerifiedSession();
+        var world = DynamicEventWorld.ForHost(session.Rules, session.Current.Leader, 2, 0, 0);
+        var trigger = ReturnTrigger(false, world: world);
+        Assert.True(session.InitializeTrigger(trigger));
+        Assert.False(session.BindTrigger(Guid.NewGuid(), trigger));
+        session.Press(ExplorationKey.SouthPrimary);
+        Assert.True(session.Update(0));
+        Assert.Equal((1248, 256, 0, 1), ((int)world.Leader.X, (int)world.Leader.Y,
+            world.Leader.Direction, world.Leader.StepPhase));
+        Assert.Equal(session.Current.Leader, world.Leader);
+        Assert.Equal(Guid.Empty, trigger.CallId);
+        session.Release(ExplorationKey.SouthPrimary);
+        session.Press(ExplorationKey.EastPrimary); Assert.True(session.Update(100));
+        session.Release(ExplorationKey.EastPrimary);
+        session.Press(ExplorationKey.NorthPrimary); Assert.True(session.Update(200));
+        Assert.Equal((1264, 264, 2, 0), ((int)world.Leader.X, (int)world.Leader.Y,
+            world.Leader.Direction, world.Leader.StepPhase));
+        session.PressSearch(); Assert.True(session.Update(300));
+        trigger.Start("return", "owner28", 28, session.PendingRequestId);
+        Assert.True(session.BindTrigger(session.PendingRequestId, trigger));
+        Assert.Equal((1264, 264, 2, 0), ((int)world.Leader.X, (int)world.Leader.Y,
+            world.Leader.Direction, world.Leader.StepPhase));
+    }
+
+    [Fact]
+    public void Owned_world_return_projects_current_scene_words_and_leader_without_global_collision_or_owner_copies()
+    {
+        var sceneRules = Rules();
+        sceneRules = sceneRules.WithObjects(sceneRules.Objects.Select(o => o with
+            { Sprite = new SceneSprite(210, [new SceneFrame(0, 1, 1)]) }));
+        var session = VerifiedSession(sceneRules);
+        var second = VerifiedSession(sceneRules);
+        var template = session.Rules;
+        var initial = session.Current;
+        var extra = new SceneObject(99, 1232, 248, 2, 0, 0, 211, 0, 0, 0,
+            new SceneSprite(211, [new SceneFrame(0, 1, 1)])) { TriggerMode = 1, TriggerEntry = 0x09c3 };
+        var owner = new RoleLiveState(new RealClosureFixture("none").Content().InitialRoles.Values.ToArray());
+        var roles = owner.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var world = DynamicEventWorld.ForHost(template.WithObjects(template.Objects.Append(extra)), initial.Leader, 2, 0, 0, owner);
+        var trigger = ReturnTrigger(world: world, prefix:
+        [
+            WorldCommand("setObjectPosition", 0x13, [28, 1200, 224], ("eventObjectId", 28), ("x", 1200), ("y", 224)),
+            WorldCommand("setState", 0x49, [28, 0, 0], ("eventObjectId", 28), ("state", 0)),
+            WorldCommand("setPartyPos", 0x46, [39, 15, 0], ("x", 39), ("y", 15), ("h", 0)),
+            WorldCommand("setTriggerEntry", 0x25, [28, 0x09c4, 0], ("eventObjectId", 28), ("entry", 0x09c4))
+        ]);
+        Assert.True(session.InitializeTrigger(trigger));
+        session.PressSearch(); Assert.True(session.Update(0));
+        Guid id = session.PendingRequestId;
+        trigger.Start("return", "owner28", 28, id);
+        Assert.True(session.BindTrigger(id, trigger));
+        Assert.Same(initial, session.Current); // Script prefix is not yet a published exploration view.
+        Assert.False(session.CompleteTrigger(id, trigger, 100));
+        FinishReturnDisplay(trigger);
+        Assert.True(session.CompleteTrigger(id, trigger, 100));
+        Assert.False(session.CompleteTrigger(id, trigger, 500));
+        var obj = Assert.Single(session.Objects);
+        Assert.Equal((28, 1200, 224, 0, 0x09c3), ((int)obj.Id, (int)obj.X, (int)obj.Y, (int)obj.State, (int)obj.TriggerEntry));
+        Assert.Equal((1248, 240, 3), ((int)session.Current.Leader.X, (int)session.Current.Leader.Y, session.Current.Leader.Direction));
+        Assert.Equal((1248, 240), (session.State.World.Leader.X, session.State.World.Leader.Y));
+        Assert.Equal((1088, 128, 9), (session.Current.Plan.CameraX, session.Current.Plan.CameraY, session.Current.Plan.LeaderFrameIndex));
+        Assert.DoesNotContain(session.Current.Plan.Commands, item => item.Source == SceneDrawSource.Object);
+        Assert.False(session.Rules.IsBlocked(1232, 248));
+        Assert.Null(session.Rules.FindSearchTarget(session.Current.Leader with { Direction = 0 }));
+        Assert.Equal(2, world.Objects.Count);
+        Assert.Equal((1232, 248, 2), (world.Objects[1].X, world.Objects[1].Y, world.Objects[1].State));
+        var legacy = session.State.World.EventObjects.Single(item => item.OwnerId == 28);
+        Assert.Equal((1200, 224, 0, 0x09c3), (legacy.X, legacy.Y, legacy.State, legacy.TriggerEntry));
+        Assert.Equal(second.State.World.EventObjects.Length, session.State.World.EventObjects.Length);
+        Assert.Same(template.Objects[0].Sprite, obj.Sprite);
+        Assert.Same(initial.Leader.Sprite, session.Current.Leader.Sprite);
+        Assert.Equal((1280, 256, 2), ((int)template.Objects[0].X, (int)template.Objects[0].Y, (int)template.Objects[0].State));
+        Assert.Equal((1280, 256, 2), ((int)second.Objects[0].X, (int)second.Objects[0].Y, (int)second.Objects[0].State));
+        Assert.Same(owner, world.RoleLiveState);
+        foreach (var pair in roles) Assert.Same(pair.Value, owner.Roles[pair.Key]);
+        session.PressSearch(); session.Press(ExplorationKey.SouthPrimary);
+        Assert.False(session.Update(149));
+        Assert.True(session.Update(150));
+        Assert.Null(session.PendingTrigger);
+        Assert.Equal((1232, 248), ((int)world.Leader.X, (int)world.Leader.Y));
+        Assert.Equal(world.Leader, session.Current.Leader);
+    }
+
+    [Fact]
+    public void Initialization_rejects_incompatible_started_duplicate_and_late_contexts_atomically()
+    {
+        var session = VerifiedSession();
+        var initial = session.Current;
+        string legacy = System.Text.Json.JsonSerializer.Serialize(session.State.World);
+        Assert.Throws<ArgumentNullException>(() => session.InitializeTrigger(null!));
+        Assert.False(session.InitializeTrigger(ReturnTrigger(false)));
+        foreach (var world in new[]
+        {
+            DynamicEventWorld.ForHost(session.Rules, initial.Leader, 4, 0, 0),
+            DynamicEventWorld.ForHost(session.Rules.WithObjects([]), initial.Leader, 2, 0, 0),
+            DynamicEventWorld.ForHost(session.Rules, initial.Leader with { X = 1248 }, 2, 0, 0),
+            DynamicEventWorld.ForHost(session.Rules.WithObjects(session.Objects.Select(o => o with { SpriteNumber = 211 })), initial.Leader, 2, 0, 0)
+        })
+        {
+            var leader = world.Leader;
+            Assert.False(session.InitializeTrigger(ReturnTrigger(false, world: world)));
+            Assert.Same(leader, world.Leader);
+            Assert.Same(initial, session.Current);
+            Assert.Equal(legacy, System.Text.Json.JsonSerializer.Serialize(session.State.World));
+        }
+        var correctWorld = DynamicEventWorld.ForHost(session.Rules, ReturnLeader(), 2, 0, 0);
+        var wrongEntry = ReturnTrigger(false, address: 0x09c4, world: correctWorld);
+        Assert.False(session.InitializeTrigger(wrongEntry));
+        var started = ReturnTrigger(false, world: correctWorld);
+        started.Start("return", "owner28", 28);
+        Assert.False(session.InitializeTrigger(started));
+        var correct = ReturnTrigger(false, world: correctWorld);
+        Assert.True(session.InitializeTrigger(correct)); // Independently cloned valid sprite metadata is compatible.
+        Assert.False(session.InitializeTrigger(correct));
+        var foreignWorld = DynamicEventWorld.ForHost(session.Rules, initial.Leader, 2, 0, 0);
+        Assert.False(session.InitializeTrigger(ReturnTrigger(false, world: foreignWorld)));
+        session.Press(ExplorationKey.SouthPrimary); Assert.True(session.Update(0));
+        Assert.Equal((1248, 256), ((int)correctWorld.Leader.X, (int)correctWorld.Leader.Y));
+        Assert.Same(initial.Leader, foreignWorld.Leader);
+        var late = VerifiedSession();
+        var lateWorld = DynamicEventWorld.ForHost(late.Rules, late.Current.Leader, 2, 0, 0);
+        Assert.True(late.Update(0));
+        Assert.False(late.InitializeTrigger(ReturnTrigger(false, world: lateWorld)));
+        var pending = VerifiedSession();
+        var pendingWorld = DynamicEventWorld.ForHost(pending.Rules, pending.Current.Leader, 2, 0, 0);
+        pending.PressSearch(); Assert.True(pending.Update(0));
+        var uninitialized = ReturnTrigger(false, world: pendingWorld);
+        Assert.False(pending.InitializeTrigger(uninitialized));
+        uninitialized.Start("return", "owner28", 28, pending.PendingRequestId);
+        Assert.False(pending.BindTrigger(pending.PendingRequestId, uninitialized));
+        Assert.False(pending.CompleteTrigger(pending.PendingRequestId, uninitialized, 100));
+    }
+
+    [Fact]
+    public void Initialized_context_rejects_foreign_world_and_restarted_completion_without_publishing_prefix()
+    {
+        var session = VerifiedSession();
+        var world = DynamicEventWorld.ForHost(session.Rules, session.Current.Leader, 2, 0, 0);
+        var trigger = ReturnTrigger(world: world, prefix:
+            [WorldCommand("setObjectPosition", 0x13, [28, 1200, 224], ("eventObjectId", 28), ("x", 1200), ("y", 224))]);
+        Assert.True(session.InitializeTrigger(trigger));
+        session.PressSearch(); Assert.True(session.Update(0));
+        Guid id = session.PendingRequestId;
+        var current = session.Current;
+        var rules = session.Rules;
+        var pending = session.PendingTrigger;
+        string legacy = System.Text.Json.JsonSerializer.Serialize(session.State.World);
+        var foreignWorld = DynamicEventWorld.ForHost(session.Rules, session.Current.Leader, 2, 0, 0);
+        var foreign = ReturnTrigger(false, world: foreignWorld);
+        foreign.Start("return", "owner28", 28, id);
+        Assert.False(session.BindTrigger(id, foreign));
+        var sameWorldForeign = ReturnTrigger(false, world: world);
+        sameWorldForeign.Start("return", "owner28", 28, id);
+        Assert.False(session.BindTrigger(id, sameWorldForeign));
+        trigger.Start("return", "owner28", 28, id);
+        Assert.False(session.CompleteTrigger(id, trigger, 100)); // unbound
+        Assert.False(session.BindTrigger(Guid.NewGuid(), trigger));
+        Assert.True(session.BindTrigger(id, trigger));
+        Assert.False(session.CompleteTrigger(id, trigger, 100)); // unfinished display
+        FinishReturnDisplay(trigger);
+        string actual = System.Text.Json.JsonSerializer.Serialize(world);
+        Assert.False(session.CompleteTrigger(id, foreign, 100));
+        Assert.False(session.CompleteTrigger(Guid.NewGuid(), trigger, 100));
+        trigger.Start("return", "owner28", 28, id); FinishReturnDisplay(trigger);
+        Assert.False(session.CompleteTrigger(id, trigger, 500)); // same session, a different actual CallId
+        Assert.Same(current, session.Current);
+        Assert.Same(rules, session.Rules);
+        Assert.Same(pending, session.PendingTrigger);
+        Assert.Equal(id, session.PendingRequestId);
+        Assert.Equal(legacy, System.Text.Json.JsonSerializer.Serialize(session.State.World));
+        Assert.Equal(actual, System.Text.Json.JsonSerializer.Serialize(world));
+        Assert.False(session.Update(1000));
+        Assert.Equal((1200, 224), (world.Objects[0].X, world.Objects[0].Y));
+        Assert.Equal((1280, 256), ((int)session.Objects[0].X, (int)session.Objects[0].Y));
+    }
+
+    [Fact]
+    public void Returned_object_position_controls_collision_and_the_next_owned_search()
+    {
+        var session = VerifiedSession();
+        var world = DynamicEventWorld.ForHost(session.Rules, session.Current.Leader, 2, 0, 0);
+        var trigger = ReturnTrigger(false, world: world, prefix:
+            [WorldCommand("setObjectPosition", 0x13, [28, 1248, 256], ("eventObjectId", 28), ("x", 1248), ("y", 256))]);
+        Assert.True(session.InitializeTrigger(trigger));
+        session.PressSearch(); Assert.True(session.Update(0));
+        Guid id = session.PendingRequestId;
+        trigger.Start("return", "owner28", 28, id);
+        Assert.True(session.BindTrigger(id, trigger));
+        Assert.True(session.CompleteTrigger(id, trigger, 100));
+        Assert.Null(session.Rules.FindSearchTarget(session.Current.Leader)); // old east-facing search is now empty
+        Assert.True(session.Rules.IsBlocked(1248, 256));
+        session.Press(ExplorationKey.SouthPrimary);
+        Assert.True(session.Update(150));
+        Assert.False(session.Current.IsWalking);
+        Assert.Equal((1264, 248, 0), ((int)world.Leader.X, (int)world.Leader.Y, world.Leader.Direction));
+        session.Release(ExplorationKey.SouthPrimary); session.PressSearch();
+        Assert.True(session.Update(250));
+        Assert.Equal(new FirstMandatoryBattleTriggerRequest(0x09c3, 28), session.PendingTrigger);
+        Assert.NotEqual(id, session.PendingRequestId);
+        Assert.False(session.CompleteTrigger(id, trigger, 250));
+    }
+
+    [Fact]
+    public void Invalid_return_plan_is_rejected_before_any_exploration_or_legacy_publication()
+    {
+        var session = VerifiedSession();
+        var world = DynamicEventWorld.ForHost(session.Rules, session.Current.Leader, 2, 0, 0);
+        var trigger = ReturnTrigger(false, world: world, prefix:
+            [WorldCommand("setPartyFacing", 0x15, [9, 0, 0], ("direction", 9), ("gesture", 0), ("memberIndex", 0))]);
+        Assert.True(session.InitializeTrigger(trigger));
+        session.PressSearch(); Assert.True(session.Update(0));
+        Guid id = session.PendingRequestId;
+        trigger.Start("return", "owner28", 28, id);
+        Assert.True(session.BindTrigger(id, trigger));
+        var current = session.Current;
+        var rules = session.Rules;
+        var pending = session.PendingTrigger;
+        string legacy = System.Text.Json.JsonSerializer.Serialize(session.State.World);
+        string actual = System.Text.Json.JsonSerializer.Serialize(world);
+        Assert.False(session.CompleteTrigger(id, trigger, 100));
+        Assert.Same(current, session.Current);
+        Assert.Same(rules, session.Rules);
+        Assert.Same(pending, session.PendingTrigger);
+        Assert.Equal(id, session.PendingRequestId);
+        Assert.Equal(legacy, System.Text.Json.JsonSerializer.Serialize(session.State.World));
+        Assert.Equal(actual, System.Text.Json.JsonSerializer.Serialize(world));
+        Assert.False(session.Update(1000));
+    }
+
+    private static JsonObject WorldCommand(string op, int opcode, int[] operands, params (string Name, int Value)[] fields)
+    {
+        var command = new JsonObject { ["op"] = op,
+            ["source"] = new JsonObject { ["opcode"] = opcode,
+                ["operands"] = new JsonArray(operands.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray()) } };
+        foreach (var field in fields) command[field.Name] = field.Value;
+        return command;
+    }
+
+    private static FirstMandatoryBattleSession VerifiedSession(StaticSceneRules? rules = null)
+    {
+        var (profile, fixture) = PreparedProfile();
+        var receipt = FirstMandatoryBattleClosure.Verify(profile,
+            fixture.Events(), fixture.Chinese(), fixture.English(), fixture.Content(), Images());
+        return new(profile, 2, rules ?? Rules(), ReturnLeader(), receipt);
+    }
+
+    private static StaticLeader ReturnLeader() => Leader() with
+    {
+        Sprite = new SceneSprite(17, Enumerable.Range(0, 12).Select(i => new SceneFrame(i, 1, 1)))
+    };
+
+    // Original selected modern stream isolates outer-call release, not the battle engine.
+    private static TriggerScriptSession ReturnTrigger(bool dialogue = true, int owner = 28,
+        string ownerType = "eventObject", string slot = "wTriggerScript", int address = 0x09c3,
+        bool reload = false, DynamicEventWorld? world = null, JsonObject[]? prefix = null)
+    {
+        const int count = 0x09d0;
+        var commands = new JsonArray();
+        for (int i = 0; i < count; i++)
+        {
+            bool show = dialogue && i == address + (prefix?.Length ?? 0);
+            var command = new JsonObject
+            {
+                ["label"] = $"L{i:X4}", ["op"] = show ? "showDialog" : reload && i == address ? "requestReload" : "end",
+                ["next"] = i + 1 < count ? $"L{i + 1:X4}" : null,
+                ["source"] = new JsonObject { ["index"] = i, ["opcode"] = show ? 65535 : reload && i == address ? 78 : 0,
+                    ["operands"] = new JsonArray(show ? 10 : 0, 0, 0) }
+            };
+            if (show) { command["messageId"] = 10; command["descriptionLineWord"] = 0; }
+            else if (!(reload && i == address)) command["mode"] = "keep";
+            if (prefix is not null && i >= address && i < address + prefix.Length)
+            {
+                command = (JsonObject)prefix[i - address].DeepClone();
+                command["label"] = $"L{i:X4}";
+                command["next"] = $"L{i + 1:X4}";
+                command["source"]!["index"] = i;
+            }
+            commands.Add(command);
+        }
+        var index = new JsonObject
+        {
+            ["formatVersion"] = 1, ["profile"] = "faithful",
+            ["source"] = new JsonObject { ["archive"] = "SSS.MKF", ["chunk"] = 4, ["byteOrder"] = "little",
+                ["instructionCount"] = count, ["byteLength"] = count * 8, ["sha256"] = new string('c', 64) },
+            ["files"] = new JsonArray("return")
+        };
+        var file = new JsonObject
+        {
+            ["formatVersion"] = 1, ["profile"] = "faithful", ["fileId"] = "return",
+            ["entries"] = new JsonArray(new JsonObject { ["id"] = "owner28",
+                ["owner"] = new JsonObject { ["type"] = ownerType, ["id"] = owner }, ["slot"] = slot,
+                ["kind"] = "trigger", ["target"] = $"L{address:X4}", ["sourceAddress"] = address }),
+            ["commands"] = commands
+        };
+        var events = TriggerEventCollection.Parse(index.ToJsonString(),
+            new Dictionary<string, string> { ["return"] = file.ToJsonString() });
+        var language = new DialogueLanguagePackage("en", [new DialogueMessageBlock(10, 10, [DialogueMessagePart.FromText("AB")])]);
+        return world is null ? new(events, language) : new(events, language, world);
+    }
+
+    private static void FinishReturnDisplay(TriggerScriptSession trigger)
+    {
+        var display = Assert.IsType<TriggerDialogueRequest>(trigger.PendingDisplay);
+        display.Display.Update(24, false, true);
+        display.Display.Update(100, true, false);
+        Assert.Equal(DialogueDisplayPhase.Completed, display.Display.Current.Phase);
+        Assert.True(trigger.AcknowledgeDisplay(display.Id));
+        Assert.Equal(TriggerScriptPhase.Completed, trigger.Phase);
     }
 
     private static (FirstMandatoryBattleProfile Profile, RealClosureFixture Fixture) PreparedProfile(string fault = "none") =>

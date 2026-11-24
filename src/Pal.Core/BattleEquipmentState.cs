@@ -3,25 +3,33 @@ using System.Collections.ObjectModel;
 namespace Pal.Core;
 
 /// <summary>Per-role effect row of one equipment object's equip script (global.c script 0x0017/0x001A/0x002D word writes).
-/// The three optional words cover PLAYERROLES stat 18/21/22 equipment writes (magicStrength, fleeRate,
-/// poisonResistance); absent means the script never writes them, so all #48-era content stays legal.</summary>
+/// The optional stat words cover PLAYERROLES stat 18/21/22 equipment writes (magicStrength, fleeRate,
+/// poisonResistance). AttackAll and CooperativeMagic retain nullable field 4/65 WORDs in content and
+/// equipment registers; a non-zero selected attackAll word grants the reference all-target attack
+/// (PAL_PlayerCanAttackAll) while selected combat still rejects nonzero cooperativeMagic values.</summary>
 public sealed record BattleEquipmentEffect(int Attack, int Defense, int Dexterity, int BattleSprite, IReadOnlyList<int> Statuses,
-    int? MagicPower = null, int? FleeRate = null, int? PoisonResistance = null);
+    int? MagicPower = null, int? FleeRate = null, int? PoisonResistance = null)
+{
+    public int? AttackAll { get; init; }
+    public int? CooperativeMagic { get; init; }
+}
 
 /// <summary>Authored equip-script closure for one object: exactly six role-indexed effect rows (ObjectId is 1..65535).</summary>
 public sealed record BattleEquipmentObject(int ObjectId, IReadOnlyList<BattleEquipmentEffect> Effects);
 
 /// <summary>Formal six-role equipment initialization (PAL_UpdateEquipments, global.c:1352) and effective panel
-/// projections (PAL_GetPlayerAttackStrength/Defense/Dexterity global.c:1736/1800/1832 and PAL_GetPlayerBattleSprite
-/// global.c:1978-2008). Pure data; battle execution semantics are delivered by a later ticket and are not wired here.</summary>
+/// projections (PAL_GetPlayerAttackStrength/Defense/Dexterity global.c 1736/1800/1832 and PAL_GetPlayerBattleSprite
+/// global.c 1978-2008). Retains the nullable field 65 equipment word for selected-combat validation;
+/// the field 4 attackAll word is the reference all-target capability source.</summary>
 public sealed class BattleEquipmentState
 {
     public const int RoleCount = 6;   // MAX_PLAYER_ROLES (palcommon.h)
     public const int SlotCount = 6;   // MAX_PLAYER_EQUIPMENTS (kBodyPartHead..kBodyPartWear)
-    public const int RegisterCount = SlotCount + 1; // kBodyPartExtra register; stays zero until temporary effects are delivered
+    public const int RegisterCount = SlotCount + 1; // kBodyPartExtra: numeric registers stay zero, nullable words stay unwritten
     public const int StatusCount = 9; // kStatusAll
     internal const int PersistentStatusFloor = 1000; // PAL_RemovePlayerStatus keeps values above 999 (global.c:2297)
     internal const int GoodStatusFirstIndex = 5;     // bravery, protect, haste, dualAttack (global.h tagSTATUS)
+    internal const int PuppetStatusIndex = 4;        // kStatusPuppet: cleared by PAL_StartBattle for dead entrants (battle.c:1576)
 
     private readonly int[,] equipment = new int[RoleCount, SlotCount];
     private readonly int[,] attack = new int[RoleCount, RegisterCount];
@@ -31,6 +39,8 @@ public sealed class BattleEquipmentState
     private readonly int[,] magicPower = new int[RoleCount, RegisterCount];
     private readonly int[,] fleeRate = new int[RoleCount, RegisterCount];
     private readonly int[,] poisonResistance = new int[RoleCount, RegisterCount];
+    private readonly int?[,] attackAll = new int?[RoleCount, RegisterCount];
+    private readonly int?[,] cooperativeMagic = new int?[RoleCount, RegisterCount];
     private readonly int[,] statuses = new int[RoleCount, StatusCount];
 
     private BattleEquipmentState() { }
@@ -51,7 +61,8 @@ public sealed class BattleEquipmentState
         return Initialize(content.RoleEquipment, content.EquipmentObjects);
     }
 
-    /// <summary>Clears all registers, then applies every equipped object's effect row to its (role, slot) context.</summary>
+    /// <summary>Initializes all registers, then copies every equipped object's effect row to its (role, slot)
+    /// context. Nullable WORDs preserve explicit zero; item zero and unwritten registers remain null.</summary>
     public static BattleEquipmentState Initialize(IReadOnlyList<IReadOnlyList<int>> roleEquipment,
         IReadOnlyDictionary<int, BattleEquipmentObject> equipmentObjects)
     {
@@ -75,6 +86,8 @@ public sealed class BattleEquipmentState
                 state.magicPower[role, slot] = effect.MagicPower ?? 0;
                 state.fleeRate[role, slot] = effect.FleeRate ?? 0;
                 state.poisonResistance[role, slot] = effect.PoisonResistance ?? 0;
+                state.attackAll[role, slot] = effect.AttackAll;
+                state.cooperativeMagic[role, slot] = effect.CooperativeMagic;
                 // PAL_SetPlayerStatus good-status branch (global.c:2255): keep the longer value, never stack.
                 for (int status = GoodStatusFirstIndex; status < StatusCount; status++)
                     if (effect.Statuses[status] > state.statuses[role, status])
@@ -114,6 +127,8 @@ public sealed class BattleEquipmentState
                         if (value is < PersistentStatusFloor or > 65535)
                             throw Error("$.equipments", $"equipment object {obj.ObjectId} status slot {status} must be a persistent word {PersistentStatusFloor}..65535");
                     }
+                    if ((effect.AttackAll is < 0 or > 65535) || (effect.CooperativeMagic is < 0 or > 65535))
+                        throw Error("$.equipments", $"equipment object {obj.ObjectId} optional effect words must be 0..65535");
                 }
                 if (!declared.TryAdd(obj.ObjectId, obj))
                     throw Error("$.equipments", $"duplicate equipment object ID {obj.ObjectId}");
@@ -144,6 +159,202 @@ public sealed class BattleEquipmentState
     {
         Role(roleId);
         return Array.AsReadOnly(Enumerable.Range(0, SlotCount).Select(slot => equipment[roleId, slot]).ToArray());
+    }
+
+    /// <summary>Counts inventory plus equipped copies on the explicit current party (PAL_CountItem,
+    /// global.c:957). This is not the inventory-only shortage query and never consumes in-use stock.</summary>
+    public int CountItem(int itemId, InventoryLiveState inventory, IReadOnlyList<int> partyRoleIds)
+    {
+        ArgumentNullException.ThrowIfNull(inventory);
+        ArgumentNullException.ThrowIfNull(partyRoleIds);
+        if (!Word(itemId)) throw new ArgumentOutOfRangeException(nameof(itemId));
+        // MAX_PLAYABLE_PLAYER_ROLES is the exploration-party limit, not combat capacity.
+        if (partyRoleIds.Count > 5) throw new ArgumentException("Current party requires at most five roles.", nameof(partyRoleIds));
+        var seen = new HashSet<int>();
+        foreach (int roleId in partyRoleIds)
+        {
+            Role(roleId);
+            if (!seen.Add(roleId)) throw new ArgumentException("Current party requires distinct role IDs.", nameof(partyRoleIds));
+        }
+        if (itemId == 0) return 0;
+        int count = inventory.GetAmount(itemId);
+        foreach (int roleId in partyRoleIds)
+            for (int slot = 0; slot < SlotCount; slot++)
+                if (equipment[roleId, slot] == itemId) count++;
+        return count;
+    }
+
+    /// <summary>Count-gated stock removal and ordered current-party equipment fallback (script.c 0x0020).
+    /// False selects the shortage branch without writes; true means the removal arm ran, even if
+    /// allowShortage permitted partial consumption. The caller retains script control/success ownership.</summary>
+    public bool TryRemoveItem(int itemId, int amount, bool allowShortage, InventoryLiveState inventory,
+        RoleLiveState roleLiveState, PartyPoisonState partyPoisons)
+    {
+        ArgumentNullException.ThrowIfNull(inventory);
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        ArgumentNullException.ThrowIfNull(partyPoisons);
+        if (!Word(itemId)) throw new ArgumentOutOfRangeException(nameof(itemId));
+        if (!Word(amount)) throw new ArgumentOutOfRangeException(nameof(amount));
+        if (amount == 0) amount = 1;
+        if (amount > CountItem(itemId, inventory, partyPoisons.PartyRoleIds) && !allowShortage) return false;
+
+        // Resolve every row that fallback can touch before consuming even the stock prefix. These
+        // synchronous owners cannot change during the operation. Do not require unrelated live rows.
+        int remaining = Math.Max(0, amount - inventory.GetAmount(itemId));
+        var fallback = new List<(int RoleId, int Slot)>();
+        foreach (int roleId in partyPoisons.PartyRoleIds)
+        {
+            for (int slot = 0; slot < SlotCount && remaining > 0; slot++)
+            {
+                // Item0 deliberately matches EMPTY slots in the reference no-target removal arm.
+                if (equipment[roleId, slot] != itemId) continue;
+                ValidateRemovalRole(roleId, roleLiveState);
+                fallback.Add((roleId, slot));
+                remaining--;
+            }
+            if (remaining == 0) break;
+        }
+
+        int result = inventory.RemoveItem(itemId, amount);
+        if (result > 0) return true;
+        remaining = result < 0 ? -result : amount;
+        foreach (var (roleId, slot) in fallback)
+        {
+            RemoveEquippedItem(roleId, slot, roleLiveState, partyPoisons);
+            if (--remaining == 0) break;
+        }
+        return true;
+    }
+
+    /// <summary>Clears only the represented effect-register words (global.c PAL_RemoveEquipmentEffect's
+    /// first loop). Does not remove gear, reset hand dualAttack, or clean wear poisons; callers must
+    /// compose those operations on the same live state before exposing an equipment-removal command.</summary>
+    public void ClearEffectRegister(int roleId, int registerIndex)
+    {
+        Role(roleId);
+        if (registerIndex is < 0 or >= RegisterCount)
+            throw new ArgumentOutOfRangeException(nameof(registerIndex), registerIndex, "Equipment register index must be 0..6.");
+        attack[roleId, registerIndex] = 0;
+        defense[roleId, registerIndex] = 0;
+        dexterity[roleId, registerIndex] = 0;
+        battleSprite[roleId, registerIndex] = 0;
+        magicPower[roleId, registerIndex] = 0;
+        fleeRate[roleId, registerIndex] = 0;
+        poisonResistance[roleId, registerIndex] = 0;
+        attackAll[roleId, registerIndex] = 0;
+        cooperativeMagic[roleId, registerIndex] = 0;
+    }
+
+    /// <summary>Removes one equipped slot on this instance and its live role record. Composes effect
+    /// clearing, hand dualAttack reset and current-party wear poison cleanup without reinitializing.</summary>
+    public void RemoveEquippedItem(int roleId, int slotIndex, RoleLiveState roleLiveState, PartyPoisonState partyPoisons)
+    {
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        ArgumentNullException.ThrowIfNull(partyPoisons);
+        Role(roleId);
+        if (slotIndex is < 0 or >= SlotCount)
+            throw new ArgumentOutOfRangeException(nameof(slotIndex), slotIndex, "Equipment slot index must be 0..5.");
+        var live = ValidateRemovalRole(roleId, roleLiveState);
+        int[] gear = live.Equipment.ToArray();
+        int[] liveStatuses = live.Statuses.ToArray();
+        gear[slotIndex] = 0;
+        if (slotIndex == 3) liveStatuses[8] = 0; // kBodyPartHand / kStatusDualAttack, even temporary status.
+        // Prepare/freeze the record before mutating registers. These synchronous owners have no
+        // callbacks; after validation the remaining operations cannot fail for missing content.
+        roleLiveState.MergeSettledRoles([live with { Equipment = gear, Statuses = liveStatuses }]);
+        ClearEffectRegister(roleId, slotIndex);
+        if (slotIndex == 3) statuses[roleId, 8] = 0; // Do not resurrect it via the initialization overlay.
+        else if (slotIndex == 5) partyPoisons.RemoveEquipmentPoisons(roleId); // kBodyPartWear.
+        equipment[roleId, slotIndex] = 0;
+    }
+
+    /// <summary>One equip-script execution for a (role, part, object): script.c 0x0018 runs
+    /// PAL_RemoveEquipmentEffect unconditionally (registers, hand dual attack and wear poisons
+    /// reset even when the part re-equips its current object), then installs the authored effect
+    /// row — the equip script's following 0x0017/0x001A/0x002D words — and moves stock per the
+    /// reference arms: a single incoming copy whose displaced item is absent exchanges in place,
+    /// otherwise one incoming copy is removed and one displaced copy is returned. Returns the
+    /// wLastUnequippedItem WORD: the displaced object (0 when the part was empty) or the object
+    /// itself on a same-object rewrite, which never stacks because registers are rewritten, not
+    /// added. Role eligibility is the caller's menu gate (uigame.c kItemFlagEquipableByPlayerRole
+    /// bits), not this operation's.</summary>
+    public int EquipItem(int roleId, int partIndex, int objectId,
+        IReadOnlyDictionary<int, BattleEquipmentObject> equipmentObjects,
+        InventoryLiveState inventory, RoleLiveState roleLiveState, PartyPoisonState partyPoisons)
+    {
+        ArgumentNullException.ThrowIfNull(equipmentObjects);
+        ArgumentNullException.ThrowIfNull(inventory);
+        ArgumentNullException.ThrowIfNull(roleLiveState);
+        ArgumentNullException.ThrowIfNull(partyPoisons);
+        Role(roleId);
+        if (partIndex is < 0 or >= SlotCount)
+            throw new ArgumentOutOfRangeException(nameof(partIndex), partIndex, "Equipment part index must be 0..5.");
+        if (objectId is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(objectId), objectId, "Equipment object ID must be 1..65535.");
+        if (!equipmentObjects.TryGetValue(objectId, out BattleEquipmentObject? obj))
+            throw new InvalidDataException($"Equipment object {objectId} is not declared.");
+        int previous = equipment[roleId, partIndex];
+        // 0x0018's PAL_RemoveEquipmentEffect call precedes its same-object guard: the live
+        // record's gear word clears and hand/wear side effects run for every equip, not only swaps.
+        RemoveEquippedItem(roleId, partIndex, roleLiveState, partyPoisons);
+        // The equip script's following words install the authored effect row for this (role, part).
+        BattleEquipmentEffect effect = obj.Effects[roleId];
+        equipment[roleId, partIndex] = objectId;
+        attack[roleId, partIndex] = effect.Attack;
+        defense[roleId, partIndex] = effect.Defense;
+        dexterity[roleId, partIndex] = effect.Dexterity;
+        battleSprite[roleId, partIndex] = effect.BattleSprite;
+        magicPower[roleId, partIndex] = effect.MagicPower ?? 0;
+        fleeRate[roleId, partIndex] = effect.FleeRate ?? 0;
+        poisonResistance[roleId, partIndex] = effect.PoisonResistance ?? 0;
+        attackAll[roleId, partIndex] = effect.AttackAll;
+        cooperativeMagic[roleId, partIndex] = effect.CooperativeMagic;
+        // PAL_SetPlayerStatus good-status branch (global.c:2255): the longer word wins, never stacks.
+        for (int status = GoodStatusFirstIndex; status < StatusCount; status++)
+            if (effect.Statuses[status] > statuses[roleId, status]) statuses[roleId, status] = effect.Statuses[status];
+        var live = roleLiveState.Roles[roleId];
+        int[] gear = live.Equipment.ToArray();
+        int[] liveStatuses = live.Statuses.ToArray();
+        gear[partIndex] = objectId;
+        for (int status = GoodStatusFirstIndex; status < StatusCount; status++)
+            if (effect.Statuses[status] > liveStatuses[status]) liveStatuses[status] = effect.Statuses[status];
+        roleLiveState.MergeSettledRoles([live with { Equipment = gear, Statuses = liveStatuses }]);
+        if (previous == objectId) return objectId; // 0x0018's guard: no gear or stock change.
+        if (!inventory.TryExchangeSingle(objectId, previous))
+        {
+            inventory.RemoveItem(objectId, 1);
+            if (previous != 0) inventory.AddItem(previous, 1);
+        }
+        return previous;
+    }
+
+    private BattleRoleSnapshot ValidateRemovalRole(int roleId, RoleLiveState roleLiveState)
+    {
+        if (!roleLiveState.Roles.TryGetValue(roleId, out var live)
+            || live.Equipment.Count != SlotCount || live.Equipment.Any(value => !Word(value))
+            || !live.Equipment.SequenceEqual(Equipment(roleId))
+            || live.Statuses.Count != StatusCount || live.Statuses.Any(value => !Word(value)))
+            throw new InvalidDataException("Equipment removal requires a live role with six agreeing gear WORDs and nine status WORDs.");
+        return live;
+    }
+
+    /// <summary>Retained field 4 WORD for one equipment register; null means no write. Any non-zero
+    /// value is the reference all-target attack capability (PAL_PlayerCanAttackAll).</summary>
+    public int? AttackAllWord(int roleId, int registerIndex)
+    {
+        Role(roleId);
+        if (registerIndex is < 0 or >= RegisterCount)
+            throw new ArgumentOutOfRangeException(nameof(registerIndex), registerIndex, "Equipment register index must be 0..6.");
+        return attackAll[roleId, registerIndex];
+    }
+
+    /// <summary>Retained field 65 WORD for one equipment register; not a known magic or combat ability.</summary>
+    public int? CooperativeMagicWord(int roleId, int registerIndex)
+    {
+        Role(roleId);
+        if (registerIndex is < 0 or >= RegisterCount)
+            throw new ArgumentOutOfRangeException(nameof(registerIndex), registerIndex, "Equipment register index must be 0..6.");
+        return cooperativeMagic[roleId, registerIndex];
     }
 
     /// <summary>WORD sum over the equipment effect registers (global.c:1760/1825/1861); the extra register stays zero in this slice.</summary>
