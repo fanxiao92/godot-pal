@@ -4,7 +4,7 @@
 
 ## 新人最小模型（仅按需进入 Godot）
 
-先完成[短指南](getting-started.md)的 Unit 反馈；只有目标契约需要真实引擎接线时才进入本页。Game `[RequireGodotRuntime]` 由 VSTest → 固定 GdUnit adapter 启动 Godot .NET runtime，不是普通纯内存 Unit；引擎路径、bootstrap 与实际命令只由 [Game README](../../src/Pal.Game/Tests/README.md)维护。
+先完成[短指南](getting-started.md)的 Unit 反馈；只有目标契约需要真实引擎接线时才进入本页。Game `[RequireGodotRuntime]` 由 VSTest → 官方 `gdUnit4.test.adapter` 启动 Godot .NET runtime，不是普通纯内存 Unit；测试工程与运行配置位于 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 与 [game.runsettings](../../tests/Pal.Game.Tests/game.runsettings)。
 
 ```text
 本例 GUID Resource/PackedScene → new Main → Configure + 订阅（入树前）
@@ -13,7 +13,7 @@
   → release 自有输入 → unsubscribe → Dispose → 验证节点释放 → 恢复全局 → 删除自有 fixture
 ```
 
-以下节选现有 [`ExplorationSceneTests.ExplorationScene`](../../src/Pal.Game/Tests/ExplorationSceneTests.cs) 构造器，不是独立可粘贴程序；`fixture`、字段和回调的定义/失败清理同在该文件。本次只核对定义与固定源码，未执行 Game 示例，不据此声明当前候选的 Godot 测试通过。
+以下节选现有 [`ExplorationSceneTests.ExplorationScene`](../../tests/Pal.Game.Tests/Tests/ExplorationSceneTests.cs) 构造器，不是独立可粘贴程序；`fixture`、字段和回调的定义/失败清理同在该文件。本次只核对定义与源码，未执行 Game 示例，不据此声明当前候选的 Godot 测试通过。
 
 ```csharp
 Main.Configure(GameSceneConfiguration.FromArguments("--m2-resources", fixture.ResourceRoot,
@@ -44,18 +44,18 @@ runner = ISceneRunner.Load(Main, autoFree: true);
 
 ## 每例生命周期
 
-1. **先核固定语义。** 版本与 bootstrap 以[包说明](gdunit-source-packages.md)、当前配置为准；使用前读取对应固定源码的 Load、输入和 Dispose 定义，不套用 latest 文档。`Load` 会加入树，`autoFree` 必须明确。
+1. **先核固定语义。** 版本与配置以 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 及 [game.runsettings](../../tests/Pal.Game.Tests/game.runsettings) 为准；使用前核对当前版本的 `ISceneRunner` Load、输入和 Dispose 定义，不套用过时文档。`Load` 会加入树，`autoFree` 必须明确。
 2. **创建独立场景。** 使用本例拥有的唯一人工资源身份和新节点；加载前完成配置，观察初始化失败。真实原始/派生资源保持只读复用，不进入提交或证据上传。
 3. **交付真实输入。** 历史 M2 保留失焦冻结/清键与回焦 fresh-press；M3 当前共享探索不复制该额外重置。需要验证信号时核实际交付，不猜 OS HasFocus 或私改 Core；信号注入不等于物理焦点验收。按生产入口使用 `InputEventKey` 等实际事件；echo、逻辑/物理键位语义按用例明确验证。`InputEventAction` 不替代只接收 Key 的处理链。runner 仅跟踪自己注入的输入，自行注入的按键由本例显式释放。
 4. **在实际边界断言。** 从生产 `UpdateCompleted` 等已核实的完成事件同步保存状态。第一次有效输入后的首个实际更新必须无条件检查，不先等待 walking 等“正确状态”再采样；frame-wait 返回、日志顺序或协程恢复不证明目标回调已完成。断言异常需留在测试失败通道，不误报为 Main 的业务失败。
 5. **在 finally 清理。** 释放自有输入、断开订阅、Dispose runner 并核对节点已释放；部分初始化失败也释放整个 owned 场景。恢复本例改动的窗口、焦点和引擎设置，只清理本例 GUID 人工产物。
 6. **核对共享状态隔离。** 新 Node 不保证新 Resource；必要时让新场景复用同 URI 验证初始状态及首次交互，并检查原资源身份未变。按所有权管理可变资源，不依靠全局清 ResourceLoader 缓存、清 InputMap 或删除其他资源掩盖污染。
 
-现有入口：[`MainSceneTests`](../../src/Pal.Game/Tests/MainSceneTests.cs)、[`ExplorationSceneTests`](../../src/Pal.Game/Tests/ExplorationSceneTests.cs)。具体 Game 命令、当前覆盖和失败控制见 [Game 测试说明](../../src/Pal.Game/Tests/README.md)。
+现有入口：[`MainSceneTests`](../../tests/Pal.Game.Tests/Tests/MainSceneTests.cs)、[`ExplorationSceneTests`](../../tests/Pal.Game.Tests/Tests/ExplorationSceneTests.cs)。
 
 ## 输入、等待与资源所有权
 
-固定源码链接由[包说明](gdunit-source-packages.md#固定-scenerunner-源码语义)维护。runner 的模拟按压 API 才进入其输入跟踪集合；本仓上述示例直接 `Input.ParseInputEvent` + `FlushBufferedEvents`，因此显式 `SendKey(false)` 由本例负责，不能指望 runner reset 代放。`OnUpdated` 首个完成无条件断言，再推进已有测试状态机；其断言异常先捕获，回测试协程重新抛出，避免穿过 `Main._Process` 被包装成 production failure。
+官方 `gdUnit4.api 5.1.0-rc7`（GD-549）将 `ISceneRunner.Load` 的场景放入独立 `SubViewport`：常规按键使用 `runner.SimulateKeyPress` / `SimulateKeyRelease`（由 `SceneRunner` 跟踪并在 `Dispose` 清理）；`Echo=true` 或指定 `KeyLocation` 等特例通过 `runner.Scene()!.GetViewport().PushInput(input)` 投递（共享辅助见 [`SceneRunnerInput`](../../tests/Pal.Game.Tests/Tests/SceneRunnerInput.cs)）。`OnUpdated` 首个完成无条件断言，再推进已有测试状态机；其断言异常先捕获，回测试协程重新抛出，避免穿过 `Main._Process` 被包装成 production failure。
 
 | 边界 | 固定版定义／当前用法 | 不可替代 |
 | --- | --- | --- |
@@ -89,4 +89,4 @@ Unit-only 第一阶段不默认运行完整门，也不以完整门作为当前�
 
 当前 dotnet 进程边界见[生产定义](../../scripts/DotnetCheckedDefinition.ps1)及[定点回归](../../tests/Pal.Game.Tests/DotnetBoundary.Tests.ps1)：root 与双流 EOF 共用工作预算，失败后只给共享清理预算；root exit0 不代表输出完整或后代退出，未知退出保持 null。增量保留两路原始字节，完整后才扫描诊断；取消、退出已知、输出完整与清理完成分别记录，只处置自有进程。持久回归的外护栏不证明 OS/I/O 硬实时，也不授权放宽生产预算。
 
-其余完整批次、历史预算值、TRX 身份图、成本/性能口径和历史交付记录保留在[历史记录](../archive/m3/game-test-history.md)；当前命令与覆盖以 Game README 和脚本配置为准，不复制会过期的案例清单。
+其余完整批次、历史预算值、TRX 身份图、成本/性能口径和历史交付记录保留在[历史记录](../archive/m3/game-test-history.md)；当前命令与配置以 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj)、[game.runsettings](../../tests/Pal.Game.Tests/game.runsettings) 及脚本配置为准，不复制会过期的案例清单。

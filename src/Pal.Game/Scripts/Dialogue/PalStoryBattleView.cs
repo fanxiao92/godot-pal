@@ -12,21 +12,21 @@ namespace Pal.Game.Dialogue;
 public enum StoryBattlePresentation { AttackMenu, TargetMenu, Resolving, Feedback, HookDialogue, Settlement }
 
 /// <summary>Indexed native art and authored WORD labels. Main alone advances combat and presentation.</summary>
-internal partial class PalStoryBattleView : Node2D
+public partial class PalStoryBattleView : Node2D
 {
     // Modern demo WORD convention, not retail SDL IDs (SDL attack selection uses an icon).
-    internal const int AttackWord = 60000, TargetWord = 60001, MissWord = 60002, CriticalWord = 60003, HpWord = 60004, BoostWord = 60005;
+    public const int AttackWord = 60000, TargetWord = 60001, MissWord = 60002, CriticalWord = 60003, HpWord = 60004, BoostWord = 60005;
     // #50 settlement labels (battle.c 1019-1032/1130/1314: exp/cash box, level-up, learned magic).
-    internal const int ExpWord = 60006, CashWord = 60007, LevelUpWord = 60008, LearnedMagicWord = 60009;
+    public const int ExpWord = 60006, CashWord = 60007, LevelUpWord = 60008, LearnedMagicWord = 60009;
     // #51 failed escape label (fight.c 4168 BATTLE_LABEL_ESCAPEFAIL); authored WORD, not retail SDL id 31.
-    internal const int EscapeFailWord = 60010;
+    public const int EscapeFailWord = 60010;
     private CheckedStoryProfile story = null!;
     private CheckedBattleVisualProfile visual = null!;
     private CheckedBattleVisualTeam team = null!;
     private readonly List<ImageTexture> owned = new();
     // Instance-local observation runs only after this view owns the native texture.
-    internal Action<int?, ImageTexture>? TextureOwned { get; init; }
-    internal int TextureReferenceCount => owned.Count + frames.Count + effects.Count + numbers.Count;
+    public Action<int?, ImageTexture>? TextureOwned { get; init; }
+    public int TextureReferenceCount => owned.Count + frames.Count + effects.Count + numbers.Count;
     private readonly Dictionary<(bool Player, int Slot, int Frame, int Shift), ImageTexture> frames = new();
     private ImageTexture background = null!;
     private ClassicBattleView combat = null!;
@@ -39,10 +39,10 @@ internal partial class PalStoryBattleView : Node2D
     private int[] idleCounters = [];
     private readonly Dictionary<(int Member, int Frame), ImageTexture> effects = new();
     private readonly Dictionary<(StoryNumberColor Color, int Digit), ImageTexture> numbers = new();
-    internal StoryEnemyAttackSnapshot? EnemyPresentation { get; private set; }
-    internal int DisplayedPlayerHp => DrawSnapshot.DisplayedPlayerHp;
-    internal int DisplayedEnemyHp => DrawSnapshot.DisplayedEnemyHp;
-    internal bool ResultVisible => DrawSnapshot.ResultVisible;
+    public StoryEnemyAttackSnapshot? EnemyPresentation { get; private set; }
+    public int DisplayedPlayerHp => DrawSnapshot.DisplayedPlayerHp;
+    public int DisplayedEnemyHp => DrawSnapshot.DisplayedEnemyHp;
+    public bool ResultVisible => DrawSnapshot.ResultVisible;
 
     internal static void ValidateUi(CheckedStoryProfile story)
     {
@@ -132,11 +132,11 @@ internal partial class PalStoryBattleView : Node2D
         BuildDrawSnapshot(); QueueRedraw();
     }
 
-    internal IReadOnlyList<StoryNumberDigit> NumberDigits { get; private set; } = Array.Empty<StoryNumberDigit>();
-    internal int? FeedbackWord { get; private set; }
+    public IReadOnlyList<StoryNumberDigit> NumberDigits { get; private set; } = Array.Empty<StoryNumberDigit>();
+    public int? FeedbackWord { get; private set; }
     /// <summary>The current victory-settlement line (authored WORD labels plus numbers); null outside Settlement.</summary>
-    internal string? SettlementLine { get; private set; }
-    internal StoryBattleDrawSnapshot DrawSnapshot { get; private set; }
+    public string? SettlementLine { get; private set; }
+    public StoryBattleDrawSnapshot DrawSnapshot { get; private set; }
     private void BuildDrawSnapshot()
     {
         // Either side can have multiple actors independently; scalar fields project actor zero.
@@ -374,33 +374,33 @@ internal partial class PalStoryBattleView : Node2D
         }
     }
     public override void _ExitTree() { ReleaseTextures(); }
-    internal void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; SettlementLine = null; fleePresentation = null; escapePresentation = null; }
+    public void ReleaseTextures() { foreach (var texture in owned) texture.Dispose(); owned.Clear(); frames.Clear(); effects.Clear(); numbers.Clear(); NumberDigits = Array.Empty<StoryNumberDigit>(); FeedbackWord = null; SettlementLine = null; fleePresentation = null; escapePresentation = null; }
 }
 
 /// <summary>fight.c 4153-4171: the failed escaper's stepped frame/offset for one pose.</summary>
-internal readonly record struct StoryPlayerFleeSnapshot(int PartyIndex, int Frame, Vector2 Offset);
+public readonly record struct StoryPlayerFleeSnapshot(int PartyIndex, int Frame, Vector2 Offset);
 
-internal readonly record struct StoryBattleDrawSnapshot(int PlayerFrame, int EnemyFrame, Vector2 PlayerPosition, Vector2 EnemyPosition, int PlayerColorShift,
+public readonly record struct StoryBattleDrawSnapshot(int PlayerFrame, int EnemyFrame, Vector2 PlayerPosition, Vector2 EnemyPosition, int PlayerColorShift,
     int EnemyColorShift, int? EffectFrame, Vector2 EffectPosition, int DisplayedPlayerHp, int DisplayedEnemyHp,
     bool ResultVisible, int EnemyIdleCounter)
 {
-    internal bool EnemyVisible { get; init; }
-    internal IReadOnlyList<int> EnemyIdleFrames { get; init; } = Array.Empty<int>();
-    internal IReadOnlyList<int> EnemyIdleCounters { get; init; } = Array.Empty<int>();
-    internal IReadOnlyList<StoryNumberDigit> NumberDigits { get; init; } = Array.Empty<StoryNumberDigit>();
-    internal int? FeedbackWord { get; init; }
+    public bool EnemyVisible { get; init; }
+    public IReadOnlyList<int> EnemyIdleFrames { get; init; } = Array.Empty<int>();
+    public IReadOnlyList<int> EnemyIdleCounters { get; init; } = Array.Empty<int>();
+    public IReadOnlyList<StoryNumberDigit> NumberDigits { get; init; } = Array.Empty<StoryNumberDigit>();
+    public int? FeedbackWord { get; init; }
     // Party per-actor truth in party/slot order; empty keeps the legacy single-pair projection.
-    internal IReadOnlyList<StoryActorDraw> PartyPlayers { get; init; } = Array.Empty<StoryActorDraw>();
-    internal IReadOnlyList<StoryActorDraw> PartyEnemies { get; init; } = Array.Empty<StoryActorDraw>();
+    public IReadOnlyList<StoryActorDraw> PartyPlayers { get; init; } = Array.Empty<StoryActorDraw>();
+    public IReadOnlyList<StoryActorDraw> PartyEnemies { get; init; } = Array.Empty<StoryActorDraw>();
     // Per-struck-enemy state of one all-target strike; null keeps the single-target projection.
-    internal IReadOnlyList<StoryStruckEnemy>? StruckEnemies { get; init; }
+    public IReadOnlyList<StoryStruckEnemy>? StruckEnemies { get; init; }
     // Per-member role-hook boost sums; empty while no boost register is set.
-    internal IReadOnlyList<int> PartyBoosts { get; init; } = Array.Empty<int>();
-    internal int? SelectingPlayer { get; init; }
+    public IReadOnlyList<int> PartyBoosts { get; init; } = Array.Empty<int>();
+    public int? SelectingPlayer { get; init; }
 }
 
 /// <summary>One drawn battle actor: frame, bottom-center position, palette shift and displayed HP.</summary>
-internal readonly record struct StoryActorDraw(int Frame, Vector2 Position, int ColorShift, int Hp)
+public readonly record struct StoryActorDraw(int Frame, Vector2 Position, int ColorShift, int Hp)
 {
-    internal bool Visible { get; init; } = true;
+    public bool Visible { get; init; } = true;
 }

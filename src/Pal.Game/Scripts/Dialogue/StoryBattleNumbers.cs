@@ -5,18 +5,18 @@ using Pal.Core;
 
 namespace Pal.Game.Dialogue;
 
-internal enum StoryNumberColor { Yellow, Blue, Cyan }
-internal readonly record struct StoryNumberDigit(int Slot, int Digit, StoryNumberColor Color, Vector2 Position, uint BornAt);
+public enum StoryNumberColor { Yellow, Blue, Cyan }
+public readonly record struct StoryNumberDigit(int Slot, int Digit, StoryNumberColor Color, Vector2 Position, uint BornAt);
 
 /// <summary>Battle-owned UI slots (uibattle.c1748–1808), not a pose clock or combat owner.</summary>
-internal sealed class StoryBattleNumbers
+public sealed class StoryBattleNumbers
 {
     private sealed record Number(ushort Value, Vector2 Position, StoryNumberColor Color, uint BornAt, bool Pending);
     private readonly Number?[] slots = new Number?[16];
     private (int Word, uint BornAt, bool Pending)? label;
 
-    internal void BeginAction() => label = null;
-    internal void EnqueueAction(int beforeHp, ClassicBattleAction action, Vector2 target, uint now, bool pending)
+    public void BeginAction() => label = null;
+    public void EnqueueAction(int beforeHp, ClassicBattleAction action, Vector2 target, uint now, bool pending)
     {
         // Player caller subtracts SHORT damage from WORD HP before stat-change; do not use clamped combat HP.
         ushort after = unchecked((ushort)(beforeHp - action.Damage));
@@ -28,7 +28,7 @@ internal sealed class StoryBattleNumbers
             label = (action.Evaded ? PalStoryBattleView.MissWord : PalStoryBattleView.CriticalWord, now, pending);
     }
     // Position is the caller's stat-change anchor (already y-clamped), before ShowNum's x-15.
-    internal bool Enqueue(ushort value, Vector2 position, StoryNumberColor color, uint now, bool pending = false)
+    public bool Enqueue(ushort value, Vector2 position, StoryNumberColor color, uint now, bool pending = false)
     {
         if (value == 0) return false;
         for (int i = 0; i < slots.Length; i++)
@@ -36,18 +36,18 @@ internal sealed class StoryBattleNumbers
             { slots[i] = new(value, position - new Vector2(15, 0), color, now, pending); return true; }
         return false;
     }
-    internal void RevealPending()
+    public void RevealPending()
     {
         for (int i = 0; i < slots.Length; i++) if (slots[i] is { Pending: true } n) slots[i] = n with { Pending = false };
         if (label is { } l) label = (l.Word, l.BornAt, false);
     }
-    internal int? LabelAt(uint now)
+    public int? LabelAt(uint now)
     {
         if (label is not { } l) return null;
         if (unchecked(now - l.BornAt) / 40 > 10) { label = null; return null; }
         return l.Pending ? null : l.Word;
     }
-    internal IReadOnlyList<StoryNumberDigit> At(uint now)
+    public IReadOnlyList<StoryNumberDigit> At(uint now)
     {
         var digits = new List<StoryNumberDigit>();
         for (int i = 0; i < slots.Length; i++)
@@ -65,5 +65,5 @@ internal sealed class StoryBattleNumbers
         }
         return digits.AsReadOnly();
     }
-    internal void Clear() { Array.Clear(slots); label = null; }
+    public void Clear() { Array.Clear(slots); label = null; }
 }

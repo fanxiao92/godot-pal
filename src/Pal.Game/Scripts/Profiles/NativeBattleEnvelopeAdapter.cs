@@ -7,9 +7,9 @@ using Pal.Game.Resources;
 
 namespace Pal.Game.Profiles;
 
-internal static class NativeBattleEnvelopeAdapter
+public static class NativeBattleEnvelopeAdapter
 {
-    internal static FirstMandatoryBattleEnvelope Read(PalFirstMandatoryBattleProfile n, string uri)
+    public static FirstMandatoryBattleEnvelope Read(PalFirstMandatoryBattleProfile n, string uri)
     {
         try
         {
@@ -57,7 +57,7 @@ internal static class NativeBattleEnvelopeAdapter
         _=>throw new InvalidDataException("unknown closure identity resource type")
     };
 
-    internal static void Write(PalFirstMandatoryBattleProfile n,FirstMandatoryBattleEnvelope e)
+    public static void Write(PalFirstMandatoryBattleProfile n,FirstMandatoryBattleEnvelope e)
     {
         n.ContextSha256=e.ContextSha256; n.NativeEnvelopeSha256=FirstMandatoryBattleEnvelopeCodec.Sha256(e);
         n.Identity=new(){SnapshotKind=e.Identity.SnapshotKind,SceneId=e.Identity.SceneId,MapId=e.Identity.MapId,OwnerId=e.Identity.OwnerId,TriggerAddress=e.Identity.TriggerAddress};

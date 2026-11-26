@@ -36,7 +36,7 @@ public sealed partial class PalShopView : Node2D
 
     /// <summary>The selected row's presented BALL bitmap (object id, bitmap word, frame size);
     /// null while no row is selected or the binding carries the reference's empty-chunk word 0.</summary>
-    internal (int ObjectId, int Bitmap, int Width, int Height)? PresentedItemBitmap =>
+    public (int ObjectId, int Bitmap, int Width, int Height)? PresentedItemBitmap =>
         presentedItemBitmap is { } bitmap ? (bitmap.ObjectId, bitmap.Bitmap, bitmap.Frame.Width, bitmap.Frame.Height) : null;
 
     /// <summary>Publishes the session's current state for drawing. Composition and glyph

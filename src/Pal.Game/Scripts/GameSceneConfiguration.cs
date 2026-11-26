@@ -32,8 +32,8 @@ public sealed class GameSceneConfiguration
     internal string Profile { get; }
     internal bool StaticAcceptance { get; }
     internal string? DialogueProfile { get; }
-    internal string? BattleProfile { get; }
-    internal string Language { get; }
+    public string? BattleProfile { get; }
+    public string Language { get; }
 
     public static GameSceneConfiguration FromArguments(params string[] arguments)
     {

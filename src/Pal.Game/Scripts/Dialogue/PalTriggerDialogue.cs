@@ -62,7 +62,7 @@ public partial class PalTriggerDialogue : Node
     private IBattleRandom? _previewRandom;
     /// <summary>Transfers a throwaway executor and its owned native lifetime to StartCall.
     /// The factory must release its own allocations if construction fails before transfer.</summary>
-    internal Func<(TriggerScriptSession Session, IDisposable Lifetime)>? PreviewSessionFactory { get; set; }
+    public Func<(TriggerScriptSession Session, IDisposable Lifetime)>? PreviewSessionFactory { get; set; }
 
     /// <summary>The active 256-color scene palette, set by the host before the first-battle
     /// initialization (the #53 host owns the scene, not a story profile).</summary>
@@ -71,7 +71,7 @@ public partial class PalTriggerDialogue : Node
     /// <summary>World supplied before initialization by the first-battle or checked Story host.
     /// A shared world also binds its live role owner to the trigger; null preserves the legacy
     /// battle-only session whose dynamic verbs reject precisely at execution.</summary>
-    public Pal.Core.DynamicEventWorld? FirstBattleWorld { internal get; set; }
+    public Pal.Core.DynamicEventWorld? FirstBattleWorld { get; set; }
 
     public void Initialize(PalDialogueDisplay display, FirstBattleRealResources resources, string language, IBattleRandom random,
         PalSceneData? scene = null)

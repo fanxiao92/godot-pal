@@ -1,4 +1,4 @@
-# Offline public-command regression; artificial UTF-8 projects only, no SDK/engine required.
+﻿# Offline public-command regression; artificial UTF-8 projects only, no SDK/engine required.
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
@@ -16,13 +16,14 @@ function Reset-Fixture {
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
     Put 'src/Pal.Core/Pal.Core.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
     Put 'tools/Pal.Extract/Pal.Extract.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
-    Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /></ItemGroup></Project>'
+    Put 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" /><PackageReference Include="coverlet.collector" Version="6.0.4" /></ItemGroup></Project>'
     Put 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><ProjectReference Include="../../tools/Pal.Extract/Pal.Extract.csproj" /><Compile Include="../Pal.Extract.Tests/Fixtures/Yj2TestData.cs" Link="Fixtures/Yj2TestData.cs" /></ItemGroup></Project>'
     Put 'tests/Pal.Core.UnitTests/人工 Tests.cs' 'using System.IO; class Pure { string 中文 = "File.ReadAllText 不是调用"; /* Directory.CreateDirectory */ }'
     Put 'tests/Pal.Extract.UnitTests/PngTests.cs' 'using System.IO; using System.IO.Compression; class Png { void Read() { using var m = new MemoryStream(); using var r = new BinaryReader(m); using var z = new ZLibStream(m, CompressionMode.Decompress); } }'
     Put 'tests/Pal.Extract.Tests/Fixtures/Yj2TestData.cs' 'class Yj2TestData { static byte[] Data() => new byte[] { 1, 2 }; }'
     Put 'tools/Pal.Extract/Program.cs' 'class Program { static void Main() { System.IO.File.ReadAllText("production I/O is not a unit fixture"); } }'
-    Put 'NuGet.Config' '<configuration><packageSources><add key="gdunit" value=".packages/gdunit" /></packageSources></configuration>'
+    Put 'NuGet.Config' '<configuration><packageSources><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>'
+    Put 'pal.ps1' '# approved front-door entry'
 }
 function Check([string]$Name, [int]$Exit, [string]$Diagnostic, [string[]]$Selection = @('core', 'cli-unit')) {
     # -Command argument transport permits explicit empty arrays, unlike native -File string[] binding.
