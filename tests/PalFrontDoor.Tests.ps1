@@ -260,10 +260,21 @@ try {
     $prepDlgText = [IO.File]::ReadAllText((Join-Path $repoRoot 'scripts/Prepare-DialoguePackage.ps1'), $utf8)
     Assert-True ($prepDlgText -notmatch 'xiaofan') 'Prepare-DialoguePackage.ps1 must not contain personal paths'
     Assert-True ($prepDlgText -notmatch 'Get-TestProcesses\.ps1') 'Prepare-DialoguePackage.ps1 must not depend on Get-TestProcesses.ps1'
-    Assert-True ($prepDlgText -match 'Assert-NoRunningGodotProcess') 'Prepare-DialoguePackage.ps1 must call shared PID/Name-only Godot process guard'
+    Assert-True ($prepDlgText -match 'Resolve-ReadyGodotBinary') 'Prepare-DialoguePackage.ps1 must call shared PID/Name-only Godot preflight guard'
     Pass 'Prepare-DialoguePackage.ps1 personal path and legacy process-script coupling removed'
 
-    # 8. assets status and battle-context parameter validation
+    # 8. report error path writes run-summary.json with errorMsg
+    $repErrRes = Invoke-Pal @('report', '--repo-root', $workDir, '--json')
+    Assert-Equal 1 $repErrRes.ExitCode 'report without --from must exit 1'
+    Assert-True ($repErrRes.StdOut -match 'PAL_SUMMARY_JSON=(.+)') 'report error with --json must emit summary path'
+    $repErrSumPath = $Matches[1].Trim()
+    Assert-True (Test-Path -LiteralPath $repErrSumPath -PathType Leaf) 'report error must write run-summary.json'
+    $repErrSum = [IO.File]::ReadAllText($repErrSumPath, $utf8) | ConvertFrom-Json
+    Assert-Equal 'error' $repErrSum.status 'report error summary status must be error'
+    Assert-True ([string]$repErrSum.errorMsg -match '--from') 'report error summary must contain errorMsg'
+    Pass 'report error persists errorMsg to run-summary.json'
+
+    # 9. assets status and battle-context parameter validation
     $assetsOut = Join-Path $workDir 'assets-status-out'
     $assetsRes = Invoke-Pal @('assets', 'status', '--out', $assetsOut)
     Assert-Equal 0 $assetsRes.ExitCode 'assets status must exit 0'

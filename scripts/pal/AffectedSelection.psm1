@@ -10,7 +10,7 @@ function ConvertTo-RepoRelativePath {
         [Parameter(Mandatory)][string]$Path
     )
     $root = [IO.Path]::GetFullPath($RepositoryRoot)
-    $full = if ([IO.Path]::IsPathRooted($Path)) { [IO.Path]::GetFullPath($Path) } else { [IO.Path]::GetFullPath((Join-Path $root $Path)) }
+    $full = Resolve-PathUnderRoot -Root $root -Path $Path
     $rel = [IO.Path]::GetRelativePath($root, $full)
     return ($rel -replace '\\', '/')
 }
@@ -244,7 +244,7 @@ function Resolve-AffectedSelection {
         [string]$MapPath = 'tests/affected-map.psd1',
         [switch]$ForceAll
     )
-    $fullMapPath = if ([IO.Path]::IsPathRooted($MapPath)) { $MapPath } else { Join-Path $RepositoryRoot $MapPath }
+    $fullMapPath = Resolve-PathUnderRoot -Root $RepositoryRoot -Path $MapPath
     if (-not (Test-Path -LiteralPath $fullMapPath -PathType Leaf)) {
         throw "Affected map not found: $fullMapPath"
     }
@@ -442,7 +442,7 @@ function Test-AffectedMapIntegrity {
         [string]$MapPath = 'tests/affected-map.psd1'
     )
     $errors = [Collections.Generic.List[string]]::new()
-    $fullMapPath = if ([IO.Path]::IsPathRooted($MapPath)) { $MapPath } else { Join-Path $RepositoryRoot $MapPath }
+    $fullMapPath = Resolve-PathUnderRoot -Root $RepositoryRoot -Path $MapPath
     if (-not (Test-Path -LiteralPath $fullMapPath -PathType Leaf)) {
         return @{ Passed = $false; Errors = @("Missing affected map: $fullMapPath") }
     }

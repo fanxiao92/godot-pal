@@ -144,8 +144,7 @@ function New-ArtifactsDirectory {
         [string]$Label
     )
     if (-not [string]::IsNullOrWhiteSpace($ExplicitOut)) {
-        $dir = if ([IO.Path]::IsPathRooted($ExplicitOut)) { $ExplicitOut } else { Join-Path $Root $ExplicitOut }
-        $full = [IO.Path]::GetFullPath($dir)
+        $full = Resolve-PathUnderRoot -Root $Root -Path $ExplicitOut
         [void][IO.Directory]::CreateDirectory($full)
         return $full
     }
@@ -224,14 +223,15 @@ function Invoke-DotnetTestStep {
         $env:PAL_TEST_GODOT = $prevPalGodot
     }
 
+    $trxCounts = $null
     if (Test-Path -LiteralPath $rawTrxPath -PathType Leaf) {
         Copy-Item -LiteralPath $rawTrxPath -Destination $trxPath -Force
         $State.TrxFiles.Add((Get-RelativeArtifactPath -BaseDir $ArtifactsDir -TargetPath $trxPath))
-        $counts = Read-TrxSummary -TrxPath $trxPath
-        $State.Total += $counts.total
-        $State.Passed += $counts.passed
-        $State.Failed += $counts.failed
-        $State.Skipped += $counts.skipped
+        $trxCounts = Read-TrxSummary -TrxPath $trxPath
+        $State.Total += $trxCounts.total
+        $State.Passed += $trxCounts.passed
+        $State.Failed += $trxCounts.failed
+        $State.Skipped += $trxCounts.skipped
         if ($EmitJunit) {
             $junitPath = Join-Path (Join-Path $ArtifactsDir 'junit') "$Name.xml"
             Convert-TrxToJunit -TrxPath $trxPath -JunitPath $junitPath
@@ -260,6 +260,10 @@ function Invoke-DotnetTestStep {
     if ($exitCode -ne 0) {
         $State.Status = 'failed'
         throw "Test step '$Name' failed with exit code $exitCode."
+    }
+    if ($trxCounts -and ($trxCounts.failed -gt 0 -or ($trxCounts.outcome -notin @('Completed', 'Passed')))) {
+        $State.Status = 'failed'
+        throw "Test step '$Name' TRX reported non-passing outcome '$($trxCounts.outcome)' (failed=$($trxCounts.failed))."
     }
 }
 
@@ -309,9 +313,7 @@ function Invoke-IntegrationTarget {
             -ArtifactsDir $ArtifactsDir -Filter $Filter -EmitJunit:$EmitJunit -State $State
     }
     if ('prepare' -in $selected) {
-        Assert-NoRunningGodotProcess
-        $godot = Resolve-GodotBinary -ExplicitPath $GodotPathOpt
-        [void](Assert-PinnedGodotVersion -GodotExe $godot)
+        $godot = Resolve-ReadyGodotBinary -ExplicitPath $GodotPathOpt
         Invoke-DotnetTestStep -Name 'Pal.Prepare.Tests' `
             -ProjectRelPath 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj' `
             -ArtifactsDir $ArtifactsDir -Filter $Filter -EmitJunit:$EmitJunit -GodotExe $godot -State $State
@@ -328,9 +330,7 @@ function Invoke-GameTarget {
         [string]$ArtifactsDir,
         [hashtable]$State
     )
-    Assert-NoRunningGodotProcess
-    $godot = Resolve-GodotBinary -ExplicitPath $GodotPathOpt
-    [void](Assert-PinnedGodotVersion -GodotExe $godot)
+    $godot = Resolve-ReadyGodotBinary -ExplicitPath $GodotPathOpt
 
     $parts = [Collections.Generic.List[string]]::new()
     $explicitRealAssets = $IncludeRealAssets -or (@($Categories | Where-Object { $_ -ieq 'RealAssets' }).Count -gt 0)
@@ -392,9 +392,7 @@ function Invoke-FullTestSuite {
 
 function Invoke-GodotImportWarmup {
     param([string]$GodotPathOpt)
-    Assert-NoRunningGodotProcess
-    $godot = Resolve-GodotBinary -ExplicitPath $GodotPathOpt
-    [void](Assert-PinnedGodotVersion -GodotExe $godot)
+    $godot = Resolve-ReadyGodotBinary -ExplicitPath $GodotPathOpt
     foreach ($relProj in @('src/Pal.Game', 'tests/Pal.Game.Tests')) {
         $projDir = Join-Path $script:RepoRoot $relProj
         if (-not (Test-Path -LiteralPath (Join-Path $projDir 'project.godot') -PathType Leaf)) { continue }
@@ -440,7 +438,7 @@ if ($cmd -eq 'report') {
         $summaries = [Collections.Generic.List[object]]::new()
         $trxFailures = [Collections.Generic.List[object]]::new()
         foreach ($d in $fromDirs) {
-            $fullDir = if ([IO.Path]::IsPathRooted($d)) { $d } else { Join-Path $script:RepoRoot $d }
+            $fullDir = Resolve-PathUnderRoot -Root $script:RepoRoot -Path $d
             $sumFile = Join-Path $fullDir 'run-summary.json'
             if (-not (Test-Path -LiteralPath $sumFile -PathType Leaf)) {
                 throw "run-summary.json not found in $fullDir"
@@ -449,7 +447,7 @@ if ($cmd -eq 'report') {
             $summaries.Add($sumObj)
             if ($sumObj.PSObject.Properties['trxFiles'] -and $sumObj.trxFiles) {
                 foreach ($relTrx in @($sumObj.trxFiles)) {
-                    $trxFull = if ([IO.Path]::IsPathRooted([string]$relTrx)) { [string]$relTrx } else { Join-Path $fullDir ([string]$relTrx) }
+                    $trxFull = Resolve-PathUnderRoot -Root $fullDir -Path ([string]$relTrx)
                     foreach ($failItem in @(Read-TrxFailures -TrxPath $trxFull)) {
                         $trxFailures.Add($failItem)
                     }
@@ -461,7 +459,7 @@ if ($cmd -eq 'report') {
         $sha = Get-CurrentCommitSha -Root $script:RepoRoot
         $md = Format-MarkdownReport -Summaries $summaries.ToArray() -CommitSha $sha -Format $fmt -TrxFailures $trxFailures.ToArray()
         if ($parsed.Flags.ContainsKey('out')) {
-            $outFile = if ([IO.Path]::IsPathRooted($parsed.Flags['out'])) { $parsed.Flags['out'] } else { Join-Path $script:RepoRoot $parsed.Flags['out'] }
+            $outFile = Resolve-PathUnderRoot -Root $script:RepoRoot -Path ([string]$parsed.Flags['out'])
             $parent = Split-Path $outFile -Parent
             if ($parent) { [void][IO.Directory]::CreateDirectory($parent) }
             [IO.File]::WriteAllText($outFile, $md, [Text.UTF8Encoding]::new($false))
@@ -471,7 +469,13 @@ if ($cmd -eq 'report') {
         }
         exit 0
     } catch {
-        [Console]::Error.WriteLine("pal.ps1 report error: $($_.Exception.Message)")
+        $errMsg = $_.Exception.Message
+        [Console]::Error.WriteLine("pal.ps1 report error: $errMsg")
+        $art = New-ArtifactsDirectory -Root $script:RepoRoot -ExplicitOut '' -Label 'report-error'
+        $sum = New-RunSummaryObject -Command 'report' -Status 'error' -ErrorMsg $errMsg `
+            -ArtifactsDir (ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $art)
+        $sumPath = Write-RunSummaryJson -ArtifactsDir $art -Summary $sum
+        if ($parsed.Flags.ContainsKey('json')) { Write-Output "PAL_SUMMARY_JSON=$sumPath" }
         exit 1
     }
 }
@@ -489,7 +493,6 @@ $state = @{
     TrxFiles      = [Collections.Generic.List[string]]::new()
     CoverageFiles = [Collections.Generic.List[string]]::new()
     Coverage      = [Collections.Generic.List[object]]::new()
-    Notes         = [Collections.Generic.List[string]]::new()
 }
 
 try {
@@ -518,7 +521,6 @@ try {
                     }
                     Write-Host "Selected targets: $(if ($sel.Targets.Count -gt 0) { $sel.Targets -join ', ' } else { '<none (no-op)>' })"
 
-                    $state.Notes.Add("mode=$($sel.Mode); targets=$($sel.Targets -join ',')")
                     if ($explainOnly -or $sel.Mode -eq 'no-op') {
                         if ($sel.Mode -eq 'no-op') { Write-Host 'NO-OP: No tests required for this change set.' }
                         break

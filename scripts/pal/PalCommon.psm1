@@ -2,6 +2,15 @@ Set-StrictMode -Version Latest
 
 $script:PinnedGodotVersion = '4.7.2.stable.mono.official.ed1daf0bf'
 
+function Resolve-PathUnderRoot {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Path
+    )
+    if ([IO.Path]::IsPathRooted($Path)) { return [IO.Path]::GetFullPath($Path) }
+    return [IO.Path]::GetFullPath((Join-Path $Root $Path))
+}
+
 function Read-SafeXmlDocument {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -57,6 +66,14 @@ function Assert-PinnedGodotVersion {
     return $ver
 }
 
+function Resolve-ReadyGodotBinary {
+    param([string]$ExplicitPath)
+    Assert-NoRunningGodotProcess
+    $godot = Resolve-GodotBinary -ExplicitPath $ExplicitPath
+    [void](Assert-PinnedGodotVersion -GodotExe $godot)
+    return $godot
+}
+
 function New-RunSummaryObject {
     param(
         [Parameter(Mandatory)][string]$Command,
@@ -91,9 +108,11 @@ function New-RunSummaryObject {
 }
 
 Export-ModuleMember -Function @(
+    'Resolve-PathUnderRoot',
     'Read-SafeXmlDocument',
     'Resolve-GodotBinary',
     'Assert-NoRunningGodotProcess',
     'Assert-PinnedGodotVersion',
+    'Resolve-ReadyGodotBinary',
     'New-RunSummaryObject'
 )

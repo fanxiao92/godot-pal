@@ -4,16 +4,27 @@ if (-not (Get-Command Read-SafeXmlDocument -ErrorAction SilentlyContinue)) {
     Import-Module (Join-Path $PSScriptRoot 'PalCommon.psm1') -Global
 }
 
-function Read-TrxSummary {
+function Open-TrxDocument {
     param([Parameter(Mandatory)][string]$TrxPath)
     $xml = Read-SafeXmlDocument -Path $TrxPath
     $ns = [Xml.XmlNamespaceManager]::new($xml.NameTable)
     $ns.AddNamespace('t', 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010')
-    $counters = $xml.SelectSingleNode('//t:ResultSummary/t:Counters', $ns)
+    return @{ Xml = $xml; Ns = $ns }
+}
+
+function Test-TrxFailureOutcome {
+    param([string]$Outcome)
+    return ($Outcome -in @('Failed', 'Error', 'Timeout', 'Aborted'))
+}
+
+function Read-TrxSummary {
+    param([Parameter(Mandatory)][string]$TrxPath)
+    $trx = Open-TrxDocument -TrxPath $TrxPath
+    $counters = $trx.Xml.SelectSingleNode('//t:ResultSummary/t:Counters', $trx.Ns)
     if (-not $counters) {
         return [ordered]@{ total = 0; passed = 0; failed = 0; skipped = 0; outcome = 'Unknown' }
     }
-    $summary = $xml.SelectSingleNode('//t:ResultSummary', $ns)
+    $summary = $trx.Xml.SelectSingleNode('//t:ResultSummary', $trx.Ns)
     $total = [int]($counters.GetAttribute('total'))
     $passed = [int]($counters.GetAttribute('passed'))
     $failed = [int]($counters.GetAttribute('failed')) + [int]($counters.GetAttribute('error')) + [int]($counters.GetAttribute('timeout')) + [int]($counters.GetAttribute('aborted'))
@@ -31,14 +42,12 @@ function Read-TrxSummary {
 function Read-TrxFailures {
     param([Parameter(Mandatory)][string]$TrxPath)
     if (-not (Test-Path -LiteralPath $TrxPath -PathType Leaf)) { return @() }
-    $xml = Read-SafeXmlDocument -Path $TrxPath
-    $ns = [Xml.XmlNamespaceManager]::new($xml.NameTable)
-    $ns.AddNamespace('t', 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010')
+    $trx = Open-TrxDocument -TrxPath $TrxPath
     $failures = [Collections.Generic.List[object]]::new()
-    foreach ($r in @($xml.SelectNodes('//t:Results/t:UnitTestResult', $ns))) {
+    foreach ($r in @($trx.Xml.SelectNodes('//t:Results/t:UnitTestResult', $trx.Ns))) {
         $outcome = [string]$r.GetAttribute('outcome')
-        if ($outcome -ieq 'Failed' -or $outcome -ieq 'Error' -or $outcome -ieq 'Timeout' -or $outcome -ieq 'Aborted') {
-            $msgNode = $r.SelectSingleNode('t:Output/t:ErrorInfo/t:Message', $ns)
+        if (Test-TrxFailureOutcome -Outcome $outcome) {
+            $msgNode = $r.SelectSingleNode('t:Output/t:ErrorInfo/t:Message', $trx.Ns)
             $msg = if ($msgNode) { ($msgNode.InnerText -replace '[\r\n]+', ' ').Trim() } else { $outcome }
             $failures.Add([ordered]@{
                 testName = [string]$r.GetAttribute('testName')
@@ -55,10 +64,8 @@ function Convert-TrxToJunit {
         [Parameter(Mandatory)][string]$TrxPath,
         [Parameter(Mandatory)][string]$JunitPath
     )
-    $trx = Read-SafeXmlDocument -Path $TrxPath
-    $ns = [Xml.XmlNamespaceManager]::new($trx.NameTable)
-    $ns.AddNamespace('t', 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010')
-    $results = @($trx.SelectNodes('//t:Results/t:UnitTestResult', $ns))
+    $trx = Open-TrxDocument -TrxPath $TrxPath
+    $results = @($trx.Xml.SelectNodes('//t:Results/t:UnitTestResult', $trx.Ns))
 
     $doc = [xml]::new()
     $decl = $doc.CreateXmlDeclaration('1.0', 'utf-8', $null)
@@ -83,15 +90,15 @@ function Convert-TrxToJunit {
         }
         $tc.SetAttribute('time', ([string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', $sec)))
         $outcome = [string]$r.GetAttribute('outcome')
-        if ($outcome -ieq 'Failed' -or $outcome -ieq 'Error' -or $outcome -ieq 'Timeout' -or $outcome -ieq 'Aborted') {
+        if (Test-TrxFailureOutcome -Outcome $outcome) {
             $failures++
             $failEl = $doc.CreateElement('failure')
-            $msgNode = $r.SelectSingleNode('t:Output/t:ErrorInfo/t:Message', $ns)
-            $stackNode = $r.SelectSingleNode('t:Output/t:ErrorInfo/t:StackTrace', $ns)
+            $msgNode = $r.SelectSingleNode('t:Output/t:ErrorInfo/t:Message', $trx.Ns)
+            $stackNode = $r.SelectSingleNode('t:Output/t:ErrorInfo/t:StackTrace', $trx.Ns)
             $failEl.SetAttribute('message', $(if ($msgNode) { $msgNode.InnerText } else { $outcome }))
             if ($stackNode) { $failEl.InnerText = $stackNode.InnerText }
             [void]$tc.AppendChild($failEl)
-        } elseif ($outcome -ieq 'NotExecuted' -or $outcome -ieq 'Inconclusive') {
+        } elseif ($outcome -in @('NotExecuted', 'Inconclusive')) {
             $skipped++
             [void]$tc.AppendChild($doc.CreateElement('skipped'))
         }

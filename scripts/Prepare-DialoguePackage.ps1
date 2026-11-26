@@ -33,9 +33,7 @@ try {
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot
     if ([IO.File]::Exists($outputRoot)) { throw 'OutputPath is an existing file.' }
     if ([IO.Directory]::Exists($outputRoot) -and @([IO.Directory]::EnumerateFileSystemEntries($outputRoot)).Count -ne 0) { throw 'OutputPath must be new or empty; no overwrite is supported.' }
-    $godot = Resolve-GodotBinary -ExplicitPath $options['-GodotPath']
-    Assert-NoRunningGodotProcess
-    [void](Assert-PinnedGodotVersion -GodotExe $godot)
+    $godot = Resolve-ReadyGodotBinary -ExplicitPath $options['-GodotPath']
     dotnet build (Join-Path $project 'Pal.Game.csproj') --nologo --verbosity quiet
     if ($LASTEXITCODE -ne 0) { throw 'Pal.Game build failed.' }
     & $godot --headless --path $project 'res://Editor/PrepareDialogue.tscn' -- '--prepare-input' $inputRoot '--prepare-output' $outputRoot
