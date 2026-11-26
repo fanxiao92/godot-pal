@@ -18,6 +18,6 @@
 
 ## 工具链与历史症状
 
-工具链版本、固定包消费和 bootstrap 以[当前包消费说明](../testing/gdunit-source-packages.md)及仓库配置为准；来源、发布、固定包验收和历史完整门见[固定包来源与验收年表](../archive/m2/gdunit-source-acceptance-history.md)。Windows 输出捕获、焦点观测、跨盘 Prepare 和历史 CI 的具体失败只在历史记录中按明确症状触发查阅；历史一次通过不证明根因已消除，也不授权重跑。
+工具链版本与包配置以 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 及仓库配置为准；历史固定包来源、发布与验收年表见[固定包来源与验收年表](../archive/m2/gdunit-source-acceptance-history.md)。Windows 输出捕获、焦点观测、跨盘 Prepare 和历史 CI 的具体失败只在历史记录中按明确症状触发查阅；历史一次通过不证明根因已消除，也不授权重跑。
 
 完整门仍由共享入口负责；本页不创建第二诊断框架，不把 headless、GPU、人工桌面、远端 CI 或成本报告相互替代。任务状态、Issue 评论和远端 CI 是动态事实，不能从历史标题或旧计划页推断。
