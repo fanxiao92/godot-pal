@@ -42,4 +42,4 @@
 
 # Synthetic test fixtures must be plain content (#76): CI checks out with lfs:false,
 # and an LFS pointer checked out as text fails the texture import (valid=false, no ctex).
-src/Pal.Game/Tests/Fixtures/** -filter -diff -merge -text
+tests/Pal.Game.Tests/Tests/Fixtures/** -filter -diff -merge -text

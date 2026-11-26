@@ -67,7 +67,7 @@ public sealed partial class PalMenuView : Node2D
     /// <summary>The selected item row's presented BALL bitmap (object id, bitmap word, frame
     /// size); null while no item row is selected or the binding carries the reference's
     /// empty-chunk word 0 (PAL_MKFReadChunk returns no bitmap, so no picture is drawn).</summary>
-    internal (int ObjectId, int Bitmap, int Width, int Height)? PresentedItemBitmap =>
+    public (int ObjectId, int Bitmap, int Width, int Height)? PresentedItemBitmap =>
         presentedItemBitmap is { } bitmap ? (bitmap.ObjectId, bitmap.Bitmap, bitmap.Frame.Width, bitmap.Frame.Height) : null;
 
     /// <summary>Preflight for every text the current menu state would draw. Throws with the font's

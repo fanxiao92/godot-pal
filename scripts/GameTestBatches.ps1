@@ -92,7 +92,7 @@ function Get-PrepareTestCount {
 }
 
 function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committable')][string]$Scope = 'full') {
-    $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'src/Pal.Game/Tests'))
+    $inventory = @(Get-GameSourceInventory (Join-Path $Repository 'tests/Pal.Game.Tests/Tests'))
     $definitions = @(
         @{ name = 'process'; count = 85; classes = @('StoryMainProcessTests', 'MainProcessTests', 'ExplorationProcessTests') }
         @{ name = 'scene-dialogue'; count = 135; classes = @('ExplorationSceneTests', 'NpcInteractionHostTests', 'DialogueDisplayFixtureTests', 'TriggerDialogueFixtureTests', 'MenuSceneTests', 'ShopSceneTests', 'SystemSaveSceneTests', 'SystemLoadSceneTests'); excludeMatches = @('Pal.Game.Tests.TriggerDialogueFixtureTests.First_battle_'); sessionTimeoutMs = 300000 }
@@ -163,12 +163,9 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         if ($names.Count -ne $expected) { throw "[range:source-count] Batch $($definition.name) $Scope source count differs: $($names.Count)/$expected." }
         [pscustomobject]@{ name = $definition.name; count = $expected; classes = $definition.classes; expected = $names; filter = $filter; sessionTimeoutMs = [int]($definition.sessionTimeoutMs ?? 120000) }
     }
-    $controls = @($inventory | Where-Object class -CEQ 'FailureControlTests')
-    $expectedControls = @('Pal.Game.Tests.FailureControlTests.IntentionalAssertionMismatchPropagates',
-        'Pal.Game.Tests.FailureControlTests.IntentionalTimeoutPropagates', 'Pal.Game.Tests.FailureControlTests.NativeReadyExceptionIsNotSwallowed')
-    Assert-ExactTestNames @($controls.name) $expectedControls 'Game controls'
-    Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.class -CNE 'FailureControlTests' -and $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
-    if ($inventory.Count -ne 1100) { throw "Game inventory differs: $($inventory.Count)/1100." }
+    $controls = @()
+    Assert-ExactTestNames @($batches.expected) @($inventory | Where-Object { $_.name -cnotin $localOnly } | ForEach-Object name) 'Game partition'
+    if ($inventory.Count -ne 1097) { throw "Game inventory differs: $($inventory.Count)/1097." }
     $spriteFieldsPositive = 'Pal.Game.Tests.NativeBattleVisualProfileTests.StandaloneCheckedSpriteMatchesIndependentFieldsAndSourceBoundaries'
     $spriteFieldsCases = @($inventory | Where-Object name -CEQ $spriteFieldsPositive)
     $spriteFieldsOwners = @($batches | Where-Object { $_.expected -ccontains $spriteFieldsPositive })
@@ -188,7 +185,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         [pscustomobject]@{ name = 'cli-integration'; path = 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj'; passed = 419; skipped = 2 }
         [pscustomobject]@{ name = 'prepare'; path = 'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj'; passed = (Get-PrepareTestCount); skipped = 0 }
         # 1097 full-scope positives; committable scope executes one fewer (#76 local-only split).
-        [pscustomobject]@{ name = 'game'; path = 'src/Pal.Game/Pal.Game.csproj'; passed = (1097 - $localOnly.Count); skipped = 0 }
+        [pscustomobject]@{ name = 'game'; path = 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj'; passed = (1097 - $localOnly.Count); skipped = 0 }
     )
     $allProjects = [Collections.Generic.List[string]]::new()
     $solutionProjects = foreach ($match in [regex]::Matches([IO.File]::ReadAllText((Join-Path $Repository 'GodotPal.sln')), '"([^"\r\n]+\.csproj)"')) {
@@ -197,7 +194,7 @@ function Get-GameBatchPlan([string]$Repository, [ValidateSet('full', 'committabl
         [xml]$project = [IO.File]::ReadAllText((Join-Path $Repository $relative))
         if (@($project.Project.PropertyGroup.IsTestProject | Where-Object { $_ -eq 'true' }).Count) { $relative }
     }
-    Assert-ExactTestNames @($allProjects) @($projects.path + @('src/Pal.Core/Pal.Core.csproj', 'tools/Pal.Extract/Pal.Extract.csproj')) 'Solution project classification'
+    Assert-ExactTestNames @($allProjects) @($projects.path + @('src/Pal.Core/Pal.Core.csproj', 'src/Pal.Game/Pal.Game.csproj', 'tools/Pal.Extract/Pal.Extract.csproj')) 'Solution project classification'
     Assert-ExactTestNames @($solutionProjects) @($projects.path) 'Solution test projects'
     [pscustomobject]@{ scope = $Scope; inventory = $inventory; batches = @($batches); controls = $controls; projects = $projects; localOnly = $localOnly }
 }

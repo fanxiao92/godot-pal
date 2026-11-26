@@ -22,7 +22,7 @@ public partial class PalDialogueDisplay : Control
     private int _lastPaletteRotation;
     private string _box = "upper";
     /// <summary>The dialogue box the current request selected (kDialogCenterWindow etc.).</summary>
-    internal string DisplayBox => _box;
+    public string DisplayBox => _box;
 
     public event Action<Color[]>? ActivePaletteChanged;
     public event Action? BackgroundRestoreRequested;

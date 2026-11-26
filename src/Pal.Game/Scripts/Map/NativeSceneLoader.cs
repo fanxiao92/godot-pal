@@ -7,12 +7,12 @@ using Pal.Game.Profiles;
 
 namespace Pal.Game.Map;
 
-internal static class NativeSceneLoader
+public static class NativeSceneLoader
 {
-    internal sealed record Selection(string Root, string Profile, bool StaticAcceptance, string? DialogueProfile,
+    public sealed record Selection(string Root, string Profile, bool StaticAcceptance, string? DialogueProfile,
         string? BattleProfile, string Language);
 
-    internal static Selection Arguments(string[] arguments)
+    public static Selection Arguments(string[] arguments)
     {
         if (arguments.Any(a => a.StartsWith("--m4-", StringComparison.Ordinal)))
         {
@@ -83,7 +83,7 @@ internal static class NativeSceneLoader
         return new(root, profile, staticAcceptance, null, null, "zh-Hans");
     }
 
-    internal static void ValidateRoot(string root)
+    public static void ValidateRoot(string root)
     {
         const string usage = "--m2-resources requires one normalized res://Assets (or child directory) URI";
         if (!(root == "res://Assets" || root.StartsWith("res://Assets/", StringComparison.Ordinal)))
@@ -96,7 +96,7 @@ internal static class NativeSceneLoader
         }
     }
 
-    internal static PalMapScene Load(string root)
+    public static PalMapScene Load(string root)
     {
         string path = root + "/Scenes/Scene.tscn";
         if (!ResourceLoader.Exists(path)) throw new InvalidDataException(path + ": native scene missing; prepare resources explicitly");

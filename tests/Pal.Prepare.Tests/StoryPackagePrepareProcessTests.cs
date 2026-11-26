@@ -159,7 +159,7 @@ public sealed class StoryPackagePrepareProcessTests : IDisposable
             "-InputPath", numbers, "-OutputPath", Path.Combine(native, "Numbers"), "-GodotPath", Godot);
         Assert.True(battle.ExitCode == 0, battle.Text);
         foreach (string name in new[] { "Font.tres", "Prompt-00.tres", "Prompt-01.tres", "Prompt-02.tres" })
-            File.Copy(Path.Combine(Project, "Tests", "Fixtures", "TriggerDialogue", name), Path.Combine(native, name));
+            File.Copy(Path.Combine(repo, "tests", "Pal.Game.Tests", "Tests", "Fixtures", "TriggerDialogue", name), Path.Combine(native, name));
         foreach (string language in new[] { "zh-Hans", "en" })
             WriteNative("Language." + language + ".tres", "PalDialogueLanguage", $"Language = \"{language}\"\nSourceIdentity = \"literal-process-test\"\nMessages = Array[Resource]([])");
         // No display blocks are used by this minimal process representative; direct tests cover glyph closure.

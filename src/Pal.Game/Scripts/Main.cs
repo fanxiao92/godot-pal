@@ -27,7 +27,7 @@ public partial class Main : Node2D
     private bool firstBattleRendererSubscribed;
     private GodotBattleRandom? firstBattleRandom;
     private ulong? initialFirstBattleSeed;
-    internal GodotBattleRandom? FirstBattleRandom => firstBattleRandom;
+    public GodotBattleRandom? FirstBattleRandom => firstBattleRandom;
     private DynamicEventWorld? firstBattleWorld;
     private RoleLiveState? roleLiveState;
     // #213 exploration menu: the story-profile host binds the Core menu session over the shared
@@ -80,7 +80,7 @@ public partial class Main : Node2D
         configuration = selection;
     }
 
-    internal void Configure(GameSceneConfiguration selection, ulong initialFirstBattleSeed)
+    public void Configure(GameSceneConfiguration selection, ulong initialFirstBattleSeed)
     {
         ArgumentNullException.ThrowIfNull(selection);
         if (selection.BattleProfile is null)
@@ -98,9 +98,9 @@ public partial class Main : Node2D
     /// <summary>The #213 exploration menu session bound to the story-profile host, or null on
     /// hosts without the formal shared live-state chain (supported context of this leaf).</summary>
     public ExplorationMenuSession? Menu => menu;
-    internal PalMenuView? MenuView => menuView;
-    internal ExplorationShopSession? Shop => shop;
-    internal PalShopView? ShopView => shopView;
+    public PalMenuView? MenuView => menuView;
+    public ExplorationShopSession? Shop => shop;
+    public PalShopView? ShopView => shopView;
     // Actual Main callback completion; display completion has its own production boundary.
     public event Action? UpdateCompleted;
 

@@ -3,17 +3,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <Nullable>enable</Nullable>
-    <IsTestProject>true</IsTestProject>
-    <IsPackable>false</IsPackable>
-    <!-- TestPlatform uses RunSettingsFilePath by default; the CLI filter overrides this default filter. -->
-    <RunSettingsFilePath>$(MSBuildThisFileDirectory)../../tests/Pal.Game.Tests/game.runsettings</RunSettingsFilePath>
-    <VSTestTestCaseFilter Condition="'$(VSTestTestCaseFilter)' == ''">FullyQualifiedName!~FailureControlTests</VSTestTestCaseFilter>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../tests/Fixtures/BattleContextTestFixture.cs" Link="Tests/Fixtures/BattleContextTestFixture.cs" />
     <ProjectReference Include="../Pal.Core/Pal.Core.csproj" />
-    <PackageReference Include="gdUnit4.api" Version="[5.1.0-rc6.pal.a5f20fb8.1]" />
-    <PackageReference Include="gdUnit4.test.adapter" Version="[3.2.0-pal.a5f20fb8.1]" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
   </ItemGroup>
 </Project>

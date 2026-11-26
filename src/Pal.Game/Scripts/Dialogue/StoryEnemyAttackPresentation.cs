@@ -7,19 +7,19 @@ namespace Pal.Game.Dialogue;
 
 /// <summary>Active single-enemy physical sequence, fight.c4987–5135. No RNG or combat advancement.
 /// Main supplies the persistent gesture for TRUE tail segments; this timeline owns active FALSE frames.</summary>
-internal sealed class StoryEnemyAttackPresentation
+public sealed class StoryEnemyAttackPresentation
 {
     private readonly List<(long End, StoryEnemyAttackSnapshot Snapshot)> segments = new();
     private readonly StoryEnemyAttackSnapshot returned;
-    internal long Duration { get; private set; }
-    internal long ImpactPose { get; }
-    internal StoryEnemyAttackSnapshot At(int pose)
+    public long Duration { get; private set; }
+    public long ImpactPose { get; }
+    public StoryEnemyAttackSnapshot At(int pose)
     {
         foreach (var segment in segments) if (pose < segment.End) return segment.Snapshot;
         return returned;
     }
 
-    internal StoryEnemyAttackPresentation(int idle, int magic, int attack, int wait,
+    public StoryEnemyAttackPresentation(int idle, int magic, int attack, int wait,
         Vector2 player, Vector2 enemy, int beforeHp, int afterHp, int maxHp, ClassicBattleAction action, int initialEnemyFrame = 0)
     {
         int pf = RestFrame(beforeHp, maxHp), ef = initialEnemyFrame;
@@ -54,9 +54,9 @@ internal sealed class StoryEnemyAttackPresentation
         pf = RestFrame(afterHp, maxHp); Hold(5);
         returned = new(pf, 0, player, enemy, 0, afterHp, true);
     }
-    internal static int RestFrame(int hp, int maxHp) => hp == 0 ? 2 : hp < Math.Min(100, maxHp / 5) ? 1 : 0;
-    internal static byte ShiftIndex(byte index, int shift) => (byte)((index & 0xf0) | Math.Clamp((index & 15) + shift, 0, 15));
+    public static int RestFrame(int hp, int maxHp) => hp == 0 ? 2 : hp < Math.Min(100, maxHp / 5) ? 1 : 0;
+    public static byte ShiftIndex(byte index, int shift) => (byte)((index & 0xf0) | Math.Clamp((index & 15) + shift, 0, 15));
 }
 
-internal readonly record struct StoryEnemyAttackSnapshot(int PlayerFrame, int EnemyFrame,
+public readonly record struct StoryEnemyAttackSnapshot(int PlayerFrame, int EnemyFrame,
     Vector2 PlayerPosition, Vector2 EnemyPosition, int PlayerColorShift, int DisplayedPlayerHp, bool ResultVisible);

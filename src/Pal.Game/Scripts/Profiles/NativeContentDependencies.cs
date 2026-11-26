@@ -6,10 +6,10 @@ using Godot;
 
 namespace Pal.Game.Profiles;
 
-internal static class NativeContentDependencies
+public static class NativeContentDependencies
 {
     // Only the authored/prepared data graph. Scripts/engine and generated .godot import outputs are not authenticated.
-    internal static HashSet<string> ContentDependencies(IEnumerable<string> seeds, IReadOnlyDictionary<string, string>? hashes = null)
+    public static HashSet<string> ContentDependencies(IEnumerable<string> seeds, IReadOnlyDictionary<string, string>? hashes = null)
     {
         var complete = new HashSet<string>(StringComparer.Ordinal);
         var active = new HashSet<string>(StringComparer.Ordinal);
@@ -43,15 +43,15 @@ internal static class NativeContentDependencies
         return complete;
     }
 
-    internal static void CheckFile(string path, IReadOnlyDictionary<string, string> hashes)
+    public static void CheckFile(string path, IReadOnlyDictionary<string, string> hashes)
     {
         NativeExplorationProfile.ValidateUri(path);
         Require(hashes.TryGetValue(path, out string? expected) && IsHash(expected)
             && Godot.FileAccess.FileExists(path) && Godot.FileAccess.GetSha256(path) == expected,
             path + ": resource SHA-256 mismatch, missing hash or missing resource");
     }
-    internal static bool IsHash(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
-    internal static IEnumerable<string> Dependencies(string path)
+    public static bool IsHash(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+    public static IEnumerable<string> Dependencies(string path)
     {
         foreach (string dependency in ResourceLoader.GetDependencies(path))
         {

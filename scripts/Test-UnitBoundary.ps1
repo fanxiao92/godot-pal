@@ -9,7 +9,7 @@ function Fail([string]$Code, [string]$Message) { throw "[boundary:$Code] $Messag
 # Root-level entries are allowlisted: one-off helper scripts accidentally committed at the repository
 # root (e.g. _fix_loader.py in #53, _pb2.py caught by the M4 dual review) must fail here instead of
 # riding along in delivery diffs. Missing entries are fine; unexpected entries are not.
-$script:AllowedRootFiles = @('.gitattributes', '.gitignore', 'AGENTS.md', 'GLOSSARY.md', 'GodotPal.sln', 'NuGet.Config', 'README.md', 'global.json')
+$script:AllowedRootFiles = @('.gitattributes', '.gitignore', 'AGENTS.md', 'GLOSSARY.md', 'GodotPal.sln', 'NuGet.Config', 'README.md', 'global.json', 'pal.ps1')
 # NuGet.Config and the locked GdUnit bootstrap require .packages; .pi holds project-trusted
 # Pi subagent configuration (docs/agents/execution-environment.md). Neither is a unit compilation source.
 $script:AllowedRootDirectories = @('.github', '.packages', '.pi', 'data', 'docs', 'reference', 'samples', 'scripts', 'src', 'tests', 'tools')
@@ -33,7 +33,7 @@ $production = @{
 }
 function Test-ProjectShape([string]$Path, [xml]$Xml) {
     $allowedProperties = @('TargetFramework', 'ImplicitUsings', 'Nullable', 'IsPackable', 'IsTestProject', 'OutputType')
-    $allowedPackages = @('Microsoft.NET.Test.Sdk', 'xunit', 'xunit.runner.visualstudio')
+    $allowedPackages = @('Microsoft.NET.Test.Sdk', 'xunit', 'xunit.runner.visualstudio', 'coverlet.collector')
     # Only the InternalsVisibleToAttribute assembly attribute (friend assembly for Pal.Extract) is allowed;
     # any other AssemblyAttribute keeps failing this allowlist.
     $allowedAssemblyAttributes = @('System.Runtime.CompilerServices.InternalsVisibleToAttribute')

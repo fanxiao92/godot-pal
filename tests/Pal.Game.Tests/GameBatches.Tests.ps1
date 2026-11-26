@@ -1,4 +1,4 @@
-# Offline metadata/entry rejection regression. No SDK, Godot, CIM or network.
+﻿# Offline metadata/entry rejection regression. No SDK, Godot, CIM or network.
 [CmdletBinding()]
 param([string]$EvidenceDirectory)
 $ErrorActionPreference = 'Stop'
@@ -421,7 +421,7 @@ public class Fixture
     }
     Case 'real source partitions 85/135/2/5/6/3/4/30/782/45, preserves controls and solution test projects' {
         Assert ((($plan.batches | ForEach-Object count) -join ',') -ceq '85,135,2,5,6,3,4,30,782,45') 'Wrong batch sizes/order.'
-        Assert ($plan.inventory.Count -eq 1100 -and $plan.controls.Count -eq 3 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
+        Assert ($plan.inventory.Count -eq 1097 -and $plan.controls.Count -eq 0 -and $plan.projects.Count -eq 5) 'Incomplete source inventory.'
         $enemySourceCase = 'Pal.Game.Tests.NativeFirstMandatoryBattleProfileTests.BoundEnemySpriteSourceMustMatchFrozenArchiveEvenWithFreshHashes'
         foreach ($scope in @('full', 'committable')) {
             $candidate = Get-GameBatchPlan $repository -Scope $scope
@@ -647,13 +647,13 @@ public class Fixture
         Assert (($plan.projects.name -join ',') -ceq 'core,cli-unit,cli-integration,prepare,game') 'Wrong serial project identities/order.'
         Assert-ExactTestNames @($plan.projects.path) @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj',
             'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj',
-            'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'src/Pal.Game/Pal.Game.csproj') 'literal test project paths'
+            'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj') 'literal test project paths'
         $expectedProjects = @{
             core = @('tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 1598, 0)
             'cli-unit' = @('tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj', 537, 0)
             'cli-integration' = @('tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj', 419, 2)
             prepare = @('tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj', 129, 0)
-            game = @('src/Pal.Game/Pal.Game.csproj', 1097, 0)
+            game = @('tests/Pal.Game.Tests/Pal.Game.Tests.csproj', 1097, 0)
         }
         foreach ($project in $plan.projects) {
             $expectedProject = $expectedProjects[$project.name]
@@ -757,7 +757,7 @@ public class Fixture
     }
     Case 'gate PASS summary exactly reports the verified plan metadata' {
         $summary = Get-GatePassSummary $plan
-        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1598 passed; CLI unit 537 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 129 passed; Godot source/discovery 1100; positives 1097 as serial 85/135/2/5/6/3/4/30/782/45 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
+        $expectedSummary = 'PASS: eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1598 passed; CLI unit 537 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 129 passed; Godot source/discovery 1097; positives 1097 as serial 85/135/2/5/6/3/4/30/782/45 in each of three complete rounds; 34 identity-verified TRX; 0 separately verified 1-failure controls; native prepare/profile/import/Main startup. Headless automation only; real GPU/manual desktop acceptance is separate; this PASS alone does not establish remote-CI execution identity.'
         Assert ($summary -ceq $expectedSummary) "Wrong gate PASS summary: $summary"
         Assert ($summary.EndsWith('this PASS alone does not establish remote-CI execution identity.', [StringComparison]::Ordinal)) 'Gate PASS summary lost the remote-CI evidence boundary.'
     }
@@ -770,7 +770,7 @@ public class Fixture
         Assert (($plan.batches | ForEach-Object count) -join ',' -ceq '85,135,2,5,6,3,4,30,782,44') 'Wrong committable batch sizes/order.'
         $game = @($plan.projects | Where-Object name -CEQ 'game')[0]
         Assert ($game.passed -eq 1096) 'Committable game positives must drop the local-only case.'
-        Assert ($plan.inventory.Count -eq 1100) 'Committable scope keeps the real class compiled and discoverable.'
+        Assert ($plan.inventory.Count -eq 1097) 'Committable scope keeps the real class compiled and discoverable.'
         Assert-ExactTestNames @($plan.localOnly) @('Pal.Game.Tests.RealFirstBattleFlowTests.Real_phases_search_pages_engagement_and_bounded_damage_trajectory') 'Local-only positive identity'
         Assert-ExactTestNames @($plan.batches.expected) @($plan.inventory | Where-Object { $_.class -NE 'FailureControlTests' -and $_.name -cnotin $plan.localOnly } | ForEach-Object name) 'committable partition'
     }
@@ -783,7 +783,7 @@ public class Fixture
     }
     Case 'committable gate PASS summary declares scope and the private-asset boundary' {
         $summary = Get-GatePassSummary (Get-GameBatchPlan $repository -Scope committable)
-        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1598 passed; CLI unit 537 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 129 passed; Godot source/discovery 1100; positives 1096 as serial 85/135/2/5/6/3/4/30/782/44 in each of three complete rounds; 37 identity-verified TRX; 3 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
+        $expected = 'PASS: committable-scope full gate; eight real-process dotnet-boundary prechecks; empty-cache restore/build; Core 1598 passed; CLI unit 537 passed; CLI integration 419 passed + 2 skipped (421 total); Prepare 129 passed; Godot source/discovery 1097; positives 1096 as serial 85/135/2/5/6/3/4/30/782/44 in each of three complete rounds; 34 identity-verified TRX; 0 separately verified 1-failure controls; native prepare/profile/import/Main startup; 1 local-only real-asset positives excluded from this remote scope (private staged assets are never uploaded; their acceptance receipts remain the local delivery process''s responsibility). Headless automation only; real GPU/manual desktop acceptance is separate; this committable-scope remote PASS does not replace the local full-scope gate for the excluded positives.'
         Assert ($summary -ceq $expected) "Wrong committable gate PASS summary: $summary"
         Assert ($summary -cmatch 'committable-scope full gate') 'Committable identity missing.'
         Assert ($summary -cmatch 'local-only real-asset positives excluded') 'Private-asset boundary missing.'
@@ -813,12 +813,12 @@ public class Fixture
     }
     Case 'unassigned source classes and new solution projects fail closed' {
         $fixtureRepo = Join-Path $temp 'repository'
-        foreach ($relative in @($plan.projects.path + @('src/Pal.Core/Pal.Core.csproj', 'tools/Pal.Extract/Pal.Extract.csproj', 'GodotPal.sln') + @($plan.inventory.source | Select-Object -Unique | ForEach-Object { "src/Pal.Game/Tests/$_" }))) {
+        foreach ($relative in @($plan.projects.path + @('src/Pal.Core/Pal.Core.csproj', 'src/Pal.Game/Pal.Game.csproj', 'tools/Pal.Extract/Pal.Extract.csproj', 'GodotPal.sln') + @($plan.inventory.source | Select-Object -Unique | ForEach-Object { "tests/Pal.Game.Tests/Tests/$_" }))) {
             $destination = Join-Path $fixtureRepo $relative
             New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($destination)) | Out-Null
             [IO.File]::Copy((Join-Path $repository $relative), $destination)
         }
-        $extra = Join-Path $fixtureRepo 'src/Pal.Game/Tests/ExtraTests.cs'
+        $extra = Join-Path $fixtureRepo 'tests/Pal.Game.Tests/Tests/ExtraTests.cs'
         [IO.File]::WriteAllText($extra, "namespace Pal.Game.Tests;`npublic class ExtraTests {`n[TestCase]`npublic void Unassigned() {} }")
         Fails { Get-GameBatchPlan $fixtureRepo } 'Game partition: identity set mismatch'
         Remove-Item -LiteralPath $extra

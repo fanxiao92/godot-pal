@@ -255,7 +255,7 @@ test('range completion must come from the selected existing contract, never a wr
   rangeCompleted(directory, 'prepare');
 });
 test('fixture negative mutations assert field existence rather than silently removing an obsolete address', () => {
-  const source = fs.readFileSync(path.join(repository, 'src/Pal.Game/Tests/AuthoredStoryFixture.cs'), 'utf8');
+  const source = fs.readFileSync(path.join(repository, 'tests/Pal.Game.Tests/Tests/AuthoredStoryFixture.cs'), 'utf8');
   const negativeBlock = source.match(/if \(missingPresentation == "effect"\)[\s\S]*?if \(missingPresentation == "idle"\)[^\n]*/)?.[0] ?? '';
   assert.ok(negativeBlock.length > 0, 'missingPresentation negative-mutation block must exist');
   assert.doesNotMatch(negativeBlock, /\.AsObject\(\)\.Remove\(/);

@@ -16,6 +16,7 @@ public sealed class ProjectedStoryChainTests : IDisposable
     private readonly List<string> ownedOutputs = [];
     private readonly string repo;
     private string GameProject => Path.Combine(repo, "src", "Pal.Game");
+    private string TestGameProject => Path.Combine(repo, "tests", "Pal.Game.Tests");
     private static string Godot => Environment.GetEnvironmentVariable("PAL_TEST_GODOT")
         ?? throw new InvalidOperationException("Set PAL_TEST_GODOT.");
 
@@ -134,7 +135,7 @@ public sealed class ProjectedStoryChainTests : IDisposable
         Assert.True(File.Exists(Path.Combine(storyOutput, "Story.tres")));
         Assert.True(File.Exists(Path.Combine(storyOutput, "Visual.tres")));
 
-        var observed = await GodotScene("res://Tests/ObserveProjectedBattle.tscn",
+        var observed = await TestGodotScene("res://Tests/ObserveProjectedBattle.tscn",
             "--story-profile", storyUri, "--battle-visual-profile", visualUri, "--battle-seed", "1");
         Assert.True(observed.ExitCode == 0, observed.Text);
         Assert.Contains($"PAL_PROJECTED_CHAIN:receipt={receiptSha}|{receiptBytes.Length};" +
@@ -197,6 +198,9 @@ public sealed class ProjectedStoryChainTests : IDisposable
 
     private Task<PrepareProcessTests.Result> GodotScene(string scene, params string[] args) =>
         PrepareProcessTests.Run(Godot, ["--headless", "--path", GameProject, scene, "--", .. args]);
+
+    private Task<PrepareProcessTests.Result> TestGodotScene(string scene, params string[] args) =>
+        PrepareProcessTests.Run(Godot, ["--headless", "--path", TestGameProject, scene, "--", .. args]);
 
     private (string Uri, string Path) NewAssetOutput(string suffix)
     {

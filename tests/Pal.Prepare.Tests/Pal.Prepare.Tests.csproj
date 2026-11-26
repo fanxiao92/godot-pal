@@ -9,6 +9,7 @@
   <ItemGroup>
     <!-- C# editor scenes need the Game host built, not its assembly or test dependencies. -->
     <ProjectReference Include="../../src/Pal.Game/Pal.Game.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="../Pal.Game.Tests/Pal.Game.Tests.csproj" ReferenceOutputAssembly="false" Private="false" />
     <ProjectReference Include="../../tools/Pal.Extract/Pal.Extract.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />

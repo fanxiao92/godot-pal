@@ -45,8 +45,8 @@ public partial class Main
     public string? SaveContentIdentity { get; private set; }
     /// <summary>The formal chain's controlled storage adapter (tests read slots back through
     /// this exact production instance; no second save chain exists anywhere).</summary>
-    internal PlayerSaveStorage? SaveStorage => storySaveStorage;
-    internal Func<PalStoryBattleView> StoryBattleViewFactory { get; set; } = () => new PalStoryBattleView();
+    public PlayerSaveStorage? SaveStorage => storySaveStorage;
+    public Func<PalStoryBattleView> StoryBattleViewFactory { get; set; } = () => new PalStoryBattleView();
     private TriggerBattleRequest? storyRequest;
     private bool battleConfirm;
     // input.c 66-70 kKeyMenu (Escape/Insert/Alt/KP_0): the pending cancel of the active battle menu.
@@ -79,9 +79,9 @@ public partial class Main
     private int storyRedStep = -1;
     private uint storyRedStepAt;
     /// <summary>Current red-fade step (-1 none, 0..31 in progress, 32 converged).</summary>
-    internal int StoryRedFadeStep => storyRedStep;
+    public int StoryRedFadeStep => storyRedStep;
     /// <summary>The red-faded world palette the map currently shows; null outside the fade.</summary>
-    internal Color[]? StoryRedPalette => storyRedStep < 0 ? null : RedFadePalette(story!.Palette, storyRedStep);
+    public Color[]? StoryRedPalette => storyRedStep < 0 ? null : RedFadePalette(story!.Palette, storyRedStep);
     private bool resumeStoryDisplay;
     private StoryBattlePoseClock poseClock;
     private uint presentationNow;
@@ -100,25 +100,25 @@ public partial class Main
     private int feedbackBeforeHp;
     // The presented action's enemies-before-HP snapshot (all-target strikes read it per target).
     private int[] feedbackEnemiesBefore = [];
-    internal StoryEnemyAttackSnapshot? StoryEnemyPresentation => storyView?.EnemyPresentation;
-    internal StoryBattleDrawSnapshot? StoryDrawSnapshot => storyView?.DrawSnapshot;
-    internal uint StoryPresentationTicks => presentationNow;
-    internal StoryBattlePoseSnapshot? StoryBattlePose => StoryBattleMode == StoryBattlePresentation.Feedback
+    public StoryEnemyAttackSnapshot? StoryEnemyPresentation => storyView?.EnemyPresentation;
+    public StoryBattleDrawSnapshot? StoryDrawSnapshot => storyView?.DrawSnapshot;
+    public uint StoryPresentationTicks => presentationNow;
+    public StoryBattlePoseSnapshot? StoryBattlePose => StoryBattleMode == StoryBattlePresentation.Feedback
         ? new(presentationNow, poseClock.PoseStartedAt, poseClock.Pose) : null;
     /// <summary>Per-member sum of the live role-hook boost registers; empty while none applied.</summary>
-    internal IReadOnlyList<int> StoryBattleBoosts => storyView?.DrawSnapshot.PartyBoosts ?? [];
+    public IReadOnlyList<int> StoryBattleBoosts => storyView?.DrawSnapshot.PartyBoosts ?? [];
     public StoryBattlePresentation? StoryBattleMode { get; private set; }
     public ClassicBattleLifecycleSession? StoryBattle => storyRequest?.Lifecycle;
     /// <summary>The current victory-settlement line, or null outside the Settlement presentation.</summary>
-    internal string? StorySettlementLine => StoryBattleMode == StoryBattlePresentation.Settlement
+    public string? StorySettlementLine => StoryBattleMode == StoryBattlePresentation.Settlement
         ? storyView?.SettlementLine : null;
     /// <summary>Story ledger of the granted victory totals (gpGlobals dwCash, battle.c 1054); one
     /// consumption per owned Won receipt, never re-granted by a repeat acknowledgement.</summary>
     public int StoryCashGranted { get; private set; }
     public int StoryExperienceGranted { get; private set; }
-    internal int? StoryDisplayedPlayerHp => storyView?.DisplayedPlayerHp;
-    internal int? StoryDisplayedEnemyHp => storyView?.DisplayedEnemyHp;
-    internal bool StoryResultVisible => storyView?.ResultVisible ?? false;
+    public int? StoryDisplayedPlayerHp => storyView?.DisplayedPlayerHp;
+    public int? StoryDisplayedEnemyHp => storyView?.DisplayedEnemyHp;
+    public bool StoryResultVisible => storyView?.ResultVisible ?? false;
 
     private void InitializeStory(GameSceneConfiguration selected)
     {
@@ -636,14 +636,14 @@ public partial class Main
         return true;
     }
     /// <summary>True while the failed-escape feedback presents (authored: the scene freezes).</summary>
-    internal bool StoryFleeFeedback => fleeOrigin is not null;
+    public bool StoryFleeFeedback => fleeOrigin is not null;
     /// <summary>True while the successful-escape walk-off presents (battle.c 1458-1528): every
     /// living member leaves the screen before the battle releases with its owned receipt.</summary>
-    internal bool StoryEscapeFeedback => fleeOrigin is not null && fleeEscaped;
+    public bool StoryEscapeFeedback => fleeOrigin is not null && fleeEscaped;
     /// <summary>palette.c PAL_FadeToRed (script.c 0x004F game-over fade): every palette entry
     /// except the preserved 0x4F text color moves red by 8 per step for 32 steps of 75ms;
     /// this is the step-<paramref name="step"/> palette of that reference convergence.</summary>
-    internal static Color[] RedFadePalette(IReadOnlyList<Color> palette, int step)
+    public static Color[] RedFadePalette(IReadOnlyList<Color> palette, int step)
     {
         var faded = palette.ToArray();
         for (int index = 0; index < faded.Length; index++)
@@ -1203,11 +1203,11 @@ public partial class Main
 
 /// <summary>fight.c 4153-4171 failed-escape presentation: three +4/+2 steps then the escape-fail
 /// label holds for eight frames; poses advance on the shared 40ms battle pose clock.</summary>
-internal static class StoryPlayerFleePresentation
+public static class StoryPlayerFleePresentation
 {
-    internal const int LabelPose = 3;
-    internal const long Duration = 11;
-    internal static StoryPlayerFleeSnapshot At(int pose, Vector2 origin, int partyIndex) =>
+    public const int LabelPose = 3;
+    public const long Duration = 11;
+    public static StoryPlayerFleeSnapshot At(int pose, Vector2 origin, int partyIndex) =>
         new(partyIndex, pose < LabelPose ? 0 : 1,
             new Vector2(4 * Math.Min(pose + 1, LabelPose), 2 * Math.Min(pose + 1, LabelPose)));
 }
@@ -1218,12 +1218,12 @@ internal static class StoryPlayerFleePresentation
 /// on the shared 40ms clock. Only the living walk; the dead stay visible at their home
 /// positions through the walk-off (fight.c 952-957 keeps drawing them) and leave with the
 /// party at the final removal frame.</summary>
-internal static class StoryPlayerEscapePresentation
+public static class StoryPlayerEscapePresentation
 {
-    internal const long Duration = 17;
+    public const long Duration = 17;
     // The snapshots carry only the relative walk-off offset; the view adds each member's own
     // visual origin (PlayerOrigins columns) when drawing.
-    internal static IReadOnlyList<StoryPlayerFleeSnapshot> At(int pose, IReadOnlyList<ClassicBattlePlayerView> members)
+    public static IReadOnlyList<StoryPlayerFleeSnapshot> At(int pose, IReadOnlyList<ClassicBattlePlayerView> members)
     {
         var walking = new List<StoryPlayerFleeSnapshot>();
         for (int member = 0; member < members.Count; member++)
