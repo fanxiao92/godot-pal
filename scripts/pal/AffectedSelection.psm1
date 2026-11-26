@@ -1,5 +1,9 @@
 Set-StrictMode -Version Latest
 
+if (-not (Get-Command Read-SafeXmlDocument -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot 'PalCommon.psm1') -Global
+}
+
 function ConvertTo-RepoRelativePath {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
@@ -88,15 +92,7 @@ function Get-StaticProjectGraph {
         if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
             throw "Solution project missing on disk: $p"
         }
-        $settings = [Xml.XmlReaderSettings]::new()
-        $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
-        $reader = [Xml.XmlReader]::Create($fullPath, $settings)
-        try {
-            $xml = [xml]::new()
-            $xml.Load($reader)
-        } finally {
-            $reader.Dispose()
-        }
+        $xml = Read-SafeXmlDocument -Path $fullPath
         $projDir = Split-Path $fullPath -Parent
         foreach ($node in @($xml.SelectNodes('//ProjectReference'))) {
             $include = $node.GetAttribute('Include')
@@ -146,7 +142,7 @@ function Get-FileGameTestCategories {
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return @() }
     if ([IO.Path]::GetExtension($full) -ine '.cs') { return @() }
     $text = [IO.File]::ReadAllText($full, [Text.Encoding]::UTF8)
-    $matches = [regex]::Matches($text, '\[(?:[^\]]*,\s*)?TestCategory\("([^"]+)"\)')
+    $matches = [regex]::Matches($text, 'TestCategory\("([^"]+)"\)')
     $cats = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($m in $matches) {
         $val = $m.Groups[1].Value

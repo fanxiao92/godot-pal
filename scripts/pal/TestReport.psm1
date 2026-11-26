@@ -1,19 +1,12 @@
 ﻿Set-StrictMode -Version Latest
 
+if (-not (Get-Command Read-SafeXmlDocument -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot 'PalCommon.psm1') -Global
+}
+
 function Read-TrxSummary {
     param([Parameter(Mandatory)][string]$TrxPath)
-    if (-not (Test-Path -LiteralPath $TrxPath -PathType Leaf)) {
-        throw "TRX file not found: $TrxPath"
-    }
-    $settings = [Xml.XmlReaderSettings]::new()
-    $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
-    $reader = [Xml.XmlReader]::Create($TrxPath, $settings)
-    try {
-        $xml = [xml]::new()
-        $xml.Load($reader)
-    } finally {
-        $reader.Dispose()
-    }
+    $xml = Read-SafeXmlDocument -Path $TrxPath
     $ns = [Xml.XmlNamespaceManager]::new($xml.NameTable)
     $ns.AddNamespace('t', 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010')
     $counters = $xml.SelectSingleNode('//t:ResultSummary/t:Counters', $ns)
@@ -35,20 +28,34 @@ function Read-TrxSummary {
     }
 }
 
+function Read-TrxFailures {
+    param([Parameter(Mandatory)][string]$TrxPath)
+    if (-not (Test-Path -LiteralPath $TrxPath -PathType Leaf)) { return @() }
+    $xml = Read-SafeXmlDocument -Path $TrxPath
+    $ns = [Xml.XmlNamespaceManager]::new($xml.NameTable)
+    $ns.AddNamespace('t', 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010')
+    $failures = [Collections.Generic.List[object]]::new()
+    foreach ($r in @($xml.SelectNodes('//t:Results/t:UnitTestResult', $ns))) {
+        $outcome = [string]$r.GetAttribute('outcome')
+        if ($outcome -ieq 'Failed' -or $outcome -ieq 'Error' -or $outcome -ieq 'Timeout' -or $outcome -ieq 'Aborted') {
+            $msgNode = $r.SelectSingleNode('t:Output/t:ErrorInfo/t:Message', $ns)
+            $msg = if ($msgNode) { ($msgNode.InnerText -replace '[\r\n]+', ' ').Trim() } else { $outcome }
+            $failures.Add([ordered]@{
+                testName = [string]$r.GetAttribute('testName')
+                outcome  = $outcome
+                message  = $msg
+            })
+        }
+    }
+    return @($failures)
+}
+
 function Convert-TrxToJunit {
     param(
         [Parameter(Mandatory)][string]$TrxPath,
         [Parameter(Mandatory)][string]$JunitPath
     )
-    $settings = [Xml.XmlReaderSettings]::new()
-    $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
-    $reader = [Xml.XmlReader]::Create($TrxPath, $settings)
-    try {
-        $trx = [xml]::new()
-        $trx.Load($reader)
-    } finally {
-        $reader.Dispose()
-    }
+    $trx = Read-SafeXmlDocument -Path $TrxPath
     $ns = [Xml.XmlNamespaceManager]::new($trx.NameTable)
     $ns.AddNamespace('t', 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010')
     $results = @($trx.SelectNodes('//t:Results/t:UnitTestResult', $ns))
@@ -108,15 +115,7 @@ function Convert-TrxToJunit {
 function Read-CoberturaCoverage {
     param([Parameter(Mandatory)][string]$CoveragePath)
     if (-not (Test-Path -LiteralPath $CoveragePath -PathType Leaf)) { return @() }
-    $settings = [Xml.XmlReaderSettings]::new()
-    $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
-    $reader = [Xml.XmlReader]::Create($CoveragePath, $settings)
-    try {
-        $xml = [xml]::new()
-        $xml.Load($reader)
-    } finally {
-        $reader.Dispose()
-    }
+    $xml = Read-SafeXmlDocument -Path $CoveragePath
     $entries = [Collections.Generic.List[object]]::new()
     foreach ($pkg in @($xml.SelectNodes('//packages/package'))) {
         $name = [string]$pkg.GetAttribute('name')
@@ -148,7 +147,8 @@ function Format-MarkdownReport {
     param(
         [Parameter(Mandatory)][object[]]$Summaries,
         [string]$CommitSha = '',
-        [string]$Format = 'pr-comment'
+        [string]$Format = 'pr-comment',
+        [AllowEmptyCollection()][object[]]$TrxFailures = @()
     )
     $lines = [Collections.Generic.List[string]]::new()
     $allPassed = $true
@@ -206,6 +206,14 @@ function Format-MarkdownReport {
         foreach ($e in $errors) { $lines.Add($e) }
     }
 
+    if ($TrxFailures -and $TrxFailures.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('#### 失败用例（来自 TRX）')
+        foreach ($f in $TrxFailures) {
+            $lines.Add("- ``$($f.testName)`` ($($f.outcome)): $($f.message)")
+        }
+    }
+
     if ($Format -eq 'pr-comment') {
         $lines.Add('')
         $lines.Add('#### T3 端到端 / 截图对比（预留）')
@@ -217,6 +225,7 @@ function Format-MarkdownReport {
 
 Export-ModuleMember -Function @(
     'Read-TrxSummary',
+    'Read-TrxFailures',
     'Convert-TrxToJunit',
     'Read-CoberturaCoverage',
     'Write-RunSummaryJson',

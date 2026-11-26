@@ -121,7 +121,10 @@ try {
     $selMenuTest = Resolve-AffectedSelection -RepositoryRoot $repoRoot -ChangedFiles @('tests/Pal.Game.Tests/Tests/MenuSceneTests.cs')
     Assert-Equal 'targeted' $selMenuTest.Mode 'single Game test file -> targeted'
     Assert-SetEqual @('game:Menu') $selMenuTest.Targets 'MenuSceneTests.cs -> game:Menu'
-    Pass 'affected selection: single Game test file narrows to its TestCategory'
+    $selMultiCat = Resolve-AffectedSelection -RepositoryRoot $repoRoot -ChangedFiles @('tests/Pal.Game.Tests/Tests/ExplorationSceneTests.cs')
+    Assert-Equal 'targeted' $selMultiCat.Mode 'multi-category Game test file -> targeted'
+    Assert-SetEqual @('game:Exploration', 'game:Smoke') $selMultiCat.Targets 'comma-separated [TestCategory] must preserve all categories'
+    Pass 'affected selection: single Game test file narrows to all its TestCategories'
 
     foreach ($fullPath in @('GodotPal.sln', 'src/Pal.Core/Pal.Core.csproj', 'tests/unit.runsettings', 'src/Pal.Game/project.godot', 'pal.ps1', 'tests/affected-map.psd1', '.github/workflows/ci.yml', '.gitignore')) {
         $selFull = Resolve-AffectedSelection -RepositoryRoot $repoRoot -ChangedFiles @($fullPath)
@@ -230,11 +233,11 @@ try {
 
     $repSum = [ordered]@{
         command = 'ci dotnet'
-        status = 'passed'
-        errorMsg = $null
+        status = 'failed'
+        errorMsg = "Test step 'sample' failed with exit code 1."
         durationSec = 12.5
-        counts = [ordered]@{ total = 100; passed = 100; failed = 0; skipped = 0 }
-        trxFiles = @('trx/Pal.Core.UnitTests.trx')
+        counts = [ordered]@{ total = 2; passed = 1; failed = 1; skipped = 0 }
+        trxFiles = @('sample.trx')
         coverageFiles = @('coverage/Pal.Core.UnitTests/coverage.cobertura.xml')
         coverage = @($covEntries) + @([ordered]@{ package = 'Pal.Core'; lineRate = 15.1; branchRate = 15.4 })
         artifactsDir = '.artifacts/pal/sample'
@@ -244,7 +247,7 @@ try {
     $repRes = Invoke-Pal @('report', '--from', $repDir, '--out', $mdOut)
     Assert-Equal 0 $repRes.ExitCode 'pal.ps1 report must exit 0'
     $mdText = [IO.File]::ReadAllText($mdOut, $utf8)
-    Assert-True ($mdText -match 'ci dotnet' -and $mdText -match '84\.2%' -and $mdText -notmatch '15\.1%' -and $mdText -match 'T3') 'report markdown must keep highest package coverage, command, and T3 placeholder'
+    Assert-True ($mdText -match 'ci dotnet' -and $mdText -match '84\.2%' -and $mdText -notmatch '15\.1%' -and $mdText -match 'FailCase' -and $mdText -match 'Expected 1 got 2' -and $mdText -match 'T3') 'report markdown must include TRX failure details, highest package coverage, command, and T3 placeholder'
     Pass 'TRX/JUnit/Cobertura parsing and pal.ps1 report generation'
 
     # 7. Script hygiene: Get-Godot.ps1 Linux support & Prepare-DialoguePackage.ps1 cleanup
@@ -257,14 +260,18 @@ try {
     $prepDlgText = [IO.File]::ReadAllText((Join-Path $repoRoot 'scripts/Prepare-DialoguePackage.ps1'), $utf8)
     Assert-True ($prepDlgText -notmatch 'xiaofan') 'Prepare-DialoguePackage.ps1 must not contain personal paths'
     Assert-True ($prepDlgText -notmatch 'Get-TestProcesses\.ps1') 'Prepare-DialoguePackage.ps1 must not depend on Get-TestProcesses.ps1'
-    Assert-True ($prepDlgText -match "Get-Process -Name 'godot\*'") 'Prepare-DialoguePackage.ps1 must keep PID/Name-only Godot process check'
+    Assert-True ($prepDlgText -match 'Assert-NoRunningGodotProcess') 'Prepare-DialoguePackage.ps1 must call shared PID/Name-only Godot process guard'
     Pass 'Prepare-DialoguePackage.ps1 personal path and legacy process-script coupling removed'
 
-    # 8. assets status returns 0 without leaking private paths
+    # 8. assets status and battle-context parameter validation
     $assetsOut = Join-Path $workDir 'assets-status-out'
     $assetsRes = Invoke-Pal @('assets', 'status', '--out', $assetsOut)
     Assert-Equal 0 $assetsRes.ExitCode 'assets status must exit 0'
-    Pass 'assets status succeeds'
+    $bcOut = Join-Path $workDir 'assets-bc-out'
+    $bcRes = Invoke-Pal @('assets', 'prepare', '--kind', 'battle-context', '--input', 'a', '--output', 'b', '--out', $bcOut)
+    Assert-Equal 1 $bcRes.ExitCode 'battle-context without --static-resources/--static-profile must exit 1'
+    Assert-True ($bcRes.StdErr -match '--static-resources' -and $bcRes.StdErr -match '--static-profile') 'battle-context error must name required static flags'
+    Pass 'assets status and battle-context flag validation succeed'
 
     $completed = $true
     Write-Host "PASS PalFrontDoor regression: $passedCount cases."

@@ -9,8 +9,8 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 $script:RepoRoot = [IO.Path]::GetFullPath($PSScriptRoot)
-$script:PinnedGodotVersion = '4.7.2.stable.mono.official.ed1daf0bf'
 
+Import-Module (Join-Path $script:RepoRoot 'scripts/pal/PalCommon.psm1') -Force -Global
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/AffectedSelection.psm1') -Force
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/TestReport.psm1') -Force
 
@@ -58,9 +58,13 @@ Common Options:
   --kind <name>          assets prepare: scene|dialogue|battle-data|battle-context|fire-effects|item-bitmaps|story
   --input <path>         assets prepare: input package directory
   --output <path>        assets prepare: output Assets directory
+  --static-resources <p> assets prepare (battle-context): static resources directory
+  --static-profile <p>   assets prepare (battle-context): static profile .tres path
+  --battle-resources <p> assets prepare (battle-context): optional battle resources directory
   --from <dir>           report: artifact directory (repeatable)
   --format <fmt>         report: pr-comment|summary (default pr-comment)
   --out <path>           Artifact output directory (or report output file)
+  --repo-root <dir>      Override repository root directory
   --json                 Print PAL_SUMMARY_JSON=<path> to stdout
   --help, -h             Show this help text
 
@@ -77,7 +81,9 @@ function Parse-Options {
     $multi = @{ category = [Collections.Generic.List[string]]::new(); from = [Collections.Generic.List[string]]::new() }
     $valueOptions = @(
         'project', 'category', 'filter', 'base', 'scenario', 'godot-path',
-        'out', 'platform', 'destination', 'kind', 'input', 'output', 'from', 'format', 'repo-root'
+        'out', 'platform', 'destination', 'kind', 'input', 'output',
+        'static-resources', 'static-profile', 'battle-resources',
+        'from', 'format', 'repo-root'
     )
     $switchOptions = @('explain', 'all', 'coverage', 'gpu', 'json', 'help', 'include-real-assets')
 
@@ -119,44 +125,6 @@ function Parse-Options {
         Flags       = $flags
         Multi       = $multi
     }
-}
-
-function Resolve-GodotBinary {
-    param([string]$ExplicitPath)
-    $candidate = $ExplicitPath
-    if (-not $candidate) { $candidate = $env:GODOT_BIN }
-    if (-not $candidate) { $candidate = $env:PAL_TEST_GODOT }
-    if ($candidate) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            return [IO.Path]::GetFullPath($candidate)
-        }
-        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
-        throw "Configured Godot executable not found: $candidate"
-    }
-    foreach ($name in @('godot-mono.console.exe', 'godot-mono', 'godot')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
-    }
-    throw 'Godot executable not found. Pass --godot-path, set GODOT_BIN, or run `./pal.ps1 godot install`.'
-}
-
-function Assert-NoRunningGodotProcess {
-    # Cross-platform process check: strictly PID and ProcessName only.
-    $procs = @(Get-Process -Name 'godot*' -ErrorAction SilentlyContinue | Select-Object Id, ProcessName)
-    if ($procs.Count -gt 0) {
-        $list = ($procs | ForEach-Object { "$($_.ProcessName)($($_.Id))" }) -join ', '
-        throw "Existing Godot process detected ($list); stop and confirm ownership before starting Godot."
-    }
-}
-
-function Assert-PinnedGodotVersion {
-    param([Parameter(Mandatory)][string]$GodotExe)
-    $ver = (& $GodotExe --version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $ver -ne $script:PinnedGodotVersion) {
-        throw "Godot version mismatch: expected '$($script:PinnedGodotVersion)', got '$ver' (exit $LASTEXITCODE)."
-    }
-    return $ver
 }
 
 function Get-CurrentCommitSha {
@@ -408,6 +376,20 @@ function Invoke-MapSelfCheck {
     Write-Host "PASS map self-check: $($result.CheckedProjects) solution projects verified."
 }
 
+function Invoke-FullTestSuite {
+    param(
+        [switch]$Coverage,
+        [string]$GodotPathOpt,
+        [switch]$IncludeRealAssets,
+        [string]$ArtifactsDir,
+        [hashtable]$State
+    )
+    Invoke-MapSelfCheck
+    Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage:$Coverage -ArtifactsDir $ArtifactsDir -State $State
+    Invoke-IntegrationTarget -ProjectScope '' -Filter '' -GodotPathOpt $GodotPathOpt -ArtifactsDir $ArtifactsDir -State $State
+    Invoke-GameTarget -Categories @() -Filter '' -GodotPathOpt $GodotPathOpt -IncludeRealAssets:$IncludeRealAssets -ArtifactsDir $ArtifactsDir -State $State
+}
+
 function Invoke-GodotImportWarmup {
     param([string]$GodotPathOpt)
     Assert-NoRunningGodotProcess
@@ -431,17 +413,8 @@ try {
     $errMsg = $_.Exception.Message
     [Console]::Error.WriteLine("pal.ps1 error: $errMsg")
     $art = New-ArtifactsDirectory -Root $script:RepoRoot -ExplicitOut '' -Label 'error'
-    $sum = [ordered]@{
-        command       = ($CliArgs -join ' ')
-        status        = 'error'
-        errorMsg      = $errMsg
-        durationSec   = 0.0
-        counts        = [ordered]@{ total = 0; passed = 0; failed = 0; skipped = 0 }
-        trxFiles      = @()
-        coverageFiles = @()
-        coverage      = @()
-        artifactsDir  = ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $art
-    }
+    $sum = New-RunSummaryObject -Command ($CliArgs -join ' ') -Status 'error' -ErrorMsg $errMsg `
+        -ArtifactsDir (ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $art)
     [void](Write-RunSummaryJson -ArtifactsDir $art -Summary $sum)
     exit 1
 }
@@ -465,18 +438,28 @@ if ($cmd -eq 'report') {
         $fromDirs = @($parsed.Multi['from'])
         if ($fromDirs.Count -eq 0) { throw 'report requires at least one --from <artifacts-dir>.' }
         $summaries = [Collections.Generic.List[object]]::new()
+        $trxFailures = [Collections.Generic.List[object]]::new()
         foreach ($d in $fromDirs) {
             $fullDir = if ([IO.Path]::IsPathRooted($d)) { $d } else { Join-Path $script:RepoRoot $d }
             $sumFile = Join-Path $fullDir 'run-summary.json'
             if (-not (Test-Path -LiteralPath $sumFile -PathType Leaf)) {
                 throw "run-summary.json not found in $fullDir"
             }
-            $summaries.Add(([IO.File]::ReadAllText($sumFile, [Text.Encoding]::UTF8) | ConvertFrom-Json))
+            $sumObj = [IO.File]::ReadAllText($sumFile, [Text.Encoding]::UTF8) | ConvertFrom-Json
+            $summaries.Add($sumObj)
+            if ($sumObj.PSObject.Properties['trxFiles'] -and $sumObj.trxFiles) {
+                foreach ($relTrx in @($sumObj.trxFiles)) {
+                    $trxFull = if ([IO.Path]::IsPathRooted([string]$relTrx)) { [string]$relTrx } else { Join-Path $fullDir ([string]$relTrx) }
+                    foreach ($failItem in @(Read-TrxFailures -TrxPath $trxFull)) {
+                        $trxFailures.Add($failItem)
+                    }
+                }
+            }
         }
         $fmt = if ($parsed.Flags.ContainsKey('format')) { [string]$parsed.Flags['format'] } else { 'pr-comment' }
         if ($fmt -notin @('pr-comment', 'summary')) { throw "Unsupported --format '$fmt'. Allowed: pr-comment, summary." }
         $sha = Get-CurrentCommitSha -Root $script:RepoRoot
-        $md = Format-MarkdownReport -Summaries $summaries.ToArray() -CommitSha $sha -Format $fmt
+        $md = Format-MarkdownReport -Summaries $summaries.ToArray() -CommitSha $sha -Format $fmt -TrxFailures $trxFailures.ToArray()
         if ($parsed.Flags.ContainsKey('out')) {
             $outFile = if ([IO.Path]::IsPathRooted($parsed.Flags['out'])) { $parsed.Flags['out'] } else { Join-Path $script:RepoRoot $parsed.Flags['out'] }
             $parent = Split-Path $outFile -Parent
@@ -542,10 +525,7 @@ try {
                     }
 
                     if ($sel.Mode -eq 'full') {
-                        Invoke-MapSelfCheck
-                        Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage:$parsed.Flags.ContainsKey('coverage') -ArtifactsDir $artifactsDir -State $state
-                        Invoke-IntegrationTarget -ProjectScope '' -Filter '' -GodotPathOpt $godotOpt -ArtifactsDir $artifactsDir -State $state
-                        Invoke-GameTarget -Categories @() -Filter '' -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -ArtifactsDir $artifactsDir -State $state
+                        Invoke-FullTestSuite -Coverage:$parsed.Flags.ContainsKey('coverage') -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -ArtifactsDir $artifactsDir -State $state
                     } else {
                         if ('core-unit' -in $sel.Targets) {
                             Invoke-UnitTarget -ProjectScope 'core' -Filter $filterOpt -Coverage:$parsed.Flags.ContainsKey('coverage') -ArtifactsDir $artifactsDir -State $state
@@ -589,10 +569,7 @@ try {
                     throw 'T3 E2E GPU scenarios are reserved for M7-5 and not yet implemented in this branch.'
                 }
                 { $_ -in @('full', 'all') } {
-                    Invoke-MapSelfCheck
-                    Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage:$parsed.Flags.ContainsKey('coverage') -ArtifactsDir $artifactsDir -State $state
-                    Invoke-IntegrationTarget -ProjectScope '' -Filter '' -GodotPathOpt $godotOpt -ArtifactsDir $artifactsDir -State $state
-                    Invoke-GameTarget -Categories @() -Filter '' -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -ArtifactsDir $artifactsDir -State $state
+                    Invoke-FullTestSuite -Coverage:$parsed.Flags.ContainsKey('coverage') -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -ArtifactsDir $artifactsDir -State $state
                 }
                 default {
                     $state.Status = 'error'
@@ -675,6 +652,16 @@ try {
                         throw 'assets prepare requires --input <dir> and --output <dir>.'
                     }
                     $prepArgs = @('-InputPath', [string]$parsed.Flags['input'], '-OutputPath', [string]$parsed.Flags['output'])
+                    if ($kind -eq 'battle-context') {
+                        if (-not $parsed.Flags.ContainsKey('static-resources') -or -not $parsed.Flags.ContainsKey('static-profile')) {
+                            $state.Status = 'error'
+                            throw 'assets prepare --kind battle-context requires --static-resources <dir> and --static-profile <path>.'
+                        }
+                        $prepArgs += @('-StaticResources', [string]$parsed.Flags['static-resources'], '-StaticProfile', [string]$parsed.Flags['static-profile'])
+                        if ($parsed.Flags.ContainsKey('battle-resources')) {
+                            $prepArgs += @('-BattleResources', [string]$parsed.Flags['battle-resources'])
+                        }
+                    }
                     if ($godotOpt) { $prepArgs += @('-GodotPath', $godotOpt) }
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot $scriptMap[$kind]) @prepArgs
                     if ($LASTEXITCODE -ne 0) { throw "Asset preparation '$kind' failed with exit code $LASTEXITCODE." }
@@ -706,22 +693,10 @@ try {
     $sw.Stop()
 }
 
-$summaryObj = [ordered]@{
-    command       = $commandLabel
-    status        = $state.Status
-    errorMsg      = $state.ErrorMsg
-    durationSec   = [Math]::Round($sw.Elapsed.TotalSeconds, 2)
-    counts        = [ordered]@{
-        total   = $state.Total
-        passed  = $state.Passed
-        failed  = $state.Failed
-        skipped = $state.Skipped
-    }
-    trxFiles      = @($state.TrxFiles)
-    coverageFiles = @($state.CoverageFiles)
-    coverage      = @($state.Coverage)
-    artifactsDir  = ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $artifactsDir
-}
+$summaryObj = New-RunSummaryObject -Command $commandLabel -Status $state.Status -ErrorMsg $state.ErrorMsg `
+    -DurationSec $sw.Elapsed.TotalSeconds -Total $state.Total -Passed $state.Passed -Failed $state.Failed `
+    -Skipped $state.Skipped -TrxFiles $state.TrxFiles.ToArray() -CoverageFiles $state.CoverageFiles.ToArray() `
+    -Coverage $state.Coverage.ToArray() -ArtifactsDir (ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $artifactsDir)
 
 $summaryPath = Write-RunSummaryJson -ArtifactsDir $artifactsDir -Summary $summaryObj
 
