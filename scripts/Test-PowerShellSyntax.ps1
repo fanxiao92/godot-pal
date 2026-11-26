@@ -19,8 +19,11 @@ try {
     if ($explicit -and (-not $Path -or @($Path | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count)) {
         throw '[syntax:empty] Explicit Path must contain nonblank objects.'
     }
-    if (-not $explicit) { $Path = @('scripts', 'tests') }
-    $excluded = @('bin', 'obj', '.godot', '.packages', 'TestResults', 'reference', '.pi', '.git')
+    if (-not $explicit) {
+        $Path = @('scripts', 'tests')
+        if (Test-Path -LiteralPath (Join-Path $root 'pal.ps1') -PathType Leaf) { $Path = @('pal.ps1') + $Path }
+    }
+    $excluded = @('bin', 'obj', '.godot', '.packages', '.artifacts', 'TestResults', 'reference', '.pi', '.git')
     $files = [Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
     function Is-Excluded([string]$File) {
         $relative = [IO.Path]::GetRelativePath($root, $File)

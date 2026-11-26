@@ -50,3 +50,6 @@ src/Pal.Game/Assets/
 # Official gdUnit4 .NET adapter's generated runner (not source).
 src/Pal.Game/gdunit4_testadapter_v5/
 tests/Pal.Game.Tests/gdunit4_testadapter_v5/
+
+# Front-door pal.ps1 local run artifacts (summaries, TRX, coverage, reports).
+/.artifacts/

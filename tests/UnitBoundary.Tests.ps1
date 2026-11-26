@@ -47,6 +47,7 @@ try {
     Reset-Fixture
     Check 'pure projects / Chinese and spaces / foreign cwd / production Exe I/O allowed' 0 'PASS unit-boundary: cli-unit'
     Put '.packages/gdunit/cached.nupkg' 'artificial cache bytes: File.ReadAllText is not a unit compilation source'
+    Put '.artifacts/pal/run/run-summary.json' '{"status":"passed"}'
     $cachePath = Join-Path $root '.packages/gdunit/cached.nupkg'
     $cacheBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes($cachePath))
     Check 'approved local package cache coexists with pure projects' 0 'PASS unit-boundary: cli-unit'

@@ -1,4 +1,4 @@
-# Public CLI regression; intentionally invalid scripts are UTF-8 fixture data, never project source.
+﻿# Public CLI regression; intentionally invalid scripts are UTF-8 fixture data, never project source.
 [CmdletBinding()]
 param([string]$EvidenceDirectory)
 $ErrorActionPreference = 'Stop'
@@ -66,7 +66,11 @@ try {
     Check 'relative explicit source path ignores foreign cwd' @('scripts/中文 ok.ps1') 0 'PASS syntax: 1 file'
     $null = Put 'scripts/bin/generated.ps1' 'if ('
     $null = Put 'tests/obj/generated.ps1' 'Write-Output "'
+    $null = Put '.artifacts/pal/generated.ps1' 'if ('
     Check 'default source excludes generated files' @() 0 'PASS syntax: 3 file' -Default
+    $null = Put 'pal.ps1' 'Write-Output "front door"'
+    Check 'default source includes root pal.ps1 when present' @() 0 'PASS syntax: 4 file' -Default
+    Remove-Item -LiteralPath (Join-Path $fixture 'pal.ps1') -Force
     Check 'explicit generated subtree rejected' @('scripts/bin') 1 '\[syntax:range\]'
     $external = Join-Path $evidence 'generated temporary.ps1'
     [IO.File]::WriteAllText($external, 'Write-Output "只解析"', $utf8)
