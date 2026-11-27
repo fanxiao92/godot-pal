@@ -1,6 +1,7 @@
 # Lightweight offline repository hygiene guard:
 # 1. Verifies .gdignore-isolated directories under Godot projects contain zero stray .uid files.
 # 2. Verifies relative Markdown links in active agent/testing docs resolve to existing files.
+# 3. Verifies literal script references in pal.ps1 and scripts/*.ps1|*.psm1 resolve to existing files.
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Split-Path $PSScriptRoot -Parent),
@@ -55,10 +56,44 @@ foreach ($doc in $docFiles) {
     }
 }
 
+# 3. Literal script references in pal.ps1 and scripts/*.ps1|*.psm1 resolve to existing files.
+$psFiles = [Collections.Generic.List[string]]::new()
+$palFile = Join-Path $root 'pal.ps1'
+if ([IO.File]::Exists($palFile)) { $psFiles.Add($palFile) }
+$scriptsDir = Join-Path $root 'scripts'
+if ([IO.Directory]::Exists($scriptsDir)) {
+    foreach ($f in @(Get-ChildItem -LiteralPath $scriptsDir -Recurse -File | Where-Object { $_.Extension -in '.ps1', '.psm1' })) {
+        $psFiles.Add($f.FullName)
+    }
+}
+$legacyM74Scripts = @('scripts/Test-Range.ps1')
+foreach ($psFile in $psFiles) {
+    $psDir = Split-Path $psFile -Parent
+    $relPs = [IO.Path]::GetRelativePath($root, $psFile).Replace('\', '/')
+    if ($relPs -cin $legacyM74Scripts) { continue }
+    foreach ($line in [IO.File]::ReadAllLines($psFile, [Text.Encoding]::UTF8)) {
+        if ($line.TrimStart().StartsWith('#')) { continue }
+        foreach ($m in [regex]::Matches($line, "Join-Path\s+\`$PSScriptRoot\s+'([^'\$\*]+?\.(?:ps1|psm1))'")) {
+            $target = $m.Groups[1].Value
+            $resolved = [IO.Path]::GetFullPath((Join-Path $psDir $target))
+            if (-not [IO.File]::Exists($resolved)) {
+                $failures.Add("[hygiene:missing-script-ref] $relPs -> `$PSScriptRoot/$target")
+            }
+        }
+        foreach ($m in [regex]::Matches($line, "'(scripts/[^'\$\*]+?\.(?:ps1|psm1))'")) {
+            $target = $m.Groups[1].Value
+            $resolved = [IO.Path]::GetFullPath((Join-Path $root $target))
+            if (-not [IO.File]::Exists($resolved)) {
+                $failures.Add("[hygiene:missing-script-ref] $relPs -> $target")
+            }
+        }
+    }
+}
+
 if ($failures.Count -gt 0) {
     foreach ($line in $failures) { [Console]::Error.WriteLine($line) }
     exit 1
 }
 
-Write-Output "PASS repo-hygiene: checked $($docFiles.Count) markdown files and all .gdignore directories (0 stray .uid, 0 broken links)."
+Write-Output "PASS repo-hygiene: checked $($docFiles.Count) markdown files, $($psFiles.Count) script files, and all .gdignore directories (0 stray .uid, 0 broken links, 0 missing script refs)."
 exit 0

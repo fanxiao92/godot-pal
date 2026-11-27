@@ -154,11 +154,7 @@ public class PrepareBattleDataTests
         }
         finally
         {
-            if (link is not null)
-            {
-                if (OperatingSystem.IsWindows()) Directory.Delete(link);
-                else File.Delete(link);
-            }
+            if (link is not null) GameProjectMount.DeleteDirectoryLink(link);
             if (defect == "directory") Directory.Delete(receipt!);
         }
     }
@@ -622,8 +618,7 @@ public class PrepareBattleDataTests
         }
         finally
         {
-            if (OperatingSystem.IsWindows()) Directory.Delete(link);
-            else File.Delete(link);
+            GameProjectMount.DeleteDirectoryLink(link);
             if (target != fixture.Input && Directory.Exists(target)) Directory.Delete(target);
         }
     }

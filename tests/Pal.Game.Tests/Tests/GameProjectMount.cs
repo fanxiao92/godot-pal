@@ -25,6 +25,12 @@ internal static class GameProjectMount
     internal static string GameSamplePath(string relative) =>
         Path.Combine(GameProjectRoot, relative.Replace('/', Path.DirectorySeparatorChar));
 
+    internal static void DeleteDirectoryLink(string link)
+    {
+        if (OperatingSystem.IsWindows()) Directory.Delete(link);
+        else File.Delete(link);
+    }
+
     internal static void EnsureMounted()
     {
         if (ResourceLoader.Exists("res://Scenes/Main.tscn")) return;

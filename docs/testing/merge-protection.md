@@ -27,8 +27,9 @@
 ## 受控操作与恢复守则
 
 1. **操作前先 GET 保存基线**：实时 GET 保存当前保护对象、required checks 及 `app_id`、strict、管理员 enforcement、强推/删除开关及其余原字段；保存到任务自有的新证据目录，不覆盖旧记录。不把历史 `app_id` 硬编码当作当前事实，切换前须从目标提交的实时 check-runs 核对。
-2. **仅使用 checks-only 载荷更新**：PATCH `required_status_checks` 时只发送 `strict` 与 `checks[]`（不混发 `contexts[]`），立即 GET 回读并逐字段比较。遇到 4xx、身份不明或回读不一致，保留请求/响应并停止，不以本地 YAML 或 issue 状态代替。
-3. **验证拒绝与允许行为**：在获授权的远端操作中分别核验未就绪/失败时的普通 merge 拒绝（HTTP 405）与三项 required checks 全绿时的普通 merge 允许；不合入无关或故意损坏的代码。
-4. **保留保护与受控恢复**：验收后的保护保持启用，不作为清理项删除。确需恢复时，仅在明确授权下核对当前 GET 与已保存基线无外部漂移后执行，并在恢复后再次 GET 回读。
+2. **先就绪后切换，缩短分裂窗口**：在切换 `main` 保护前，先在 PR 上完成本页文档更新并跑绿最终候选的所有新 check，确认 `mergeStateStatus` 非 `DIRTY` 后再执行保护切换并立即普通合入，避免 `main` 长时间处于“要求新 check 但 `main` 尚无新 workflow”的分裂窗口。
+3. **仅使用 checks-only 载荷更新**：PATCH `required_status_checks` 时只发送 `strict` 与 `checks[]`（不混发 `contexts[]`），立即 GET 回读并逐字段比较。遇到 4xx、身份不明或回读不一致，保留请求/响应并停止，不以本地 YAML 或 issue 状态代替。
+4. **验证拒绝与允许行为**：在获授权的远端操作中分别核验未就绪/失败时的普通 merge 拒绝（HTTP 405）与三项 required checks 全绿时的普通 merge 允许；不合入无关或故意损坏的代码。
+5. **保留保护与受控恢复**：验收后的保护保持启用，不作为清理项删除。确需恢复时，仅在明确授权下核对当前 GET 与已保存基线无外部漂移后执行，并在恢复后再次 GET 回读。
 
 本页不授予远端写入、受控 PR、合并、Issue 收尾或 SDK/引擎运行授权；每类操作须分别获得明确授权。
