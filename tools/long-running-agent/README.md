@@ -209,7 +209,8 @@ node tools/long-running-agent/cli.ts run --issue 126 --commit --engine-checks `
 ```powershell
 npm --prefix tools/long-running-agent run typecheck
 npm --prefix tools/long-running-agent run test:unit # tight纯策略检查
-npm --prefix tools/long-running-agent test          # 含真实Git/PS/SDK接线的离线集成，不冒称快速Unit
+npm --prefix tools/long-running-agent run test:fast # 快速反馈（policy + checks，约 20s，日常迭代优先）
+npm --prefix tools/long-running-agent test          # 含真实Git/PS/SDK接线的全量离线集成（Windows 约 12min，收口运行）
 ```
 
 普通 worker 的实际安装包配置→读取指令、SDK 项目上下文→子代理 global 过滤可另行离线核对（需显式选择已安装包，不安装依赖，不派发 child、不请求 provider）：
