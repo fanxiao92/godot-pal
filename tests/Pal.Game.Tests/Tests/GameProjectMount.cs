@@ -16,6 +16,8 @@ internal static class GameProjectMount
     private static string? mountedPackPath;
     private static int stagedSamplesRefCount;
     private static bool stagedSamplesOwned;
+    private static readonly List<Resource> pinnedSampleResources = [];
+    private static bool samplesPinned;
 
     internal static string TestProjectRoot => ProjectSettings.GlobalizePath("res://").TrimEnd('/', '\\');
 
@@ -74,8 +76,24 @@ internal static class GameProjectMount
             CopyDirectory(srcSamples, dstSamples);
             stagedSamplesOwned = true;
         }
+        PinSharedSampleResources(dstSamples);
         stagedSamplesRefCount++;
         return new SamplesStageScope(testRoot, dstSamples);
+    }
+
+    // Workaround for Godot #83762 (mono_object_disposed_baseref: gchandle.is_released()):
+    // hold strong C# references to shared cached res://Samples/AuthoredBattle/*.tres resources so
+    // the .NET GC finalizer thread cannot race with subsequent ResourceLoader.Load calls.
+    private static void PinSharedSampleResources(string dstSamples)
+    {
+        if (samplesPinned || !Directory.Exists(dstSamples)) return;
+        samplesPinned = true;
+        foreach (string file in Directory.EnumerateFiles(dstSamples, "*.tres", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(TestProjectRoot, file).Replace('\\', '/');
+            var resource = ResourceLoader.Load<Resource>("res://" + relative);
+            if (resource is not null) pinnedSampleResources.Add(resource);
+        }
     }
 
     internal static IDisposable StageFixturesForGameChild(IEnumerable<string> arguments)
