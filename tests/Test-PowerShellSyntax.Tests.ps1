@@ -108,6 +108,12 @@ $process.Other('WaitForExit')
     Check 'AST rejects nested Import-Module -Force without -Global in psm1' @($nestedForceBad) 1 '\[syntax:nested-force-import\]'
     $nestedForceOk = Put 'ast/nested-global.psm1' 'Import-Module ./PalCommon.psm1 -Force -Global'
     Check 'AST allows Import-Module -Force -Global in psm1' @($nestedForceOk) 0 'PASS syntax: 1 file'
+    # Verify pwsh -File -Path <file1> <file2> binds extra args into -Path rather than -RepositoryRoot.
+    $multiOut = & $hostPath -NoProfile -NonInteractive -File $entry -RepositoryRoot $fixture -Path $good $module 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $multiOut -notmatch 'PASS syntax: 2 file') {
+        throw "pwsh -File multi-path binding failed: exit=$LASTEXITCODE out=$multiOut"
+    }
+    Write-Host 'PASS pwsh -File multi-path binding does not hijack RepositoryRoot'
     if (Test-Path -LiteralPath $marker) { throw 'AST checker executed its target.' }
     $completed = $true
     Write-Host "PASS syntax regression: $($records.Count) public invocations; no target execution."

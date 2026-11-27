@@ -4,14 +4,28 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { hash, type Check } from './contract.ts';
-import { acquire, atomicJson, json, native, NativeCheckFailure, noLinks, QuiescenceUnknownError, runCheck } from './io.ts';
+import { acquire, atomicJson, inside, json, native, NativeCheckFailure, noLinks, QuiescenceUnknownError, runCheck } from './io.ts';
 
 export const unitProjects = ['tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj', 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'] as const;
-export const gameBatches = ['process', 'scene-dialogue', 'native-map', 'scene-realfull'] as const;
+const unitProjectArgs: Record<typeof unitProjects[number], 'core' | 'extract'> = {
+  'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj': 'core',
+  'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj': 'extract',
+};
+// Committable GdUnit [TestCategory] allowlist in tests/Pal.Game.Tests (excludes RealAssets).
+export const gameCategories = ['Smoke', 'Process', 'Dialogue', 'Exploration', 'Map', 'Profiles', 'Battle', 'Menu', 'Shop', 'SaveLoad', 'Prepare'] as const;
 const fqnFilter = /^FullyQualifiedName[=~][A-Za-z_][\w.]*(?:\.)?$/;
 export interface ExpectedFailure { test: string; message: string }
-export interface EngineOptions { godotPath: string; fixedPackageDirectory: string }
-export interface Selection { scope: 'unit' | 'prepare' | 'game'; project?: string; batch?: string; filter?: string; expectedFailure?: ExpectedFailure }
+export interface EngineOptions { godotPath: string }
+export interface Selection { scope: 'unit' | 'prepare' | 'game'; project?: string; category?: string; filter?: string; expectedFailure?: ExpectedFailure }
+export interface PalRunSummary {
+  command: string;
+  status: string;
+  errorMsg?: string | null;
+  durationSec?: number;
+  counts?: { total: number; passed: number; failed: number; skipped: number };
+  trxFiles?: string[];
+  artifactsDir?: string;
+}
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const engineLock = path.join(os.tmpdir(), 'godot-pal-long-running-engine.lock');
 export function assertEngineIdle(): void {
@@ -20,97 +34,97 @@ export function assertEngineIdle(): void {
   if (!Array.isArray(rows) || rows.some(row => !Number.isSafeInteger(row.Id) || typeof row.ProcessName !== 'string')) throw new Error('Engine process ownership is unknown');
   if (rows.length) throw new Error(`Existing Godot processes; confirm ownership before running: ${JSON.stringify(rows)}`);
 }
+function expectedPalCommand(scope: Selection['scope']): string {
+  if (scope === 'unit') return 'test unit';
+  if (scope === 'prepare') return 'test integration';
+  return 'test game';
+}
 export function buildCheck(cwd: string, directory: string, selection: Selection, engine?: EngineOptions): Check {
   if (selection.expectedFailure && ((!/^[A-Za-z_][\w.]+(?:[:(\[].*)?$/.test(selection.expectedFailure.test) || /[\x00-\x1f]/.test(selection.expectedFailure.test)) || !selection.expectedFailure.message.trim())) throw new Error('Expected failure needs an exact test identity/FQN and a literal message');
+  const palScript = path.join(cwd, 'pal.ps1');
+  const outDir = path.join(directory, 'pal');
   if (selection.scope === 'unit') {
-    if (!unitProjects.includes(selection.project as typeof unitProjects[number]) || selection.batch) throw new Error('Unit requires one whole approved project; no batch narrowing');
-    const args = ['test', selection.project!, '--configuration', 'Debug', '--settings', 'tests/unit.runsettings', '--logger', 'trx;LogFileName=results.trx', '--results-directory', path.join(directory, 'trx')];
+    if (!unitProjects.includes(selection.project as typeof unitProjects[number]) || selection.category) throw new Error('Unit requires one whole approved project; no category narrowing');
+    const args = ['-NoProfile', '-NonInteractive', '-File', palScript, 'test', 'unit', '--project', unitProjectArgs[selection.project as typeof unitProjects[number]], '--repo-root', cwd, '--out', outDir, '--json'];
     if (selection.filter) {
       if (!fqnFilter.test(selection.filter)) throw new Error('Use one existing FQN method/class-prefix filter, not DisplayName or Boolean narrowing');
       args.push('--filter', selection.filter);
     }
-    return { kind: 'non_engine', executable: 'dotnet', args, timeoutMs: 300_000 };
+    return { kind: 'non_engine', executable: 'pwsh', args, timeoutMs: 300_000 };
   }
-  if (!engine || !path.isAbsolute(engine.godotPath) || !path.isAbsolute(engine.fixedPackageDirectory)) throw new Error('Prepare/Game requires explicit --engine-checks, --godot-path and --fixed-package-directory authority');
-  if (selection.project || (selection.scope === 'prepare' && (selection.batch || selection.filter)) || (selection.scope === 'game' && !gameBatches.includes(selection.batch as typeof gameBatches[number]))) throw new Error('Use the existing Prepare whole scope or an explicit positive Game batch');
+  if (!engine || !path.isAbsolute(engine.godotPath)) throw new Error('Prepare/Game requires explicit --engine-checks and --godot-path authority');
+  if (selection.project || (selection.scope === 'prepare' && (selection.category || selection.filter))) throw new Error('Use the existing Prepare whole scope or a committable Game category/filter');
+  if (selection.scope === 'game' && selection.category !== undefined && !gameCategories.includes(selection.category as typeof gameCategories[number])) throw new Error('Use an approved committable Game category (never RealAssets)');
   if (selection.filter && !fqnFilter.test(selection.filter)) throw new Error('Use one existing FQN method/class-prefix filter, not DisplayName or Boolean narrowing');
-  const args = ['-NoProfile', '-NonInteractive', '-File', path.join(cwd, 'scripts/Test-Range.ps1'), '-RepositoryRoot', cwd, '-Scope', selection.scope, '-OutputDirectory', path.join(directory, 'range'), '-GodotPath', engine.godotPath, '-FixedPackageDirectory', engine.fixedPackageDirectory];
-  if (selection.batch) args.push('-GameBatch', selection.batch);
-  if (selection.filter) args.push('-Filter', selection.filter);
+  const args = selection.scope === 'prepare'
+    ? ['-NoProfile', '-NonInteractive', '-File', palScript, 'test', 'integration', '--project', 'prepare', '--godot-path', engine.godotPath, '--repo-root', cwd, '--out', outDir, '--json']
+    : ['-NoProfile', '-NonInteractive', '-File', palScript, 'test', 'game', '--godot-path', engine.godotPath, '--repo-root', cwd, '--out', outDir, '--json'];
+  if (selection.category) args.push('--category', selection.category);
+  if (selection.filter) args.push('--filter', selection.filter);
   return { kind: 'engine', executable: 'pwsh', args, timeoutMs: 900_000 };
 }
 export interface CheckOutcome { code: number; expectedRed: boolean; summary: string }
-export function rangeCompleted(directory: string, scope: string): void {
-  const report = json(path.join(directory, 'range', 'range-run.json')) as { status: string; projects: { scope: string }[] };
-  if (report.status !== 'completed' || !report.projects.some(project => project.scope === scope)) throw new QuiescenceUnknownError('Range did not certify a complete selected test session; preserve original evidence');
+function resolvePalTrx(directory: string, summary: PalRunSummary): string | undefined {
+  const palRoot = path.resolve(directory, 'pal');
+  const first = summary.trxFiles?.[0];
+  if (!first) return undefined;
+  const resolved = path.resolve(palRoot, first);
+  if (!inside(palRoot, resolved)) throw new Error('Invalid pal.ps1 TRX evidence path');
+  return resolved;
+}
+export function palCompleted(directory: string, scope: Selection['scope']): void {
+  const summaryPath = path.join(directory, 'pal', 'run-summary.json');
+  if (!fs.existsSync(summaryPath)) throw new QuiescenceUnknownError('pal.ps1 did not produce run-summary.json; preserve original evidence');
+  const report = json(summaryPath) as PalRunSummary;
+  const trx = resolvePalTrx(directory, report);
+  if (report.status !== 'passed' || report.command !== expectedPalCommand(scope) || !trx || !fs.existsSync(trx)) {
+    throw new QuiescenceUnknownError('pal.ps1 did not certify a complete selected test session; preserve original evidence');
+  }
 }
 // Evidence/adapter failures stop the attempt, but do not assert that a normally exited process is alive.
 export class CheckEvidenceError extends Error {}
-// Range quality-gate failure prefixes that a real complete, deterministic, clean-exit attempt has proven to
-// be an ordinary failure. Add each prefix one by one from that real-attempt evidence only; every other
-// prefix keeps unknown quiescence (source-count: #143 attempt f9eacb62 game-oYuPvv proved the batch
-// source-count gate is a deterministic count pin after a complete clean-exit run).
-const gateFailurePrefixes = ['warning-delta', 'discovery', 'source-count'] as const;
-export function rangeFailureContext(report: { status: string; failure?: string; commands?: { exitCode?: number; exitKnown?: boolean; rootExited?: boolean; outputComplete?: boolean; cleanupComplete?: boolean; failureKind?: string }[] }): string {
-  const last = report.commands?.at(-1);
-  return `status=${report.status}; exitCode=${last?.exitCode ?? 'n/a'}; exitKnown=${last?.exitKnown ?? 'n/a'}; rootExited=${last?.rootExited ?? 'n/a'}; outputComplete=${last?.outputComplete ?? 'n/a'}; cleanupComplete=${last?.cleanupComplete ?? 'n/a'}; failureKind=${last?.failureKind ?? 'n/a'}; failure=${(typeof report.failure === 'string' ? report.failure : '').slice(0, 300)}`;
+export function palFailureContext(report: PalRunSummary): string {
+  const err = typeof report.errorMsg === 'string' ? report.errorMsg.slice(0, 300) : '';
+  return `command=${report.command ?? 'n/a'}; status=${report.status ?? 'n/a'}; total=${report.counts?.total ?? 'n/a'}; failed=${report.counts?.failed ?? 'n/a'}; errorMsg=${err}`;
 }
-export function classifyFailure(cwd: string, directory: string, selection: Selection, code: number): CheckOutcome {
+export function classifyFailure(_cwd: string, directory: string, selection: Selection, code: number): CheckOutcome {
+  const summaryPath = path.join(directory, 'pal', 'run-summary.json');
+  let report: PalRunSummary | undefined;
+  if (fs.existsSync(summaryPath)) {
+    try { report = json(summaryPath) as PalRunSummary; } catch { report = undefined; }
+  }
   if (code !== 1) {
-    // The abnormal-session path (OutputDrainTimeout/ProcessTimeout/...) exits 2 before any TRX exists
-    // (scripts/Test-Range.ps1 sets exitCode 2 then Fail 'abnormal-session'). Carry the same range context
-    // instead of a bare message so the blocked text names the failureKind and gate text.
-    const rangePath = path.join(directory, 'range', 'range-run.json');
-    if (selection.scope !== 'unit' && fs.existsSync(rangePath)) {
-      let report: Parameters<typeof rangeFailureContext>[0] | undefined;
-      try { report = json(rangePath) as Parameters<typeof rangeFailureContext>[0]; } catch { report = undefined; }
-      if (report) throw new QuiescenceUnknownError(`Unclassified native exit (${rangeFailureContext(report)}); not eligible for automatic correction`);
-    }
-    throw new QuiescenceUnknownError('Unclassified native exit; not eligible for automatic correction');
+    if (report) throw new QuiescenceUnknownError(`Unclassified native exit ${code} (${palFailureContext(report)}); not eligible for automatic correction`);
+    throw new QuiescenceUnknownError(`Unclassified native exit ${code}; not eligible for automatic correction`);
   }
-  let trx = path.join(directory, 'trx', 'results.trx');
   let raw = fs.readFileSync(path.join(directory, 'stdout.log'), 'utf8') + '\n' + fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8');
-  if (selection.scope !== 'unit') {
-    const report = json(path.join(directory, 'range', 'range-run.json')) as { status: string; failure: string; commands: { exitKnown: boolean; rootExited: boolean; outputComplete: boolean; cleanupComplete: boolean; exitCode: number; failureKind: string; stdout: string; stderr: string }[] };
-    const last = report.commands.at(-1);
-    const rangeContext = rangeFailureContext(report);
-    if (report.status !== 'failed' || !last || !last.exitKnown || !last.rootExited || !last.outputComplete || !last.cleanupComplete) throw new QuiescenceUnknownError(`Range failure is not a completed normal native check (${rangeContext})`);
-    // A whitelisted gate-verdict prefix is deterministic: the last command finished with a clean process-tree
-    // exit and the range wrapper stopped on its own quality verdict. That is a complete normal failure, not
-    // unknown quiescence: it enters the recordFailure/request_correction loop without any TRX evidence.
-    if (typeof report.failure === 'string' && gateFailurePrefixes.some(prefix => report.failure.startsWith(`[range:${prefix}]`))) {
-      atomicJson(path.join(directory, 'failure-classification.json'), { status: 'classified', classification: 'gate_failure', nativeExit: code, scope: selection.scope, expectedRed: false, failed: 0, failures: [] });
-      return { code, expectedRed: false, summary: report.failure };
-    }
-    if (last.exitCode !== 1 || !/^\[range:command-exit\]/.test(report.failure)) throw new QuiescenceUnknownError(`Range failure is not a completed normal native check (${rangeContext})`);
-    for (const name of [last.stdout, last.stderr]) {
-      const file = path.resolve(directory, 'range', name);
-      if (!file.startsWith(path.resolve(directory, 'range') + path.sep)) throw new Error('Invalid range evidence path');
-      raw += '\n' + fs.readFileSync(file, 'utf8');
-    }
-    trx = path.join(directory, 'range', selection.scope, 'results.trx');
-  }
-  if (/Aborting test run|Test Run Aborted|test host.*crash|Unhandled exception|WindowsStdOutHook|test run timeout/i.test(raw)) {
-    const keyLines = raw.split(/\r?\n/).filter(line => /Aborting test run|Test Run Aborted|test host.*crash|Unhandled exception|WindowsStdOutHook|test run timeout|failureKind=|\[range:[a-z-]+\]|error [A-Z]+\d+|empty or duplicate identity|guarded content/i.test(line)).slice(0, 5).join(' | ').slice(0, 700);
+  if (report?.errorMsg) raw += '\n' + report.errorMsg;
+  if (/Aborting test run|Test Run Aborted|test host.*crash|Unhandled exception|WindowsStdOutHook|test run timeout|Existing Godot process detected/i.test(raw)) {
+    const keyLines = raw.split(/\r?\n/).filter(line => /Aborting test run|Test Run Aborted|test host.*crash|Unhandled exception|WindowsStdOutHook|test run timeout|Existing Godot process detected|error [A-Z]+\d+/i.test(line)).slice(0, 5).join(' | ').slice(0, 700);
     throw new QuiescenceUnknownError(`Abnormal test session; preserve evidence and stop. Key lines: ${keyLines}`);
   }
-  if (!fs.existsSync(trx)) {
-    if (!selection.expectedFailure && /\berror (?:CS|CA|IDE)\d+\b/.test(raw)) return { code, expectedRed: false, summary: 'Located compiler/analyzer error; inspect original diagnostic before requesting correction' };
-    throw new CheckEvidenceError(`Missing test result after native exit ${code}; cannot classify failure or declared RED. Inspect ${trx}, ${path.join(directory, 'stdout.log')} and ${path.join(directory, 'stderr.log')}; do not retry automatically.`);
+  const trx = report ? resolvePalTrx(directory, report) : undefined;
+  if (!trx || !fs.existsSync(trx)) {
+    if (!selection.expectedFailure && /\berror (?:CS|CA|IDE)\d+\b/.test(raw)) {
+      const detail = report?.errorMsg ? ` (${report.errorMsg})` : '';
+      return { code, expectedRed: false, summary: `Located compiler/analyzer error${detail}; inspect original diagnostic before requesting correction` };
+    }
+    const detail = report ? ` (${palFailureContext(report)})` : '';
+    throw new CheckEvidenceError(`Missing test result after native exit ${code}${detail}; cannot classify failure or declared RED. Inspect ${summaryPath}, ${path.join(directory, 'stdout.log')} and ${path.join(directory, 'stderr.log')}; do not retry automatically.`);
   }
-  const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'check-failure.ps1'), '-RepositoryRoot', cwd, '-TrxPath', trx, '-Scope', selection.scope];
+  const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'check-failure.ps1'), '-TrxPath', trx, '-Scope', selection.scope];
   if (selection.expectedFailure) args.push('-ExpectedTest', selection.expectedFailure.test, '-ExpectedMessage', selection.expectedFailure.message);
   let classification: { expectedRed: boolean; failures: { test: string; message: string }[] };
   const evidenceFile = path.join(directory, 'failure-classification.json');
-  try { classification = JSON.parse(native(cwd, 'pwsh', args)); }
+  try { classification = JSON.parse(native(here, 'pwsh', args)); }
   catch (error) {
     const cause = error instanceof Error ? error.message : String(error);
-    atomicJson(evidenceFile, { status: 'classification_failed', nativeExit: code, scope: selection.scope, trx, cause });
+    atomicJson(evidenceFile, { status: 'classification_failed', nativeExit: code, scope: selection.scope, trx, errorMsg: report?.errorMsg ?? null, cause });
     const diagnostic = `Failure classification failed after native exit ${code}: ${cause}\nEvidence: ${evidenceFile}; original TRX: ${trx}. No automatic retry; inspect the classifier separately from process quiescence.`;
     if (cause.includes('[check:abnormal]')) throw new QuiescenceUnknownError(diagnostic, { cause: error });
     throw new CheckEvidenceError(diagnostic, { cause: error });
   }
-  atomicJson(evidenceFile, { status: 'classified', nativeExit: code, scope: selection.scope, trx, ...classification });
+  atomicJson(evidenceFile, { status: 'classified', nativeExit: code, scope: selection.scope, trx, errorMsg: report?.errorMsg ?? null, ...classification });
   const failures = classification.failures.slice(0, 3).map(failure => `${failure.test}: ${failure.message.slice(0, 500)}`).join('; ');
   return { code, expectedRed: classification.expectedRed, summary: classification.expectedRed ? `Exact predeclared RED observed; not a passing candidate. ${failures}. Evidence: ${evidenceFile}` : `Normal assertion/fixture failure: ${failures}. Evidence: ${evidenceFile}; diagnose before requesting bounded correction` };
 }
@@ -130,9 +144,7 @@ export async function executeCheck(cwd: string, directory: string, stateDirector
       if (!(error instanceof NativeCheckFailure)) throw error;
       return classifyFailure(cwd, directory, selection, error.code);
     }
-    if (selection.scope === 'unit') {
-      if (!fs.existsSync(path.join(directory, 'trx', 'results.trx'))) throw new QuiescenceUnknownError('Native Unit produced no expected TRX');
-    } else rangeCompleted(directory, selection.scope);
+    palCompleted(directory, selection.scope);
     if (selection.expectedFailure) throw new Error('Declared RED unexpectedly passed; inspect the test premise rather than accepting it');
     return { code: 0, expectedRed: false, summary: `${selection.scope} selected feedback only; not GPU/desktop/full acceptance` };
   } catch (error) {
@@ -245,7 +257,7 @@ export async function stabilizeGodotUids(cwd: string, engine: EngineOptions, sta
       await runGodotImport(projectRoot, engine.godotPath, importDirectory, signal);
     } catch (error) {
       if (error instanceof QuiescenceUnknownError) throw error;
-      // ranCheck rejects a launch failure (e.g. ENOENT) with the raw Error and a nonzero exit with
+      // runCheck rejects a launch failure (e.g. ENOENT) with the raw Error and a nonzero exit with
       // NativeCheckFailure; only the launch failure is retryable, anything the engine actually ran is fatal.
       if (error instanceof NativeCheckFailure) throw new QuiescenceUnknownError('Godot import exited ' + error.code + '; evidence ' + importDirectory + '; engine may have run');
       throw new Error('Godot import failed to start: ' + (error instanceof Error ? error.message : String(error)) + '; evidence ' + importDirectory);

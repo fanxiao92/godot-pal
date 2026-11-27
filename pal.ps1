@@ -390,14 +390,27 @@ function Invoke-LraTarget {
     if (-not (Test-Path -LiteralPath (Join-Path $lraDir 'package.json') -PathType Leaf)) {
         throw "LRA package.json not found under $lraDir"
     }
+    $prevSdkRoot = $env:PAL_PI_SDK_ROOT
+    $localSdkRoot = Join-Path $lraDir 'node_modules/@earendil-works/pi-coding-agent'
     Push-Location $lraDir
     try {
+        if (-not $env:PAL_PI_SDK_ROOT -and (Test-Path -LiteralPath $localSdkRoot -PathType Container)) {
+            $env:PAL_PI_SDK_ROOT = $localSdkRoot
+        }
+        Write-Host '==> npm run typecheck (tools/long-running-agent)'
+        & npm run typecheck
+        if ($LASTEXITCODE -ne 0) {
+            throw "LRA npm run typecheck failed with exit code $LASTEXITCODE."
+        }
         Write-Host '==> npm test (tools/long-running-agent)'
         & npm test
         if ($LASTEXITCODE -ne 0) {
             throw "LRA npm test failed with exit code $LASTEXITCODE."
         }
-    } finally { Pop-Location }
+    } finally {
+        $env:PAL_PI_SDK_ROOT = $prevSdkRoot
+        Pop-Location
+    }
 }
 
 function Invoke-MapSelfCheck {

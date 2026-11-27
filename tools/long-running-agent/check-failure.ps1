@@ -1,5 +1,4 @@
 param(
-    [Parameter(Mandatory)][string]$RepositoryRoot,
     [Parameter(Mandatory)][string]$TrxPath,
     [ValidateSet('unit', 'prepare', 'game')][string]$Scope = 'game',
     [string]$ExpectedTest,
@@ -23,16 +22,48 @@ if (($summary -and $summary.outcome -in @('Aborted', 'Timeout')) -or
     @($runInfos | Where-Object { $_.outcome -in @('Aborted', 'Timeout') -or
         $_.InnerText -match '(?i)abort|crash|timed out|Unhandled exception|WindowsStdOutHook' }).Count -or
     @($rows | Where-Object { $_.InnerText -match '(?i)TimeoutException|timed out|test host.*crash|WindowsStdOutHook' }).Count) { throw '[check:abnormal] Abnormal or liveness failure requires operator review.' }
-if ($Scope -eq 'unit') {
-    # xUnit theories may legitimately share one definition/testId across executions.
-    $root = $doc.SelectSingleNode('/t:TestRun', $ns)
-    if (-not $root -or -not $root.GetAttribute('id')) { throw 'Missing TRX run identity.' }
-    $runId = $root.GetAttribute('id')
-} else {
-    # Keep the existing strong identity contract for Prepare/Game unchanged.
-    . (Join-Path $RepositoryRoot 'scripts/GameTestBatches.ps1')
-    $identity = Read-TestRunIdentity $TrxPath
-    $doc = $identity.document; $ns = $identity.ns; $runId = $identity.runId
+$root = $doc.SelectSingleNode('/t:TestRun', $ns)
+if (-not $root -or -not $root.GetAttribute('id')) { throw 'Missing TRX run identity.' }
+$runId = $root.GetAttribute('id')
+if ($Scope -ne 'unit') {
+    # Self-contained strong TRX identity validation for Prepare/Game (xUnit theories in Unit may share one definition/testId).
+    $definitions = @($root.SelectNodes('t:TestDefinitions/t:UnitTest', $ns))
+    $entries = @($root.SelectNodes('t:TestEntries/t:TestEntry', $ns))
+    if (-not $rows.Count -or $rows.Count -ne $definitions.Count -or $rows.Count -ne $entries.Count) {
+        throw "Incomplete TRX identity graph: $TrxPath."
+    }
+    $byId = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+    foreach ($definition in $definitions) {
+        $id = $definition.GetAttribute('id')
+        $method = $definition.SelectSingleNode('t:TestMethod', $ns)
+        $execution = $definition.SelectSingleNode('t:Execution', $ns)
+        if (-not $id -or -not $method -or -not $execution -or $byId.ContainsKey($id) -or
+            -not $method.GetAttribute('className') -or -not $method.GetAttribute('name') -or -not $definition.GetAttribute('name')) {
+            throw "Invalid TRX definition identity: $TrxPath."
+        }
+        $name = $definition.GetAttribute('name')
+        if ($method.GetAttribute('adapterTypeName') -eq 'executor://gdunit4.testadapter/') {
+            $name = $method.GetAttribute('className') + '.' + $method.GetAttribute('name')
+        }
+        $byId.Add($id, @{ name = $name; execution = $execution.GetAttribute('id') })
+    }
+    $rowIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $executionIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($row in $rows) {
+        $id = $row.GetAttribute('testId'); $execution = $row.GetAttribute('executionId'); $name = $row.GetAttribute('testName')
+        if (-not $id -or -not $execution -or -not $name -or -not $rowIds.Add($id) -or -not $executionIds.Add($execution) -or
+            -not $byId.ContainsKey($id) -or $byId[$id].execution -cne $execution -or $byId[$id].name -cne $name) {
+            throw "TRX result/definition mismatch or duplicate identity: $TrxPath."
+        }
+    }
+    $entryIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in $entries) {
+        $id = $entry.GetAttribute('testId')
+        if (-not $entryIds.Add($id) -or -not $byId.ContainsKey($id) -or $byId[$id].execution -cne $entry.GetAttribute('executionId')) {
+            throw "TRX entry mismatch or duplicate identity: $TrxPath."
+        }
+    }
+    if (-not $entryIds.SetEquals($rowIds)) { throw "TRX entry/result identity sets differ: $TrxPath." }
 }
 $summary = $doc.SelectSingleNode('/t:TestRun/t:ResultSummary', $ns)
 $counters = $summary.SelectSingleNode('t:Counters', $ns)
