@@ -582,6 +582,17 @@ try {
         'ci' {
             switch ($sub) {
                 'dotnet' {
+                    Write-Host '==> Guard: No Git LFS pointers in committable trees (src/tests/tools)'
+                    Push-Location $script:RepoRoot
+                    try {
+                        $pointers = @(& git grep --cached -l -e 'version https://git-lfs' -- src tests tools)
+                        $grepExit = $LASTEXITCODE
+                        if ($grepExit -gt 1) { throw "git grep failed with exit $grepExit." }
+                        if ($grepExit -eq 0 -and $pointers.Count -gt 0) {
+                            throw "LFS pointers inside committable trees (src/tests/tools): $($pointers -join ', ')"
+                        }
+                    } finally { Pop-Location }
+
                     Write-Host '==> Guard: PowerShell syntax'
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-PowerShellSyntax.ps1') -RepositoryRoot $script:RepoRoot
                     if ($LASTEXITCODE -ne 0) { throw "Test-PowerShellSyntax.ps1 failed (exit $LASTEXITCODE)." }
@@ -589,6 +600,22 @@ try {
                     Write-Host '==> Guard: Unit boundary'
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-UnitBoundary.ps1') -RepositoryRoot $script:RepoRoot
                     if ($LASTEXITCODE -ne 0) { throw "Test-UnitBoundary.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Guard: Repo hygiene'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-RepoHygiene.ps1') -RepositoryRoot $script:RepoRoot
+                    if ($LASTEXITCODE -ne 0) { throw "Test-RepoHygiene.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Self-test: PalFrontDoor.Tests.ps1'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/PalFrontDoor.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "PalFrontDoor.Tests.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Self-test: Test-PowerShellSyntax.Tests.ps1'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/Test-PowerShellSyntax.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "Test-PowerShellSyntax.Tests.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Self-test: UnitBoundary.Tests.ps1'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/UnitBoundary.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "UnitBoundary.Tests.ps1 failed (exit $LASTEXITCODE)." }
 
                     Invoke-MapSelfCheck
                     Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage -EmitJunit -ArtifactsDir $artifactsDir -State $state
@@ -704,7 +731,14 @@ $summaryPath = Write-RunSummaryJson -ArtifactsDir $artifactsDir -Summary $summar
 
 if ($cmd -eq 'ci') {
     $sha = Get-CurrentCommitSha -Root $script:RepoRoot
-    $md = Format-MarkdownReport -Summaries @(([PSCustomObject]$summaryObj)) -CommitSha $sha -Format 'summary'
+    $ciFailures = [Collections.Generic.List[object]]::new()
+    foreach ($relTrx in $state.TrxFiles) {
+        $trxFull = Resolve-PathUnderRoot -Root $artifactsDir -Path $relTrx
+        foreach ($failItem in @(Read-TrxFailures -TrxPath $trxFull)) {
+            $ciFailures.Add($failItem)
+        }
+    }
+    $md = Format-MarkdownReport -Summaries @(([PSCustomObject]$summaryObj)) -CommitSha $sha -Format 'summary' -TrxFailures $ciFailures.ToArray()
     $mdPath = Join-Path $artifactsDir 'summary.md'
     [IO.File]::WriteAllText($mdPath, $md, [Text.UTF8Encoding]::new($false))
     if ($env:GITHUB_STEP_SUMMARY) {

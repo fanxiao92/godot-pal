@@ -34,8 +34,8 @@ function Snapshot {
     }) | ConvertTo-Json -Depth 4
 }
 $before = Snapshot
-$conflicts = @(& (Join-Path $PSScriptRoot 'Get-TestProcesses.ps1'))
-if ($conflicts.Count -ne 0) { $conflicts | Format-List; throw 'Existing Godot/repository test processes require ownership confirmation. No GPU run started.' }
+Import-Module (Join-Path $PSScriptRoot 'pal/PalCommon.psm1') -Force
+Assert-NoRunningGodotProcess
 $version = (& $godot --version | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or $version -ne '4.7.2.stable.mono.official.ed1daf0bf') { throw "Pinned Godot version mismatch: $version" }
 New-Item -ItemType Directory -Path $evidence | Out-Null
