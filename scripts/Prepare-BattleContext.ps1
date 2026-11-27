@@ -62,7 +62,7 @@ try {
     if([IO.Directory]::Exists($outputRoot)-and @([IO.Directory]::EnumerateFileSystemEntries($outputRoot)).Count-ne 0){throw 'OutputPath must be new or empty; no overwrite is supported.'}
     $godot=$options['-GodotPath']; if(-not $godot){$godot=$env:GODOT_BIN}; if(-not $godot){$godot=(Get-Command godot -ErrorAction Stop).Source}; $godot=(Get-Command $godot -ErrorAction Stop).Source
     Invoke-Checked $godot @('--version') '4.7.2.stable.mono.official.ed1daf0bf'
-    Invoke-Checked 'dotnet' @('build',(Join-Path $project 'Pal.Game.csproj'),'--nologo','--verbosity','quiet') ''
+    Invoke-Checked 'dotnet' @('build',(Join-Path $project 'Pal.Game.csproj'),'--disable-build-servers','--nologo','--verbosity','quiet') ''
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot
     $null=Resolve-StaticAssetUri $options['-StaticResources'] 'StaticResources' $true; $null=Resolve-StaticAssetUri $options['-StaticProfile'] 'StaticProfile' $false; Assert-NoLink $staticScene; Assert-TreeNoLink $staticRoot
     $resourceArgs=@()
