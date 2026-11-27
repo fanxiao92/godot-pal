@@ -590,6 +590,14 @@ try {
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-UnitBoundary.ps1') -RepositoryRoot $script:RepoRoot
                     if ($LASTEXITCODE -ne 0) { throw "Test-UnitBoundary.ps1 failed (exit $LASTEXITCODE)." }
 
+                    Write-Host '==> Guard: Repo hygiene'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-RepoHygiene.ps1') -RepositoryRoot $script:RepoRoot
+                    if ($LASTEXITCODE -ne 0) { throw "Test-RepoHygiene.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Guard: Front-door regression'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/PalFrontDoor.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "PalFrontDoor.Tests.ps1 failed (exit $LASTEXITCODE)." }
+
                     Invoke-MapSelfCheck
                     Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage -EmitJunit -ArtifactsDir $artifactsDir -State $state
                     Invoke-IntegrationTarget -ProjectScope 'extract' -Filter '' -GodotPathOpt '' -EmitJunit -ArtifactsDir $artifactsDir -State $state
