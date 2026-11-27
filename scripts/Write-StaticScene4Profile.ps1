@@ -39,16 +39,8 @@ $dataSha256 = (Get-FileHash -LiteralPath $DataMkf -Algorithm SHA256).Hash.ToLowe
 [Array]::Clear($bytes, 0, $bytes.Length)
 
 # Required privacy-safe global process gate immediately before starting the Godot authoring process.
-$processes = @(& (Join-Path $PSScriptRoot 'Get-TestProcesses.ps1'))
-if (@($processes | Where-Object Name -Like 'godot*.exe').Count -gt 0) {
-    throw 'Existing Godot process; static profile authoring was not started.'
-}
-if (@($processes | Where-Object {
-    $_.Name -in @('dotnet.exe','testhost.exe') -and
-    (($_.CommandLine -like '*godot-pal*') -or ($_.CommandLine -like '*Pal.Game*') -or ($_.CommandLine -like '*Pal.Prepare*'))
-}).Count -gt 0) {
-    throw 'Existing repository test/prepare process; static profile authoring was not started.'
-}
+Import-Module (Join-Path $PSScriptRoot 'pal/PalCommon.psm1') -Force
+Assert-NoRunningGodotProcess
 $info = [Diagnostics.ProcessStartInfo]::new()
 $info.FileName = $GodotPath
 $info.WorkingDirectory = $project

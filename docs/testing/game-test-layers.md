@@ -83,10 +83,8 @@ runner = ISceneRunner.Load(Main, autoFree: true);
 
 通用停止顺序以[当前诊断规则](../agents/test-diagnostics.md)为准。headless 引擎接线、GPU 回读、程序输入和物理桌面/人工验收分别留证；一次成功不互相覆盖。
 
-## 完整门边界
+## CI 与完整套件边界
 
-Unit-only 第一阶段不默认运行完整门，也不以完整门作为当前测试合并要求。仅显式选择完整验收时，唯一入口是 `scripts/Test-M0.ps1`，按当前脚本与 runsettings 选择 Core、CLI、Prepare、Game 批次并全局串行。Prepare 必须先于 Game；Game 的分批、发现身份、TRX Results/Definitions/Entries、RunInfo、控制失败和 startup 阶段必须按实际源码/脚本核对。任一中止、崩溃、未知退出、输出不完整、缺结果或非预期失败均保留原件并停止，不拼接旧轮、不自动重试或续跑。
+Game 测试通过统一前门 `./pal.ps1 test game`（或 CI 的 `./pal.ps1 ci game`）在单次 headless 会话中执行，配置以 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 与 [game.runsettings](../../tests/Pal.Game.Tests/game.runsettings) 为准（`TestSessionTimeout=600000`、`TolerateExitCodeAfterCompletion=false`）。任一中止、崩溃、未知退出、输出不完整或非预期失败均保留原件并停止，不自动重试或续跑。
 
-当前 dotnet 进程边界见[生产定义](../../scripts/DotnetCheckedDefinition.ps1)及[定点回归](../../tests/Pal.Game.Tests/DotnetBoundary.Tests.ps1)：root 与双流 EOF 共用工作预算，失败后只给共享清理预算；root exit0 不代表输出完整或后代退出，未知退出保持 null。增量保留两路原始字节，完整后才扫描诊断；取消、退出已知、输出完整与清理完成分别记录，只处置自有进程。持久回归的外护栏不证明 OS/I/O 硬实时，也不授权放宽生产预算。
-
-其余完整批次、历史预算值、TRX 身份图、成本/性能口径和历史交付记录保留在[历史记录](../archive/m3/game-test-history.md)；当前命令与配置以 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj)、[game.runsettings](../../tests/Pal.Game.Tests/game.runsettings) 及脚本配置为准，不复制会过期的案例清单。
+其余历史批次、预算值、TRX 身份图和交付记录保留在[历史记录](../archive/m3/game-test-history.md)。

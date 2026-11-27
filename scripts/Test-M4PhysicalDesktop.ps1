@@ -19,8 +19,8 @@ if ($evidence.Equals($repo, $comparison) -or $evidence.StartsWith($repo + [IO.Pa
     throw 'Physical evidence must be outside the repository.'
 }
 if (Test-Path -LiteralPath $evidence) { throw 'EvidenceDirectory must be a new directory; existing evidence is never overwritten.' }
-$conflicts = @(& (Join-Path $PSScriptRoot 'Get-TestProcesses.ps1'))
-if ($conflicts.Count -ne 0) { $conflicts | Format-List; throw 'Existing Godot/repository test processes require ownership confirmation. No physical run started.' }
+Import-Module (Join-Path $PSScriptRoot 'pal/PalCommon.psm1') -Force
+Assert-NoRunningGodotProcess
 $version = (& $godot --version | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or $version -ne '4.7.2.stable.mono.official.ed1daf0bf') { throw "Pinned Godot version mismatch: $version" }
 New-Item -ItemType Directory -Path $evidence | Out-Null
@@ -156,7 +156,7 @@ try {
     $engineError = ($output + "`n" + $errors) -match '(?im)(ERROR:|SCRIPT ERROR:|Unhandled|PAL_PHYSICAL_FAILED)'
     $resultPath = Join-Path $evidence 'fixture-result.json'
     $fixture = if (Test-Path $resultPath) { Get-Content $resultPath -Raw | ConvertFrom-Json } else { $null }
-    $residue = @(& (Join-Path $PSScriptRoot 'Get-TestProcesses.ps1'))
+    $residue = @(Get-Process -Name 'godot*' -ErrorAction SilentlyContinue | Select-Object Id, ProcessName)
     $pollEdges = 0
     if ($fixture -and $fixture.enterPollEdges) { $pollEdges = [int]$fixture.enterPollEdges }
     # Real-keyboard count: driver-side SendInput taps (each Key call is one injected event);

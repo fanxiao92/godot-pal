@@ -259,7 +259,14 @@ public sealed class ExportBattleImagesCliTests : IDisposable
         WriteArchive("Fire.mkf", [], Compress(Sprite), Compress(SingleFrameSprite));
         var before = Directory.GetFiles(input).ToDictionary(path => path,
             path => (Bytes: File.ReadAllBytes(path), Modified: File.GetLastWriteTimeUtc(path), Attributes: File.GetAttributes(path)));
-        foreach (var (path, snapshot) in before) File.SetAttributes(path, snapshot.Attributes | FileAttributes.ReadOnly);
+        var readonlyAttributes = new Dictionary<string, FileAttributes>(before.Count);
+        foreach (var (path, snapshot) in before)
+        {
+            File.SetAttributes(path, snapshot.Attributes | FileAttributes.ReadOnly);
+            FileAttributes afterSet = File.GetAttributes(path);
+            Assert.True((afterSet & FileAttributes.ReadOnly) != 0);
+            readonlyAttributes[path] = afterSet;
+        }
         try
         {
             Directory.CreateDirectory(output); // Empty output is allowed; the main test uses a new path.
@@ -287,7 +294,7 @@ public sealed class ExportBattleImagesCliTests : IDisposable
             {
                 Assert.Equal(snapshot.Bytes, File.ReadAllBytes(path));
                 Assert.Equal(snapshot.Modified, File.GetLastWriteTimeUtc(path));
-                Assert.Equal(snapshot.Attributes | FileAttributes.ReadOnly, File.GetAttributes(path));
+                Assert.Equal(readonlyAttributes[path], File.GetAttributes(path));
             }
         }
         finally { foreach (var (path, snapshot) in before) File.SetAttributes(path, snapshot.Attributes); }
