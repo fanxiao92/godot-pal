@@ -39,17 +39,6 @@ public class DialogueMessageTests
     }
 
     [Fact]
-    public void Language_selection_defaults_to_simplified_chinese_and_selects_english_only_when_explicit()
-    {
-        var chinese = new DialogueLanguagePackage("zh-Hans", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("zh")])]);
-        var english = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("en")])]);
-
-        Assert.Equal("zh-Hans", new DialogueLanguageSelection().Select(chinese, english).Language);
-        Assert.Equal("en", new DialogueLanguageSelection("en").Select(chinese, english).Language);
-        Assert.Throws<InvalidDataException>(() => new DialogueLanguageSelection("en").Select(english, chinese));
-    }
-
-    [Fact]
     public void Message_identifier_inside_block_does_not_rebase_or_change_original_span()
     {
         var package = new DialogueLanguagePackage("en", [

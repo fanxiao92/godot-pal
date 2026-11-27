@@ -81,29 +81,12 @@ public static class FirstMandatoryBattleEnvelopeCodec
     {
         I(w, v.SceneId); I(w, v.MapId); I(w, v.PaletteId); B(w, v.NightPalette); I(w, v.MusicId); I(w, v.BattleMusicId);
         I(w, v.Leader.X); I(w, v.Leader.Y); S(w, v.Leader.Direction); I(w, v.Leader.Layer); I(w, v.Leader.Phase);
-        I(w, v.SearchProof.OwnerId); I(w, v.SearchProof.SampleIndex); B(w, v.SearchProof.CollisionPass);
         A(w, v.SceneEntries, (x, q) => { I(x, q.SceneId); I(x, q.EnterEntry); I(x, q.TeleportEntry); });
         A(w, v.EventObjects, (x, q) => { I(x,q.OwnerId); I(x,q.X); I(x,q.Y); I(x,q.Direction); I(x,q.State); I(x,q.VanishTime); I(x,q.TriggerMode); I(x,q.TriggerEntry); I(x,q.AutoEntry); I(x,q.AutoIdleFrameCount); I(x,q.SpriteId); I(x,q.SpriteFrames); I(x,q.CurrentFrame); I(x,q.ScriptIdleFrameCount); I(x,q.SpritePtrOffset); I(x,q.AutoSpriteFrames); I(x,q.Layer); });
     }
     private static void Closure(BinaryWriter w, BattleClosureEntry v)
     {
-        S(w,v.Id); S(w,v.Category); ClosureIdentity(w,v.Identity); AI(w,v.OwnerTickets); S(w,v.Status); A(w,v.ResourceIds,S);
-    }
-    private static void ClosureIdentity(BinaryWriter w, BattleClosureIdentity v)
-    {
-        switch (v)
-        {
-            case BattleEventRangeIdentity x: S(w,"event-range"); I(w,x.StartAddress); I(w,x.BattleAddress); I(w,x.WonStartAddress); I(w,x.EndAddress); break;
-            case BattleCommandIdentity x: S(w,"battle-command"); I(w,x.CommandAddress); AI(w,x.Operands); I(w,x.EnemyTeamId); I(w,x.EnemyObjectId); I(w,x.EnemyId); I(w,x.EnemyCount); I(w,x.BattlefieldId); S(w,x.SpecialValue); S(w,x.ReverseEncoding); break;
-            case BattleRoleHooksIdentity x: S(w,"role-script-ranges"); I(w,x.DyingRoleId); I(w,x.DyingStartAddress); I(w,x.DyingEndAddress); I(w,x.FriendDeathRoleId); I(w,x.FriendDeathStartAddress); I(w,x.FriendDeathEndAddress); S(w,x.BranchCoverage); break;
-            case BattleEquipmentLayoutIdentity x: S(w,"equipment-layout"); I(w,x.RoleCount); I(w,x.SlotCount); I(w,x.DualAttackObjectId); B(w,x.PersistentEquipmentStatus); break;
-            case BattleGrowthLayoutIdentity x: S(w,"growth-layout"); I(w,x.RoleCount); B(w,x.IncludesPrimaryExperience); B(w,x.IncludesHiddenExperience); B(w,x.IncludesRecoveryAndCleanup); break;
-            case BattleDynamicAutoIdentity x: S(w,"dynamic-auto-range"); I(w,x.StartAddress); I(w,x.EndAddress); A(w,x.Effects,S); S(w,x.Advance); break;
-            case BattleFailureBoundaryIdentity x: S(w,"failure-boundary"); I(w,x.LostEntryAddress); I(w,x.ReloadCommand); S(w,x.Behavior); break;
-            case BattleImageSetIdentity x: S(w,"battle-image-set"); I(w,x.EnemyId); S(w,x.EnemyArchiveEntry); A(w,x.RoleSpriteIds,S); I(w,x.BattlefieldId); S(w,x.BattlefieldArchiveEntry); B(w,x.IncludesLayoutAndEffectFrames); break;
-            case BattleLocalizedDialogueIdentity x: S(w,"localized-dialogue-set"); A(w,x.Languages,S); A(w,x.Contents,S); break;
-            default: throw new InvalidDataException("Unknown closure identity variant.");
-        }
+        S(w,v.Id); S(w,v.Category); AI(w,v.OwnerTickets); S(w,v.Status); A(w,v.ResourceIds,S);
     }
     private static void I(BinaryWriter w,int v)=>w.Write(v);
     private static void B(BinaryWriter w,bool v)=>w.Write(v);

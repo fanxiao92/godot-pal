@@ -19,7 +19,7 @@ public sealed class RoleLiveState
                 || !Word(role.Hp) || !Word(role.MaxHp) || !Word(role.Mp) || !Word(role.MaxMp)
                 || role.Hp > role.MaxHp || role.Mp > role.MaxMp)
                 throw new InvalidDataException("Live roles require unique RoleId 0..5 and valid HP/MP WORD values.");
-            roles.Add(role.RoleId, TriggerBattleContent.Freeze(role));
+            roles.Add(role.RoleId, BattleRoleSnapshotHelper.Freeze(role));
         }
         Roles = new ReadOnlyDictionary<int, BattleRoleSnapshot>(roles);
     }

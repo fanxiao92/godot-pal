@@ -159,7 +159,6 @@ internal sealed class SyntheticFirstBattleFixture : IDisposable
             var context = SyntheticBattleContext.Valid();
             context.Document["snapshot"]!["world"]!["leader"]!["x"] = 1264;
             context.Document["snapshot"]!["world"]!["leader"]!["y"] = 248;
-            context.Document["snapshot"]!["world"]!["searchProof"]!["sampleIndex"] = 1;
             foreach (var node in context.Document["closure"]!["entries"]!.AsArray()) node!["status"] = "prepared";
             string authored = Path.Combine(input, "authored");
             Directory.CreateDirectory(authored);

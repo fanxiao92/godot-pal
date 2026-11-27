@@ -844,7 +844,6 @@ public sealed class FirstMandatoryBattleClosureTests
     {
         context.Document["snapshot"]!["world"]!["leader"]!["x"] = 1264;
         context.Document["snapshot"]!["world"]!["leader"]!["y"] = 248;
-        context.Document["snapshot"]!["world"]!["searchProof"]!["sampleIndex"] = 1;
         if (prepared)
             foreach (var node in context.Document["closure"]!["entries"]!.AsArray())
                 node!["status"] = "prepared";

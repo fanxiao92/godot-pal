@@ -16,7 +16,7 @@ public static class PlayerSaveContract
 
     /// <summary>D3=A: five manual save slots numbered 1..5 (reference PAL_SaveSlotMenu rows).
     /// The slot number maps to an app-controlled user:// name; payload never chooses paths.</summary>
-    public const int FirstSlot = 1, LastSlot = 5, SaveSlotCount = 5;
+    public const int FirstSlot = SaveSlotBounds.FirstSlot, LastSlot = SaveSlotBounds.LastSlot, SaveSlotCount = SaveSlotBounds.SaveSlotCount;
 
     /// <summary>palcommon.h MAX_INVENTORY; single-sourced from the live owner.</summary>
     public const int InventoryCapacity = InventoryLiveState.Capacity;

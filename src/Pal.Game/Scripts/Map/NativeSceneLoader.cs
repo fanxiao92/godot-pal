@@ -29,7 +29,7 @@ public static class NativeSceneLoader
                 }
             }
             if (battleProfile is null) throw new InvalidDataException("M4 first battle requires --m4-first-battle-profile");
-            NativeExplorationProfile.ValidateUri(battleProfile);
+            NativeContentDependencies.ValidateUri(battleProfile);
             if (language is not (null or "zh-Hans" or "en")) throw new InvalidDataException("M4 first battle language must be zh-Hans or en");
             return new("", "", false, null, battleProfile, language ?? "zh-Hans");
         }
@@ -48,12 +48,12 @@ public static class NativeSceneLoader
                 }
             }
             if (dialogueProfile is null) throw new InvalidDataException("M3 dialogue requires --m3-dialogue-profile");
-            NativeExplorationProfile.ValidateUri(dialogueProfile);
+            NativeContentDependencies.ValidateUri(dialogueProfile);
             if (language is not (null or "zh-Hans" or "en")) throw new InvalidDataException("M3 dialogue language must be zh-Hans or en");
             return new("", "", false, dialogueProfile, null, language ?? "zh-Hans");
         }
         const string usage = "expected unique --m2-resources/--m2-profile or --m3-static-resources/--m3-static-profile arguments";
-        string root = "res://Assets", profile = NativeExplorationProfile.DefaultUri;
+        string root = "res://Assets", profile = NativeContentDependencies.DefaultExplorationProfileUri;
         bool hasRoot = false, hasProfile = false;
         string? selectedMode = null;
         for (int i = 0; i < arguments.Length; i += 2)
@@ -75,7 +75,7 @@ public static class NativeSceneLoader
             }
         }
         ValidateRoot(root);
-        try { NativeExplorationProfile.ValidateUri(profile); }
+        try { NativeContentDependencies.ValidateUri(profile); }
         catch (InvalidDataException e) { throw new InvalidDataException("--m2-profile " + profile + ": " + e.Message, e); }
         bool staticAcceptance = selectedMode == "m3-static";
         if (staticAcceptance && (!hasRoot || !hasProfile))

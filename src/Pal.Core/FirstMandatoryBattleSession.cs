@@ -61,7 +61,7 @@ public sealed class FirstMandatoryBattleSession
             Layer = checked((ushort)authored.Layer), StepPhase = authored.Phase
         };
         SceneSearchMatch? hit = rules.FindSearchTarget(leader);
-        if (hit is null || hit.ObjectId != 28 || hit.SampleIndex != State.World.SearchProof.SampleIndex || rules.IsBlocked(leader.X, leader.Y))
+        if (hit is null || hit.ObjectId != 28 || rules.IsBlocked(leader.X, leader.Y))
             throw new InvalidDataException("First mandatory battle start/search identity does not match owner28 collision proof.");
         exploration = new ExplorationSession(rules, leader);
         input = new ExplorationInput(exploration);

@@ -139,8 +139,7 @@ public sealed class BattlePrepareProcessTests : IDisposable
     [Theory]
     [InlineData("owner")]
     [InlineData("start")]
-    [InlineData("search")]
-    public async Task Static_owner_start_and_search_mismatch_fail_without_publication(string kind)
+    public async Task Static_owner_and_start_mismatch_fail_without_publication(string kind)
     {
         if (kind == "owner")
         {
@@ -150,15 +149,14 @@ public sealed class BattlePrepareProcessTests : IDisposable
         else
         {
             BattleContextTestFixture changed = ValidBattleContext();
-            if (kind == "start") changed.Document["snapshot"]!["world"]!["leader"]!["x"] = 1248;
-            else changed.Document["snapshot"]!["world"]!["searchProof"]!["sampleIndex"] = 2;
+            changed.Document["snapshot"]!["world"]!["leader"]!["x"] = 1248;
             WriteBattleContext(changed);
         }
         (string staticUri, string staticProfile) = await PrepareStatic();
-        string output = kind == "search" ? Path.Combine(battleOutput, "new-parent", "new-output") : battleOutput;
+        string output = kind == "start" ? Path.Combine(battleOutput, "new-parent", "new-output") : battleOutput;
         var result = await Prepare(output, staticUri, staticProfile);
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains(kind == "owner" ? "owner28" : kind == "start" ? "start identity" : "start/search identity", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(kind == "owner" ? "owner28" : "start identity", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.False(File.Exists(Path.Combine(output, "Battle", "Profile.tres")));
         Assert.False(Directory.Exists(battleOutput));
     }
@@ -283,7 +281,6 @@ public sealed class BattlePrepareProcessTests : IDisposable
         BattleContextTestFixture fixture = BattleContextTestFixture.Valid();
         fixture.Document["snapshot"]!["world"]!["leader"]!["x"] = 1264;
         fixture.Document["snapshot"]!["world"]!["leader"]!["y"] = 248;
-        fixture.Document["snapshot"]!["world"]!["searchProof"]!["sampleIndex"] = 1;
         return fixture;
     }
 

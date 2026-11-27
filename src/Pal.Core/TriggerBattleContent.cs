@@ -111,15 +111,15 @@ public sealed class TriggerBattleContent
         foreach (var (player, index) in players.Select((x, i) => (x, i)))
             if (byId[player.RoleId].Hp != player.Hp || byId[player.RoleId].MaxHp != player.MaxHp)
                 throw new InvalidDataException($"roles and players[{index}] must match HP and maxHp by RoleId.");
-        InitialRoles = new ReadOnlyDictionary<int, BattleRoleSnapshot>(byId.ToDictionary(x => x.Key, x => Freeze(x.Value)));
-        Players = Array.AsReadOnly(players.Select(x => x with { Equipment = Copy(x.Equipment), Statuses = Copy(x.Statuses), Poisons = Copy(x.Poisons) }).ToArray());
+        InitialRoles = new ReadOnlyDictionary<int, BattleRoleSnapshot>(byId.ToDictionary(x => x.Key, x => BattleRoleSnapshotHelper.Freeze(x.Value)));
+        Players = Array.AsReadOnly(players.Select(x => x with { Equipment = BattleRoleSnapshotHelper.Copy(x.Equipment), Statuses = BattleRoleSnapshotHelper.Copy(x.Statuses), Poisons = BattleRoleSnapshotHelper.Copy(x.Poisons) }).ToArray());
         GrowthByRole = new ReadOnlyDictionary<int, ClassicBattleGrowthData>(growth.ToDictionary(x => x.Key,
-            x => new ClassicBattleGrowthData(Copy(x.Value.LevelUpExperience), Array.AsReadOnly(x.Value.LevelUpMagics.ToArray()))));
+            x => new ClassicBattleGrowthData(BattleRoleSnapshotHelper.Copy(x.Value.LevelUpExperience), Array.AsReadOnly(x.Value.LevelUpMagics.ToArray()))));
         EnemyTeams = new ReadOnlyDictionary<int, IReadOnlyList<ClassicBattleEnemy>>(teams.ToDictionary(x => x.Key, x =>
         {
             if (x.Value is null || x.Value.Count is < 1 or > 5 || x.Value.Any(e => e is null))
                 throw new InvalidDataException($"Battle team {x.Key} requires one to five nonnull enemy slots.");
-            return (IReadOnlyList<ClassicBattleEnemy>)Array.AsReadOnly(x.Value.Select(e => e with { Statuses = Copy(e.Statuses), Poisons = Copy(e.Poisons) }).ToArray());
+            return (IReadOnlyList<ClassicBattleEnemy>)Array.AsReadOnly(x.Value.Select(e => e with { Statuses = BattleRoleSnapshotHelper.Copy(e.Statuses), Poisons = BattleRoleSnapshotHelper.Copy(e.Poisons) }).ToArray());
         }));
         BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);
         if (panelDeclaredRoles is not null && panelDeclaredRoles.Any(role => !byId.ContainsKey(role)))
@@ -128,7 +128,7 @@ public sealed class TriggerBattleContent
         RoleEquipment = roleEquipment is null || roleEquipment.Count == 0 ? Array.Empty<IReadOnlyList<int>>()
             : Array.AsReadOnly(roleEquipment.Select(row => (IReadOnlyList<int>)Array.AsReadOnly(row.ToArray())).ToArray());
         EquipmentObjects = new ReadOnlyDictionary<int, BattleEquipmentObject>((equipmentObjects ?? []).ToDictionary(
-            x => x.ObjectId, x => x with { Effects = Array.AsReadOnly(x.Effects.Select(e => e with { Statuses = Copy(e.Statuses) }).ToArray()) }));
+            x => x.ObjectId, x => x with { Effects = Array.AsReadOnly(x.Effects.Select(e => e with { Statuses = BattleRoleSnapshotHelper.Copy(e.Statuses) }).ToArray()) }));
         InitialInventory = CopyInventory(initialInventory);
         EquipMenu = CopyEquipMenu(equipMenu, EquipmentObjects);
         UseMenu = CopyUseMenu(useMenu);
@@ -268,15 +268,6 @@ public sealed class TriggerBattleContent
             equipmentState ?? BattleEquipmentState.Initialize(this));
     }
 
-    internal static BattleRoleSnapshot Freeze(BattleRoleSnapshot role) => role with
-    {
-        HiddenExperience = new ReadOnlyDictionary<string, BattleExperienceSnapshot>(role.HiddenExperience.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal)),
-        Equipment = Copy(role.Equipment), Magics = Copy(role.Magics), Statuses = Copy(role.Statuses)
-    };
-    private static IReadOnlyList<int> Copy(IReadOnlyList<int> source) => source is null ? throw new InvalidDataException("Required numeric array is null.") : Array.AsReadOnly(source.ToArray());
     private static T Single<T>(IEnumerable<T> source) => source.Count() == 1 ? source.Single()
         : throw new InvalidOperationException("Single-actor compatibility access cannot project multiplayer content.");
 }
-
-public sealed record TriggerBattleRequest(Guid Id, int Caller, TriggerPosition Position, int EnemyTeamId, bool IsBoss,
-    int NextAddress, int? LossAddress, int? FleeAddress, ClassicBattleLifecycleSession Lifecycle);

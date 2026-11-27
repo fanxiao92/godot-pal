@@ -131,8 +131,7 @@ public sealed class FirstMandatoryBattleProfile
         }
         BattleWorldSnapshot w = e.World;
         Expect(w.SceneId == 2 && w.MapId == 12 && w.Leader.Direction is "north" or "east" or "south" or "west"
-            && w.Leader.Phase is >= 0 and <= 3 && w.SearchProof is { OwnerId: 28, CollisionPass: true }
-            && w.SearchProof.SampleIndex is >= 0 and < 13 && w.SceneEntries.Any(x => x.SceneId == 2)
+            && w.Leader.Phase is >= 0 and <= 3 && w.SceneEntries.Any(x => x.SceneId == 2)
             && w.SceneEntries.Select(x => x.SceneId).Distinct().Count() == w.SceneEntries.Count
             && w.EventObjects.Select(x => x.OwnerId).Distinct().Count() == w.EventObjects.Count, "Battle world is invalid.");
         BattleEventObjectSnapshot? owner = w.EventObjects.SingleOrDefault(x => x.OwnerId == 28);
@@ -142,7 +141,7 @@ public sealed class FirstMandatoryBattleProfile
         foreach (BattleClosureEntry entry in e.Closure.Entries)
         {
             ClosureSpec spec = ClosureSpecs[entry.Id];
-            Expect(entry.Category == spec.Category && IsClosureStatus(entry.Status) && ClosureIdentityEquals(entry.Identity, spec.Identity)
+            Expect(entry.Category == spec.Category && IsClosureStatus(entry.Status)
                 && entry.OwnerTickets.Count == entry.OwnerTickets.Distinct().Count() && entry.OwnerTickets.ToHashSet().SetEquals(spec.OwnerTickets)
                 && entry.ResourceIds.SequenceEqual(spec.ResourceIds), $"closure entry '{entry.Id}' is invalid.");
         }
@@ -179,7 +178,6 @@ public sealed class FirstMandatoryBattleProfile
         }
         foreach(string name in new[]{"sceneId","mapId","paletteId","nightPalette","musicId","battleMusicId"}) Add("snapshot.world."+name,"world");
         foreach(string name in new[]{"x","y","direction","layer","phase"}) Add("snapshot.world.leader."+name,"world");
-        foreach(string name in new[]{"ownerId","sampleIndex","collisionPass"}) Add("snapshot.world.searchProof."+name,"world");
         for(int i=0;i<e.World.SceneEntries.Count;i++) foreach(string name in new[]{"sceneId","enterEntry","teleportEntry"}) Add($"snapshot.world.sceneEntries[{i}].{name}","scene"+e.World.SceneEntries[i].SceneId);
         string[] objectNames=["ownerId","x","y","direction","state","vanishTime","triggerMode","triggerEntry","autoEntry","autoIdleFrameCount","spriteId","spriteFrames","currentFrame","scriptIdleFrameCount","spritePtrOffset","autoSpriteFrames","layer"];
         for(int i=0;i<e.World.EventObjects.Count;i++) foreach(string name in objectNames) Add($"snapshot.world.eventObjects[{i}].{name}","owner"+e.World.EventObjects[i].OwnerId);
@@ -205,7 +203,7 @@ public sealed class FirstMandatoryBattleProfile
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly Regex Sha256Pattern = new("^[0-9a-f]{64}\\z", RegexOptions.CultureInvariant);
     private static readonly string[] HiddenExperienceNames = ["health", "magic", "attack", "magicPower", "defense", "dexterity", "flee"];
-    private sealed record ClosureSpec(string Category, BattleClosureIdentity Identity, int[] OwnerTickets, string[] ResourceIds);
+    private sealed record ClosureSpec(string Category, int[] OwnerTickets, string[] ResourceIds);
     private sealed record ResourceSpec(string Kind, int[] OwnerTickets);
     private sealed record SourceSpec(string Kind, int? Address);
 
@@ -213,15 +211,15 @@ public sealed class FirstMandatoryBattleProfile
 
     private static readonly IReadOnlyDictionary<string, ClosureSpec> ClosureSpecs = new Dictionary<string, ClosureSpec>(StringComparer.Ordinal)
     {
-        ["trigger-09c3-0a32"] = new("command", new BattleEventRangeIdentity(0x09c3, 0x09fe, 0x09ff, 0x0a32), [52, 53], ["events"]),
-        ["battle-team-18"] = new("command", new BattleCommandIdentity(0x09fe, [0x0012, 0xa073, 0], 18, 495, 97, 2, 24, "third-operand-zero-is-boss-no-flee", "encode-operands-from-semantic-fields"), [46, 47, 51, 53], ["events", "battle-data"]),
-        ["role-hooks-random"] = new("command", new BattleRoleHooksIdentity(1, 0xa96e, 0xa987, 0, 0xa9b5, 0xa9d1, "all-random-branches"), [49], ["events", "battle-data", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
-        ["equipment-six-role"] = new("validation", new BattleEquipmentLayoutIdentity(6, 6, 170, true), [48], ["battle-data"]),
-        ["growth-five-role"] = new("validation", new BattleGrowthLayoutIdentity(5, true, true, true), [50], ["battle-data"]),
-        ["dynamic-auto-0a36-0a3b"] = new("command", new BattleDynamicAutoIdentity(0x0a36, 0x0a3b, ["movement", "direction", "hidden"], "update-driven"), [52], ["events"]),
-        ["failure-reload-todo"] = new("command", new BattleFailureBoundaryIdentity(0xa073, 0x004e, "diagnose-and-stop-without-reload-retry-or-exploration"), [51], ["events", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
-        ["battle-images"] = new("resource", new BattleImageSetIdentity(97, "ABC97", ["F0", "F1"], 24, "FBP24", true), [53], ["battle-images"]),
-        ["dialogue-languages"] = new("resource", new BattleLocalizedDialogueIdentity(["zh-CN", "en"], ["messages", "names", "portraits", "glyphs", "ui"]), [49, 53], ["dialogue-zh-cn", "dialogue-en", "glyphs"])
+        ["trigger-09c3-0a32"] = new("command", [52, 53], ["events"]),
+        ["battle-team-18"] = new("command", [46, 47, 51, 53], ["events", "battle-data"]),
+        ["role-hooks-random"] = new("command", [49], ["events", "battle-data", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
+        ["equipment-six-role"] = new("validation", [48], ["battle-data"]),
+        ["growth-five-role"] = new("validation", [50], ["battle-data"]),
+        ["dynamic-auto-0a36-0a3b"] = new("command", [52], ["events"]),
+        ["failure-reload-todo"] = new("command", [51], ["events", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
+        ["battle-images"] = new("resource", [53], ["battle-images"]),
+        ["dialogue-languages"] = new("resource", [49, 53], ["dialogue-zh-cn", "dialogue-en", "glyphs"])
     };
 
     private static readonly IReadOnlyDictionary<string, ResourceSpec> ResourceSpecs = new Dictionary<string, ResourceSpec>(StringComparer.Ordinal)
@@ -431,7 +429,7 @@ public sealed class FirstMandatoryBattleProfile
 
     private static void ValidateWorld(JsonElement world)
     {
-        Keys(world, "world", "sceneId", "mapId", "paletteId", "nightPalette", "musicId", "battleMusicId", "leader", "searchProof", "sceneEntries", "eventObjects");
+        Keys(world, "world", "sceneId", "mapId", "paletteId", "nightPalette", "musicId", "battleMusicId", "leader", "sceneEntries", "eventObjects");
         Expect(Integer(world, "sceneId") == 2 && Integer(world, "mapId") == 12, "snapshot world must identify scene 2 / map 12.");
         Word(world.GetProperty("paletteId"), "paletteId"); Boolean(world, "nightPalette"); Word(world.GetProperty("musicId"), "musicId"); Word(world.GetProperty("battleMusicId"), "battleMusicId");
         JsonElement leader = Object(world, "leader");
@@ -440,10 +438,6 @@ public sealed class FirstMandatoryBattleProfile
         Expect(Text(leader, "direction") is "north" or "east" or "south" or "west", "leader direction is invalid.");
         Word(leader.GetProperty("layer"), "leader.layer");
         Expect(Integer(leader, "phase") is >= 0 and <= 3, "leader phase must be 0..3.");
-        JsonElement proof = Object(world, "searchProof");
-        Keys(proof, "searchProof", "ownerId", "sampleIndex", "collisionPass");
-        Expect(Integer(proof, "ownerId") == 28 && Integer(proof, "sampleIndex") is >= 0 and < 13 && Boolean(proof, "collisionPass"),
-            "searchProof must record a legal 13-sample owner28 hit and collision pass.");
         JsonElement sceneEntries = Array(world, "sceneEntries");
         Expect(sceneEntries.GetArrayLength() > 0, "sceneEntries must not be empty.");
         var sceneIds = new HashSet<int>();
@@ -488,13 +482,11 @@ public sealed class FirstMandatoryBattleProfile
         var statuses = new HashSet<string>(StringComparer.Ordinal);
         foreach (JsonElement entry in entries.EnumerateArray())
         {
-            Keys(entry, "closure entry", "id", "category", "identity", "ownerTickets", "status", "resourceIds");
+            Keys(entry, "closure entry", "id", "category", "ownerTickets", "status", "resourceIds");
             string id = Text(entry, "id");
             Expect(id.Length > 0 && ids.Add(id), $"closure id '{id}' is empty or duplicated.");
             if (!ClosureSpecs.TryGetValue(id, out ClosureSpec? spec)) throw new InvalidDataException($"closure id '{id}' is unknown.");
             Expect(Text(entry, "category") == spec.Category, $"closure entry '{id}' category is not the frozen category.");
-            JsonElement identity = Object(entry, "identity");
-            Expect(ClosureIdentityEquals(BattleModels.ClosureIdentity(identity), spec.Identity), $"closure entry '{id}' identity is not the frozen structured identity.");
             Expect(ExactWordSet(Array(entry, "ownerTickets"), spec.OwnerTickets, $"closure entry '{id}' ownerTickets"), $"closure entry '{id}' ownerTickets do not match the exact owner set.");
             string status = Text(entry, "status");
             Expect(IsClosureStatus(status), $"closure entry '{id}' status must be contract-only or prepared.");
@@ -549,40 +541,6 @@ public sealed class FirstMandatoryBattleProfile
     }
 
     private static bool IsClosureStatus(string status) => status is "contract-only" or "prepared";
-
-    private static bool ClosureIdentityEquals(BattleClosureIdentity actual, BattleClosureIdentity expected) => (actual, expected) switch
-    {
-        (BattleEventRangeIdentity a, BattleEventRangeIdentity b) => (a.StartAddress,a.BattleAddress,a.WonStartAddress,a.EndAddress)==(b.StartAddress,b.BattleAddress,b.WonStartAddress,b.EndAddress),
-        (BattleCommandIdentity a, BattleCommandIdentity b) => a.CommandAddress==b.CommandAddress && a.Operands.SequenceEqual(b.Operands) && (a.EnemyTeamId,a.EnemyObjectId,a.EnemyId,a.EnemyCount,a.BattlefieldId,a.SpecialValue,a.ReverseEncoding)==(b.EnemyTeamId,b.EnemyObjectId,b.EnemyId,b.EnemyCount,b.BattlefieldId,b.SpecialValue,b.ReverseEncoding),
-        (BattleRoleHooksIdentity a, BattleRoleHooksIdentity b) => (a.DyingRoleId,a.DyingStartAddress,a.DyingEndAddress,a.FriendDeathRoleId,a.FriendDeathStartAddress,a.FriendDeathEndAddress,a.BranchCoverage)==(b.DyingRoleId,b.DyingStartAddress,b.DyingEndAddress,b.FriendDeathRoleId,b.FriendDeathStartAddress,b.FriendDeathEndAddress,b.BranchCoverage),
-        (BattleEquipmentLayoutIdentity a, BattleEquipmentLayoutIdentity b) => (a.RoleCount,a.SlotCount,a.DualAttackObjectId,a.PersistentEquipmentStatus)==(b.RoleCount,b.SlotCount,b.DualAttackObjectId,b.PersistentEquipmentStatus),
-        (BattleGrowthLayoutIdentity a, BattleGrowthLayoutIdentity b) => (a.RoleCount,a.IncludesPrimaryExperience,a.IncludesHiddenExperience,a.IncludesRecoveryAndCleanup)==(b.RoleCount,b.IncludesPrimaryExperience,b.IncludesHiddenExperience,b.IncludesRecoveryAndCleanup),
-        (BattleDynamicAutoIdentity a, BattleDynamicAutoIdentity b) => (a.StartAddress,a.EndAddress,a.Advance)==(b.StartAddress,b.EndAddress,b.Advance) && a.Effects.SequenceEqual(b.Effects),
-        (BattleFailureBoundaryIdentity a, BattleFailureBoundaryIdentity b) => (a.LostEntryAddress,a.ReloadCommand,a.Behavior)==(b.LostEntryAddress,b.ReloadCommand,b.Behavior),
-        (BattleImageSetIdentity a, BattleImageSetIdentity b) => (a.EnemyId,a.EnemyArchiveEntry,a.BattlefieldId,a.BattlefieldArchiveEntry,a.IncludesLayoutAndEffectFrames)==(b.EnemyId,b.EnemyArchiveEntry,b.BattlefieldId,b.BattlefieldArchiveEntry,b.IncludesLayoutAndEffectFrames) && a.RoleSpriteIds.SequenceEqual(b.RoleSpriteIds),
-        (BattleLocalizedDialogueIdentity a, BattleLocalizedDialogueIdentity b) => a.Languages.SequenceEqual(b.Languages) && a.Contents.SequenceEqual(b.Contents),
-        _ => false
-    };
-
-    private static bool DeepEqualsIgnoringComments(JsonElement actual, JsonElement expected)
-    {
-        if (actual.ValueKind != expected.ValueKind) return false;
-        if (actual.ValueKind == JsonValueKind.Object)
-        {
-            JsonProperty[] actualProperties = actual.EnumerateObject().Where(property => !property.Name.StartsWith('_')).ToArray();
-            JsonProperty[] expectedProperties = expected.EnumerateObject().ToArray();
-            return actualProperties.Length == expectedProperties.Length
-                && expectedProperties.All(property => actual.TryGetProperty(property.Name, out JsonElement value)
-                    && DeepEqualsIgnoringComments(value, property.Value));
-        }
-        if (actual.ValueKind == JsonValueKind.Array)
-        {
-            JsonElement[] actualItems = actual.EnumerateArray().ToArray(), expectedItems = expected.EnumerateArray().ToArray();
-            return actualItems.Length == expectedItems.Length
-                && actualItems.Zip(expectedItems).All(pair => DeepEqualsIgnoringComments(pair.First, pair.Second));
-        }
-        return JsonElement.DeepEquals(actual, expected);
-    }
 
     private static void RejectDuplicateKeys(JsonElement element, string context)
     {

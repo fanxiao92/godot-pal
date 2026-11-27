@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using Godot;
@@ -8,6 +9,16 @@ namespace Pal.Game.Profiles;
 
 public static class NativeContentDependencies
 {
+    public const string DefaultExplorationProfileUri = "res://Assets/Profiles/Exploration.tres";
+
+    public static void ValidateUri(string profileUri)
+    {
+        Require(profileUri != null && profileUri.StartsWith("res://", StringComparison.Ordinal), "profile requires a normalized res:// resource URI");
+        foreach (string segment in profileUri[6..].Split('/'))
+            Require(segment.Length > 0 && segment is not ("." or "..") && !segment.EndsWith('.') && segment == segment.Trim()
+                && !segment.Any(c => char.IsControl(c) || "\\:%?#*\"<>|".Contains(c)), "profile requires a normalized res:// resource URI");
+    }
+
     // Only the authored/prepared data graph. Scripts/engine and generated .godot import outputs are not authenticated.
     public static HashSet<string> ContentDependencies(IEnumerable<string> seeds, IReadOnlyDictionary<string, string>? hashes = null)
     {
@@ -19,7 +30,7 @@ public static class NativeContentDependencies
         {
             string path = item.Path;
             if (item.Exit) { active.Remove(path); complete.Add(path); continue; }
-            NativeExplorationProfile.ValidateUri(path);
+            ValidateUri(path);
             if (complete.Contains(path)) continue;
             Require(active.Add(path), path + ": cyclic native content dependency");
             if (hashes is not null) CheckFile(path, hashes);
@@ -45,7 +56,7 @@ public static class NativeContentDependencies
 
     public static void CheckFile(string path, IReadOnlyDictionary<string, string> hashes)
     {
-        NativeExplorationProfile.ValidateUri(path);
+        ValidateUri(path);
         Require(hashes.TryGetValue(path, out string? expected) && IsHash(expected)
             && Godot.FileAccess.FileExists(path) && Godot.FileAccess.GetSha256(path) == expected,
             path + ": resource SHA-256 mismatch, missing hash or missing resource");
@@ -66,11 +77,11 @@ public static class NativeContentDependencies
                 Require(uid != -1, path + ": invalid dependency UID");
                 Require(!ResourceUid.HasId(uid) || ResourceUid.GetIdPath(uid) == target, path + ": dependency UID/fallback identity mismatch");
             }
-            NativeExplorationProfile.ValidateUri(target);
+            ValidateUri(target);
             if (Path.GetExtension(target) is ".cs" or ".gd") continue;
             yield return target;
         }
     }
 
-    private static void Require(bool valid, string message) { if (!valid) throw new InvalidDataException(message); }
+    private static void Require([DoesNotReturnIf(false)] bool valid, string message) { if (!valid) throw new InvalidDataException(message); }
 }

@@ -336,10 +336,10 @@ public sealed class ExplorationMenuSession
     /// storage, so both receipt outcomes look identical here (#148 Decision 27).</summary>
     public ExplorationMenuSaveRequest? PendingSave { get; private set; }
     /// <summary>The remembered save-slot cursor (uigame.c PAL_SaveSlotMenu's static selection):
-    /// one of the five manual slots {<see cref="PlayerSaveContract.FirstSlot"/>}..
-    /// {<see cref="PlayerSaveContract.LastSlot"/>}, starts at 1 and survives closes; browsing only
+    /// one of the five manual slots {<see cref="SaveSlotBounds.FirstSlot"/>}..
+    /// {<see cref="SaveSlotBounds.LastSlot"/>}, starts at 1 and survives closes; browsing only
     /// moves it — never a file, never a switch (#148 Stories 3/4). Both system intents share it.</summary>
-    public int SelectedSaveSlot { get; private set; } = PlayerSaveContract.FirstSlot;
+    public int SelectedSaveSlot { get; private set; } = SaveSlotBounds.FirstSlot;
     /// <summary>The remembered system-item cursor (uigame.c gpGlobals->iCurSystemMenuItem): row 0
     /// (SAVE) or 1 (LOAD), starts at SAVE and survives closes exactly like the main-menu cursor.</summary>
     public int SelectedSystemItem { get; private set; }
@@ -768,12 +768,12 @@ public sealed class ExplorationMenuSession
                 switch (key)
                 {
                     case ExplorationMenuKey.Up or ExplorationMenuKey.Left:
-                        SelectedSaveSlot = SelectedSaveSlot == PlayerSaveContract.FirstSlot
-                            ? PlayerSaveContract.LastSlot : SelectedSaveSlot - 1;
+                        SelectedSaveSlot = SelectedSaveSlot == SaveSlotBounds.FirstSlot
+                            ? SaveSlotBounds.LastSlot : SelectedSaveSlot - 1;
                         break;
                     case ExplorationMenuKey.Down or ExplorationMenuKey.Right:
-                        SelectedSaveSlot = SelectedSaveSlot == PlayerSaveContract.LastSlot
-                            ? PlayerSaveContract.FirstSlot : SelectedSaveSlot + 1;
+                        SelectedSaveSlot = SelectedSaveSlot == SaveSlotBounds.LastSlot
+                            ? SaveSlotBounds.FirstSlot : SelectedSaveSlot + 1;
                         break;
                     case ExplorationMenuKey.Confirm:
                         if (SystemIntent == ExplorationSystemIntent.Save)
