@@ -645,7 +645,17 @@ try {
                     Invoke-IntegrationTarget -ProjectScope 'prepare' -Filter '' -GodotPathOpt $godotOpt -EmitJunit -ArtifactsDir $artifactsDir -State $state
                 }
                 'game' {
-                    Invoke-GameTarget -Categories @() -Filter '' -GodotPathOpt $godotOpt -EmitJunit -ArtifactsDir $artifactsDir -State $state
+                    # Partition into two disjoint Godot sessions (Map vs non-Map) so neither process accumulates
+                    # 930+ tests of RefCounted Gen2 wrappers (avoids Godot 4.7.2 mono_object_disposed_baseref GC crash).
+                    $godot = Resolve-ReadyGodotBinary -ExplicitPath $godotOpt
+                    Invoke-DotnetTestStep -Name 'Pal.Game.Tests.Map' `
+                        -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
+                        -ArtifactsDir $artifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
+                        -Filter 'TestCategory=Map&TestCategory!=RealAssets' -EmitJunit -BlameHang -GodotExe $godot -State $state
+                    Invoke-DotnetTestStep -Name 'Pal.Game.Tests.Other' `
+                        -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
+                        -ArtifactsDir $artifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
+                        -Filter 'TestCategory!=Map&TestCategory!=RealAssets' -EmitJunit -BlameHang -GodotExe $godot -State $state
                 }
                 default {
                     $state.Status = 'error'
