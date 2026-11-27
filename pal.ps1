@@ -13,6 +13,7 @@ $script:RepoRoot = [IO.Path]::GetFullPath($PSScriptRoot)
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/PalCommon.psm1') -Force -Global
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/AffectedSelection.psm1') -Force
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/TestReport.psm1') -Force
+Import-Module (Join-Path $script:RepoRoot 'scripts/pal/T3Assets.psm1') -Force
 
 function Show-Usage {
     @'
@@ -24,7 +25,7 @@ Commands:
        unit              Run Pal.Core.UnitTests and/or Pal.Extract.UnitTests
        integration       Run Pal.Extract.IntegrationTests and/or Pal.Prepare.Tests
        game              Run tests/Pal.Game.Tests (Godot headless + GdUnit)
-       e2e               [T3] End-to-end GPU scenarios (reserved for M7-5)
+       e2e               [T3] End-to-end GPU YAML regression scenarios (--gpu required)
        lra               Run tools/long-running-agent npm test
        full | all        Run committable full suite (map self-check + unit + integration + game)
        check-map         Run MSBuild dependency graph & tests/affected-map.psd1 self-check
@@ -37,8 +38,8 @@ Commands:
         locate           Resolve & verify pinned Godot executable version
         import           Warm Godot --headless --editor --import cache for Pal.Game & Pal.Game.Tests
 
-  assets prepare         Wrap scripts/Prepare-*.ps1 (--kind scene|dialogue|battle-data|battle-context|fire-effects|item-bitmaps|story)
-         status          Show shared T3 asset cache status (reserved interface)
+  assets prepare         Prepare T3 shared real-asset cache (default) or wrap scripts/Prepare-*.ps1 (--kind)
+         status          Show shared T3 asset & golden cache status
 
   report                 Render Markdown summary / PR evidence comment from run-summary.json & TRX
 
@@ -51,8 +52,9 @@ Common Options:
   --all                  test affected: bypass incremental selection and run full
   --coverage             test unit: enable coverlet.collector XPlat Code Coverage
   --blame-hang           test game: enable --blame-hang-timeout 2m and normal console logger
-  --scenario <name>      test e2e: scenario name (default all)
-  --gpu                  test e2e: real GPU mode
+  --scenario <name|path> test e2e: scenario name, YAML file path, or all (default all)
+  --gpu                  test e2e: real GPU mode (required for T3 E2E)
+  --update-golden        test e2e: explicitly create/refresh local golden screenshots & manifest
   --godot-path <path>    Explicit Godot executable path (overrides GODOT_BIN)
   --platform <p>         godot install: auto|win64|linux
   --destination <dir>    godot install: target directory
@@ -86,7 +88,7 @@ function Parse-Options {
         'static-resources', 'static-profile', 'battle-resources',
         'from', 'format', 'repo-root'
     )
-    $switchOptions = @('explain', 'all', 'coverage', 'blame-hang', 'gpu', 'json', 'help', 'include-real-assets')
+    $switchOptions = @('explain', 'all', 'coverage', 'blame-hang', 'gpu', 'update-golden', 'json', 'help', 'include-real-assets')
 
     $i = 0
     while ($i -lt $Tokens.Count) {
@@ -367,12 +369,16 @@ function Invoke-GameTarget {
 
     $parts = [Collections.Generic.List[string]]::new()
     $explicitRealAssets = $IncludeRealAssets -or (@($Categories | Where-Object { $_ -ieq 'RealAssets' }).Count -gt 0)
+    $explicitE2E = (@($Categories | Where-Object { $_ -ieq 'E2E' }).Count -gt 0)
     if ($Categories -and $Categories.Count -gt 0) {
         $catExpr = (@($Categories | ForEach-Object { "TestCategory=$_" }) -join '|')
         $parts.Add("($catExpr)")
     }
     if (-not $explicitRealAssets) {
         $parts.Add('TestCategory!=RealAssets')
+    }
+    if (-not $explicitE2E) {
+        $parts.Add('TestCategory!=E2E')
     }
     if (-not [string]::IsNullOrWhiteSpace($Filter)) {
         $parts.Add("($Filter)")
@@ -434,6 +440,199 @@ function Invoke-FullTestSuite {
     Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage:$Coverage -ArtifactsDir $ArtifactsDir -State $State
     Invoke-IntegrationTarget -ProjectScope '' -Filter '' -GodotPathOpt $GodotPathOpt -ArtifactsDir $ArtifactsDir -State $State
     Invoke-GameTarget -Categories @() -Filter '' -GodotPathOpt $GodotPathOpt -IncludeRealAssets:$IncludeRealAssets -ArtifactsDir $ArtifactsDir -State $State
+}
+
+function Get-YamlPhaseCount {
+    param([Parameter(Mandatory)][string]$YamlPath)
+    $lines = [IO.File]::ReadAllLines($YamlPath, [Text.Encoding]::UTF8)
+    $inPhases = $false
+    $count = 0
+    foreach ($line in $lines) {
+        if ($line -match '^phases:\s*$') {
+            $inPhases = $true
+            continue
+        }
+        if ($inPhases) {
+            if ($line -match '^[a-zA-Z0-9_-]+:') { break }
+            if ($line -match '^\s{2}-\s+') { $count++ }
+        }
+    }
+    return [Math]::Max(1, $count)
+}
+
+function Resolve-E2EScenarioFiles {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [string]$ScenarioOpt = ''
+    )
+    $scenariosDir = Join-Path $RepositoryRoot 'tests/Pal.Game.Tests/E2E/Scenarios'
+    $canonical = @(
+        'boot-and-explore',
+        'real-dialogue-bilingual',
+        'battle-closure',
+        'save-load-restore',
+        'dynamic-scene'
+    )
+    if ([string]::IsNullOrWhiteSpace($ScenarioOpt) -or $ScenarioOpt -ieq 'all') {
+        $list = [Collections.Generic.List[string]]::new()
+        foreach ($name in $canonical) {
+            $p = Join-Path $scenariosDir "$name.yaml"
+            if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
+                throw "Canonical E2E scenario file not found: $p"
+            }
+            $list.Add([IO.Path]::GetFullPath($p))
+        }
+        return @($list)
+    }
+    if (Test-Path -LiteralPath $ScenarioOpt -PathType Leaf) {
+        return @([IO.Path]::GetFullPath($ScenarioOpt))
+    }
+    $resolvedPath = Resolve-PathUnderRoot -Root $RepositoryRoot -Path $ScenarioOpt
+    if (Test-Path -LiteralPath $resolvedPath -PathType Leaf) {
+        return @($resolvedPath)
+    }
+    $byName = Join-Path $scenariosDir "$ScenarioOpt.yaml"
+    if (Test-Path -LiteralPath $byName -PathType Leaf) {
+        return @([IO.Path]::GetFullPath($byName))
+    }
+    throw "E2E scenario not found: '$ScenarioOpt'. Expected one of ($($canonical -join ', ')) or an existing .yaml file path."
+}
+
+function Invoke-E2ETarget {
+    param(
+        [switch]$Gpu,
+        [switch]$UpdateGolden,
+        [string]$ScenarioOpt,
+        [string]$GodotPathOpt,
+        [Parameter(Mandatory)][string]$ArtifactsDir,
+        [Parameter(Mandatory)][hashtable]$State
+    )
+    if (-not $Gpu) {
+        $State.Status = 'error'
+        throw 'T3 E2E scenarios require real GPU rendering: pass --gpu (T3 E2E is local GPU-only and never runs headless).'
+    }
+    $cacheInfo = Initialize-T3Assets -RepositoryRoot $script:RepoRoot -GodotPath $GodotPathOpt
+    $godot = Resolve-ReadyGodotBinary -ExplicitPath $GodotPathOpt
+    $scenarioFiles = Resolve-E2EScenarioFiles -RepositoryRoot $script:RepoRoot -ScenarioOpt $ScenarioOpt
+    $commitSha = Get-CurrentCommitSha -Root $script:RepoRoot
+
+    $e2eScenarios = [Collections.Generic.List[object]]::new()
+    $checksumEntries = [Collections.Generic.List[object]]::new()
+    $firstFailure = $null
+
+    foreach ($yamlFile in $scenarioFiles) {
+        $scenarioName = [IO.Path]::GetFileNameWithoutExtension($yamlFile)
+        $phaseCount = Get-YamlPhaseCount -YamlPath $yamlFile
+        $mergedFrames = [Collections.Generic.List[object]]::new()
+        $mergedDuration = 0.0
+        $mergedProbe = $true
+        $mergedStatus = 'passed'
+        $mergedError = $null
+
+        for ($phaseIdx = 0; $phaseIdx -lt $phaseCount; $phaseIdx++) {
+            $stepName = if ($phaseCount -gt 1) { "e2e-$scenarioName-phase$phaseIdx" } else { "e2e-$scenarioName" }
+            $prevEnv = @{
+                PAL_E2E_SCENARIO_PATH = $env:PAL_E2E_SCENARIO_PATH
+                PAL_E2E_PHASE_INDEX   = $env:PAL_E2E_PHASE_INDEX
+                PAL_E2E_ARTIFACTS_DIR = $env:PAL_E2E_ARTIFACTS_DIR
+                PAL_E2E_GOLDEN_DIR    = $env:PAL_E2E_GOLDEN_DIR
+                PAL_E2E_UPDATE_GOLDEN = $env:PAL_E2E_UPDATE_GOLDEN
+                PAL_E2E_COMMIT_SHA    = $env:PAL_E2E_COMMIT_SHA
+            }
+            $stepFailed = $false
+            try {
+                $env:PAL_E2E_SCENARIO_PATH = $yamlFile
+                $env:PAL_E2E_PHASE_INDEX = [string]$phaseIdx
+                $env:PAL_E2E_ARTIFACTS_DIR = $ArtifactsDir
+                $env:PAL_E2E_GOLDEN_DIR = $cacheInfo.GoldensDir
+                $env:PAL_E2E_UPDATE_GOLDEN = if ($UpdateGolden) { '1' } else { '0' }
+                $env:PAL_E2E_COMMIT_SHA = $commitSha
+
+                Invoke-DotnetTestStep -Name $stepName `
+                    -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
+                    -ArtifactsDir $ArtifactsDir `
+                    -RunSettingsRelPath 'tests/Pal.Game.Tests/e2e-gpu.runsettings' `
+                    -Filter 'FullyQualifiedName=Pal.Game.Tests.E2E.E2EScenarioSuite.Run_configured_yaml_scenario' `
+                    -GodotExe $godot -State $State
+            } catch {
+                $stepFailed = $true
+                $mergedStatus = 'failed'
+                $mergedError = $_.Exception.Message
+                if (-not $firstFailure) { $firstFailure = $mergedError }
+            } finally {
+                foreach ($k in $prevEnv.Keys) {
+                    if ($null -eq $prevEnv[$k]) { Remove-Item -Path "Env:$k" -ErrorAction SilentlyContinue }
+                    else { Set-Item -Path "Env:$k" -Value $prevEnv[$k] }
+                }
+            }
+
+            $resFile = Join-Path $ArtifactsDir "e2e-results/$scenarioName.phase$phaseIdx.json"
+            if (Test-Path -LiteralPath $resFile -PathType Leaf) {
+                $phaseRes = [IO.File]::ReadAllText($resFile, [Text.Encoding]::UTF8) | ConvertFrom-Json
+                $mergedDuration += [double]$phaseRes.DurationSec
+                if (-not $phaseRes.ProbePassed) { $mergedProbe = $false }
+                if ($phaseRes.Status -ne 'passed') {
+                    $mergedStatus = 'failed'
+                    if ($phaseRes.Error) { $mergedError = [string]$phaseRes.Error }
+                }
+                foreach ($fr in @($phaseRes.Frames)) {
+                    $frameObj = [ordered]@{
+                        frameName        = [string]$fr.FrameName
+                        status           = [string]$fr.Status
+                        error            = $fr.Error
+                        actualPath       = [string]$fr.ActualPath
+                        actualSha256     = [string]$fr.ActualSha256
+                        goldenSha256     = $fr.GoldenSha256
+                        diffPath         = $fr.DiffPath
+                        diffPercent      = [double]$fr.DiffPercent
+                        tolerancePercent = [double]$fr.TolerancePercent
+                    }
+                    $mergedFrames.Add($frameObj)
+                    $checksumEntries.Add([ordered]@{
+                        scenario     = $scenarioName
+                        frame        = [string]$fr.FrameName
+                        actualPath   = [string]$fr.ActualPath
+                        actualSha256 = [string]$fr.ActualSha256
+                        goldenSha256 = $fr.GoldenSha256
+                        diffPercent  = [double]$fr.DiffPercent
+                        status       = [string]$fr.Status
+                    })
+                }
+            } elseif ($stepFailed) {
+                $mergedProbe = $false
+            }
+            if ($stepFailed) { break }
+        }
+
+        $e2eScenarios.Add([ordered]@{
+            scenario    = $scenarioName
+            phases      = $phaseCount
+            status      = $mergedStatus
+            probePassed = $mergedProbe
+            durationSec = [Math]::Round($mergedDuration, 2)
+            error       = $mergedError
+            frames      = @($mergedFrames)
+        })
+    }
+
+    $checksumPath = Join-Path $ArtifactsDir 'checksums.json'
+    [IO.File]::WriteAllText(
+        $checksumPath,
+        ((ConvertTo-Json -InputObject @($checksumEntries) -Depth 6) + "`n"),
+        [Text.UTF8Encoding]::new($false)
+    )
+    $contactSheetRel = if (Test-Path -LiteralPath (Join-Path $ArtifactsDir 'contact-sheet.png') -PathType Leaf) { 'contact-sheet.png' } else { $null }
+    $State.E2E = [ordered]@{
+        cacheKey     = $cacheInfo.CacheKey
+        updateGolden = [bool]$UpdateGolden
+        contactSheet = $contactSheetRel
+        checksums    = 'checksums.json'
+        scenarios    = @($e2eScenarios)
+    }
+    if ($firstFailure) {
+        $State.Status = 'failed'
+        throw $firstFailure
+    }
 }
 
 function Invoke-GodotImportWarmup {
@@ -540,6 +739,7 @@ $state = @{
     TrxFiles      = [Collections.Generic.List[string]]::new()
     CoverageFiles = [Collections.Generic.List[string]]::new()
     Coverage      = [Collections.Generic.List[object]]::new()
+    E2E           = $null
 }
 
 try {
@@ -614,8 +814,11 @@ try {
                     Invoke-MapSelfCheck
                 }
                 'e2e' {
-                    $state.Status = 'error'
-                    throw 'T3 E2E GPU scenarios are reserved for M7-5 and not yet implemented in this branch.'
+                    $scenarioOpt = if ($parsed.Flags.ContainsKey('scenario')) { [string]$parsed.Flags['scenario'] } else { 'all' }
+                    Invoke-E2ETarget -Gpu:$parsed.Flags.ContainsKey('gpu') `
+                        -UpdateGolden:$parsed.Flags.ContainsKey('update-golden') `
+                        -ScenarioOpt $scenarioOpt -GodotPathOpt $godotOpt `
+                        -ArtifactsDir $artifactsDir -State $state
                 }
                 { $_ -in @('full', 'all') } {
                     Invoke-FullTestSuite -Coverage:$parsed.Flags.ContainsKey('coverage') -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -ArtifactsDir $artifactsDir -State $state
@@ -677,11 +880,11 @@ try {
                     Invoke-DotnetTestStep -Name 'Pal.Game.Tests.ProfilesPrepare' `
                         -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
                         -ArtifactsDir $artifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
-                        -Filter '(TestCategory=Profiles|TestCategory=Prepare)&TestCategory!=RealAssets' -EmitJunit -BlameHang -GodotExe $godot -State $state
+                        -Filter '(TestCategory=Profiles|TestCategory=Prepare)&TestCategory!=RealAssets&TestCategory!=E2E' -EmitJunit -BlameHang -GodotExe $godot -State $state
                     Invoke-DotnetTestStep -Name 'Pal.Game.Tests.Runtime' `
                         -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
                         -ArtifactsDir $artifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
-                        -Filter 'TestCategory!=Profiles&TestCategory!=Prepare&TestCategory!=RealAssets' -EmitJunit -BlameHang -GodotExe $godot -State $state
+                        -Filter 'TestCategory!=Profiles&TestCategory!=Prepare&TestCategory!=RealAssets&TestCategory!=E2E' -EmitJunit -BlameHang -GodotExe $godot -State $state
                 }
                 default {
                     $state.Status = 'error'
@@ -719,6 +922,12 @@ try {
             switch ($sub) {
                 'prepare' {
                     $kind = if ($parsed.Flags.ContainsKey('kind')) { [string]$parsed.Flags['kind'] } else { '' }
+                    if (-not $kind) {
+                        $info = Initialize-T3Assets -RepositoryRoot $script:RepoRoot -GodotPath $godotOpt
+                        $hitText = if ($info.PreparedNow) { 'built and cached' } else { 'cache hit' }
+                        Write-Output "T3 shared asset cache ready: $($info.CacheKey) ($hitText, worktree=$($info.LinkMode))"
+                        break
+                    }
                     $scriptMap = @{
                         'scene'          = 'scripts/Prepare-GameScene.ps1'
                         'dialogue'       = 'scripts/Prepare-DialoguePackage.ps1'
@@ -728,9 +937,9 @@ try {
                         'item-bitmaps'   = 'scripts/Prepare-ItemBitmaps.ps1'
                         'story'          = 'scripts/Prepare-StoryPackage.ps1'
                     }
-                    if (-not $kind -or -not $scriptMap.ContainsKey($kind)) {
+                    if (-not $scriptMap.ContainsKey($kind)) {
                         $state.Status = 'error'
-                        throw "assets prepare requires --kind <$($scriptMap.Keys -join '|')>."
+                        throw "assets prepare --kind must be one of <$($scriptMap.Keys -join '|')>."
                     }
                     if (-not $parsed.Flags.ContainsKey('input') -or -not $parsed.Flags.ContainsKey('output')) {
                         $state.Status = 'error'
@@ -752,11 +961,13 @@ try {
                     if ($LASTEXITCODE -ne 0) { throw "Asset preparation '$kind' failed with exit code $LASTEXITCODE." }
                 }
                 'status' {
-                    $cacheRoot = $env:PAL_ASSET_CACHE_DIR
-                    if ($cacheRoot -and (Test-Path -LiteralPath $cacheRoot -PathType Container)) {
-                        Write-Output 'T3 shared asset cache: configured (directory exists; private path omitted).'
+                    $info = Get-T3CacheInfo -RepositoryRoot $script:RepoRoot
+                    if (-not $info.Configured) {
+                        Write-Output 'T3 shared asset cache: PAL_RAW_DATA_DIR not configured (set PAL_RAW_DATA_DIR to enable T3).'
                     } else {
-                        Write-Output 'T3 shared asset cache: not configured (reserved for M7-5).'
+                        $assetState = if ($info.AssetsHit) { 'HIT' } else { 'MISS' }
+                        $goldenState = if ($info.GoldensHit) { 'HIT' } else { 'MISS' }
+                        Write-Output "T3 shared asset cache: key=$($info.CacheKey) assets=$assetState goldens=$goldenState (private paths omitted)"
                     }
                 }
                 default {
@@ -781,7 +992,8 @@ try {
 $summaryObj = New-RunSummaryObject -Command $commandLabel -Status $state.Status -ErrorMsg $state.ErrorMsg `
     -DurationSec $sw.Elapsed.TotalSeconds -Total $state.Total -Passed $state.Passed -Failed $state.Failed `
     -Skipped $state.Skipped -Steps $state.Steps.ToArray() -TrxFiles $state.TrxFiles.ToArray() -CoverageFiles $state.CoverageFiles.ToArray() `
-    -Coverage $state.Coverage.ToArray() -ArtifactsDir (ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $artifactsDir)
+    -Coverage $state.Coverage.ToArray() -E2E $state.E2E `
+    -ArtifactsDir (ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $artifactsDir)
 
 $summaryPath = Write-RunSummaryJson -ArtifactsDir $artifactsDir -Summary $summaryObj
 

@@ -60,11 +60,15 @@ public partial class PrepareDialogue : Node
             for (int frame = 0; frame < prompts.Length; frame++) Save(prompts[frame], $"Prompt-{frame:00}.tres");
             VerifySavedResources(input, packageId, imageId);
             GD.Print("PAL_PREPARE_DIALOGUE_NATIVE");
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
             GetTree().Quit(0);
         }
         catch (Exception exception)
         {
             GD.PrintErr("Dialogue native import failed: " + exception.Message);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
             GetTree().Quit(1);
         }
     }

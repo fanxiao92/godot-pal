@@ -1,4 +1,4 @@
-# Cross-platform offline regression tests for ./pal.ps1, T0 affected selection, report, and script hygiene.
+﻿# Cross-platform offline regression tests for ./pal.ps1, T0 affected selection, report, and script hygiene.
 [CmdletBinding()]
 param([string]$EvidenceDirectory)
 
@@ -73,14 +73,14 @@ try {
     Assert-True ($badRes.StdOut -match 'PAL_SUMMARY_JSON=') '--json must emit PAL_SUMMARY_JSON'
     Pass 'unknown command returns exit 1 with errorMsg in stderr and run-summary.json'
 
-    # 3. Unknown subcommand / option / reserved e2e -> exit 1
+    # 3. test e2e without --gpu -> exit 1 with clear --gpu requirement
     $e2eOut = Join-Path $workDir 'e2e-out'
     $e2eRes = Invoke-Pal @('test', 'e2e', '--out', $e2eOut)
-    Assert-Equal 1 $e2eRes.ExitCode 'reserved e2e must exit 1'
+    Assert-Equal 1 $e2eRes.ExitCode 'test e2e without --gpu must exit 1'
     $e2eSum = [IO.File]::ReadAllText((Join-Path $e2eOut 'run-summary.json'), $utf8) | ConvertFrom-Json
-    Assert-Equal 'error' $e2eSum.status 'reserved e2e status must be error'
-    Assert-True ([string]$e2eSum.errorMsg -match 'M7-5') 'reserved e2e errorMsg should mention M7-5'
-    Pass 'reserved test e2e fails cleanly with exit 1 and M7-5 errorMsg'
+    Assert-Equal 'error' $e2eSum.status 'test e2e without --gpu status must be error'
+    Assert-True ([string]$e2eSum.errorMsg -match '--gpu') 'test e2e without --gpu errorMsg must mention --gpu'
+    Pass 'test e2e without --gpu fails cleanly with exit 1'
 
     # 4. Unit tests for T0 Resolve-AffectedSelection against real repository graph & map
     $selNone = Resolve-AffectedSelection -RepositoryRoot $repoRoot -ChangedFiles @()
@@ -278,15 +278,69 @@ try {
     Assert-True ([string]$repErrSum.errorMsg -match '--from') 'report error summary must contain errorMsg'
     Pass 'report error persists errorMsg to run-summary.json'
 
-    # 9. assets status and battle-context parameter validation
-    $assetsOut = Join-Path $workDir 'assets-status-out'
-    $assetsRes = Invoke-Pal @('assets', 'status', '--out', $assetsOut)
-    Assert-Equal 0 $assetsRes.ExitCode 'assets status must exit 0'
+    # 9. assets status, missing PAL_RAW_DATA_DIR, battle-context flag validation, and T3 report rendering
+    $prevRaw = $env:PAL_RAW_DATA_DIR
+    try {
+        Remove-Item Env:PAL_RAW_DATA_DIR -ErrorAction SilentlyContinue
+        $assetsOut = Join-Path $workDir 'assets-status-out'
+        $assetsRes = Invoke-Pal @('assets', 'status', '--out', $assetsOut)
+        Assert-Equal 0 $assetsRes.ExitCode 'assets status must exit 0'
+        $missingRawOut = Join-Path $workDir 'assets-missing-raw-out'
+        $missingRawRes = Invoke-Pal @('assets', 'prepare', '--out', $missingRawOut)
+        Assert-Equal 1 $missingRawRes.ExitCode 'assets prepare without PAL_RAW_DATA_DIR must exit 1'
+        Assert-True ($missingRawRes.StdErr -match 'PAL_RAW_DATA_DIR') 'missing PAL_RAW_DATA_DIR error must name PAL_RAW_DATA_DIR'
+    } finally {
+        if ($null -ne $prevRaw) { $env:PAL_RAW_DATA_DIR = $prevRaw }
+    }
     $bcOut = Join-Path $workDir 'assets-bc-out'
     $bcRes = Invoke-Pal @('assets', 'prepare', '--kind', 'battle-context', '--input', 'a', '--output', 'b', '--out', $bcOut)
     Assert-Equal 1 $bcRes.ExitCode 'battle-context without --static-resources/--static-profile must exit 1'
     Assert-True ($bcRes.StdErr -match '--static-resources' -and $bcRes.StdErr -match '--static-profile') 'battle-context error must name required static flags'
-    Pass 'assets status and battle-context flag validation succeed'
+
+    $t3Dir = Join-Path $workDir 't3-rep-source'
+    [void][IO.Directory]::CreateDirectory($t3Dir)
+    $t3Sum = [ordered]@{
+        command = 'test e2e'
+        status = 'passed'
+        errorMsg = $null
+        durationSec = 42.1
+        counts = [ordered]@{ total = 5; passed = 5; failed = 0; skipped = 0 }
+        trxFiles = @()
+        coverageFiles = @()
+        coverage = @()
+        artifactsDir = '.artifacts/pal/sample-t3'
+        e2e = [ordered]@{
+            cacheKey = 'raw:sha256-0123456789abcdef + prepare:v1'
+            updateGolden = $false
+            contactSheet = 'contact-sheet.png'
+            scenarios = @(
+                [ordered]@{
+                    scenario = 'boot-and-explore'
+                    status = 'passed'
+                    probePassed = $true
+                    durationSec = 1.2
+                    frames = @(
+                        [ordered]@{
+                            frameName = '01-boot-scene4'
+                            status = 'passed'
+                            actualSha256 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                            goldenSha256 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                            diffPercent = 0.0
+                            tolerancePercent = 1.0
+                            diffPath = $null
+                        }
+                    )
+                }
+            )
+        }
+    }
+    [void](Write-RunSummaryJson -ArtifactsDir $t3Dir -Summary $t3Sum)
+    $t3MdOut = Join-Path $workDir 't3-pr-comment.md'
+    $t3RepRes = Invoke-Pal @('report', '--from', $t3Dir, '--out', $t3MdOut)
+    Assert-Equal 0 $t3RepRes.ExitCode 'T3 report must exit 0'
+    $t3Md = [IO.File]::ReadAllText($t3MdOut, $utf8)
+    Assert-True ($t3Md -match 'raw:sha256-0123456789abcdef \+ prepare:v1' -and $t3Md -match 'boot-and-explore/01-boot-scene4' -and $t3Md -match 'contact-sheet\.png' -and $t3Md -match '人工 5 分钟审阅清单') 'T3 report must render cacheKey, frame SHA256/diff table, contact sheet, and manual review checklist'
+    Pass 'assets T3 validation and T3 PR evidence report rendering succeed'
 
     $completed = $true
     Write-Host "PASS PalFrontDoor regression: $passedCount cases."

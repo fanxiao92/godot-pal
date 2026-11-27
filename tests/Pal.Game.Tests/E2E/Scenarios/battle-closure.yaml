@@ -1,0 +1,43 @@
+name: battle-closure
+version: "1"
+description: "Deterministic --battle-seed battle closure from trigger search through victory settlement and post-battle exploration."
+timeoutSeconds: 120
+tolerancePercent: 1.0
+args:
+  - --story-profile
+  - res://Assets/T3Real/BattleStory/Story/Story.tres
+  - --battle-visual-profile
+  - res://Assets/T3Real/BattleStory/Story/Visual.tres
+  - --battle-seed
+  - "42"
+  - --story-language
+  - zh-Hans
+steps:
+  - action: wait
+    condition: "updates >= 1"
+    timeoutMs: 15000
+  - action: key_tap
+    key: Enter
+  - action: advance_dialogue
+    condition: "battle.active == true && battle.mode == AttackMenu"
+    timeoutMs: 25000
+  - action: assert
+    assertions:
+      - "battle.enemyCount == 2"
+      - "battle.enemyHpTotal > 0"
+  - action: capture
+    name: "01-battle-attack-menu"
+    settleFrames: 3
+  - action: battle_attack_rounds
+    condition: "battle.active == false && dialogue.active == false && interaction.phase == Exploring"
+    timeoutMs: 90000
+    maxRounds: 250
+  - action: assert
+    assertions:
+      - "failure == null"
+      - "lostTerminal == false"
+      - "battle.active == false"
+      - "interaction.phase == Exploring"
+  - action: capture
+    name: "02-post-battle-won"
+    settleFrames: 3
