@@ -1,6 +1,6 @@
 # M3 Core trigger 执行与显示回执
 
-本页是 #24 的纯 .NET 组件契约，不是整票、Godot fixture、#25 独立场景或 M3 验收完成声明。格式依据 [events-schema.md](events-schema.md)，显示依据 [dialogue-display.md](dialogue-display.md)。
+本页是 #24 的纯 .NET 组件契约，不是整票、Godot fixture、#25 独立场景或 M3 验收完成声明。格式依据 [events-schema.md](../../design/events-schema.md)，显示依据 [dialogue-display.md](dialogue-display.md)。
 
 ## 输入和严格校验
 

@@ -104,7 +104,7 @@ Core 在反馈前已提交伤害，所以致死攻击的目标仍绘制完整物
 
 ## #209：统一逐角色玩家绑定（当前唯一形态）
 
-承自 #135 与 [m6-no-legacy-compat-20261111](role-battle-visual-readiness.md)：`PalBattleVisualProfile` 的玩家侧不再有标量 `RoleId/PlayerSpriteUri/AttackEffectSpriteUri/AttackEffectIndex/PlayerPosition`，只保留 `Players : PalBattleVisualPlayer[]`（typed Resource，party 顺序），root `FormatVersion=2`。旧 FormatVersion=1 共享精灵产物显式拒绝并须重新 Prepare；没有双 loader、headRoleId+人数折叠加载或领队回退，单角色也是一项完整绑定。
+承自 #135 与 [m6-no-legacy-compat-20261111](../m6-readiness/role-battle-visual-readiness.md)：`PalBattleVisualProfile` 的玩家侧不再有标量 `RoleId/PlayerSpriteUri/AttackEffectSpriteUri/AttackEffectIndex/PlayerPosition`，只保留 `Players : PalBattleVisualPlayer[]`（typed Resource，party 顺序），root `FormatVersion=2`。旧 FormatVersion=1 共享精灵产物显式拒绝并须重新 Prepare；没有双 loader、headRoleId+人数折叠加载或领队回退，单角色也是一项完整绑定。
 
 公开入口统一为 `Load(uri, IReadOnlyList<int> partyRoleIds, enemyTeams, requirementTeamIds, palette)`；Story 重载按 `CheckedStoryProfile.BattleContent.Players` 传完整 party，非 Story 首战按已核 `content.Players` 逐位传入。加载器逐一认证 `Players[i].RoleId == partyRoleIds[i]` 与 `PlayerPosition == g_rgPlayerPos[party-1][i]`（battle.c:27-31 布局列：单角色 `(240,170)`，双人 `(200,176)`/`(256,152)`，三人 `(180,180)`/`(234,170)`/`(270,146)`；#137 起人数 1..3），数量与 party 一一对应；换位/缺员/错位精确拒绝，不以队伍位置、图号或领队身份推断第二角色。攻击效果组仍是 `rgwBattleEffectIndex[实际战斗精灵][1]×3`（fight.c:2029）的作者声明：每成员可选、必须配对、帧 `Index*3+{0,1,2}` 必须可寻址。
 
@@ -159,7 +159,7 @@ checked hash map **包含 sprite root**（区别于完整 visual 的不自 hash 
 
 ## #46 checkpoint B: original authored sample
 
-完整可提交人工作者 native 静态/双语非空bitmap字形/索引视觉资源及 Win/Loss 现代输入已提供，见 [正常准备命令、来源、搜索和数值设计](../../samples/authored-battle/README.md)。正常 numeric/story wrappers 分别准备两种场景；两个精确 Game 数据用例核双语 strict Load、真实搜索/可见平面和公开 Core Won/Lost 续接。本文上文 checkpoint A 的历史范围不改写；本B仍不接 Main/HUD/input/动作/effect，不签 SceneRunner/GPU/人工/CI、#46或M4完成。
+完整可提交人工作者 native 静态/双语非空bitmap字形/索引视觉资源及 Win/Loss 现代输入已提供，见 [正常准备命令、来源、搜索和数值设计](../../../samples/authored-battle/README.md)。正常 numeric/story wrappers 分别准备两种场景；两个精确 Game 数据用例核双语 strict Load、真实搜索/可见平面和公开 Core Won/Lost 续接。本文上文 checkpoint A 的历史范围不改写；本B仍不接 Main/HUD/input/动作/effect，不签 SceneRunner/GPU/人工/CI、#46或M4完成。
 
 
 ## #46 D2-A: optional reference-presentation data, not playback

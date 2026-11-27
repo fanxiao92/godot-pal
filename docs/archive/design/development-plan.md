@@ -10,7 +10,7 @@
 
 ### M0 · 项目骨架与工具链
 
-状态：已完成。实施范围见 [M0 计划](../milestones/m0/plan.md)，当前环境与命令见 [根目录 README](../../README.md)。以下保留里程碑目标；实际采用 xUnit + 进程级 smoke test，GdUnit4Net 后于 M2 的 #12 关卡通过后接入，不能倒写为 M0 当时已使用。
+状态：已完成。实施范围见 [M0 计划](../../milestones/m0/plan.md)，当前环境与命令见 [根目录 README](../../../README.md)。以下保留里程碑目标；实际采用 xUnit + 进程级 smoke test，GdUnit4Net 后于 M2 的 #12 关卡通过后接入，不能倒写为 M0 当时已使用。
 
 - 使用 Godot .NET 建立 C# 桌面游戏项目,确定 Godot/.NET 版本并验证 CLI 构建。
 - 确认并配置 GdUnit4Net 及核心层纯 .NET 测试方案。基本 CI(构建 + 测试)。
@@ -18,13 +18,13 @@
 
 ### M1 · 场景资源提取
 - 核对真实数据与 sdlpal 的 Win95/98 分支,实现 MKF 读取及当前场景需要的解压能力。
-- 只提取 1 张地图、瓦片、相关精灵、调色板及场景对象初始数据,产出 PNG + JSON。实施范围见 [M1 计划](../milestones/m1/plan.md)。
+- 只提取 1 张地图、瓦片、相关精灵、调色板及场景对象初始数据,产出 PNG + JSON。实施范围见 [M1 计划](../../milestones/m1/plan.md)。
 - 保留原始 ID、坐标、显隐状态和脚本入口数值;不执行脚本,不将事件文件作为资源包依赖。
 - 不包含事件转写、对话、语言包或字库,不以完整脚本资源闭包阻塞静态场景提取。
 
 ### M2 · Godot 场景构建与探索
 
-状态：**已完成（2026-10-22）。** Windows 探索功能、自动/人工验收及收尾文档独立双轴终审已接受，成果已合入并推送 main；[#17](https://github.com/fanxiao92/godot-pal/issues/17)、父规格 [#11](https://github.com/fanxiao92/godot-pal/issues/11) 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，远端完整 Windows headless CI 已通过。实际入口、独立配置及任务状态见 [M2 计划](../milestones/m2/plan.md)，分层证据与限制见 [验收记录](../milestones/m2/acceptance.md)。
+状态：**已完成（2026-10-22）。** Windows 探索功能、自动/人工验收及收尾文档独立双轴终审已接受，成果已合入并推送 main；[#17](https://github.com/fanxiao92/godot-pal/issues/17)、父规格 [#11](https://github.com/fanxiao92/godot-pal/issues/11) 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，远端完整 Windows headless CI 已通过。实际入口、独立配置及任务状态见 [M2 计划](../../milestones/m2/plan.md)，分层证据与限制见 [验收记录](../../milestones/m2/acceptance.md)。
 
 - 显式校验 M1 PNG/JSON 输入包并导入为 Godot 原生 Resource/PackedScene/Texture2D；独立 `.tres` 探索 profile 另行配置起点及经离线核对的默认领队行走参数，Prepare 不 author profile，运行时不读取 M1 JSON/MKF、不修改既有 M1 包。
 - 直接进入场景 2 / 地图 12，显示地图、对象与单领队，核对瓦片、遮挡和领队行走帧；多队员跟随不在本轮范围。
@@ -35,7 +35,7 @@
 
 ### M3 · 事件与对话垂直切片
 
-状态：**已完成并已主线交付**。最终 Issue/CI、历史证据身份和未验收边界统一见[M3 验收页当前状态](../milestones/m3/acceptance.md#当前状态)，批准范围见[M3 计划](../milestones/m3/plan.md)。本路线不复制动态证据台账，也不以本地 PASS 代签远端。
+状态：**已完成并已主线交付**。最终 Issue/CI、历史证据身份和未验收边界统一见[M3 验收页当前状态](../../milestones/m3/acceptance.md#当前状态)，批准范围见[M3 计划](../../milestones/m3/plan.md)。本路线不复制动态证据台账，也不以本地 PASS 代签远端。
 
 - 已接通独立 scene4/map10/owner60 的“完整事件转换 → 搜索 → trigger → 双语对话 → 返回探索/再次交谈”；不绑定 M2 场景2，不改原始对象/脚本。
 - 完整 faithful 集合保存与重建、具名字段重新编码及严格加载验证已实现；运行时仅支持切片所需 setDialog/showDialog/end，raw 或其他未支持闭包明确拒绝。全量 opcode、auto、条件/调用及正常场景调度不在此切片。

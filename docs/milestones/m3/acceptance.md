@@ -124,7 +124,7 @@ Core、Game66、Game77的TRX SHA256分别为 `d662ccd54af51be772c5270579d3e25d81
 
 **历史检查点结论：精确 dab79ad8 完整自动门 PASS，经独立 evidence review 支持；用户确认 Windows 人工清单通过。** 这些历史证据不替代最终远端回填。Observer 是 agent 自行追加、规格外的辅助采证工具，现已停用，其缺陷不作为 M3 功能验收门；历史 verifier criterion-1 仍为 `not-satisfied`，不改写历史报告、不宣称工具修复或隐私风险消除。此前记录的 OPEN 状态是 2026-10-23 快照，最终交付及当前状态入口见[本页当前状态](#当前状态)和 GitHub 实时 Issue。
 
-批准范围见 [计划](plan.md)；普通运行与资源身份见 [NPC 宿主契约](../../design/npc-interaction-host.md)。这是 scene4/map10/owner60/0188 的显式独立上下文，不是原版出生、正常自由探索或全量 VM/auto。owner57 热点未改 state，只是不在此上下文调度；32原始对象保留显示/碰撞。默认简中，英文只在启动时显式选择。不带 M3 参数仍走 M2 Main，独立静态模式保留。运行时只读准备好的原生资源和现代事件 JSON，不读原始 MKF/SLF/M.MSG/M1 JSON/参考头文件，不自动提取或补配置。
+批准范围见 [计划](plan.md)；普通运行与资源身份见 [NPC 宿主契约](../../archive/design/npc-interaction-host.md)。这是 scene4/map10/owner60/0188 的显式独立上下文，不是原版出生、正常自由探索或全量 VM/auto。owner57 热点未改 state，只是不在此上下文调度；32原始对象保留显示/碰撞。默认简中，英文只在启动时显式选择。不带 M3 参数仍走 M2 Main，独立静态模式保留。运行时只读准备好的原生资源和现代事件 JSON，不读原始 MKF/SLF/M.MSG/M1 JSON/参考头文件，不自动提取或补配置。
 
 ## 实际 integration 共享门结果
 

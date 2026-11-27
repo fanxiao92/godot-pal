@@ -2,7 +2,7 @@
 
 状态（2026-10-22）：**M2 已完成。** Windows 单领队探索功能、自动/人工验收及收尾文档独立双轴终审已接受；成果已合入并推送 main，已验证交付提交为 `a76f83b`。[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)、[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，[远端完整 Windows headless CI](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过。分层证据、完整门禁计数和未验收范围见 [M2 验收记录](acceptance.md)。M0/M1 历史构建、离线预览或启动 smoke test 不替代 M2 功能证据；后续工作按 [Issue 工作流](../../agents/issue-tracker.md) 核对实时正文、评论与直接依赖，不重做已接受前置。
 
-本计划承接 [总体路线](../../design/development-plan.md)、[架构设计](../../design/architecture.md) 与 [M1 完整静态资源包契约](../m1/extract-scene.md)。技术基线与当前可执行命令以 [根目录 README](../../../README.md) 及工程配置为准；下文入口按已交付实现同步，原立项的 Content/M2Scene 与 JSON profile 路线已由 #13 后续批准的原生资源路线替代，不是当前可执行契约。
+本计划承接 [总体路线](../../archive/design/development-plan.md)、[架构设计](../../archive/design/architecture.md) 与 [M1 完整静态资源包契约](../m1/extract-scene.md)。技术基线与当前可执行命令以 [根目录 README](../../../README.md) 及工程配置为准；下文入口按已交付实现同步，原立项的 Content/M2Scene 与 JSON profile 路线已由 #13 后续批准的原生资源路线替代，不是当前可执行契约。
 
 ## 1. 目标与已确认范围
 

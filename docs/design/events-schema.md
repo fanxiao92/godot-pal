@@ -1,8 +1,8 @@
 # events.json 契约
 
-状态：**M5 终态已交付：165/165 opcode 全具名（156 个动词），注册表完整性与反例覆盖机器核对为常驻 Integration 测试断言（#116 迁层；unit-only CI 当前不含该工程，在共享验收层与本地 dotnet test 重复执行），真实数据逐字节往返终验通过（#113 收官）。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（#96–#112 共 17 批逐批核对交付，各批清单与收官行见第 4 节注册表章节及各批条目小节）；#112 交付全部 165 位后，#113 将「注册表位集合与 script.c 三个 switch（共享 `PAL_InterpretInstruction`、trigger 专属、auto 专属）的去重 `case 0x…:` 清单双向差集为空」落为常驻 Integration 测试断言（#116 迁层，unit-only CI 不含该工程；`tests/Pal.Extract.IntegrationTests/OpcodeRegistryCompletenessTests.cs`），并同一测试机核「每个具名 opcode 至少一个反向编码反例测试」（见[反向编码反例覆盖](#反向编码反例覆盖113-终验)）。无 opcode 保留为 `raw`：`raw` 仅作为遗留/未知 opcode 的保底编码形态保留（兼容旧 M2/M3 包的 raw opcode 7 例外，见 startBattle 章节）。真实 `SSS.MKF` chunk 4（43538 条指令）export→rebuild SHA-256 `f36cf853…b39e72a` 逐字节一致、raw 命中 0（#78–#112 各批及 #113 终验，证据见各票回执）。此离线能力不表示运行时支持或全游戏入口/可达性已核实；运行时执行全量 opcode 留后续里程碑。对话使用原始消息引用，正文由独立语言包提供（格式见后文「语言包现代格式 v1」）；阶段边界见 [总体路线](development-plan.md)。
+状态：**M5 终态已交付：165/165 opcode 全具名（156 个动词），注册表完整性与反例覆盖机器核对为常驻 Integration 测试断言（`tests/Pal.Extract.IntegrationTests/OpcodeRegistryCompletenessTests.cs`，由 `./pal.ps1 ci dotnet` 自动执行），真实数据逐字节往返终验通过（#113 收官）。** 具名映射由 #78 冻结的表驱动 opcode 注册表承载（#96–#112 共 17 批逐批核对交付，各批清单与收官行见第 4 节注册表章节及各批条目小节）；#112 交付全部 165 位后，#113 将「注册表位集合与 script.c 三个 switch（共享 `PAL_InterpretInstruction`、trigger 专属、auto 专属）的去重 `case 0x…:` 清单双向差集为空」落为常驻 Integration 测试断言，并同一测试机核「每个具名 opcode 至少一个反向编码反例测试」（见[反向编码反例覆盖](#反向编码反例覆盖113-终验)）。无 opcode 保留为 `raw`：`raw` 仅作为遗留/未知 opcode 的保底编码形态保留（兼容旧 M2/M3 包的 raw opcode 7 例外，见 startBattle 章节）。真实 `SSS.MKF` chunk 4（43538 条指令）export→rebuild SHA-256 `f36cf853…b39e72a` 逐字节一致、raw 命中 0（#78–#112 各批及 #113 终验，证据见各票回执）。此离线能力不表示运行时支持或全游戏入口/可达性已核实；运行时实时覆盖状态见 [`sdlpal` 对位与能力账本](../generated/capabilities-ledger.md)。对话使用原始消息引用，正文由独立语言包提供（格式见后文「语言包现代格式 v1」）。
 
-原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构设计](architecture.md)、[决策索引](decisions.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
+原版剧情、触发与 NPC 行为由 `SSS.MKF` 中的脚本驱动。离线工具将其转为 `data/extracted/events/` 中的可读 JSON，运行时只读取现代资源，不解析 MKF。背景见 [架构总览](../../ARCHITECTURE.md) 和 [忠实转写决策](../adr/0001-faithful-event-transcription.md)。术语见 [术语表](../../GLOSSARY.md)。
 
 ## 当前 Pal.Extract 命令子集
 
@@ -919,7 +919,7 @@ Pal.Extract 的具名映射由 `OpcodeRegistry` 的**描述符表**驱动：每�
 - 非空 `lossTarget` / `fleeTarget` 必须按本文件或 `file#label` 解析到集合内**非零**地址。引用下标 0 会与原始零值特殊含义冲突，故拒绝，必须用 `null`。`0xFFFF` 在本指令没有 sentinel 含义：enemyTeamId 可为 65535，结果目标 65535 仅在完整 65536 条集合中引用实际命令。
 - 三个 WORD 全部由语义字段重新编码：`enemyTeamId`、已解析的 loss 地址或 0、已解析的 flee 地址或 0。`source.operands` 完整保留作来源诊断，但不能覆盖编辑后的字段；`next` 仍严格遵守完整数组的 WORD 顺序后继，包括回绕和真末端 `null`。即使真末端也校验所有结果引用。
 - 新导出总是使用具名 `startBattle`。为兼容此前合法 M2/M3 完整包，旧 `raw` opcode 7 仍可严格仅携带公共字段，离线无损重建及 Core 集合加载；其原始操作数不按引用解析。此例外不放松 `0x0000` / `0x003C` / `0xFFFF` 必须具名的既有规则，也不为运行时提供 raw 执行通道，不要求迁移旧资源或改变 v1/profile。
-- Core 已追加显式 `TriggerBattleContent` + `IBattleRandom` 的 trigger 战斗 binding 检查点：具名 `startBattle` 暂停于准确 active `ClassicBattleLifecycleSession`，真实结算完成且匹配回执后 Won 走 next、Lost 走 lossTarget（null 则 next），不改原 ReturnEntry。详见[正式接口及支持域](classic-battle-session.md#trigger-事件binding46-有界检查点)。原有无战斗配置的构造器仍在副作用前拒绝 `startBattle`，所有构造器都拒绝执行 `raw`。
+- Core 已追加显式 `TriggerBattleContent` + `IBattleRandom` 的 trigger 战斗 binding 检查点：具名 `startBattle` 暂停于准确 active `ClassicBattleLifecycleSession`，真实结算完成且匹配回执后 Won 走 next、Lost 走 lossTarget（null 则 next），不改原 ReturnEntry。详见[正式接口及支持域](../archive/design/classic-battle-session.md#trigger-事件binding46-有界检查点)。原有无战斗配置的构造器仍在副作用前拒绝 `startBattle`，所有构造器都拒绝执行 `raw`。
 - 能力预检覆盖选中入口的 next、lossTarget、编码的 fleeTarget 完整保守闭包（包括跨文件与循环），至 end(keep)/零地址停止；不因当前只会产生 Won/Lost 而忽略 fleeTarget。预检使用纯数据验证与独立语言 preview，不创建预演战斗或消耗生产随机值。auto 没有获得战斗执行语义；逃跑动作/结果仍属 #51，Main、native 准备与表现尚未接通。
 
 注意：

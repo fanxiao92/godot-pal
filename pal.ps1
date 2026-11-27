@@ -875,6 +875,10 @@ try {
                     Write-Host '==> Self-test: UnitBoundary.Tests.ps1'
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/UnitBoundary.Tests.ps1')
                     if ($LASTEXITCODE -ne 0) { throw "UnitBoundary.Tests.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Self-test: RepoHygiene.Tests.ps1'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/RepoHygiene.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "RepoHygiene.Tests.ps1 failed (exit $LASTEXITCODE)." }
                     Invoke-MapSelfCheck
                     Invoke-CapabilityLedgerCheck -RepositoryRoot $script:RepoRoot
                     Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage -EmitJunit -ArtifactsDir $artifactsDir -State $state

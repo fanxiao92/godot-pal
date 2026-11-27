@@ -63,13 +63,13 @@
 
 ### 唯一 bank、声明与启动顺序
 
-- 唯一可变入口存储是既有 [`DynamicEventWorld.ObjectScripts`](../../src/Pal.Core/Events/DynamicEventSession.cs)，键为显式 `(NameObjectId, slot)`：slot0=`FriendDeath`，slot1=`Dying`。`NameObjectId=null` 是未映射的 legacy 静态路径；Name WORD `0`、`0xFFFF` 都是真实名字对象身份，与脚本 entry0 的禁用语义不同。相同 Name 的角色 alias 同一双槽，且声明的 FriendDeath、Dying seed **各自**必须相等；不同 Name 即使 seed 相同也不 alias。
-- [`TriggerScriptSession`](../../src/Pal.Core/Events/TriggerScriptSession.cs) 对选中闭包中可达的 mapped battle 做小型、纯 typed 能力检查：只要有玩家声明 Name，就要求全体玩家映射、Name 在 WORD 范围内、同 Name seeds 一致，并且实际 Start/当前查询绑定 world。不是调用完整 modern 数值格式 validator；legacy 简写数组及既有格式诊断顺序不变。
+- 唯一可变入口存储是既有 [`DynamicEventWorld.ObjectScripts`](../../../src/Pal.Core/Events/DynamicEventSession.cs)，键为显式 `(NameObjectId, slot)`：slot0=`FriendDeath`，slot1=`Dying`。`NameObjectId=null` 是未映射的 legacy 静态路径；Name WORD `0`、`0xFFFF` 都是真实名字对象身份，与脚本 entry0 的禁用语义不同。相同 Name 的角色 alias 同一双槽，且声明的 FriendDeath、Dying seed **各自**必须相等；不同 Name 即使 seed 相同也不 alias。
+- [`TriggerScriptSession`](../../../src/Pal.Core/Events/TriggerScriptSession.cs) 对选中闭包中可达的 mapped battle 做小型、纯 typed 能力检查：只要有玩家声明 Name，就要求全体玩家映射、Name 在 WORD 范围内、同 Name seeds 一致，并且实际 Start/当前查询绑定 world。不是调用完整 modern 数值格式 validator；legacy 简写数组及既有格式诊断顺序不变。
 - 构造器、`ForSharedRoles`、纯查询均不 seed、不重绑 world/角色 owner。成功 `Start` 先完成全部纯预检，再为实际结构可达 mapped battle 的相关双槽**仅补缺失键**，之后才创建 CallId、改 caller/success/PC、执行前缀及消耗生产 RNG。已有值0优先于声明 seed；无 battle 或 entry0 不因传入 content 而 seed。基本、world-only、battle-only、shared+world 绑定仍各守原能力边界，不从未映射内容制造 owner。
 
 ### 实际参与者的 live reader 与真实完成回写
 
-- 正式路径为 Trigger `Continue(startBattle)` → [`ClassicBattleLifecycleSession`](../../src/Pal.Core/Battle/ClassicBattleLifecycleSession.cs) → [`ClassicBattleSession`](../../src/Pal.Core/Battle/ClassicBattleSession.cs)。仅 internal overload 借用 `Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript`，每次真实检测按实际 player 的 Name 与 kind 读当前 bank：Dying 读濒死本人，FriendDeath 读实际 coverer，而非死者。live0 是禁用，不是缺失。既有 public 独立 combat/lifecycle 构造器仍传 null、读静态声明，不创建新 bank。
+- 正式路径为 Trigger `Continue(startBattle)` → [`ClassicBattleLifecycleSession`](../../../src/Pal.Core/Battle/ClassicBattleLifecycleSession.cs) → [`ClassicBattleSession`](../../../src/Pal.Core/Battle/ClassicBattleSession.cs)。仅 internal overload 借用 `Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript`，每次真实检测按实际 player 的 Name 与 kind 读当前 bank：Dying 读濒死本人，FriendDeath 读实际 coverer，而非死者。live0 是禁用，不是缺失。既有 public 独立 combat/lifecycle 构造器仍传 null、读静态声明，不创建新 bank。
 - 钩子 caller 是实际 `RoleId`，0 合法，不是 Name、party index 或 EVENTOBJECT count owner。只有外层 `Start` 的 caller `0xFFFF` 继承 `_lastCaller`；Name `0xFFFF` 与根 RoleId0 都不是继承标记。这不引入 [#129](https://github.com/fanxiao92/godot-pal/issues/129) 的嵌套 VM/call、保存入口或 count 语义。
 - `StartBattleHook` 仍先预检**实际 pending entry X**，通过后捕获不可变 `(NameObjectId, slot, X)`；X 不取声明 seed、此刻 bank、返回 PC 或外层 `ReturnEntry`。真实 hook 内 `0090/setObjectScript` 写自身槽Y后等待 display 时保持Y；只有正常根 `keep` 或真实到达 PC0 的完成才把X写回捕获槽，**先写 bank，再清临时 hook owner，再 lifecycle `AcknowledgeRoleHook`**，随后恢复外层 caller。外层 `ReturnEntry` 不是 hook bank；其他 Name/slot 不受该回写影响。
 - 真实用例覆盖 pending5→另一个 executor 写 bank31→hook 自写0→display 等待仍0→真实 display 完成且 owned ACK 后终止→回写5、恢复 outer caller28。仅 display 完成而未 ACK、早到/foreign/stale/重复 display 或 battle 回执均不提交回写；重复回执也不能覆盖后来真实写入。跨文件位置仅用于诊断和寻址，文件名不是 bank key。enemy battle-end 按实际 enemy slot 作 caller，丢弃脚本返回 WORD，没有 Name owner。
@@ -87,15 +87,15 @@
 public TriggerEntryRequirements GetCurrentEntryRequirements(string fileId, string entryId, int caller);
 ```
 
-该既有公开方法绑定当前 `BattleRoles`、`Context.Color`、events/language/content 及相关 world keys，返回既有深不可变 [`TriggerEntryRequirements`](../../src/Pal.Core/Events/TriggerEntryRequirements.cs)（`DisplayBlocks`/消息引用、`PortraitIds`、`BattleTeamIds`），不创建生产调用、seed、重绑、消耗 RNG 或改变 CallId/caller/PC。它与 `Start` 共用 `ValidateSelectedStart` 纯 guard：阻塞中的 active call 抛 `InvalidOperationException`，非 WORD caller 抛 `ArgumentOutOfRangeException`，入口/Name 映射/world 可用性/闭包/语言问题抛带文件或命令位置的 `InvalidDataException`。caller `0xFFFF` 仅保留对 `_lastCaller` 的继承约定，不更新它；查询结果不是跨后续更新有效的授权，真正 `Start` 必须重查。
+该既有公开方法绑定当前 `BattleRoles`、`Context.Color`、events/language/content 及相关 world keys，返回既有深不可变 [`TriggerEntryRequirements`](../../../src/Pal.Core/Events/TriggerEntryRequirements.cs)（`DisplayBlocks`/消息引用、`PortraitIds`、`BattleTeamIds`），不创建生产调用、seed、重绑、消耗 RNG 或改变 CallId/caller/PC。它与 `Start` 共用 `ValidateSelectedStart` 纯 guard：阻塞中的 active call 抛 `InvalidOperationException`，非 WORD caller 抛 `ArgumentOutOfRangeException`，入口/Name 映射/world 可用性/闭包/语言问题抛带文件或命令位置的 `InvalidDataException`。caller `0xFFFF` 仅保留对 `_lastCaller` 的继承约定，不更新它；查询结果不是跨后续更新有效的授权，真正 `Start` 必须重查。
 
 静态 `ValidateEntry` 仍是 initial-content、纯且无计数器的预检，以初始角色及声明入口保守纳入相关未来 `0090` 写根，不要求 live world、不读取当前 bank。它不获得 #129 的 call/goto/count 能力或 `ValidateReturnEntryPreserved` checker 权限；当前查询也不扩大既有构造绑定的执行能力。
 
 ### 已有 Core 用例与尚未交付的外层
 
-[`MidbattleRoleHookTests`](../../tests/Pal.Core.UnitTests/MidbattleRoleHookTests.cs) 经公开构造、选令、真实动作、display.Update 与 owned ACK 覆盖上述行为，不注入假 hook/receipt：例如 `Current_entry_requirements_are_pure_and_do_not_seed_or_advance_last_caller`、`Aliased_Name_zero_Dying_hooks_use_the_shared_current_entry_and_keep_the_captured_return`（Role0/1 同 Name0）、`Dying_root_keep_restores_the_captured_actual_Name_entry_after_its_own_write`，以及 `Ended_battle_owned_ACK_starts_the_next_battle_with_settled_roles_and_the_current_mapped_Dying_entry`（第一场真实 Won/结算及 owned ACK 后，第二场真实检测当前入口；不是第二场结算证据）。同文件另有实际 coverer FriendDeath、PC0、跨文件、真实 foreign display、同 world 新 executor 与当前副本/local keep 用例；预期来自独立 authored 字面值及参考核对，不由被测实现生成。
+[`MidbattleRoleHookTests`](../../../tests/Pal.Core.UnitTests/MidbattleRoleHookTests.cs) 经公开构造、选令、真实动作、display.Update 与 owned ACK 覆盖上述行为，不注入假 hook/receipt：例如 `Current_entry_requirements_are_pure_and_do_not_seed_or_advance_last_caller`、`Aliased_Name_zero_Dying_hooks_use_the_shared_current_entry_and_keep_the_captured_return`（Role0/1 同 Name0）、`Dying_root_keep_restores_the_captured_actual_Name_entry_after_its_own_write`，以及 `Ended_battle_owned_ACK_starts_the_next_battle_with_settled_roles_and_the_current_mapped_Dying_entry`（第一场真实 Won/结算及 owned ACK 后，第二场真实检测当前入口；不是第二场结算证据）。同文件另有实际 coverer FriendDeath、PC0、跨文件、真实 foreign display、同 world 新 executor 与当前副本/local keep 用例；预期来自独立 authored 字面值及参考核对，不由被测实现生成。
 
-D1 的生产 Start 前当前查询与完整资源预检、D2 的正常 Main/资源/真实输入/`UpdateCompleted`+ACK，以及未来 #129 集成、完整 M6 保存/66条C故事，均不由本 Core 前置票实现或验收。[`NativeStoryProfile`](../../src/Pal.Game/Scripts/Profiles/NativeStoryProfile.cs) 的静态双语检查和 [`PalTriggerDialogue`](../../src/Pal.Game/Scripts/Dialogue/PalTriggerDialogue.cs) 到 battle 即停的 preview 不能证明当前 live 资源闭包；Core 反馈不替代 Game/native/Main、GPU、人工、私有真实资源或远端 CI 门禁，`.packages` 正式 Source 基线要求不豁免。
+D1 的生产 Start 前当前查询与完整资源预检、D2 的正常 Main/资源/真实输入/`UpdateCompleted`+ACK，以及未来 #129 集成、完整 M6 保存/66条C故事，均不由本 Core 前置票实现或验收。[`NativeStoryProfile`](../../../src/Pal.Game/Scripts/Profiles/NativeStoryProfile.cs) 的静态双语检查和 [`PalTriggerDialogue`](../../../src/Pal.Game/Scripts/Dialogue/PalTriggerDialogue.cs) 到 battle 即停的 preview 不能证明当前 live 资源闭包；Core 反馈不替代 Game/native/Main、GPU、人工、私有真实资源或远端 CI 门禁，`.packages` 正式 Source 基线要求不豁免。
 
 ## #47 纯 Core 多人检查点
 
@@ -127,7 +127,7 @@ Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 fra
 
 参考：fight.c:336–349（haste×3）、3628–3673（双击循环/目标保持）、3753–3755（计数一次）、4943–4973/5008–5028（掩护条件与表现）、5086–5090（protect 减半）；global.c:2255/2304（好状态取大/清理保留 >999）。
 
-状态：#46 的 **Core 内部检查点**。单人单敌经典普攻、选令后随机排序、逐动作推进和真实 Won/Lost、下述零成长正式生命周期及 trigger 事件 binding 已实现；不是整张 #46 或 M4 的交付。独立现代数值 native codec 及完整显式离线数值 Prepare/Editor/PS 已追加（见[数值契约](modern-battle-data.md)），但完整人工 package、Main/真实输入与表现尚未接通。
+状态：#46 的 **Core 内部检查点**。单人单敌经典普攻、选令后随机排序、逐动作推进和真实 Won/Lost、下述零成长正式生命周期及 trigger 事件 binding 已实现；不是整张 #46 或 M4 的交付。独立现代数值 native codec 及完整显式离线数值 Prepare/Editor/PS 已追加（见[数值契约](../../design/modern-battle-data.md)），但完整人工 package、Main/真实输入与表现尚未接通。
 
 ## Interface 与数据
 
@@ -154,7 +154,7 @@ Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 fra
 
 事件后续不能直接以 raw combat KO 恢复。正常业务入口是 `ClassicBattleLifecycleSession(BattleRoleSnapshot, ClassicBattlePlayer, ClassicBattleEnemy, ClassicBattleGrowthData, IBattleRandom)`；它私有持有唯一 `ClassicBattleSession`，只转交 `SelectAttack` / `ResolveNextAction`，不另建伤害、排序或推进循环。`Current.Combat` 是战内快照，`Current.Role` 是角色持久快照：例如 raw HP180 胜利后可结算为 HP190，两者不得混用。`Current.IsInBattle` 取自真实 active combat 引用；结算及清理后释放该引用，不再接受动作。
 
-既有 `BattleRoleSnapshot` 提供 MP/maxMP、primary/七 hidden EXP、32槽已学法术、六装备与九状态；私有可变角色复用 `BattleRoleState`，外部只得到深拷贝、只读集合的快照。角色和 compact player 的 role/HP/maxHP 必须一致，零装备/status/cover 及 combat 既有全部能力约束仍预检拒绝。新增 `ClassicBattleGrowthData` 仅接收显式完整100项 level-indexed WORD 阈值和本 role 全部 `BattleLevelUpMagic(Level, MagicId)` 行；没有 native codec、人工 profile ID 特判或默认补齐数据；纯数值 JSON 读取现见[现代战斗数据 v1](modern-battle-data.md)。成长表只在纯预检使用，构造后不保留外部引用；角色数据实际深拷贝。原 frozen v1/profile/envelope 不变。
+既有 `BattleRoleSnapshot` 提供 MP/maxMP、primary/七 hidden EXP、32槽已学法术、六装备与九状态；私有可变角色复用 `BattleRoleState`，外部只得到深拷贝、只读集合的快照。角色和 compact player 的 role/HP/maxHP 必须一致，零装备/status/cover 及 combat 既有全部能力约束仍预检拒绝。新增 `ClassicBattleGrowthData` 仅接收显式完整100项 level-indexed WORD 阈值和本 role 全部 `BattleLevelUpMagic(Level, MagicId)` 行；没有 native codec、人工 profile ID 特判或默认补齐数据；纯数值 JSON 读取现见[现代战斗数据 v1](../../design/modern-battle-data.md)。成长表只在纯预检使用，构造后不保留外部引用；角色数据实际深拷贝。原 frozen v1/profile/envelope 不变。
 
 无成长闭包在创建可变角色/抽 RNG 前证明：role level 与七 hidden level 均0..99，所有 XP/level/count 为 WORD，primary XP 严格小于 **role.Level** 对应阈值，七 hidden XP 各严格小于自身 level 对应阈值；阈值完整且正 WORD。七项 hidden 名称按 Ordinal 精确匹配，不因调用方字典使用大小写不敏感比较器而接受别名；规范键配合该比较器仍合法。不是 `reward==0` 就跳过规则：旧 XP 已达阈值、需要 level clamp、任意可新增法术等均拒绝。逐行检查当前等级可学法术，已知/零 ID/未来等级不新增；32槽全满时按 `PAL_AddMagic` 不会新增。非零奖励仍由 combat 预检拒绝。这是合法数据下没有永久成长的封闭子集，不是 #50 通用成长实现。
 
@@ -170,7 +170,7 @@ Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 fra
 
 正常显式入口：`TriggerScriptSession(events, language, TriggerBattleContent, IBattleRandom, inheritedColor = ...)`。既有 `(events, language, inheritedColor = ...)` 保持原有 M2/M3 行为及 enum 数值 Ready=0 / WaitingForDisplay=1 / Completed=2，无战斗配置时依然拒绝具名 `startBattle`，raw7 从不执行。WaitingForBattle 追加为3；两种等待均阻塞 `BlocksSceneUpdates`，且 `Start` 拒绝重入，不改变原调用。
 
-`TriggerBattleContent(role, player, growth, teamId→enemy)` 是纯 typed 正式内容，不是测试 profile、工厂或注入结果的 delegate；后续有界检查点已补充[严格现代数值 JSON 读取](modern-battle-data.md)，已有独立 typed numeric native schema，已有显式数值准备入口，尚无完整 storypackage schema/准备链。role 提供初始持久状态，player 提供无装备效果的有效面板，growth 是该 role 的完整阈值/法术表，每个 team 映射本支持域的一个真实 enemy。初始 role/player 的 roleId、HP、maxHP 必须一致；所有之后仍要使用的嵌套 role、player、enemy、growth 集合均防御拷贝，不保留外部可变 alias。公开 `BattleRole` 是只读、不可变快照，不是可写全局状态库。
+`TriggerBattleContent(role, player, growth, teamId→enemy)` 是纯 typed 正式内容，不是测试 profile、工厂或注入结果的 delegate；后续有界检查点已补充[严格现代数值 JSON 读取](../../design/modern-battle-data.md)，已有独立 typed numeric native schema，已有显式数值准备入口，尚无完整 storypackage schema/准备链。role 提供初始持久状态，player 提供无装备效果的有效面板，growth 是该 role 的完整阈值/法术表，每个 team 映射本支持域的一个真实 enemy。初始 role/player 的 roleId、HP、maxHP 必须一致；所有之后仍要使用的嵌套 role、player、enemy、growth 集合均防御拷贝，不保留外部可变 alias。公开 `BattleRole` 是只读、不可变快照，不是可写全局状态库。
 
 同一 trigger session 持有唯一持久角色快照；每场以其当前 HP 覆盖初始 player template HP，正常构造准确且唯一的 `ClassicBattleLifecycleSession`。会话不把 rawHP 当 settledHP，也不在请求创建/真实KO时提前应用角色；**只有合法 ack** 将 lifecycle 的 settled `Current.Role` 一次应用。多次开战和后续 `Start` 承接 HP/MP/XP/法术/counts；开场复活/reset 只发生在下一场 lifecycle 内。独立新 session 从内容初始状态开始。为了保证任意多战 Won 半恢复后都仍在底层 combat HP1..32767 范围，此 VM 的保守支持域额外要求 **maxHP<=32767**；不更改 lifecycle/combat 原有 maxHP WORD 合同。
 
@@ -190,7 +190,7 @@ Main/View：两击各走一次正式 Feedback 表现；掩护时掩护者以 fra
 
 ## 现代数值读取（#46 有界检查点）
 
-`ModernBattleContent.Parse(string)` 仅严格读取纯数值并返回上述同一 `TriggerBattleContent`；字段和数组演进边界见[现代战斗数据 v1](modern-battle-data.md)。复用既有 role 转换及 combat/growth 类型，不增第二套规则。格式合法不等于选中入口可执行：合法非零能力字段、含0阈值和有序重复法术行均保留，再由正式 `Start` 纯预检拒绝不支持闭包，不消耗RNG。`InitialRole/Player/Growth/Teams` 为public只读投影，全部嵌套集合沿现构造器防御拷贝。公开 Core 字符串用例已真实经Won/Lost与原事件续接；独立 typed native codec 已追加；不是已交付的完整人工资源链，数值 Prepare/Editor/PS 已交付，完整 storypackage/CLI 作者链/Main 仍待后续。
+`ModernBattleContent.Parse(string)` 仅严格读取纯数值并返回上述同一 `TriggerBattleContent`；字段和数组演进边界见[现代战斗数据 v1](../../design/modern-battle-data.md)。复用既有 role 转换及 combat/growth 类型，不增第二套规则。格式合法不等于选中入口可执行：合法非零能力字段、含0阈值和有序重复法术行均保留，再由正式 `Start` 纯预检拒绝不支持闭包，不消耗RNG。`InitialRole/Player/Growth/Teams` 为public只读投影，全部嵌套集合沿现构造器防御拷贝。公开 Core 字符串用例已真实经Won/Lost与原事件续接；独立 typed native codec 已追加；不是已交付的完整人工资源链，数值 Prepare/Editor/PS 已交付，完整 storypackage/CLI 作者链/Main 仍待后续。
 
 ## 固定参考与独立算例
 

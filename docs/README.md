@@ -1,6 +1,6 @@
 # 文档导航
 
-项目概览、技术基线与 `./pal.ps1` 常用命令见根目录 [README.md](../README.md)。文档按职责归类，动态任务进度与远端状态以 GitHub Issues 与实时 CI 为准。
+项目概览、技术基线与 `./pal.ps1` 常用命令见根目录 [README.md](../README.md)；当前态三段管道、物理模块拓扑与编译期机械护栏见根目录 [ARCHITECTURE.md](../ARCHITECTURE.md)；代码派生的实时指令/模块支持状态见 [`sdlpal` 对位与能力账本](generated/capabilities-ledger.md)。文档按职责归类，动态任务进度与远端状态以 GitHub Issues 与实时 CI 为准。
 
 ## 测试与验证：`testing/`（4 篇）
 
@@ -37,16 +37,21 @@
 
 M7（agent 适配与验证基建）规格与叶票跟踪见 GitHub Issue [#249](https://github.com/fanxiao92/godot-pal/issues/249)。
 
-## 设计背景：`design/`
+## 有效格式契约与可行性：`design/`（5 篇）
 
-按需查阅具体模块设计，不默认通读全部文档：
+仅保留仍为当前态真源的格式契约与项目可行性基线（历史切片过程稿与 M6 就绪度核对稿已归档至 [历史文档归档索引](archive/README.md)）：
 
-- 核心背景与路线：[背景与可行性](design/feasibility.md)、[架构设计](design/architecture.md)、[开发计划](design/development-plan.md)、[决策记录与待定问题](design/decisions.md)
-- 离线数据与事件契约：[数据层 schema](design/data-schema.md)、[事件格式契约](design/events-schema.md)、[主线剧情往返](design/main-story-roundtrip.md)
-- 对话与场景交互：[对话资源与显示](design/dialogue-display.md)、[trigger 执行](design/trigger-execution.md)、[搜索/返回规则](design/npc-interaction.md)、[Godot 宿主与启动配置](design/npc-interaction-host.md)
-- 战斗与系统设计：[首战战前上下文](design/first-story-battle-context.md)、[现代战斗数据](design/modern-battle-data.md)、[经典战斗会话](design/classic-battle-session.md)、[原生剧情内容](design/native-story-content.md)、[故事包准备](design/story-package-preparation.md)、[战斗图像 schema](design/battle-image-schema.md)、[原生战斗视觉](design/native-battle-visuals.md)、[金钱状态](design/live-cash-state.md)、[背包状态](design/live-inventory-state.md)
+- [背景与可行性](design/feasibility.md)
+- [数据层 schema](design/data-schema.md)
+- [事件格式契约](design/events-schema.md)
+- [现代战斗数据](design/modern-battle-data.md)
+- [战斗图像 schema](design/battle-image-schema.md)
 
 引擎逻辑的只读参考源码导航见 [reference/README.md](../reference/README.md)。
+
+## 自动生成文档：`generated/`
+
+- [`sdlpal` 对位与能力账本](generated/capabilities-ledger.md)（由 `./pal.ps1 test check-ledger` 零漂移校验，严禁手改）
 
 ## Agent 工作流：`agents/`
 
@@ -63,9 +68,8 @@ M7（agent 适配与验证基建）规格与叶票跟踪见 GitHub Issue [#249](
 
 ## 历史归档：`archive/`
 
-仅在排障或追溯 M0 初始交付记录时按需查阅：
+仅在排障或追溯历史阶段过程稿时按需查阅，完整分类见 [历史文档归档索引](archive/README.md)：
 
-- [Godot C# 兼容性](archive/m0/godot-compatibility.md)（Issue #2）
-- [最小游戏启动链路](archive/m0/game-startup.md)（Issue #3）
-- [独立 CLI 入口](archive/m0/extract-cli.md)（Issue #4）
-- [M0 集成验收与 CI](archive/m0/acceptance.md)（Issue #5）
+- [M0 初始交付记录](archive/README.md#目录分类)：`m0/`（4 篇）
+- [早期总览与切片过程设计稿](archive/README.md#目录分类)：`design/`（15 篇）
+- [M6 切片就绪度核对稿](archive/README.md#目录分类)：`m6-readiness/`（6 篇）

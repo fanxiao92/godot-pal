@@ -12,7 +12,7 @@ pal-extract extract-dialogue --input <raw-sdlpal-directory> --reference <referen
 
 命令要求简中和英文 SLF、`RGM.MKF`、`DATA.MKF` 及固定参考目录，读取两种语言的消息章节、RGM chunk 59、DATA chunk 12 和参考 `ascii.h` / `fontglyph.h`。头像是直接 RLE；等待提示是帧表图像。输出的 `.pimg` 保留索引像素和 alpha，并声明使用运行时当前场景调色板。它不得覆盖已有目标或写入输入目录；应将真实输出保存在唯一的仓库外临时目录，不能提交、上传或放进 CI。事件仍仅通过原始消息 ID/跨度解析正文。
 
-输出的现代语言契约见 [events-schema.md](events-schema.md#语言包现代格式-v1)。图像文件 `.pimg` 为 `PALIMG1\\0` 8字节标记、little-endian Int32 宽高，随后逐像素交错的 palette index / alpha；它保持当前场景调色板语义，而非固定 RGB。`font.json` 只含实际语言文字使用的字形，ISO 8×15 glyph 按参考位序归一，Unifont 使用 16×16、每行1或2字节位图及原始宽度元数据。两种来源散列留在封套中。
+输出的现代语言契约见 [events-schema.md](../../design/events-schema.md#语言包现代格式-v1)。图像文件 `.pimg` 为 `PALIMG1\\0` 8字节标记、little-endian Int32 宽高，随后逐像素交错的 palette index / alpha；它保持当前场景调色板语义，而非固定 RGB。`font.json` 只含实际语言文字使用的字形，ISO 8×15 glyph 按参考位序归一，Unifont 使用 16×16、每行1或2字节位图及原始宽度元数据。两种来源散列留在封套中。
 
 导出目录随后必须由明确的 Godot 离线准备阶段转成原生 Resource；不可直接作为运行时包读取。先为两步分别选择尚不存在的唯一输出路径，再执行：
 
