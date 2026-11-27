@@ -170,6 +170,7 @@ function Invoke-DotnetTestStep {
         [switch]$CollectCoverage,
         [string]$CoveragePackage = '',
         [switch]$EmitJunit,
+        [switch]$BlameHang,
         [string]$GodotExe = '',
         [Parameter(Mandatory)][hashtable]$State
     )
@@ -198,6 +199,15 @@ function Invoke-DotnetTestStep {
     }
     $argsList.Add('--logger')
     $argsList.Add("trx;LogFileName=$trxName")
+    if ($BlameHang) {
+        $argsList.Add('--logger')
+        $argsList.Add('console;verbosity=normal')
+        $argsList.Add('--blame-hang')
+        $argsList.Add('--blame-hang-timeout')
+        $argsList.Add('2m')
+        $argsList.Add('--blame-hang-dump-type')
+        $argsList.Add('mini')
+    }
     $argsList.Add('--results-directory')
     $argsList.Add($rawDir)
     if ($CollectCoverage) {
@@ -253,6 +263,17 @@ function Invoke-DotnetTestStep {
                 if (-not $CoveragePackage -or ([string]$entry.package -ieq $CoveragePackage)) {
                     $State.Coverage.Add($entry)
                 }
+            }
+        }
+    }
+
+    if ($BlameHang) {
+        $blameFiles = @(Get-ChildItem -LiteralPath $rawDir -Recurse -File -Include 'Sequence*.xml', '*.dmp' -ErrorAction SilentlyContinue)
+        if ($blameFiles.Count -gt 0) {
+            $blameDir = Join-Path $ArtifactsDir 'blame'
+            [void][IO.Directory]::CreateDirectory($blameDir)
+            foreach ($bf in $blameFiles) {
+                Copy-Item -LiteralPath $bf.FullName -Destination (Join-Path $blameDir $bf.Name) -Force
             }
         }
     }
@@ -349,7 +370,7 @@ function Invoke-GameTarget {
     Invoke-DotnetTestStep -Name 'Pal.Game.Tests' `
         -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
         -ArtifactsDir $ArtifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
-        -Filter $combinedFilter -EmitJunit:$EmitJunit -GodotExe $godot -State $State
+        -Filter $combinedFilter -EmitJunit:$EmitJunit -BlameHang:$EmitJunit -GodotExe $godot -State $State
 }
 
 function Invoke-LraTarget {

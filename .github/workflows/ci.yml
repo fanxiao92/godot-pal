@@ -114,3 +114,4 @@ jobs:
             ${{ runner.temp }}/pal-ci-game/summary.md
             ${{ runner.temp }}/pal-ci-game/trx/**
             ${{ runner.temp }}/pal-ci-game/junit/**
+            ${{ runner.temp }}/pal-ci-game/blame/**
