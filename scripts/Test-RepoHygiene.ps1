@@ -66,11 +66,9 @@ if ([IO.Directory]::Exists($scriptsDir)) {
         $psFiles.Add($f.FullName)
     }
 }
-$legacyM74Scripts = @('scripts/Test-Range.ps1')
 foreach ($psFile in $psFiles) {
     $psDir = Split-Path $psFile -Parent
     $relPs = [IO.Path]::GetRelativePath($root, $psFile).Replace('\', '/')
-    if ($relPs -cin $legacyM74Scripts) { continue }
     foreach ($line in [IO.File]::ReadAllLines($psFile, [Text.Encoding]::UTF8)) {
         if ($line.TrimStart().StartsWith('#')) { continue }
         foreach ($m in [regex]::Matches($line, "Join-Path\s+\`$PSScriptRoot\s+'([^'\$\*]+?\.(?:ps1|psm1))'")) {
