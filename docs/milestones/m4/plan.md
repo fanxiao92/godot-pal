@@ -66,7 +66,7 @@ Lost 进入原失败剧情至 `0x004E` 重载请求，输出一次可定位诊�
 2. **真实独立游戏会话**：人工现代资源经显式准备，由正常 Main/SceneRunner 接受真实输入，在生产更新完成处观察，覆盖胜负交接、失败传播、输入/订阅/节点清理和同 URI 隔离；不直调 UI 或注入战斗结果。
 3. **CLI/Prepare/native 与必要进程**：文件、版本/引用、完整 faithful 往返、资源诊断、路径安全、argv/退出/READY 由所属层验证，不全部搬入 SceneRunner。
 
-具体执行读[测试职责矩阵](../../testing/test-layers.md)、[Game 分层](../../testing/game-test-layers.md)、[时序规则](../../testing/time-boundaries.md)及[异常处理](../../agents/test-diagnostics.md)。普通 Unit 原生运行；按实际改动选受影响层，新增用例同步源码身份、参数行、严格计数和串行分区。未变源码/条件的成功检查不因阶段名重跑；独立范围成功不拼成完整门 PASS。
+具体执行读[验证矩阵](../../testing/verification-matrix.md)、[Game 分层](../../testing/game-test-layers.md)、[时序规则](../../testing/time-boundaries.md)及[异常处理](../../agents/test-diagnostics.md)。普通 Unit 原生运行；按实际改动选受影响层，新增用例同步源码身份、参数行、严格计数和串行分区。未变源码/条件的成功检查不因阶段名重跑；独立范围成功不拼成完整门 PASS。
 
 每票增量验证核心行为和关键边界，不把所有测试拖到 #54。最终固定候选仍必须完成：
 

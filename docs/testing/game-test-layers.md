@@ -1,10 +1,10 @@
 # Game 测试分层与 SceneRunner
 
-本页是 Game 的**当前操作规则**。新增或改写 Game 集成测试、迁移进程用例时进入；历史失败、变异、性能对照和交付年表见[历史记录](../archive/m3/game-test-history.md)。两者不是两套规则：本页保留当前可执行的契约，历史页只保存原身份和结论。
+本页是 Game 集成测试的**当前操作规则**。新增或改写 `tests/Pal.Game.Tests` 用例、迁移进程用例时进入；跨层选档与命令入口见[验证矩阵](verification-matrix.md)，拆分工程与官方 GdUnit4 决策见 [ADR-0006](../adr/0006-split-game-tests-and-official-gdunit.md)。
 
 ## 新人最小模型（仅按需进入 Godot）
 
-先完成[短指南](getting-started.md)的 Unit 反馈；只有目标契约需要真实引擎接线时才进入本页。Game `[RequireGodotRuntime]` 由 VSTest → 官方 `gdUnit4.test.adapter` 启动 Godot .NET runtime，不是普通纯内存 Unit；测试工程与运行配置位于 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 与 [game.runsettings](../../tests/Pal.Game.Tests/game.runsettings)。
+纯业务规则先在 `Pal.Core.UnitTests` 完成快速反馈（见[验证矩阵](verification-matrix.md)）；只有目标契约需要真实引擎接线时才进入本页。Game `[RequireGodotRuntime]` 由 VSTest → 官方 `gdUnit4.test.adapter` 启动 Godot .NET runtime，不是普通纯内存 Unit；测试工程与运行配置位于 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 与 [game.runsettings](../../tests/Pal.Game.Tests/game.runsettings)。
 
 ```text
 本例 GUID Resource/PackedScene → new Main → Configure + 订阅（入树前）
@@ -69,7 +69,7 @@ runner = ISceneRunner.Load(Main, autoFree: true);
 
 通用时序契约先读[时序验证细则](time-boundaries.md)。精确业务时间留在 Core 显式时间测试。固定版 `SimulateFrames` 双参数包含真实 `Task.Delay`，不是虚拟 delta；TimeFactor/Engine 倍速也不等价于推进单调业务时钟。SceneRunner 的有界等待只防挂起：观察到更新但状态错误是功能失败，期限内未观察到必要更新是活性问题，两者均不能计为通过。引擎调度延迟不能替代 Core 的 deadline 前/时/晚到边界；集成层只证明真实输入到达及对应更新完成边界。
 
-遇到时序变更、调度偶发、输出捕获、断言变异或 Game 迁移时，先对照根 [AGENTS 测试规则](../../AGENTS.md#测试)和[测试职责矩阵](test-layers.md)，再进入[历史诊断与复现记录](../archive/m3/test-diagnostics-history.md)中明确触发的症状。迁移或替换时序断言前列出旧断言到新层的映射，预先冻结最小错误反例与指定失败原因。变异必须逐例运行、逐例恢复，既核源码也核实际运行目录 DLL/PDB；必要时显式 Rebuild，源码字节/mtime 恢复不证明运行产物恢复。指定失败原因、退出码和原日志必须保留。不要以提高超时、重复运行、崩溃或编译失败替代目标错误捕获。
+遇到时序变更、调度偶发、输出捕获、断言变异或 Game 迁移时，先对照[验证矩阵](verification-matrix.md)与[时序与外部调度延迟](time-boundaries.md)，并按[测试异常处理规则](../agents/test-diagnostics.md)分类留证。迁移或替换时序断言前列出旧断言到新层的映射，预先冻结最小错误反例与指定失败原因。变异必须逐例运行、逐例恢复，既核源码也核实际运行目录 DLL/PDB；必要时显式 Rebuild，源码字节/mtime 恢复不证明运行产物恢复。指定失败原因、退出码和原日志必须保留。不要以提高超时、重复运行、崩溃或编译失败替代目标错误捕获。
 
 ### 失败分类（不能互相代签）
 
@@ -85,6 +85,4 @@ runner = ISceneRunner.Load(Main, autoFree: true);
 
 ## CI 与完整套件边界
 
-Game 测试通过统一前门 `./pal.ps1 test game`（或 CI 的 `./pal.ps1 ci game`）在单次 headless 会话中执行，配置以 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 与 [game.runsettings](../../tests/Pal.Game.Tests/game.runsettings) 为准（`TestSessionTimeout=600000`、`TolerateExitCodeAfterCompletion=false`）。任一中止、崩溃、未知退出、输出不完整或非预期失败均保留原件并停止，不自动重试或续跑。
-
-其余历史批次、预算值、TRX 身份图和交付记录保留在[历史记录](../archive/m3/game-test-history.md)。
+Game 测试通过统一前门 `./pal.ps1 test game`（或 CI 的 `./pal.ps1 ci game`）在 headless 会话中执行，配置以 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 与 [game.runsettings](../../tests/Pal.Game.Tests/game.runsettings) 为准（`TestSessionTimeout=600000`、`TolerateExitCodeAfterCompletion=false`）。任一中止、崩溃、未知退出、输出不完整或非预期失败均保留原件并停止，不自动重试或续跑。

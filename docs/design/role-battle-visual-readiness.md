@@ -119,7 +119,7 @@ A→B→C 不表示装备问题消失，也不意味着#133信任根、#161/#165
 | 两Main/cache | 第二Main复用相同URI；退出/部分初始化后重建 | 资源hash/初始图帧不被上例写脏，所有新增纹理集合清空；不全局清ResourceLoader/cache/UID |
 | 装备门 | 上文最后非零例；未有已证明的完整上下文能力时给非零覆盖 | 当前必须仍拒绝且无RNG/玩法副作用；未来仅在已批准能力闭包下覆盖正例可游玩。不能用无装备正例补签 |
 
-选层沿用 `docs/testing/test-layers.md`、`docs/testing/game-test-layers.md`、`docs/testing/time-boundaries.md`。检查点A的native资源测试不能代签B/C；headless snapshot不能代签GPU像素。`scripts/GameTestBatches.ps1:318` 将 Profiles/Resources/Editor列入 native-map守卫，未来改动要按该规则提供**完整未过滤**native-map证据后再运行受守卫的其它Game；不能复制旧verified标记或Skip绕过。新增用例必须按实际source/discovery身份更新两个登记，不猜运行成功数量。本报告不改变现有473等源码计数，也不将其当本轮测试结果。
+选层沿用 `docs/testing/verification-matrix.md`、`docs/testing/game-test-layers.md`、`docs/testing/time-boundaries.md`（历史记录中的 `docs/testing/test-layers.md` 与 `scripts/GameTestBatches.ps1` 已于 M7 退役，现由 `tests/affected-map.psd1` 与 `./pal.ps1` 承接）。检查点A的native资源测试不能代签B/C；headless snapshot不能代签GPU像素。本报告不改变历史473等源码计数，也不将其当本轮测试结果。
 
 ## 下一合法动作与未运行
 

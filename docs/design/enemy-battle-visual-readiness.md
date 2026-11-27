@@ -123,7 +123,7 @@
 | 首个有效输入、部分初始化纹理失败、正常/活动中退出、重复Main同URI | Configure/订阅入树前；首个实际UpdateCompleted内无条件采样，不等待正确状态。finally释放自有输入/订阅/节点/纹理；资源字节/hash/初态不写脏 |
 | GPU像素/私有真实/桌面/完整门 | 各自绑定实际候选、明确授权与原件，不能用SOURCE/native/headless互相代签；必要但缺少的证据继续保留未验，不以合成图或历史首战补签 |
 
-选层沿用 `docs/testing/test-layers.md`、`docs/testing/game-test-layers.md`、`docs/testing/time-boundaries.md`。Profiles/Resources/Editor变更受 `scripts/GameTestBatches.ps1:318` 的native-map守卫；后续届时核完整未过滤native-map及当前runsettings，不复制旧marker/Skip绕过。计数按实际发现/运行同步，不能把当前source分区数473说成本轮执行通过数。
+选层沿用 `docs/testing/verification-matrix.md`、`docs/testing/game-test-layers.md`、`docs/testing/time-boundaries.md`（历史记录中的 `docs/testing/test-layers.md` 与 `scripts/GameTestBatches.ps1` 已于 M7 退役，现由 `tests/affected-map.psd1` 与 `./pal.ps1` 承接）。计数按实际发现/运行同步，不能把历史 source 分区数473说成本轮执行通过数。
 
 ## 下一入口与保留限制
 

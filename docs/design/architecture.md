@@ -25,7 +25,7 @@
 ```
 
 - **MKF 解析只活在 `pal-extract` 工具里**,它和游戏是两个独立 package。游戏代码里没有一行认识 MKF,完全脱离。
-- `pal-extract` 是独立的 C#/.NET 离线命令行工具,产出 `data/extracted/`(现代资源)。当前工具能力与命令见 [根目录 README](../../README.md#构建测试与运行);转换能力从 M1 起增量实现,可按开发需要重复运行。
+- `pal-extract` 是独立的 C#/.NET 离线命令行工具,产出 `data/extracted/`(现代资源)。当前工具能力与命令见 [根目录 README](../../README.md#快速开始与常用命令);转换能力从 M1 起增量实现,可按开发需要重复运行。
 
 ## 资源 vs 事件:两类东西
 
@@ -88,7 +88,7 @@ M1 提取静态场景资源，M2 在 Godot 构建场景并验证行走、碰撞�
 1. **核心层是纯逻辑**,不碰渲染、不碰 MKF。通过「命令总线」与上层通讯 —— 事件系统不直接画对话框,而是发出 `显示对话` / `播放音效` / `进入战斗` 命令,表现层和外壳层消费。这样核心系统可脱离 Godot 场景树,在纯 .NET 环境中单元测试。
 2. **所有"内容"都从资源文件来**,核心代码不硬编码任何剧情、地图、数值。
 3. **字节码解析只存在于离线工具中**。运行时事件系统执行转换后的 JSON 命令,保留 trigger/auto 的执行差异;通过可暂停的步进处理等待,不把所有脚本统一成每 tick 一条。第二阶段再为手写新内容接入结构化子集或现代脚本能力,不改变原版转写契约。
-4. **Godot 平台适配留在外层**:表现层使用 Godot 2D 节点与逻辑视口,输入使用 InputMap;打包资源通过 `res://` 加载,存档通过 FileAccess 写入 `user://`。M2 交付参考离散步进、320×200 原始比例整数缩放、方向键/WASD 与不加移动插值；M2 当时采用的失焦暂停已由 #21 按 SDLPal 参考取消。当前焦点行为与历史 M2 范围分别见 [M2 计划](../milestones/m2/plan.md) 及 [Game 历史运行记录](../archive/m3/game-test-run-history.md#desktop-focus-and-exploration-behavior)；视频和其余外壳能力仍待对应阶段设计。
+4. **Godot 平台适配留在外层**:表现层使用 Godot 2D 节点与逻辑视口,输入使用 InputMap;打包资源通过 `res://` 加载,存档通过 FileAccess 写入 `user://`。M2 交付参考离散步进、320×200 原始比例整数缩放、方向键/WASD 与不加移动插值；M2 当时采用的失焦暂停已由 #21 按 SDLPal 参考取消。当前焦点行为与历史 M2 范围见 [M2 计划](../milestones/m2/plan.md)（旧 `docs/archive/m3/game-test-run-history.md` 已于 M7 退役）；视频和其余外壳能力仍待对应阶段设计。
 
 ## 核心层:1 个状态 + 4 个系统 + 1 条总线
 
@@ -130,5 +130,5 @@ M1 提取静态场景资源，M2 在 Godot 构建场景并验证行走、碰撞�
 
 - **语言与引擎**:C# + Godot .NET,目标为跨平台桌面游戏。
 - **离线工具**:独立 C#/.NET CLI,不依赖 Godot 或游戏工程。
-- **测试**:核心使用纯 .NET xUnit 测试，CLI/Prepare 使用真实进程测试；GdUnit4Net 已通过隔离关卡并接入原生场景、输入、处理帧与 Main 进程测试，保留 import/startup 回归。当前 #18 固定包来源与 bootstrap 见[包说明](../testing/gdunit-source-packages.md)。场景行为断言与有图形渲染/桌面验收分开，headless 不证明像素正确，见 [M2 测试计划](../milestones/m2/plan.md#7-测试与验收)。
+- **测试**:核心使用纯 .NET xUnit 测试，CLI/Prepare 使用集成测试；游戏测试已于 M7 拆出至 `tests/Pal.Game.Tests` 并切回官方 GdUnit4 包（见 [ADR-0006](../adr/0006-split-game-tests-and-official-gdunit.md)），选档与入口见[验证矩阵](../testing/verification-matrix.md)。场景行为断言与有图形渲染/桌面验收分开，headless 不证明像素正确，见 [M2 测试计划](../milestones/m2/plan.md#7-测试与验收)。
 

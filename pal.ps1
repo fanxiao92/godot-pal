@@ -852,7 +852,7 @@ try {
                     if ($LASTEXITCODE -ne 0) { throw "Test-UnitBoundary.ps1 failed (exit $LASTEXITCODE)." }
 
                     Write-Host '==> Guard: Repo hygiene'
-                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-RepoHygiene.ps1') -RepositoryRoot $script:RepoRoot
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-RepoHygiene.ps1') -RepositoryRoot $script:RepoRoot -AllDocs
                     if ($LASTEXITCODE -ne 0) { throw "Test-RepoHygiene.ps1 failed (exit $LASTEXITCODE)." }
 
                     Write-Host '==> Self-test: PalFrontDoor.Tests.ps1'

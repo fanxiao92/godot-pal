@@ -17,13 +17,13 @@
 | D11 | 公共事件与语言包分离，默认简体中文 | 使用当前包的 `m_chs.slf` / `m_eng.slf`，按参考保留消息映射及显示语义；切换语言配置不改剧情逻辑，不另加对话中途热切换。M3 本地候选已实现该切片，不阻塞 M1/M2；见 [事件契约](events-schema.md#语言包与-slf-来源)。 |
 | D12 | 场景构建与事件里程碑分开 | M1 提取静态场景资源，M2 构建 Godot 探索场景，M3 接入最小真实事件与对话；后续战斗和全量转换顺延，见 [总体路线](development-plan.md)。 |
 | D13 | M2 采用单领队静态探索切片 | 直接进入场景 2，以独立测试配置补足起点和经离线核对的角色行走参数；显式准备 M1 包，不改原包、不运行脚本或对象计时。M2 当时验收的桌面行为包括失焦暂停清键；#21 已在当前代码中按 SDLPal 参考取消该策略，M2 历史验收记录不变。详见 [M2 计划](../milestones/m2/plan.md)。 |
-| D14 | M2 先验证 Godot 场景测试框架 | #12 有界隔离关卡已通过并接入，不降 Godot/.NET 基线、不迁移 Core xUnit；#18 后续另获批准交付特定固定源码 API/adapter 包、完整门禁与同字节发布，见[包来源与 bootstrap](../testing/gdunit-source-packages.md)。进一步升级或回切官方包仍需另行决定。 |
+| D14 | M2 先验证 Godot 场景测试框架 | #12 有界隔离关卡已通过并接入，不降 Godot/.NET 基线、不迁移 Core xUnit；#18 曾交付固定源码包（旧 `docs/testing/gdunit-source-packages.md` 已于 M7 退役），M7 已拆出 `tests/Pal.Game.Tests` 并切回官方 GdUnit4 包，见 [ADR-0006](../adr/0006-split-game-tests-and-official-gdunit.md)。 |
 | D15 | M2 原生资源与独立 typed profile | #13 后续批准以 M1 PNG/JSON 为显式离线输入，运行时加载 Godot Resource/PackedScene/Texture2D；#14 独立 `.tres` profile 提供经核对的起点/行走参数，Prepare 不 author profile，见 [M2 计划](../milestones/m2/plan.md#3-资源准备与测试配置)。不取消未来事件 JSON。 |
 | D16 | M2 离散调度与桌面扩展（历史决策） | 首步立即、后续 100ms、晚到不补走，不加插值；当时批准的失焦冻结/清键与回焦 fresh-press 策略是明确扩展，不宣称 SDLPal 原版行为。#21 已取消当前探索链路中的该扩展；默认窗口 1280×800（4×）、逻辑视野 320×200 保留。 |
 
 ## 待定问题
 
-- **Q1 其余表现层 / 外壳层能力**：M2 的逻辑步进、键盘输入、缩放与原生资源接入已实现并通过其历史 Windows 分层验收；M2 失焦暂停在 #21 中按参考撤销。历史验收与当前行为区分见 [M2 计划](../milestones/m2/plan.md)、[M2 验收记录](../milestones/m2/acceptance.md)及[Game 历史运行记录](../archive/m3/game-test-run-history.md#desktop-focus-and-exploration-behavior)。#11/#17/#19 已关闭；转场、音视频及其他后续能力仍按对应阶段设计。
+- **Q1 其余表现层 / 外壳层能力**：M2 的逻辑步进、键盘输入、缩放与原生资源接入已实现并通过其历史 Windows 分层验收；M2 失焦暂停在 #21 中按参考撤销。历史验收与当前行为区分见 [M2 计划](../milestones/m2/plan.md)与[M2 验收记录](../milestones/m2/acceptance.md)（旧 `docs/archive/m3/game-test-run-history.md` 已于 M7 退役）。#11/#17/#19 已关闭；转场、音视频及其他后续能力仍按对应阶段设计。
 - **Q2 events.json 契约与实现进度**:忠实转写策略、v1 封套、引用和基础命令已定义,见 [事件契约](events-schema.md)。完整 faithful 导出/重建及有限 trigger 执行已本地实现；具名映射与 raw 保存不等于全量执行。当前契约见 [trigger 执行](trigger-execution.md)，手写新内容的结构化 profile 及完整指令集仍不在当前切片。
 - **Q3 数据来源与其余资源仍待验证**:当前输入在 `data/raw/sdlpal/`,外层归档与对象表符合 Windows 数据分支,但含 SDLPal 翻译内容,未证明与未修改的 98 柔情版完全一致。Windows 静态场景切片的 YJ2/图像/原始记录提取已本地验证，完整包见 [M1 计划](../milestones/m1/plan.md)；M3 已有目标文字/字形的分层本地证据，但不证明未修改发行盘一致性，见 [M3 检查点](../milestones/m3/acceptance.md)。
 - **Q4 符号表方案已确定,待实现**:数字 ID 为真值,游戏可核对名称与可选 `symbols.json` 生成 `_` 注释字段。具体规则见 [事件契约](events-schema.md#7-可读名字),不另建一套剧情标志来替代对象状态和可变入口。

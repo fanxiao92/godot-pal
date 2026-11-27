@@ -24,21 +24,25 @@ foreach ($godotDir in @('src/Pal.Game', 'tests/Pal.Game.Tests')) {
     }
 }
 
-# 2. Relative Markdown links in active docs resolve to existing paths.
+# 2. Relative Markdown links in active docs (or all docs when -AllDocs) resolve to existing paths.
 $docFiles = [Collections.Generic.List[string]]::new()
-foreach ($top in @('AGENTS.md', 'CODING_STANDARDS.md')) {
+foreach ($top in @('AGENTS.md', 'CODING_STANDARDS.md', 'README.md', 'docs/README.md')) {
     $p = Join-Path $root $top
     if ([IO.File]::Exists($p)) { $docFiles.Add($p) }
 }
-$agentsDocs = Join-Path $root 'docs/agents'
-if ([IO.Directory]::Exists($agentsDocs)) {
-    foreach ($f in @(Get-ChildItem -LiteralPath $agentsDocs -Filter '*.md' -File)) { $docFiles.Add($f.FullName) }
-}
-$testingDocs = Join-Path $root 'docs/testing'
-if ([IO.Directory]::Exists($testingDocs)) {
-    $activeTesting = @('getting-started.md', 'game-test-layers.md', 'test-layers.md', 'time-boundaries.md', 'merge-protection.md')
-    foreach ($f in @(Get-ChildItem -LiteralPath $testingDocs -Filter '*.md' -File)) {
-        if ($AllDocs -or ($f.Name -cin $activeTesting)) { $docFiles.Add($f.FullName) }
+if ($AllDocs) {
+    $docsRoot = Join-Path $root 'docs'
+    if ([IO.Directory]::Exists($docsRoot)) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $docsRoot -Recurse -Filter '*.md' -File)) {
+            if ($f.FullName -notin $docFiles) { $docFiles.Add($f.FullName) }
+        }
+    }
+} else {
+    foreach ($sub in @('docs/agents', 'docs/adr', 'docs/testing')) {
+        $subDir = Join-Path $root $sub
+        if ([IO.Directory]::Exists($subDir)) {
+            foreach ($f in @(Get-ChildItem -LiteralPath $subDir -Filter '*.md' -File)) { $docFiles.Add($f.FullName) }
+        }
     }
 }
 

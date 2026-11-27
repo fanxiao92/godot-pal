@@ -1,77 +1,71 @@
 # 文档导航
 
-当前进度、技术版本和构建运行命令见 [项目 README](../README.md)。文档按职责归类，不按产生顺序编号。
+项目概览、技术基线与 `./pal.ps1` 常用命令见根目录 [README.md](../README.md)。文档按职责归类，动态任务进度与远端状态以 GitHub Issues 与实时 CI 为准。
 
-## 设计背景：`design/`
+## 测试与验证：`testing/`（4 篇）
 
-理解项目目标和架构时阅读：
+- [验证矩阵](testing/verification-matrix.md)：**唯一当前态权威入口** —— 层（Layer）与档（Tier）术语、改动 → 档位 → `./pal.ps1` 命令 → 证据速查表、双平台覆盖边界与 T3 显式触发规则。
+- [Game 测试分层与 SceneRunner](testing/game-test-layers.md)：新增、迁移或排查 `tests/Pal.Game.Tests` 用例时的生命周期、输入、更新边界与隔离规则。
+- [时序与外部调度延迟](testing/time-boundaries.md)：改动业务时间、输入更新边界、断言变异或排查调度偶发时必读。
+- [合并保护操作说明](testing/merge-protection.md)：`main` 分支经典合并保护的当前配置（`dotnet` / `prepare` / `game`）与受控修改/回读守则。
 
-- [背景与可行性](design/feasibility.md)：为什么做、目标版本与参考项目。
-- [架构设计](design/architecture.md)：离线转换与运行时边界、核心系统分层。
-- [开发计划](design/development-plan.md)：M0～M8 总体路线，区分场景资源、Godot 场景构建和事件里程碑。
-- [决策记录与待定问题](design/decisions.md)：已确定的方向与待讨论事项。
-- [事件格式契约](design/events-schema.md)：原版忠实转写的文件结构、基础命令、引用与验证要求；处理事件转换或执行任务时阅读。
+测试失败分类与异常停止顺序见 [测试异常处理规则](agents/test-diagnostics.md)。
 
-引擎逻辑的参考文件地图见 [reference/README.md](../reference/README.md)。
+## 架构决策记录：`adr/`
+
+- [ADR-0001：原版事件采用忠实低层转写](adr/0001-faithful-event-transcription.md)
+- [ADR-0002：第一阶段采用 Unit-only 默认反馈与测试合并门槛](adr/0002-unit-only-first-stage.md)（`Superseded by ADR-0005`）
+- [ADR-0003：Unit 默认反馈信任原生工具，不重复构建审计框架](adr/0003-native-unit-feedback.md)（`Superseded by ADR-0005`）
+- [ADR-0004：数据层与脚本层分层转写](adr/0004-data-and-script-layers.md)
+- [ADR-0005：M7 验证基建重构与四档分层模型](adr/0005-m7-verification-infrastructure.md)
+- [ADR-0006：游戏测试拆出 `tests/Pal.Game.Tests` 并切回官方 GdUnit4 包](adr/0006-split-game-tests-and-official-gdunit.md)
+- [ADR-0007：T3 真实资源 GPU 端到端回归与仓库外共享缓存](adr/0007-t3-gpu-e2e-and-shared-asset-cache.md)
+
+领域术语见根目录 [GLOSSARY.md](../GLOSSARY.md)。
 
 ## 实施计划：`milestones/`
 
-开始某个里程碑时，读取其计划及对应 GitHub Issue 正文、评论；新里程碑先制定计划，再编码。
+开始或回溯某个里程碑时，结合对应 GitHub Issue 正文与评论阅读：
 
-- [M0 工程骨架与工具链](milestones/m0/plan.md)：已完成，保留原始计划。
-- [M1 场景资源提取](milestones/m1/plan.md)：只读检查、Windows 地图/精灵/场景转换和完整包已完成本地验收及独立双轴审查；只包含静态场景资源，不含事件、对话、语言包或字库。
-  - [完整静态资源包 v1](milestones/m1/extract-scene.md)：最终 CLI、来源/参数/产物散列与相对引用契约、实际验证及未执行边界。
-  - [地图切片契约](milestones/m1/export-map.md)：原始字段、PNG/索引/alpha 和瓦片预览约定。
-- [M2 Godot 场景构建与探索](milestones/m2/plan.md)：Windows 单领队、静态对象、原生资源/独立 `.tres` profile、320×200 整数缩放、键盘与焦点处理已实现，自动/人工验收及收尾文档独立终审已完成，成果已合入并推送 main，远端完整 Windows headless CI 已通过；#11/#17/#19 均已关闭。计划提供真实入口/配置与任务表。
-  - [M2 分层验收记录](milestones/m2/acceptance.md)：本地规则/headless、GPU、操作者反馈、主干交付及 #19 修复后远端 CI 的分层证据和未验收范围；追溯 #11/#17/#19 时阅读。
-  - [固定 GdUnit 源码包](testing/gdunit-source-packages.md)：#18 包身份、发布与 bootstrap；直接还原/构建或排查包来源时阅读。
-- [M3 独立真实 NPC 对话](milestones/m3/plan.md)：已交付 scene4/map10/owner60 有限切片的批准范围；不是正常剧情或全量事件系统。
-  - [M3 当前状态与分层验收](milestones/m3/acceptance.md#当前状态)：最终 Issue/CI 的单点索引，以及保持原身份的本地、GPU、用户反馈、失败和 Observer 限制；普通测试选层无需重读历史。
-  - [对话资源与显示](design/dialogue-display.md)、[trigger 执行](design/trigger-execution.md)、[搜索/返回规则](design/npc-interaction.md)、[Godot 宿主与启动配置](design/npc-interaction-host.md)：当前实际接口与支持/拒绝范围。
-- [M4 首个必经剧情战计划](milestones/m4/plan.md)：#44 与 #45–#54 的十票依赖、当前隔离实施状态、人工/真实内容衔接及分层验收边界；尚未完成整个 M4 或主线交付。
-  - [首战战前上下文](design/first-story-battle-context.md)：#45 的 snapshot author、严格现代/native 准备与正常 Main/SceneRunner 接线；真实 `@09C3` 闭包仍拒绝，后续战斗尚未交付。
+- [M0 工程骨架与工具链](milestones/m0/plan.md)（已交付）
+- [M1 场景资源提取](milestones/m1/plan.md)（已交付）：附 [完整静态资源包 v1](milestones/m1/extract-scene.md)、[地图切片契约](milestones/m1/export-map.md)
+- [M2 Godot 场景构建与探索](milestones/m2/plan.md)（已交付）：附 [M2 分层验收记录](milestones/m2/acceptance.md)、[框架兼容性记录](milestones/m2/framework-compatibility.md)
+- [M3 独立真实 NPC 对话](milestones/m3/plan.md)（已交付）：附 [M3 分层验收](milestones/m3/acceptance.md)
+- [M4 首个必经剧情战](milestones/m4/plan.md)（已交付）
+- [M5 数据与脚本全量转换](milestones/m5/plan.md)（已交付）：附 [opcode 清单](milestones/m5/opcode-inventory.md)
+- [M6 完整战斗、菜单与存读档](milestones/m6/plan.md)（已交付并合入 `main`）：附 [M6-C 存档保留矩阵](milestones/m6/m6c-save-matrix.md)
 
-后续计划放在 `docs/milestones/<里程碑>/plan.md`。具体任务规格、讨论和结果留在 GitHub Issues。
+M7（agent 适配与验证基建）规格与叶票跟踪见 GitHub Issue [#249](https://github.com/fanxiao92/godot-pal/issues/249)。
 
-## 测试规范与入口：`testing/`
+## 设计背景：`design/`
 
-- [Unit 反馈短指南](testing/getting-started.md)：新人和 work agent 的唯一默认上手入口，选工程、直接运行、判定与停止留证；[Unit 专题](testing/unit-entry.md)维护协议和显式维护工具细则，无需先读编排脚本。
-- [测试职责矩阵](testing/test-layers.md)：需要非 Unit 契约时，按依赖和证据选择 CLI 文件集成、Prepare、SceneRunner 或真实进程；不按耗时分类。
-- [工程检查与分层回归](testing/engineering-checks.md)：显式 Source、Offline、OwnedProcess 的边界与证据；CI 复用独立离线 guard，不调用聚合入口或改变原生产品 Unit。
-- [固定快照与交接](agents/runtime-workflow.md)：需要冻结原始字节源码身份或精简 current 时使用；[六项短收据](agents/large-task-handoffs.md#结构化交接)用于正常回传，原件按需读取、最终独立评审仍必读。
-- [证据分类工具](testing/agent-evidence.md)：显式 current/命令账本及 xUnit/Game GREEN/指定 RED 校验；SOURCE/OFFLINE 合成回归不替代实际 Game 验收。
-- [scripts 用途清单](testing/script-inventory.md)：公开入口、内部支持、准备与 CI/验收证据的逐项职责、调用方和静态搜索限制；本批只盘点，不删除工具。
-- [显式范围回归](testing/range-regression.md)：选择 CLI integration、Prepare 或 Game 现有批次；明确参数、准备顺序和非完整门证据。
-- [时序验证细则](testing/time-boundaries.md)：业务时间、输入更新边界、相关断言、Game 迁移或调度偶发时先读；普通选层不加载长细则。
-- [CLI 测试迁移](testing/cli-test-migration.md)：unit/integration 项目边界、映射和完整门接线。
-- [Game 测试分层与 SceneRunner](testing/game-test-layers.md)：新增或改写 Game 集成测试、迁移进程用例时阅读；当前初始化、更新边界、隔离、反例和完整门规则。
-- [Game 测试当前入口](../src/Pal.Game/Tests/README.md)：当前 Game 入口、覆盖口径和失败判定；只在选中 Game 层时阅读。
-- [M3 Game 历史运行记录](archive/m3/game-test-run-history.md)：旧命令、变异、性能、交付和历史限制，按需追溯。
-- [CI 分流与候选身份](testing/ci-dispatch.md)：Draft/Ready/main/manual 的实际调度契约、候选绑定与证据边界；远端状态仍以 GitHub 实时结果为准。
-- [固定 GdUnit 源码包](testing/gdunit-source-packages.md)：固定包的来源和消费；仅在还原、排查或获准运行 Game 时阅读。
-- [测试异常说明](agents/test-diagnostics.md)：当前处理规则与历史症状分开；遇到中止、崩溃、输出捕获或已知诊断时按指针进入。
-- [合并保护操作说明](testing/merge-protection.md)：#67 已完成的阶段性 Unit 要求、#38 历史配置与受控操作/恢复边界；实时 GET 与实际拒绝/允许证据分开。
+按需查阅具体模块设计，不默认通读全部文档：
 
-## 历史归档：`archive/`
+- 核心背景与路线：[背景与可行性](design/feasibility.md)、[架构设计](design/architecture.md)、[开发计划](design/development-plan.md)、[决策记录与待定问题](design/decisions.md)
+- 离线数据与事件契约：[数据层 schema](design/data-schema.md)、[事件格式契约](design/events-schema.md)、[主线剧情往返](design/main-story-roundtrip.md)
+- 对话与场景交互：[对话资源与显示](design/dialogue-display.md)、[trigger 执行](design/trigger-execution.md)、[搜索/返回规则](design/npc-interaction.md)、[Godot 宿主与启动配置](design/npc-interaction-host.md)
+- 战斗与系统设计：[首战战前上下文](design/first-story-battle-context.md)、[现代战斗数据](design/modern-battle-data.md)、[经典战斗会话](design/classic-battle-session.md)、[原生剧情内容](design/native-story-content.md)、[故事包准备](design/story-package-preparation.md)、[战斗图像 schema](design/battle-image-schema.md)、[原生战斗视觉](design/native-battle-visuals.md)、[金钱状态](design/live-cash-state.md)、[背包状态](design/live-inventory-state.md)
 
-仅在排障、环境升级或追溯历史结论时查阅，不是新会话或后续实现的默认必读材料。当前操作文件与历史记录分离；移动/收口后的旧入口保留为兼容跳转。
-
-- [M3 Game 历史运行记录](archive/m3/game-test-run-history.md)：旧 Game 命令、批次、变异、性能和交付年表。
-- [M3 历史诊断记录](archive/m3/test-diagnostics-history.md)：Windows 输出捕获、时序、Prepare/CI 症状和原结论。
-- [固定包来源与验收年表](archive/m2/gdunit-source-acceptance-history.md)：包来源、发布、固定包验收及其限制。
-- [#31 长任务执行复盘](archive/engineering/spec31-retrospective.md)：治理任务的耗时口径、上下文膨胀、采证返工与后续改进；仅在规划长任务或追溯本次结论时阅读，附固定截止点的统计数据。
-
-M0 原有报告保留在此，内容描述当时的环境和验证结果，不随每次版本变动重写：
-
-- [Godot C# 兼容性](archive/m0/godot-compatibility.md)（Issue #2）。
-- [最小游戏启动链路](archive/m0/game-startup.md)（Issue #3）。
-- [独立 CLI 入口](archive/m0/extract-cli.md)（Issue #4）。
-- [M0 集成验收与 CI](archive/m0/acceptance.md)（Issue #5）。
-
-验证仍由测试、启动检查和 CI 执行；普通执行结果记录在 CI 和 Issue 中，无需逐次新增报告。只有特殊兼容性调查、难以复现的问题等值得长期保留时，才另写记录。
+引擎逻辑的只读参考源码导航见 [reference/README.md](../reference/README.md)。
 
 ## Agent 工作流：`agents/`
 
-按根目录 [AGENTS.md](../AGENTS.md) 的入口读取，用于任务系统、标签映射及领域文档规则。
+由根目录 [AGENTS.md](../AGENTS.md) 按条件触发进入：
 
-领域术语见根目录 [GLOSSARY.md](../GLOSSARY.md)。正式架构决策位于 `docs/adr/`：[ADR-0001：忠实低层转写](adr/0001-faithful-event-transcription.md)、[ADR-0002：第一阶段 Unit-only](adr/0002-unit-only-first-stage.md)记录业务覆盖与重型恢复条件；[ADR-0003：原生 Unit 反馈](adr/0003-native-unit-feedback.md)记录默认路径退出强审计的后续取舍。进入对应设计或维护时按需读取。
+- [执行环境契约](agents/execution-environment.md)
+- [Issue 工作流](agents/issue-tracker.md) 与 [Triage 标签](agents/triage-labels.md)
+- [领域文档规则](agents/domain.md)
+- [单任务执行与有界纠正](agents/task-execution.md)
+- [多票协调与恢复](agents/large-task-handoffs.md)
+- [测试异常处理规则](agents/test-diagnostics.md)
+
+评审期 Standards 规则见根目录 [CODING_STANDARDS.md](../CODING_STANDARDS.md)。
+
+## 历史归档：`archive/`
+
+仅在排障或追溯 M0 初始交付记录时按需查阅：
+
+- [Godot C# 兼容性](archive/m0/godot-compatibility.md)（Issue #2）
+- [最小游戏启动链路](archive/m0/game-startup.md)（Issue #3）
+- [独立 CLI 入口](archive/m0/extract-cli.md)（Issue #4）
+- [M0 集成验收与 CI](archive/m0/acceptance.md)（Issue #5）
