@@ -92,7 +92,7 @@ node tools/long-running-agent/cli.ts status --issue 126 --offline
 node tools/long-running-agent/cli.ts preflight --issue 126
 ```
 
-输出 JSON 就绪报告，全部来自本地 state+git 实测：writer 锁/PID 状态（none/alive/exited/unknown）；每条未完成 record 的可复用 dependencyProofs（issue/commit 合法且作为当前 ancestor 实测，同 issue 冲突 commit 不复用）、每问题已用/剩余修复轮次与待决修正可解除性（源码变更路径或证据绑定路径）、当前指纹下是否存在 GREEN 检查、阻塞原因清单、tdd 声明/认证状态；工具白名单摘要（unit_test 恒可用、range_test 仅在本命令带 --engine-checks 三件套时反映为可用）。`resumable` 只复现 run 会直接拒绝的硬阻塞（锁归属、问题耗尽）；“当前指纹无 GREEN”、待诊断失败等待办列在 blockers 中由实施会话补齐。不调用模型、不解析 issue 评论、不运行任何测试、不写入任何状态。
+输出 JSON 就绪报告，全部来自本地 state+git 实测：writer 锁/PID 状态（none/alive/exited/unknown）；每条未完成 record 的可复用 dependencyProofs（issue/commit 合法且作为当前 ancestor 实测，同 issue 冲突 commit 不复用）、每问题已用/剩余修复轮次与待决修正可解除性（源码变更路径或证据绑定路径）、当前指纹下是否存在 GREEN 检查、阻塞原因清单、tdd 声明/认证状态；工具白名单摘要（unit_test 恒可用、engine_test 仅在本命令带 `--engine-checks --godot-path` 时反映为可用）。`resumable` 只复现 run 会直接拒绝的硬阻塞（锁归属、问题耗尽）；“当前指纹无 GREEN”、待诊断失败等待办列在 blockers 中由实施会话补齐。不调用模型、不解析 issue 评论、不运行任何测试、不写入任何状态。
 
 ## 正常暂停与继续
 
@@ -114,7 +114,7 @@ node tools/long-running-agent/cli.ts run --issue 126
 
 ## 失败、中断与恢复
 
-不照搬 demo 的无条件自动重试。新记录持久保留 RED 责任：没有声明前拒绝源码写入，声明后、精确 RED 证实前只允许该阶段的测试/fixture/旧契约迁移路径。路径不按生产/测试目录硬编码分类、没有文件数上限，也不是 RED 后的永久授权白名单。`unit_test` / `range_test` 的 `expectedFailure` 必须与冻结声明一致；原生分类器继续负责精确身份/字面诊断匹配。Host 拒绝缺 RED 或只有 RED 之前 GREEN 的变更候选，repair / resume 不重置声明或责任，不能靠 dirty / 新 attempt 豁免。无改动的能力复核仍用当前检查及独立双审，不制造伪 RED。
+不照搬 demo 的无条件自动重试。新记录持久保留 RED 责任：没有声明前拒绝源码写入，声明后、精确 RED 证实前只允许该阶段的测试/fixture/旧契约迁移路径。路径不按生产/测试目录硬编码分类、没有文件数上限，也不是 RED 后的永久授权白名单。`unit_test` / `engine_test` 的 `expectedFailure` 必须与冻结声明一致；原生分类器继续负责精确身份/字面诊断匹配。Host 拒绝缺 RED 或只有 RED 之前 GREEN 的变更候选，repair / resume 不重置声明或责任，不能靠 dirty / 新 attempt 豁免。无改动的能力复核仍用当前检查及独立双审，不制造伪 RED。
 
 修复既有失败的结构缺口由“修复模式”承接：`tdd` 存在且 `corrections` 已含至少一条经 `request_correction` 合法入账的 `kind: check` 修正（观察失败先诊断登记）时，该记录进入修复模式——写入/检查前置的新行为阶段门（声明路径与 RED 前置）及候选门“缺认证 RED 拒绝 / RED 之后才允许 GREEN”的顺序要求不再适用，写权限回归标准修复环语义：pendingFailure 仍必须先 request_correction（`requireWritable` 不豁免），没有源码修正不重复原检查。当前源码 GREEN 与两轴独立审查不豁免：候选仍须绑定当前指纹的成功原生检查并通过双审。新行为票不受影响：无任何已登记修正的记录保留全部声明→认证 RED→写→GREEN 门与反追溯守卫；review 类修正单独不构成进入修复模式，反追溯守卫在任何模式下保留，已观察失败不能事后改签为 RED。
 
@@ -122,11 +122,11 @@ node tools/long-running-agent/cli.ts run --issue 126
 
 事前声明精确测试身份/字面诊断的 RED 命中后可继续实现；其它正常完整的编译/断言/fixture失败，先读原件定位，通过 `request_correction` 记录原因、实质修正和不变契约后才允许写入/必要重验。`request_correction` 仅用于实施中意外出现的完整普通失败；已认证 expectedRed 属计划内工作，勿调用，直接生产写入与 GREEN。没有源码修正不重复原检查或审查，唯一例外是操作者通过 `record_evidence_resolution` 绑定树外原件解除待决修正（check 或 review 类，见工具清单）。
 
-工具协议拒绝降级为会话内工具错误：host 回调（`verify_dependency`、`declare_red`、`request_correction`、`record_evidence_resolution`、写入/检查前置与 `unit_test`/`range_test` 的检查记录）抛出的非致命 Error 不再终止 attempt——agent 侧工具包装层把它作为该工具的 `isError` 结果返回原始错误文本，模型在同一会话内改正后重试，一次协议笔误不再消耗冷启动。仍必须向上传播并保全停止的致命类：`QuiescenceUnknownError`、会话时限/取消、provider 错误，以及 commitStarted 之后的任何异常（它们发生在 host 提交路径，不经过工具层）。两轴的同契约 `changes_requested` 须提供结构化 `findings: [{ problemId, evidenceKey, cause, evidence: [...] }]` 才能自动回实施修复，禁止从摘要猜问题身份。`parseReport` 对顶层报告对象与 `findings` 条目的未知多余键容错：过滤为已知键集后再校验，被忽略的键不进入修正账本；必需键缺失、类型错误与既有 problemId/evidence 校验及其它 `object()` 调用点的精确键集保持不变。`evidenceKey` 使用brief提供的共同original源码身份加 `:规范源码路径#稳定契约锚点`，不使用各review会话目录；同finding两轴合并登记，原件路径保留在 `evidence[]`。`request_correction` 使用同形 `findings` 加 `change/contract`，host绑定证据与ID，按问题持久计数与验证结果。后续证据是否同根因须由诊断/独立审查确认；不确定则停止请求决定，host不声称算法能识别所有语义改名。
+工具协议拒绝降级为会话内工具错误：host 回调（`verify_dependency`、`declare_red`、`request_correction`、`record_evidence_resolution`、写入/检查前置与 `unit_test`/`engine_test` 的检查记录）抛出的非致命 Error 不再终止 attempt——agent 侧工具包装层把它作为该工具的 `isError` 结果返回原始错误文本，模型在同一会话内改正后重试，一次协议笔误不再消耗冷启动。仍必须向上传播并保全停止的致命类：`QuiescenceUnknownError`、会话时限/取消、provider 错误，以及 commitStarted 之后的任何异常（它们发生在 host 提交路径，不经过工具层）。两轴的同契约 `changes_requested` 须提供结构化 `findings: [{ problemId, evidenceKey, cause, evidence: [...] }]` 才能自动回实施修复，禁止从摘要猜问题身份。`parseReport` 对顶层报告对象与 `findings` 条目的未知多余键容错：过滤为已知键集后再校验，被忽略的键不进入修正账本；必需键缺失、类型错误与既有 problemId/evidence 校验及其它 `object()` 调用点的精确键集保持不变。`evidenceKey` 使用brief提供的共同original源码身份加 `:规范源码路径#稳定契约锚点`，不使用各review会话目录；同finding两轴合并登记，原件路径保留在 `evidence[]`。`request_correction` 使用同形 `findings` 加 `change/contract`，host绑定证据与ID，按问题持久计数与验证结果。后续证据是否同根因须由诊断/独立审查确认；不确定则停止请求决定，host不声称算法能识别所有语义改名。
 
 崩溃、中止、超时、未知退出/副作用、结果不完整、provider失败、额度耗尽或新业务决定仍保全停止。恢复不等于重置额度，不能事后把已观察的失败改签为RED。
 
-普通 Unit 的失败分类沿用原生会话结果和计数，不套用 Prepare/Game 的逐案例 TRX 身份图：xUnit theory 可能用同一 testId/definition 记录多个 execution。正常断言失败反馈包含具体测试、原始断言及 `failure-classification.json`。分类器/报告校验失败仍 blocked，并保留原生退出码、底层错误、TRX/日志路径；它本身不等于进程静默未知，不单因分类失败设置 unknownQuiescence。真实中止/崩溃/timeout/未知退出仍维持原硬停止和锁恢复要求；Prepare/Game 的强身份检查不变。带完整命令收尾（exitKnown/rootExited/outputComplete/cleanupComplete 全真）的门禁前缀白名单族——`[range:warning-delta]`（警告基线）、`[range:discovery]`（Prepare 发现计数）与 `[range:source-count]`（Game 批次源码计数）——是确定性普通失败：按 `gate_failure` 入账（code=1、summary 为该 failure 原文、无 TRX 与无测试失败清单、expectedRed 恒为 false），进入 recordFailure→request_correction 修复环；白名单按实证逐个加入，其余前缀（如 selection/filter/prerequisite 等 usage 类）仍按静默未知保全停止。
+普通 Unit 的失败分类沿用原生会话结果和计数，不套用 Prepare/Game 的逐案例 TRX 身份图：xUnit theory 可能用同一 testId/definition 记录多个 execution。正常断言失败反馈包含具体测试、原始断言、`pal.ps1` `run-summary.json` 的 `errorMsg` 及 `failure-classification.json`。分类器/报告校验失败仍 blocked，并保留原生退出码、底层错误、TRX/日志路径；它本身不等于进程静默未知，不单因分类失败设置 unknownQuiescence。真实中止/崩溃/timeout/未知退出仍维持原硬停止和锁恢复要求；Prepare/Game 的强身份检查由 `check-failure.ps1` 内建自洽实现。编译/分析器错误无 TRX 时按普通可修复失败进入 `recordFailure → request_correction` 修复环；非测试环境/配置错误（`status=error`）与异常进程冲突保持停止。
 
 先 `status`，检查相应 session、检查日志和 Git 副作用。已知失败处理完成后，显式批准新会话：
 
@@ -163,18 +163,18 @@ SDK `agentsFilesOverride` 保留原有 AGENTS 发现，再把契约全文和当�
 - 提供受保护的源码 read/list/search/edit/write 和固定的只读 Git 检查；没有任意 shell、MCP、子代理、扩展调度器或远端写工具。
 - 不由人预列每个可改文件，也不设文件数硬上限。超过10文件是聚焦/完整性风险提示：说明为什么属于同一契约及拆分后的中间状态；生产者、消费者、测试、样例、注册与必要文档不能为凑数漏迁。授权路径/行为/权限仍是硬边界。
 - 拒绝工作树外路径、链接、隐藏 index 标志、忽略文件写入、常见凭据路径、`.git`/`.pi`、真实 raw/派生资产及游戏 Assets；不把真实数据发给模型。
-- `unit_test` 沿原生 dotnet CLI，Core/CLI明确工程、`tests/unit.runsettings`、隐式restore/build、全工程或单个 `FullyQualifiedName=`/`~` 方法、类前缀筛选/新日志/TRX，不接受 DisplayName 或 Boolean 组合筛选。只有当前源码真实成功才记录通过；预期RED和正常失败单列，不当通过。Unit失败只核原生完整会话/计数及必要的指定RED身份，不要求逐案例一对一图；Prepare/Game失败继续复用既有 `Read-TestRunIdentity` 强检查，不另造平行图解析器。
-- `range_test` 仅在显式引擎授权后提供，调用既有 `scripts/Test-Range.ps1`：Prepare整层、Game既有正向批次及单个FQN方法/类前缀，保留原发现/身份/诊断/清理契约，不能传DisplayName、任意Boolean筛选、超时放宽或跳过guard。
-- 工具层共享异步互斥串行化源码变更类（`scoped_edit`/`scoped_write`）与检查类（`unit_test`/`range_test`）的 execute（同组与跨组均互斥，读类工具不锁），模型同回合并行调用被安全串行化，编辑不会落盘在检查快照窗口内。
+- `unit_test` 统一调用 `./pal.ps1 test unit --project <core|extract> --out <dir> --json`（纯 `0/1` 退出码 + `run-summary.json` + 原生 TRX），支持全工程或单个 `FullyQualifiedName=`/`~` 方法、类前缀筛选，不接受 DisplayName 或 Boolean 组合筛选。只有当前源码真实成功且 `run-summary.json` 证实通过才记录通过；预期 RED 和正常失败单列，不当通过。Unit 失败只核原生完整会话/计数及必要的指定 RED 身份，不要求逐案例一对一图；Prepare/Game 失败由 `check-failure.ps1` 内建严格 TRX 身份图校验。
+- `engine_test` 仅在显式引擎授权后提供，统一调用 `./pal.ps1 test integration --project prepare` 或 `./pal.ps1 test game`：支持 Prepare 整层、Game 可提交套件及可选官方 `[TestCategory]`（排除 `RealAssets`）与单个 FQN 方法/类前缀，保留全局引擎锁与 PID/Name 守卫，不能传 DisplayName、任意 Boolean 筛选或私有资产选项。
+- 工具层共享异步互斥串行化源码变更类（`scoped_edit`/`scoped_write`）与检查类（`unit_test`/`engine_test`）的 execute（同组与跨组均互斥，读类工具不锁），模型同回合并行调用被安全串行化，编辑不会落盘在检查快照窗口内。
 - Engine运行另持OS临时目录下的全局锁；Windows仅查Godot PID/Name，有任何现存进程先停。异常后保留锁，显式静默确认只解除本执行目录且owner已退出的锁。全局锁只协调本Host，不能替代与外部Godot运行者的唯一执行确认。当前未实现其它平台的引擎PID守卫。
 - 私有真实资源、GPU、人工、远端CI和完整门不自动化执行；需要它们时blocked，不能用Unit、headless或评审代签。
-- 没有 OS sandbox：批准的 dotnet 测试会执行仓库代码，批准的 git commit 会运行现有 hooks；工具路径守卫依赖唯一 writer，不能抵御恶意并发文件替换。运行前必须信任仓库和命令。
+- 没有 OS sandbox：批准的 `pal.ps1` / dotnet 测试会执行仓库代码，批准的 git commit 会运行现有 hooks；工具路径守卫依赖唯一 writer，不能抵御恶意并发文件替换。运行前必须信任仓库和命令。
 
-Prepare/Game 的显式授权示例（复用已批准的引擎与已验证固定包，仅走既有入口的固定包消费，不重建/升级工具链或准备真实资源）：
+Prepare/Game 的显式授权示例（复用已批准的 Godot 可执行文件，经统一 `./pal.ps1` 前门消费官方 NuGet GdUnit4 包，不重建/升级工具链或准备真实资源）：
 
 ```powershell
 node tools/long-running-agent/cli.ts run --issue 126 --commit --engine-checks `
-  --godot-path C:/approved/godot.console.exe --fixed-package-directory C:/evidence/verified-gdunit-bundle
+  --godot-path C:/approved/godot.console.exe
 ```
 
 可选高级参数有 `--provider/--model`（必须成对）、`--max-turns`（每会话，默认 100）、`--session-timeout-ms`（每会话，默认 30 分钟）、`--state`。普通使用不需要配置它们。没有全局 token/账单预算，不承诺服务商费用硬上限。
@@ -209,7 +209,8 @@ node tools/long-running-agent/cli.ts run --issue 126 --commit --engine-checks `
 ```powershell
 npm --prefix tools/long-running-agent run typecheck
 npm --prefix tools/long-running-agent run test:unit # tight纯策略检查
-npm --prefix tools/long-running-agent test          # 含真实Git/PS/SDK接线的离线集成，不冒称快速Unit
+npm --prefix tools/long-running-agent run test:fast # 快速反馈（policy + checks，约 20s，日常迭代优先）
+npm --prefix tools/long-running-agent test          # 含真实Git/PS/SDK接线的全量离线集成（Windows 约 12min，收口运行）
 ```
 
 普通 worker 的实际安装包配置→读取指令、SDK 项目上下文→子代理 global 过滤可另行离线核对（需显式选择已安装包，不安装依赖，不派发 child、不请求 provider）：

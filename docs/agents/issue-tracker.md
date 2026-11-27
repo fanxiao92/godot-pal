@@ -12,7 +12,7 @@
 - 标签：`gh issue edit <number> --repo fanxiao92/godot-pal --add-label "..."`
 - 关闭：`gh issue close <number> --repo fanxiao92/godot-pal --comment "..."`
 
-多行正文优先通过 `--body-file` 传入。
+多行正文优先通过 `--body-file` 传入；非交互式 / 代理终端读取 Issue 时一律带 `--json`，避免分页器或输出吞吐导致空输出。
 
 ## 技能操作约定
 

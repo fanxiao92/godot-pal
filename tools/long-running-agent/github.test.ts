@@ -179,6 +179,7 @@ async function checkEditFixture(runNativeCheck: RunNativeCheck) {
   const sdk = await import('@earendil-works/pi-coding-agent');
   const f = fixture(1);
   fs.mkdirSync(path.join(f.cwd, 'tests', 'Pal.Core.UnitTests'), { recursive: true });
+  fs.writeFileSync(path.join(f.cwd, 'pal.ps1'), '# synthetic front door\n');
   fs.writeFileSync(path.join(f.cwd, unitProjects[0]), '<Project Sdk="Microsoft.NET.Sdk"/>\n');
   fs.writeFileSync(path.join(f.cwd, 'tests', 'unit.runsettings'), '<RunSettings/>\n');
   git(f.cwd, 'add', '.'); git(f.cwd, 'commit', '--quiet', '-m', 'Approved unit project seam');
@@ -669,110 +670,43 @@ test('third normal check failure requires attribution then stops writes without 
   assert.deepEqual(record.corrections!.map(item => item.outcome), ['failed', 'failed', 'failed']);
   await assert.rejects(f.host().run({ resume: true }, signal()), /three repair rounds failed/);
 });
-test('warning-delta failure feeds the normal repair loop: receipt, pendingFailure and request_correction', async () => {
+test('pal.ps1 compiler failure feeds the normal repair loop: receipt, pendingFailure and request_correction', async () => {
   const f = fixture(1); const agent = f.getAgent(); let receipt = '';
-  const failure = '[range:warning-delta] game build emitted 16 compiler warnings (baseline 14). Fix the new warning or intentionally update scripts/warning-baseline.json in its own commit.';
-  // Synthetic #209 attempt shape: a certified RED, then the game range check fails on the warning-baseline gate.
-  const directory = fs.mkdtempSync(path.join(f.directory, 'warning-delta-'));
-  fs.mkdirSync(path.join(directory, 'range', 'game'), { recursive: true });
-  fs.writeFileSync(path.join(directory, 'stdout.log'), 'range wrapper stdout tail');
+  const errorMsg = "Test step 'Pal.Game.Tests' failed with exit code 1.";
+  const directory = fs.mkdtempSync(path.join(f.directory, 'pal-compile-'));
+  fs.mkdirSync(path.join(directory, 'pal'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'stdout.log'), 'src/Pal.Game/Scripts/Slot.cs(10,5): error CS1002: ; expected');
   fs.writeFileSync(path.join(directory, 'stderr.log'), '');
-  fs.writeFileSync(path.join(directory, 'range', 'game', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
-  fs.writeFileSync(path.join(directory, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure, projects: [], commands: [{ exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'build.stdout.log', stderr: 'build.stderr.log' }] }), 'utf8');
-  const outcome = classifyFailure(f.cwd, directory, { scope: 'game', batch: 'native-map' }, 1);
+  fs.writeFileSync(path.join(directory, 'pal', 'run-summary.json'), JSON.stringify({
+    command: 'test game',
+    status: 'failed',
+    errorMsg,
+    counts: { total: 0, passed: 0, failed: 0, skipped: 0 },
+    trxFiles: [],
+  }), 'utf8');
+  const outcome = classifyFailure(f.cwd, directory, { scope: 'game', category: 'Profiles' }, 1);
   f.setAgent({ run: async request => {
     if (request.role === 'implement') {
       certifySyntheticRed(request);
       receipt = failureReceipt(outcome, directory);
-      request.recordCheck({ project: 'game:native-map:all', scope: 'game', directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: outcome.code, expectedRed: outcome.expectedRed });
+      request.recordCheck({ project: 'game:Profiles:all', scope: 'game', directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: outcome.code, expectedRed: outcome.expectedRed });
       request.recordFailure!(directory, snapshot(f.cwd), outcome.summary);
-      assert.equal(f.host().state()!.records[2].pendingFailure!.summary, failure, 'recordFailure must store the gate failure summary as pendingFailure');
+      assert.equal(f.host().state()!.records[2].pendingFailure!.summary, outcome.summary, 'recordFailure must store the pal.ps1 failure summary as pendingFailure');
       assert.throws(() => request.beforeWrite!(), /request_correction/);
-      request.requestCorrection!([finding(request, 'warning-baseline-delta')], 'Fix the new compiler warning or intentionally update scripts/warning-baseline.json in its own commit', 'Approved range gate and warning baseline contract unchanged');
-      return { status: 'blocked', summary: 'Warning-delta diagnosis recorded through the normal repair loop', evidence: [directory] };
+      request.requestCorrection!([finding(request, 'game-compile-error')], 'Fix the missing semicolon reported by Pal.Game.Tests build', 'Approved pal.ps1 game check contract unchanged');
+      return { status: 'blocked', summary: 'Compiler failure diagnosis recorded through the normal repair loop', evidence: [directory] };
     }
     return agent.run(request);
   } });
   const result = await f.host().run({}, signal());
   assert.equal(result.counts.blocked, 1);
   assert.match(receipt, /"status":"failed"/, 'the failed check receipt keeps the failure status marker');
-  assert.ok(receipt.includes(failure), 'the tool failure receipt must carry the gate failure summary verbatim');
+  assert.ok(receipt.includes(errorMsg), 'the tool failure receipt must carry the pal.ps1 errorMsg');
   assert.doesNotMatch(receipt, /Exact classifier failures/, 'no test case ran; the receipt must not invent classifier failures');
   const record = f.host().state()!.records[2];
   assert.equal(record.pendingFailure, undefined, 'request_correction consumed the pendingFailure');
   assert.equal(record.corrections!.at(-1)!.kind, 'check');
-  assert.equal(record.corrections!.at(-1)!.problemId, 'warning-baseline-delta');
-  assert.ok(record.corrections!.at(-1)!.evidence.startsWith(directory), 'the correction binds the original failure evidence directory');
-});
-test('discovery failure feeds the normal repair loop: receipt, pendingFailure and request_correction', async () => {
-  const f = fixture(1); const agent = f.getAgent(); let receipt = '';
-  const failure = '[range:discovery] Prepare must discover exactly the 101 approved cases, got 102.';
-  // Synthetic #209 attempt shape: a certified RED, then the prepare range check fails on the discovery-count gate.
-  const directory = fs.mkdtempSync(path.join(f.directory, 'discovery-'));
-  fs.mkdirSync(path.join(directory, 'range', 'prepare'), { recursive: true });
-  fs.writeFileSync(path.join(directory, 'stdout.log'), 'range wrapper stdout tail');
-  fs.writeFileSync(path.join(directory, 'stderr.log'), '');
-  fs.writeFileSync(path.join(directory, 'range', 'prepare', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
-  fs.writeFileSync(path.join(directory, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure, projects: [], commands: [{ exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'prepare.discover.stdout.log', stderr: 'prepare.discover.stderr.log' }] }), 'utf8');
-  const outcome = classifyFailure(f.cwd, directory, { scope: 'prepare' }, 1);
-  f.setAgent({ run: async request => {
-    if (request.role === 'implement') {
-      certifySyntheticRed(request);
-      receipt = failureReceipt(outcome, directory);
-      request.recordCheck({ project: 'prepare:all:all', scope: 'prepare', directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: outcome.code, expectedRed: outcome.expectedRed });
-      request.recordFailure!(directory, snapshot(f.cwd), outcome.summary);
-      assert.equal(f.host().state()!.records[2].pendingFailure!.summary, failure, 'recordFailure must store the gate failure summary as pendingFailure');
-      assert.throws(() => request.beforeWrite!(), /request_correction/);
-      request.requestCorrection!([finding(request, 'prepare-discovery-count')], 'Fix the discovery-count regression so Prepare discovers exactly the approved cases', 'Approved range gate and prepare discovery contract unchanged');
-      return { status: 'blocked', summary: 'Discovery diagnosis recorded through the normal repair loop', evidence: [directory] };
-    }
-    return agent.run(request);
-  } });
-  const result = await f.host().run({}, signal());
-  assert.equal(result.counts.blocked, 1);
-  assert.match(receipt, /"status":"failed"/, 'the failed check receipt keeps the failure status marker');
-  assert.ok(receipt.includes(failure), 'the tool failure receipt must carry the gate failure summary verbatim');
-  assert.doesNotMatch(receipt, /Exact classifier failures/, 'no test case ran; the receipt must not invent classifier failures');
-  const record = f.host().state()!.records[2];
-  assert.equal(record.pendingFailure, undefined, 'request_correction consumed the pendingFailure');
-  assert.equal(record.corrections!.at(-1)!.kind, 'check');
-  assert.equal(record.corrections!.at(-1)!.problemId, 'prepare-discovery-count');
-  assert.ok(record.corrections!.at(-1)!.evidence.startsWith(directory), 'the correction binds the original failure evidence directory');
-});
-test('source-count failure feeds the normal repair loop: receipt, pendingFailure and request_correction', async () => {
-  const f = fixture(1); const agent = f.getAgent(); let receipt = '';
-  const failure = '[range:source-count] Batch scene-realfull full source count differs: 39/40.';
-  // Synthetic #143 attempt f9eacb62 game-oYuPvv shape: the game batch source-count gate failed a complete,
-  // deterministic, clean-exit range run before any test execution.
-  const directory = fs.mkdtempSync(path.join(f.directory, 'source-count-'));
-  fs.mkdirSync(path.join(directory, 'range', 'game'), { recursive: true });
-  fs.writeFileSync(path.join(directory, 'stdout.log'), 'range wrapper stdout tail');
-  fs.writeFileSync(path.join(directory, 'stderr.log'), '');
-  fs.writeFileSync(path.join(directory, 'range', 'game', 'results.trx'), 'not a TRX: a gate verdict must not consult test results');
-  fs.writeFileSync(path.join(directory, 'range', 'range-run.json'), JSON.stringify({ status: 'failed', failure, projects: [], commands: [{ exitKnown: true, rootExited: true, outputComplete: true, cleanupComplete: true, exitCode: 0, failureKind: 'NormalExit', stdout: 'game.discover.stdout.log', stderr: 'game.discover.stderr.log' }] }), 'utf8');
-  const outcome = classifyFailure(f.cwd, directory, { scope: 'game', batch: 'scene-realfull' }, 1);
-  f.setAgent({ run: async request => {
-    if (request.role === 'implement') {
-      certifySyntheticRed(request);
-      receipt = failureReceipt(outcome, directory);
-      request.recordCheck({ project: 'game:scene-realfull:all', scope: 'game', directory, sourceFingerprint: snapshot(f.cwd).fingerprint, code: outcome.code, expectedRed: outcome.expectedRed });
-      request.recordFailure!(directory, snapshot(f.cwd), outcome.summary);
-      assert.equal(f.host().state()!.records[2].pendingFailure!.summary, failure, 'recordFailure must store the gate failure summary as pendingFailure');
-      assert.throws(() => request.beforeWrite!(), /request_correction/);
-      request.requestCorrection!([finding(request, 'game-batch-source-count')], 'Sync the scene-realfull batch source-count pin with the newly added approved test', 'Approved range gate and game batch partition contract unchanged');
-      return { status: 'blocked', summary: 'Source-count diagnosis recorded through the normal repair loop', evidence: [directory] };
-    }
-    return agent.run(request);
-  } });
-  const result = await f.host().run({}, signal());
-  assert.equal(result.counts.blocked, 1);
-  assert.match(receipt, /"status":"failed"/, 'the failed check receipt keeps the failure status marker');
-  assert.ok(receipt.includes(failure), 'the tool failure receipt must carry the gate failure summary verbatim');
-  assert.doesNotMatch(receipt, /Exact classifier failures/, 'no test case ran; the receipt must not invent classifier failures');
-  const record = f.host().state()!.records[2];
-  assert.equal(record.pendingFailure, undefined, 'request_correction consumed the pendingFailure');
-  assert.equal(record.corrections!.at(-1)!.kind, 'check');
-  assert.equal(record.corrections!.at(-1)!.problemId, 'game-batch-source-count');
+  assert.equal(record.corrections!.at(-1)!.problemId, 'game-compile-error');
   assert.ok(record.corrections!.at(-1)!.evidence.startsWith(directory), 'the correction binds the original failure evidence directory');
 });
 test('review exhaustion stays blocked across fresh attempts and extras cannot bypass three rounds', async () => {
@@ -941,7 +875,7 @@ test('preflight reports state-derived readiness without GitHub reads, tests or s
   assert.equal(report.checkout.head, f.head); assert.equal(report.checkout.dirty, false); assert.equal(report.checkout.matchesIntegrationHead, true);
   assert.deepEqual(report.writerLock, { present: false, owner: 'none', pid: null });
   assert.equal(report.unfinished, 1);
-  assert.deepEqual(report.toolWhitelist, { unitTest: true, rangeTest: false, engineChecksAuthorized: false });
+  assert.deepEqual(report.toolWhitelist, { unitTest: true, engineTest: false, engineChecksAuthorized: false });
   const record = report.records.find(row => row.issue === 2)!;
   assert.equal(record.phase, 'blocked'); assert.equal(record.attempts, 1); assert.equal(record.resumable, true);
   assert.equal(record.pendingFailure, false); assert.equal(record.tdd!.declared, false); assert.equal(record.tdd!.redCertified, false);
@@ -1002,7 +936,7 @@ test('cli preflight subcommand prints the readiness report and stays option-guar
   await f.host().run({}, signal());
   await assert.rejects(githubMain(['preflight', '--issue', '1', '--state', f.state, '--cwd', f.cwd, '--commit']), /Inappropriate/);
   assert.equal(await githubMain(['preflight', '--issue', '1', '--state', f.state, '--cwd', f.cwd]), 0);
-  assert.equal(await githubMain(['preflight', '--issue', '1', '--state', f.state, '--cwd', f.cwd, '--engine-checks', '--godot-path', f.directory, '--fixed-package-directory', f.directory]), 0, 'engine options only reflect the tool whitelist, never launch anything');
+  assert.equal(await githubMain(['preflight', '--issue', '1', '--state', f.state, '--cwd', f.cwd, '--engine-checks', '--godot-path', f.directory]), 0, 'engine options only reflect the tool whitelist, never launch anything');
 });
 test('root-only run needs no plan.json, streams activity, persists progress and waits for a manual commit', async () => {
   const f = fixture(); const status = await f.host().run({}, signal());

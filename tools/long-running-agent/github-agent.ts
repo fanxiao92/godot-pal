@@ -6,7 +6,7 @@ import { Type, type TSchema } from 'typebox';
 import type * as Pi from '@earendil-works/pi-coding-agent';
 import { canonical, hash, parseReport, type Report } from './contract.ts';
 import { atomicJson, git, inside, isIgnored, json, noLinks, QuiescenceUnknownError, snapshot } from './io.ts';
-import { buildCheck, executeCheck, gameBatches, stabilizeGodotUids, unitProjects, type EngineOptions, type Selection } from './checks.ts';
+import { buildCheck, executeCheck, gameCategories, stabilizeGodotUids, unitProjects, type EngineOptions, type Selection } from './checks.ts';
 import { workspacePath } from './pi.ts';
 import type { CodingExecutor, CodingRequest } from './github-host.ts';
 
@@ -54,7 +54,7 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
   // #147 attempt f59851b0): the edit landed inside the check's before/after snapshot window and the resulting
   // QuiescenceUnknownError lost the whole cold-start session. Prompt discipline did not prevent it twice, so
   // the execute layer enforces it: every source-mutating execute (scoped_edit/scoped_write) and every native
-  // check execute (unit_test/range_test) shares one promise-chain mutex, serialized within and across both
+  // check execute (unit_test/engine_test) shares one promise-chain mutex, serialized within and across both
   // groups. Read-only tools never take the lock; the chain swallows settlement so a rejected holder still
   // releases the mutex while its caller observes the original error unchanged.
   let tail: Promise<unknown> = Promise.resolve();
@@ -143,13 +143,13 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
         }
         const before = snapshot(request.cwd); request.beforeCheck?.(before, selection);
         if (selection.expectedFailure && request.checks.some(check => check.sourceFingerprint === before.fingerprint && check.code !== 0)) throw new Error('Cannot retroactively declare RED for an already observed failure');
+        sourcePath(request, 'pal.ps1');
         if (selection.scope === 'unit') { sourcePath(request, selection.project!); sourcePath(request, 'tests/unit.runsettings'); }
-        else sourcePath(request, 'scripts/Test-Range.ps1');
         const directory = fs.mkdtempSync(path.join(request.directory, `${selection.scope}-`));
         const outcome = await runNativeCheck(request.cwd, directory, request.stateDirectory ?? request.directory, selection, signal, engine);
         const after = snapshot(request.cwd);
         if (canonical(before) !== canonical(after)) throw new QuiescenceUnknownError('Native check changed source identity');
-        request.recordCheck({ project: selection.project ?? `${selection.scope}:${selection.batch ?? 'all'}:${selection.filter ?? 'all'}`, scope: selection.scope, directory, sourceFingerprint: after.fingerprint, code: outcome.code, expectedRed: outcome.expectedRed, expectedFailure: selection.expectedFailure });
+        request.recordCheck({ project: selection.project ?? `${selection.scope}:${selection.category ?? 'all'}:${selection.filter ?? 'all'}`, scope: selection.scope, directory, sourceFingerprint: after.fingerprint, code: outcome.code, expectedRed: outcome.expectedRed, expectedFailure: selection.expectedFailure });
         if (outcome.code !== 0 && !outcome.expectedRed) {
           if (!request.recordFailure) throw new Error('No bounded correction controller is available');
           request.recordFailure(directory, after, outcome.summary);
@@ -190,10 +190,10 @@ export function codingTools(sdk: Sdk, request: CodingRequest, signal: AbortSigna
         catch (error) { return reject(error); }
       },
     }));
-    tools.push(typedTool({ name: 'unit_test', label: 'Run native Unit project', description: 'Run a complete approved Core/CLI Unit project, optionally narrowed by one FullyQualifiedName= or ~ method/class-prefix filter. Optional exact RED declaration is frozen before launch; abnormal results stop.', parameters: Type.Object({ project: Type.Union([Type.Literal(unitProjects[0]), Type.Literal(unitProjects[1])]), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
+    tools.push(typedTool({ name: 'unit_test', label: 'Run Unit project via pal.ps1', description: 'Run a complete approved Core/CLI Unit project via ./pal.ps1 test unit, optionally narrowed by one FullyQualifiedName= or ~ method/class-prefix filter. Optional exact RED declaration is frozen before launch; abnormal results stop.', parameters: Type.Object({ project: Type.Union([Type.Literal(unitProjects[0]), Type.Literal(unitProjects[1])]), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
       execute: async (_id, params) => serialize(() => perform({ scope: 'unit', ...params })),
     }));
-    if (engine) tools.push(typedTool({ name: 'range_test', label: 'Run approved Prepare/Game range', description: 'Existing Test-Range.ps1 only; Prepare whole scope, Game explicit positive batch and optional one FQN method/class-prefix. Global engine lock and PID/Name guard. No full gate, private data, GPU, arbitrary commands or timeout overrides.', parameters: Type.Object({ scope: Type.Union([Type.Literal('prepare'), Type.Literal('game')]), batch: Type.Optional(Type.Union(gameBatches.map(batch => Type.Literal(batch)))), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
+    if (engine) tools.push(typedTool({ name: 'engine_test', label: 'Run approved Prepare/Game check via pal.ps1', description: 'Unified ./pal.ps1 front-door only; Prepare whole scope or committable Game suite with optional approved TestCategory and optional one FQN method/class-prefix filter. Global engine lock and PID/Name guard. No full gate, private RealAssets data, GPU, arbitrary commands or timeout overrides.', parameters: Type.Object({ scope: Type.Union([Type.Literal('prepare'), Type.Literal('game')]), category: Type.Optional(Type.Union(gameCategories.map(category => Type.Literal(category)))), filter: Type.Optional(Type.String()), expectedFailure }, { additionalProperties: false }),
       execute: async (_id, params) => serialize(() => perform(params)),
     }));
   }
@@ -207,7 +207,7 @@ export async function codingResourceLoader(sdk: Sdk, request: CodingRequest, age
     capturedUtc: new Date().toISOString(),
     platform: process.platform, release: os.release(), arch: process.arch,
     cwd: request.cwd, node: process.version, nodeExecutable: process.execPath,
-    tools: tools.map(tool => tool.name), engineChecksAuthorized: tools.some(tool => tool.name === 'range_test'),
+    tools: tools.map(tool => tool.name), engineChecksAuthorized: tools.some(tool => tool.name === 'engine_test'),
     nativeExecution: { shell: false, arguments: 'argv', textEncoding: 'utf8' },
     contract: { source: environmentContract, sha256: hash(contract) },
   };

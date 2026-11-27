@@ -1,8 +1,10 @@
 # Parse only (with optional AST rule): never executes, imports or dot-sources a selected file.
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$RepositoryRoot = (Split-Path $PSScriptRoot -Parent),
     [AllowEmptyCollection()][AllowEmptyString()][string[]]$Path,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ExtraPath,
     [switch]$RejectParameterlessWaitForExit
 )
 $ErrorActionPreference = 'Stop'
@@ -15,7 +17,10 @@ function Diagnostic([string]$Code, [string]$Message) {
 try {
     if (-not (Test-Path -LiteralPath $RepositoryRoot -PathType Container)) { throw '[syntax:missing-root] RepositoryRoot must exist.' }
     $root = [IO.Path]::GetFullPath($RepositoryRoot)
-    $explicit = $PSBoundParameters.ContainsKey('Path')
+    $explicit = $PSBoundParameters.ContainsKey('Path') -or ($ExtraPath -and $ExtraPath.Count -gt 0)
+    if ($ExtraPath -and $ExtraPath.Count -gt 0) {
+        $Path = @($Path) + @($ExtraPath)
+    }
     if ($explicit -and (-not $Path -or @($Path | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count)) {
         throw '[syntax:empty] Explicit Path must contain nonblank objects.'
     }
