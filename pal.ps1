@@ -645,17 +645,17 @@ try {
                     Invoke-IntegrationTarget -ProjectScope 'prepare' -Filter '' -GodotPathOpt $godotOpt -EmitJunit -ArtifactsDir $artifactsDir -State $state
                 }
                 'game' {
-                    # Partition into two disjoint Godot sessions (Map vs non-Map) so neither process accumulates
-                    # 930+ tests of RefCounted Gen2 wrappers (avoids Godot 4.7.2 mono_object_disposed_baseref GC crash).
+                    # Partition into two disjoint Godot sessions: Profiles+Prepare (775 tests) vs Runtime/Scene/Process (321 tests),
+                    # so neither process accumulates 930+ tests of RefCounted Gen2 wrappers (avoids Godot 4.7.2 mono_object_disposed_baseref GC crash).
                     $godot = Resolve-ReadyGodotBinary -ExplicitPath $godotOpt
-                    Invoke-DotnetTestStep -Name 'Pal.Game.Tests.Map' `
+                    Invoke-DotnetTestStep -Name 'Pal.Game.Tests.ProfilesPrepare' `
                         -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
                         -ArtifactsDir $artifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
-                        -Filter 'TestCategory=Map&TestCategory!=RealAssets' -EmitJunit -BlameHang -GodotExe $godot -State $state
-                    Invoke-DotnetTestStep -Name 'Pal.Game.Tests.Other' `
+                        -Filter '(TestCategory=Profiles|TestCategory=Prepare)&TestCategory!=RealAssets' -EmitJunit -BlameHang -GodotExe $godot -State $state
+                    Invoke-DotnetTestStep -Name 'Pal.Game.Tests.Runtime' `
                         -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
                         -ArtifactsDir $artifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
-                        -Filter 'TestCategory!=Map&TestCategory!=RealAssets' -EmitJunit -BlameHang -GodotExe $godot -State $state
+                        -Filter 'TestCategory!=Profiles&TestCategory!=Prepare&TestCategory!=RealAssets' -EmitJunit -BlameHang -GodotExe $godot -State $state
                 }
                 default {
                     $state.Status = 'error'
