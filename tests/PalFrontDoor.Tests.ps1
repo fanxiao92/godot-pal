@@ -342,28 +342,26 @@ try {
     Assert-True ($t3Md -match 'raw:sha256-0123456789abcdef \+ prepare:v1' -and $t3Md -match 'boot-and-explore/01-boot-scene4' -and $t3Md -match 'contact-sheet\.png' -and $t3Md -match '人工 5 分钟审阅清单') 'T3 report must render cacheKey, frame SHA256/diff table, contact sheet, and manual review checklist'
     Pass 'assets T3 validation and T3 PR evidence report rendering succeed'
 
-    # Case 22: check-ledger detects drift (exit 1 with regenerate command) and passes when synced
+    # Case 22: check-ledger passes when synced and detects drift on an isolated copy (never mutates tracked repo files)
     $ledgerRes = Invoke-Pal @('test', 'check-ledger')
     Assert-Equal 0 $ledgerRes.ExitCode "check-ledger on synced repo must exit 0; stderr=$($ledgerRes.Stderr)"
-    $driftDir = Join-Path $workDir 'ledger-drift-test'
-    [void][IO.Directory]::CreateDirectory((Join-Path $driftDir 'docs/generated'))
-    # Copy real ledger and tamper one line, then point check-ledger via a lightweight junction/link to tools/src?
-    # Even cleaner: call Invoke-CapabilityLedgerCheck directly on a synthetic repo copy or tamper check via temp file.
-    # Let's test Pal.Extract export-capability-ledger -> tamper -> verify check fails when ledger differs.
     Import-Module (Join-Path $repoRoot 'scripts/pal/CapabilityLedger.psm1') -Force
-    $realLedger = Join-Path $repoRoot 'docs/generated/capabilities-ledger.md'
-    $origBytes = [IO.File]::ReadAllBytes($realLedger)
+    $tamperedLedger = Join-Path $workDir 'tampered-capabilities-ledger.md'
+    $origLedgerText = [IO.File]::ReadAllText((Join-Path $repoRoot 'docs/generated/capabilities-ledger.md'), $utf8)
+    [IO.File]::WriteAllText($tamperedLedger, ($origLedgerText + "`n<!-- tampered -->`n"), $utf8)
+    $driftThrew = $false
+    $driftMsg = ''
     try {
-        [IO.File]::WriteAllText($realLedger, ([Text.Encoding]::UTF8.GetString($origBytes) + "`n<!-- tampered -->`n"), $utf8)
-        $driftRes = Invoke-Pal @('test', 'check-ledger')
-        Assert-Equal 1 $driftRes.ExitCode 'tampered capabilities-ledger.md must cause check-ledger to exit 1'
-        Assert-True ($driftRes.Stderr -match 'check-ledger --update') "drift stderr must include regeneration command; got: $($driftRes.Stderr)"
-    } finally {
-        [IO.File]::WriteAllBytes($realLedger, $origBytes)
+        Invoke-CapabilityLedgerCheck -RepositoryRoot $repoRoot -LedgerPath $tamperedLedger
+    } catch {
+        $driftThrew = $true
+        $driftMsg = $_.Exception.Message
     }
-    Pass 'test check-ledger passes when synced and fails with exit 1 on drift'
+    Assert-True $driftThrew 'tampered isolated ledger copy must throw drift error'
+    Assert-True ($driftMsg -match 'check-ledger --update') "drift error must include regeneration command; got: $driftMsg"
+    Pass 'test check-ledger passes when synced and detects drift on isolated copy'
 
-    # Case 23: assets inspect fails cleanly when PAL_RAW_DATA_DIR is unset, and outputs redacted JSON on synthetic MKF fixture
+    # Case 23: assets inspect fails cleanly when PAL_RAW_DATA_DIR is unset, and outputs pure redacted JSON on synthetic MKF fixture
     $prevRaw = $env:PAL_RAW_DATA_DIR
     try {
         Remove-Item Env:PAL_RAW_DATA_DIR -ErrorAction SilentlyContinue
@@ -386,13 +384,15 @@ try {
         $insRes = Invoke-Pal @('assets', 'inspect', '--json')
         Assert-Equal 0 $insRes.ExitCode "assets inspect --json on synthetic MKF must exit 0; stderr=$($insRes.Stderr)"
         Assert-True ($insRes.Stdout -notmatch 'secret-private-raw-dir') "assets inspect output MUST NOT leak private directory path; got: $($insRes.Stdout)"
-        Assert-True ($insRes.Stdout -match '<redacted:PAL_RAW_DATA_DIR>') 'assets inspect output must mark redacted source'
-        Assert-True ($insRes.Stdout -match 'data\.mkf') 'assets inspect output must list MKF filename'
+        Assert-True ($insRes.Stdout -notmatch '[A-Za-z]:[\\/]') "assets inspect --json MUST NOT leak any local absolute path; got: $($insRes.Stdout)"
+        $insObj = $insRes.Stdout | ConvertFrom-Json
+        Assert-Equal '<redacted:PAL_RAW_DATA_DIR>' ([string]$insObj.source) 'assets inspect --json must report redacted source'
+        Assert-Equal 6 ([int]$insObj.archiveCount) 'assets inspect --json must report all 6 synthetic archives'
     } finally {
         if ($null -eq $prevRaw) { Remove-Item Env:PAL_RAW_DATA_DIR -ErrorAction SilentlyContinue }
         else { $env:PAL_RAW_DATA_DIR = $prevRaw }
     }
-    Pass 'assets inspect handles unset env and redacts private paths on synthetic MKF'
+    Pass 'assets inspect handles unset env and outputs valid redacted JSON without absolute paths'
 
     # Case 24: scripts/Sync-AgentSkills.ps1 is idempotent in a temp repo
     $syncRepo = Join-Path $workDir 'sync-skills-repo'
@@ -405,6 +405,12 @@ try {
     & pwsh -NoProfile -NonInteractive -File $syncScript -RepositoryRoot $syncRepo | Out-Null
     Assert-Equal 0 $LASTEXITCODE 'second Sync-AgentSkills.ps1 run must be idempotent and exit 0'
     Pass 'scripts/Sync-AgentSkills.ps1 bridges .claude/skills idempotently'
+
+    # Case 25: pal.ps1 test check-arch passes end-to-end
+    $archRes = Invoke-Pal @('test', 'check-arch')
+    Assert-Equal 0 $archRes.ExitCode "pal.ps1 test check-arch must exit 0; stderr=$($archRes.Stderr)"
+    Assert-True ($archRes.Stdout -match 'PASS check-arch') "check-arch stdout must report PASS; got: $($archRes.Stdout)"
+    Pass 'test check-arch runs syntax, boundary, hygiene, map, ledger, and guardrail build end-to-end'
 
     $completed = $true
     Write-Host "PASS PalFrontDoor regression: $passedCount cases."

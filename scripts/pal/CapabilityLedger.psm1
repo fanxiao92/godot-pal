@@ -3,7 +3,8 @@ Set-StrictMode -Version Latest
 function Invoke-CapabilityLedgerCheck {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
-        [switch]$Update
+        [switch]$Update,
+        [string]$LedgerPath = ''
     )
 
     $root = [IO.Path]::GetFullPath($RepositoryRoot)
@@ -13,7 +14,11 @@ function Invoke-CapabilityLedgerCheck {
     }
 
     $ledgerRel = 'docs/generated/capabilities-ledger.md'
-    $ledgerPath = Join-Path $root $ledgerRel
+    $targetLedgerPath = if ([string]::IsNullOrWhiteSpace($LedgerPath)) {
+        Join-Path $root $ledgerRel
+    } else {
+        [IO.Path]::GetFullPath($LedgerPath)
+    }
 
     $tempDir = Join-Path ([IO.Path]::GetTempPath()) ("pal-ledger-" + [guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($tempDir)
@@ -33,18 +38,18 @@ function Invoke-CapabilityLedgerCheck {
         $generatedText = [Text.Encoding]::UTF8.GetString($generatedBytes)
 
         if ($Update) {
-            $parent = Split-Path $ledgerPath -Parent
+            $parent = Split-Path $targetLedgerPath -Parent
             if ($parent) { [void][IO.Directory]::CreateDirectory($parent) }
-            [IO.File]::WriteAllBytes($ledgerPath, $generatedBytes)
+            [IO.File]::WriteAllBytes($targetLedgerPath, $generatedBytes)
             Write-Host "UPDATED capability ledger: $ledgerRel ($($generatedText.Split("`n").Count) lines)"
             return
         }
 
-        if (-not (Test-Path -LiteralPath $ledgerPath -PathType Leaf)) {
+        if (-not (Test-Path -LiteralPath $targetLedgerPath -PathType Leaf)) {
             throw "Capability ledger missing: $ledgerRel. Regenerate with: pwsh -NoProfile -NonInteractive -File ./pal.ps1 test check-ledger --update"
         }
 
-        $actualBytes = [IO.File]::ReadAllBytes($ledgerPath)
+        $actualBytes = [IO.File]::ReadAllBytes($targetLedgerPath)
         $actualText = [Text.Encoding]::UTF8.GetString($actualBytes)
 
         # Normalize CRLF only for diagnostic diff reporting; require exact byte/LF parity.

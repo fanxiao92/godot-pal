@@ -60,34 +60,16 @@ function Invoke-AssetsInspect {
     $parsed = $rawJson | ConvertFrom-Json
 
     # Strictly redact all local/absolute paths and never emit raw text or binary content.
+    # Schema matches tools/Pal.Extract/ArchiveInspector.cs (InspectionReport / ArchiveReport).
     $sanitizedArchives = [Collections.Generic.List[object]]::new()
-    $rawArchives = @()
-    if ($parsed.PSObject.Properties['archives'] -and $parsed.archives) {
-        $rawArchives = @($parsed.archives)
-    } elseif ($parsed.PSObject.Properties['files'] -and $parsed.files) {
-        $rawArchives = @($parsed.files)
-    }
-    foreach ($a in $rawArchives) {
-        $name = if ($a.PSObject.Properties['fileName']) { [IO.Path]::GetFileName([string]$a.fileName) }
-                elseif ($a.PSObject.Properties['name']) { [IO.Path]::GetFileName([string]$a.name) }
-                else { 'unknown' }
-        $bytes = if ($a.PSObject.Properties['byteLength']) { [long]$a.byteLength }
-                 elseif ($a.PSObject.Properties['fileSize']) { [long]$a.fileSize }
-                 elseif ($a.PSObject.Properties['sizeBytes']) { [long]$a.sizeBytes }
-                 elseif ($a.PSObject.Properties['length']) { [long]$a.length }
-                 else { 0L }
-        $chunkCount = if ($a.PSObject.Properties['chunkCount']) { [int]$a.chunkCount }
-                      elseif ($a.PSObject.Properties['chunks']) { @($a.chunks).Count }
-                      else { 0 }
-        $nonEmpty = if ($a.PSObject.Properties['nonEmptyChunkCount']) { [int]$a.nonEmptyChunkCount }
-                    elseif ($a.PSObject.Properties['emptyChunkCount']) { [int]($chunkCount - [int]$a.emptyChunkCount) }
-                    elseif ($a.PSObject.Properties['nonEmptyChunks']) { [int]$a.nonEmptyChunks }
-                    else { $null }
+    foreach ($a in @($parsed.archives)) {
+        $chunkCount = [int]$a.chunkCount
+        $emptyCount = [int]$a.emptyChunkCount
         $sanitizedArchives.Add([ordered]@{
-            fileName       = $name
-            sizeBytes      = $bytes
+            fileName       = [IO.Path]::GetFileName([string]$a.name)
+            sizeBytes      = [long]$a.byteLength
             chunkCount     = $chunkCount
-            nonEmptyChunks = $nonEmpty
+            nonEmptyChunks = ($chunkCount - $emptyCount)
         })
     }
 

@@ -31,23 +31,31 @@ function ConvertTo-GitHubHeadingSlug([string]$HeadingText) {
     return $sb.ToString()
 }
 
+function Get-UnfencedLines([string[]]$Lines) {
+    $out = [Collections.Generic.List[string]]::new($Lines.Count)
+    $inFence = $false
+    $fenceChar = ''
+    foreach ($line in $Lines) {
+        $trimmed = $line.TrimStart()
+        if ($trimmed -match '^(`{3,}|~{3,})') {
+            $fc = $Matches[1][0]
+            if (-not $inFence) { $inFence = $true; $fenceChar = $fc }
+            elseif ($fc -eq $fenceChar) { $inFence = $false; $fenceChar = '' }
+            $out.Add('')
+            continue
+        }
+        $out.Add($(if ($inFence) { '' } else { $line }))
+    }
+    return $out
+}
+
 $script:HeadingSlugCache = @{}
 function Get-MarkdownHeadingSlugs([string]$FilePath) {
     $key = [IO.Path]::GetFullPath($FilePath)
     if ($script:HeadingSlugCache.ContainsKey($key)) { return $script:HeadingSlugCache[$key] }
     $slugs = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $counts = @{}
-    $inFence = $false
-    $fenceChar = ''
-    foreach ($line in [IO.File]::ReadAllLines($key, [Text.Encoding]::UTF8)) {
-        $trimmed = $line.TrimStart()
-        if ($trimmed -match '^(`{3,}|~{3,})') {
-            $fc = $Matches[1][0]
-            if (-not $inFence) { $inFence = $true; $fenceChar = $fc }
-            elseif ($fc -eq $fenceChar) { $inFence = $false; $fenceChar = '' }
-            continue
-        }
-        if ($inFence) { continue }
+    foreach ($line in (Get-UnfencedLines ([IO.File]::ReadAllLines($key, [Text.Encoding]::UTF8)))) {
         if ($line -match '^\s{0,3}#{1,6}\s+(.+?)\s*$') {
             $base = ConvertTo-GitHubHeadingSlug $Matches[1]
             if ([string]::IsNullOrEmpty($base)) { continue }
@@ -70,22 +78,7 @@ function Get-MarkdownHeadingSlugs([string]$FilePath) {
 }
 
 function Strip-FencedCodeBlocks([string]$Text) {
-    $lines = $Text -split "\r?\n"
-    $out = [Collections.Generic.List[string]]::new($lines.Count)
-    $inFence = $false
-    $fenceChar = ''
-    foreach ($line in $lines) {
-        $trimmed = $line.TrimStart()
-        if ($trimmed -match '^(`{3,}|~{3,})') {
-            $fc = $Matches[1][0]
-            if (-not $inFence) { $inFence = $true; $fenceChar = $fc }
-            elseif ($fc -eq $fenceChar) { $inFence = $false; $fenceChar = '' }
-            $out.Add('')
-            continue
-        }
-        if ($inFence) { $out.Add('') } else { $out.Add($line) }
-    }
-    return ($out -join "`n")
+    return ((Get-UnfencedLines ($Text -split "\r?\n")) -join "`n")
 }
 
 # 1. No stray .uid files inside .gdignore-isolated directories under Godot projects.

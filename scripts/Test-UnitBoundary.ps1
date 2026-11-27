@@ -177,7 +177,6 @@ try {
         $testIdentity = @($xml.SelectNodes('/Project/PropertyGroup/IsTestProject'))
         if ($testIdentity.Count -ne 1 -or $testIdentity[0].InnerText -ne 'true') { Fail 'test-project' "$path requires explicit IsTestProject=true" }
         $expected = [IO.Path]::GetFullPath((Join-Path $root $production[$name]))
-        $analyzerFull = [IO.Path]::GetFullPath((Join-Path $root 'tools/Pal.Analyzers/Pal.Analyzers.csproj'))
         $runtimeRefs = @($xml.SelectNodes('//ProjectReference') | Where-Object { $_.GetAttribute('OutputItemType') -cne 'Analyzer' })
         foreach ($reference in $runtimeRefs) {
             $include = $reference.GetAttribute('Include')

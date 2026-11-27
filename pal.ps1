@@ -1037,7 +1037,7 @@ if ($cmd -eq 'ci') {
     }
 }
 
-if ($parsed.Flags.ContainsKey('json')) {
+if ($parsed.Flags.ContainsKey('json') -and -not ($cmd -eq 'assets' -and $sub -eq 'inspect')) {
     Write-Output "PAL_SUMMARY_JSON=$summaryPath"
 }
 

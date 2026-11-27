@@ -522,7 +522,10 @@ public sealed class DynamicEventSession
                 case "waitUpdate":
                     pending.Push(Next(address));
                     break;
-                case "end" when command.Mode is "advance" or "redirect":
+                case "end" when command.Mode == "advance":
+                    pending.Push(Next(address));
+                    break;
+                case "end" when command.Mode == "redirect":
                 case "goto":
                     pending.Push(Next(address));
                     pending.Push(events.ResolveControlTarget(command));

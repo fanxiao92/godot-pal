@@ -324,28 +324,10 @@ public static class CapabilityLedgerExporter
         string? repoRoot)
     {
         var byCode = descriptors.ToDictionary(d => d.Opcode);
+        ValidateExecutorSupport(byCode, triggerSupport, "TriggerScriptSession.SupportedOpcodes", OpcodeExecutor.AutoSwitchOnly);
+        ValidateExecutorSupport(byCode, autoSupport, "DynamicEventSession.SupportedOpcodes", OpcodeExecutor.TriggerSwitchOnly);
 
-        foreach (var (code, cap) in triggerSupport)
-        {
-            if (!byCode.TryGetValue(code, out var desc))
-                throw new InvalidDataException($"TriggerScriptSession.SupportedOpcodes contains unknown opcode 0x{code:X4}.");
-            if (!string.Equals(desc.Op, cap.Verb, StringComparison.Ordinal))
-                throw new InvalidDataException($"TriggerScriptSession.SupportedOpcodes 0x{code:X4} verb '{cap.Verb}' differs from OpcodeRegistry '{desc.Op}'.");
-            if (desc.Executor == OpcodeExecutor.AutoSwitchOnly)
-                throw new InvalidDataException($"TriggerScriptSession.SupportedOpcodes 0x{code:X4} is marked AutoSwitchOnly in OpcodeRegistry.");
-        }
-
-        foreach (var (code, cap) in autoSupport)
-        {
-            if (!byCode.TryGetValue(code, out var desc))
-                throw new InvalidDataException($"DynamicEventSession.SupportedOpcodes contains unknown opcode 0x{code:X4}.");
-            if (!string.Equals(desc.Op, cap.Verb, StringComparison.Ordinal))
-                throw new InvalidDataException($"DynamicEventSession.SupportedOpcodes 0x{code:X4} verb '{cap.Verb}' differs from OpcodeRegistry '{desc.Op}'.");
-            if (desc.Executor == OpcodeExecutor.TriggerSwitchOnly)
-                throw new InvalidDataException($"DynamicEventSession.SupportedOpcodes 0x{code:X4} is marked TriggerSwitchOnly in OpcodeRegistry.");
-        }
-
-        foreach (var (code, host) in hostOverrides)
+        foreach (var (code, _) in hostOverrides)
         {
             if (!byCode.ContainsKey(code))
                 throw new InvalidDataException($"GameHostOverrides contains unknown opcode 0x{code:X4}.");
@@ -357,23 +339,35 @@ public static class CapabilityLedgerExporter
         {
             string fullRoot = Path.GetFullPath(repoRoot);
             foreach (var host in GameHostOverrides)
-            {
-                foreach (var relPath in host.RepoPathsToVerify)
-                {
-                    string candidate = Path.Combine(fullRoot, relPath);
-                    if (!File.Exists(candidate))
-                        throw new InvalidDataException($"Capability ledger host override 0x{host.Opcode:X4} references missing repository path: {relPath}");
-                }
-            }
+                VerifyRepoPaths(fullRoot, $"host override 0x{host.Opcode:X4}", host.RepoPathsToVerify);
             foreach (var row in ModuleAlignments)
-            {
-                foreach (var relPath in row.RepoPathsToVerify)
-                {
-                    string candidate = Path.Combine(fullRoot, relPath);
-                    if (!File.Exists(candidate))
-                        throw new InvalidDataException($"Capability ledger alignment row '{row.SdlPalModule}' references missing repository path: {relPath}");
-                }
-            }
+                VerifyRepoPaths(fullRoot, $"alignment row '{row.SdlPalModule}'", row.RepoPathsToVerify);
+        }
+    }
+
+    private static void ValidateExecutorSupport(
+        Dictionary<int, OpcodeDescriptor> byCode,
+        IReadOnlyDictionary<int, OpcodeCapability> support,
+        string sourceName,
+        OpcodeExecutor forbiddenExecutor)
+    {
+        foreach (var (code, cap) in support)
+        {
+            if (!byCode.TryGetValue(code, out var desc))
+                throw new InvalidDataException($"{sourceName} contains unknown opcode 0x{code:X4}.");
+            if (!string.Equals(desc.Op, cap.Verb, StringComparison.Ordinal))
+                throw new InvalidDataException($"{sourceName} 0x{code:X4} verb '{cap.Verb}' differs from OpcodeRegistry '{desc.Op}'.");
+            if (desc.Executor == forbiddenExecutor)
+                throw new InvalidDataException($"{sourceName} 0x{code:X4} is marked {forbiddenExecutor} in OpcodeRegistry.");
+        }
+    }
+
+    private static void VerifyRepoPaths(string fullRoot, string ownerLabel, string[] relPaths)
+    {
+        foreach (var relPath in relPaths)
+        {
+            if (!File.Exists(Path.Combine(fullRoot, relPath)))
+                throw new InvalidDataException($"Capability ledger {ownerLabel} references missing repository path: {relPath}");
         }
     }
 }
