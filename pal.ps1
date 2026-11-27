@@ -313,10 +313,14 @@ function Invoke-UnitTarget {
         [hashtable]$State
     )
     $selected = switch ($ProjectScope) {
-        'core'    { @(@{ Name = 'Pal.Core.UnitTests'; Path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; Package = 'Pal.Core' }) }
+        'core'    { @(
+            @{ Name = 'Pal.Core.UnitTests'; Path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; Package = 'Pal.Core' },
+            @{ Name = 'Pal.Analyzers.Tests'; Path = 'tests/Pal.Analyzers.Tests/Pal.Analyzers.Tests.csproj'; Package = 'Pal.Analyzers' }
+        ) }
         'extract' { @(@{ Name = 'Pal.Extract.UnitTests'; Path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; Package = 'Pal.Extract' }) }
         ''        { @(
             @{ Name = 'Pal.Core.UnitTests'; Path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; Package = 'Pal.Core' },
+            @{ Name = 'Pal.Analyzers.Tests'; Path = 'tests/Pal.Analyzers.Tests/Pal.Analyzers.Tests.csproj'; Package = 'Pal.Analyzers' },
             @{ Name = 'Pal.Extract.UnitTests'; Path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; Package = 'Pal.Extract' }
         ) }
         default   { throw "Unknown unit project '$ProjectScope'. Allowed: core, extract." }

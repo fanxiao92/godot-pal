@@ -7,6 +7,7 @@
         'tests/Pal.Extract.IntegrationTests/Pal.Extract.IntegrationTests.csproj' = 'extract-integration'
         'tests/Pal.Prepare.Tests/Pal.Prepare.Tests.csproj' = 'prepare'
         'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' = 'game:*'
+        'tests/Pal.Analyzers.Tests/Pal.Analyzers.Tests.csproj' = 'core-unit'
     }
     Rules = @(
         # 1) Mandatory full fallback: build graph, SDK/NuGet, runsettings, Godot project config, front door, CI.
@@ -18,6 +19,9 @@
                 '**/*.csproj',
                 '**/Directory.Build.*',
                 'Directory.Packages.props',
+                '.editorconfig',
+                '**/BannedSymbols*.txt',
+                'tools/Pal.Analyzers/**',
                 'global.json',
                 'NuGet.Config',
                 '.config/dotnet-tools.json',
@@ -87,6 +91,11 @@
             Name = 'tests-prepare'
             Paths = @('tests/Pal.Prepare.Tests/**')
             Targets = @('prepare')
+        }
+        @{
+            Name = 'tests-analyzers'
+            Paths = @('tests/Pal.Analyzers.Tests/**')
+            Targets = @('core-unit')
         }
 
         # 6) Cross-directory linked Compile fixtures (verified against MSBuild -getItem:Compile).

@@ -17,6 +17,11 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="3.3.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="../../tools/Pal.Analyzers/BannedSymbols.PureDotNet.txt" Link="BannedSymbols.PureDotNet.txt" />
     <ProjectReference Include="../../src/Pal.Core/Pal.Core.csproj" />
     <Compile Include="../Fixtures/BattleContextTestFixture.cs" Link="BattleContextTestFixture.cs" />
   </ItemGroup>

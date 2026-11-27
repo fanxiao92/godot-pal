@@ -1,0 +1,28 @@
+# Pure .NET & deterministic time boundary for Pal.Core, Pal.Core.UnitTests, and Pal.Extract.UnitTests (#274).
+# Preserves MemoryStream, BinaryReader, BinaryWriter, ZLibStream, and InvalidDataException.
+
+N:Godot;Pal.Core 和纯 Unit 测试严禁依赖 Godot 引擎类型；请将引擎适配逻辑移至 src/Pal.Game 或 tests/Pal.Game.Tests。
+N:GdUnit4;纯 .NET Unit 测试严禁依赖 GdUnit4；请使用 xUnit 或将场景集成测试移至 tests/Pal.Game.Tests。
+
+T:System.IO.File;纯内存边界禁止直接磁盘文件 I/O；请改用 ReadOnlySpan<byte>/MemoryStream 内存契约或将文件 I/O 移入 CLI/Integration 层。
+T:System.IO.Directory;纯内存边界禁止直接目录枚举或创建；请改用内存夹具或将文件系统操作移入 Integration 测试层。
+T:System.IO.FileInfo;纯内存边界禁止直接访问磁盘 FileInfo；请改用内存流或字符串契约。
+T:System.IO.DirectoryInfo;纯内存边界禁止直接访问磁盘 DirectoryInfo；请改用内存夹具。
+T:System.IO.FileStream;纯内存边界禁止打开磁盘 FileStream；请改用 MemoryStream。
+T:System.IO.FileSystemWatcher;纯内存边界禁止监视主机文件系统；请移除文件系统监听器。
+T:System.IO.StreamReader;纯内存边界禁止直接经 StreamReader 读取外部流；请改用 Encoding.UTF8.GetString 或 StringReader。
+T:System.IO.StreamWriter;纯内存边界禁止直接经 StreamWriter 写入外部流；请改用 StringBuilder 或 MemoryStream。
+M:System.IO.Path.GetTempPath;纯内存边界禁止依赖本机临时目录；请使用纯内存夹具或将测试移至 Integration 工程。
+M:System.IO.Path.GetTempFileName;纯内存边界禁止在本机临时目录创建文件；请使用纯内存夹具或将测试移至 Integration 工程。
+
+T:System.Diagnostics.Process;纯内存边界禁止启动外部子进程；请将进程测试移入 Pal.Extract.IntegrationTests 或 Pal.Prepare.Tests。
+T:System.Diagnostics.ProcessStartInfo;纯内存边界禁止构造子进程启动配置；请移入 Integration 工程。
+T:System.Diagnostics.Stopwatch;业务与纯 Unit 逻辑禁止依赖墙钟计时器；请使用 Pal.Core 显式确定性时间参数接口（见 docs/testing/time-boundaries.md）。
+
+P:System.DateTime.Now;禁止依赖墙钟时间 DateTime.Now；请通过 Pal.Core 显式确定性时间参数传入（见 docs/testing/time-boundaries.md）。
+P:System.DateTime.UtcNow;禁止依赖墙钟时间 DateTime.UtcNow；请通过 Pal.Core 显式确定性时间参数传入（见 docs/testing/time-boundaries.md）。
+P:System.DateTimeOffset.Now;禁止依赖墙钟时间 DateTimeOffset.Now；请通过 Pal.Core 显式确定性时间参数传入。
+P:System.DateTimeOffset.UtcNow;禁止依赖墙钟时间 DateTimeOffset.UtcNow；请通过 Pal.Core 显式确定性时间参数传入。
+
+T:System.Runtime.InteropServices.DllImportAttribute;纯 .NET 边界禁止原生 P/Invoke；请使用纯托管实现。
+T:System.Runtime.InteropServices.LibraryImportAttribute;纯 .NET 边界禁止原生 P/Invoke；请使用纯托管实现。

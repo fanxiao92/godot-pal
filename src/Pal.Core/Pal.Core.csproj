@@ -5,6 +5,12 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="3.3.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="../../tools/Pal.Analyzers/BannedSymbols.PureDotNet.txt" Link="BannedSymbols.PureDotNet.txt" />
+    <ProjectReference Include="../../tools/Pal.Analyzers/Pal.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>Pal.Extract</_Parameter1>
     </AssemblyAttribute>
