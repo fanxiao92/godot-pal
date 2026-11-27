@@ -240,7 +240,11 @@ public class StoryRoundtripSceneTests
             bool outputAbsentBefore = !Directory.Exists(rejectedOutput) && !File.Exists(rejectedOutput);
             AssertThat(outputAbsentBefore).IsTrue();
             InvalidDataException? rejection = null;
-            try { Pal.Game.Editor.PrepareStoryPackage.Prepare(fixture.InputDirectory, rejectedOutput); }
+            try
+            {
+                using (GameProjectMount.StageSamplesInTestProject())
+                    Pal.Game.Editor.PrepareStoryPackage.Prepare(fixture.InputDirectory, rejectedOutput);
+            }
             catch (InvalidDataException error) { rejection = error; }
             var sourceAfter = SourceBytes();
             bool sourceUnchanged = sourceBefore.Keys.ToHashSet().SetEquals(sourceAfter.Keys)
