@@ -9,6 +9,8 @@ using Pal.Core.Exploration;
 using Pal.Core.Dialogue;
 using Pal.Core.Battle;
 using Pal.Core.Events;
+using Pal.Game.Battle;
+using Pal.Game.Resources;
 
 namespace Pal.Game.Tests;
 
@@ -57,7 +59,7 @@ public class SyntheticFirstBattleClosureTests
         var frozenVisual = ResourceLoader.Load<Pal.Game.Resources.PalBattleVisualProfile>(frozenProfile.VisualUri)!;
         // String-URI manifests supplement the typed graph (notably modern event JSON).
         // Never walk author temp directories or generated .godot caches.
-        var inputUris = Pal.Game.Profiles.NativeContentDependencies.ContentDependencies(new[] {
+        var inputUris = Pal.Game.Resources.NativeContentDependencies.ContentDependencies(new[] {
             fixture.ProfileUri, frozenProfile.StaticProfile, statics.ResourceRoot + "/Scenes/Scene.tscn",
             statics.ResourceRoot + "/Palettes/Palette.tres", frozenProfile.VisualUri });
         inputUris.UnionWith(frozenProfile.ResourceSha256.Keys);
@@ -83,7 +85,7 @@ public class SyntheticFirstBattleClosureTests
         }
         var main = new Main();
         main.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
-        Pal.Game.Dialogue.GodotBattleRandom? productionRandom = null;
+        Pal.Game.Battle.GodotBattleRandom? productionRandom = null;
         Pal.Game.Dialogue.PalTriggerDialogue? ownedDialogue = null;
         Pal.Core.Events.DynamicEventWorld? observedWorld = null;
         Pal.Core.State.RoleLiveState? observedOwner = null;
@@ -225,7 +227,7 @@ public class SyntheticFirstBattleClosureTests
                 if (observeTargetMenu && !targetMenuObserved)
                 {
                     targetMenuObserved = true;
-                    AssertThat(main.StoryBattleMode).IsEqual(Pal.Game.Dialogue.StoryBattlePresentation.TargetMenu);
+                    AssertThat(main.StoryBattleMode).IsEqual(Pal.Game.Battle.StoryBattlePresentation.TargetMenu);
                 }
                 if (observedOwner is null)
                 {
@@ -245,7 +247,7 @@ public class SyntheticFirstBattleClosureTests
                     var randomState = productionRandom!.CurrentState;
                     var entry = session.Entries.First();
                     var lease = main.Dialogue!.PreviewSessionFactory!();
-                    var fork = (Pal.Game.Dialogue.GodotBattleRandom)lease.Lifetime;
+                    var fork = (Pal.Game.Battle.GodotBattleRandom)lease.Lifetime;
                     const string missingEntry = "U17-missing-preview-entry";
                     bool rejected = false;
                     try
@@ -525,7 +527,7 @@ public class SyntheticFirstBattleClosureTests
             if (observationError is not null) throw observationError;
             AssertThat(main.StoryBattle is not null).IsTrue();
             AssertThat(main.StoryBattle!.Current.Combat.Enemies.Count).IsEqual(2);
-            AssertThat(main.StoryBattleMode).IsEqual(Pal.Game.Dialogue.StoryBattlePresentation.AttackMenu);
+            AssertThat(main.StoryBattleMode).IsEqual(Pal.Game.Battle.StoryBattlePresentation.AttackMenu);
             await ObserveEnterEcho(scene);
             // Reuse the driver's first real confirm, then prove echo cannot select its target.
             observeTargetMenu = true;
@@ -627,10 +629,10 @@ public class SyntheticFirstBattleClosureTests
         fresh.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
         bool freshInitial = false, activeCaptured = false, exitObserved = false;
         Exception? lifetimeError = null;
-        Pal.Game.Dialogue.GodotBattleRandom? freshRandom = null;
+        Pal.Game.Battle.GodotBattleRandom? freshRandom = null;
         Pal.Game.Dialogue.PalTriggerDialogue? freshAdapter = null;
         Pal.Game.Dialogue.PalDialogueDisplay? freshDisplay = null;
-        Pal.Game.Dialogue.PalStoryBattleView? overlay = null;
+        Pal.Game.Battle.PalStoryBattleView? overlay = null;
         Action? assertUnsettled = null;
         void ObserveFreshCompletion()
         {
@@ -667,7 +669,7 @@ public class SyntheticFirstBattleClosureTests
                 {
                     activeCaptured = true;
                     freshAdapter = fresh.Dialogue!; freshDisplay = fresh.Display!;
-                    overlay = fresh.GetChildren().OfType<Pal.Game.Dialogue.PalStoryBattleView>().Single();
+                    overlay = fresh.GetChildren().OfType<Pal.Game.Battle.PalStoryBattleView>().Single();
                     var session = freshAdapter.Session!;
                     var world = freshAdapter.FirstBattleWorld!;
                     var owner = world.RoleLiveState!;
@@ -737,7 +739,7 @@ public class SyntheticFirstBattleClosureTests
                 AssertThat(freshAdapter.FirstBattleWorld).IsNull();
                 AssertThat(freshAdapter.Session).IsNull();
                 AssertThat(GodotObject.IsInstanceValid(overlay)).IsFalse();
-                AssertThat(fresh.GetChildren().OfType<Pal.Game.Dialogue.PalStoryBattleView>().Count()).IsEqual(0);
+                AssertThat(fresh.GetChildren().OfType<Pal.Game.Battle.PalStoryBattleView>().Count()).IsEqual(0);
                 AssertThat(GodotObject.IsInstanceValid(freshDisplay)).IsTrue();
                 AssertThat(fresh.IsInsideTree()).IsFalse();
                 AssertThat(fresh.StoryBattle).IsNull();
@@ -876,7 +878,7 @@ public class SyntheticFirstBattleClosureTests
         Pal.Core.Events.DynamicEventWorld? observedWorld = null;
         Pal.Core.State.RoleLiveState? observedOwner = null;
         Pal.Core.Events.TriggerScriptSession? observedSession = null;
-        Pal.Game.Dialogue.GodotBattleRandom? observedRandom = null;
+        Pal.Game.Battle.GodotBattleRandom? observedRandom = null;
         Pal.Core.Battle.ClassicBattleLifecycleSession? firstLifecycle = null;
         Pal.Core.Battle.ClassicBattleLifecycleSession.CompletionReceipt? firstCompletion = null;
         Guid firstCall = Guid.Empty;
@@ -1009,7 +1011,7 @@ public class SyntheticFirstBattleClosureTests
             obj.State, obj.VanishTime, obj.TriggerEntry, obj.AutoEntry, obj.AutoIdleCount)).ToArray();
         var roles = world.RoleLiveState!.Roles.ToDictionary(pair => pair.Key, pair => pair.Value);
         var lease = main.Dialogue.PreviewSessionFactory!();
-        var fork = (Pal.Game.Dialogue.GodotBattleRandom)lease.Lifetime;
+        var fork = (Pal.Game.Battle.GodotBattleRandom)lease.Lifetime;
         using (lease.Lifetime)
         {
             var preview = lease.Session;
@@ -1059,7 +1061,7 @@ public class SyntheticFirstBattleClosureTests
     {
         const ulong seed = 928451;
         using var native = new RandomNumberGenerator { Seed = seed };
-        using var source = new Pal.Game.Dialogue.GodotBattleRandom(seed);
+        using var source = new Pal.Game.Battle.GodotBattleRandom(seed);
         for (int i = 0; i < 7; i++)
         {
             AssertThat(source.NextInclusive(-20, 300)).IsEqual(native.RandiRange(-20, 300));

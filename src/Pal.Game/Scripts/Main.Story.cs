@@ -12,6 +12,8 @@ using Pal.Core.Battle;
 using Pal.Core.Events;
 using Pal.Core.Menu;
 using Pal.Core.Save;
+using Pal.Game.Battle;
+using Pal.Game.UI;
 
 namespace Pal.Game;
 

@@ -3,10 +3,10 @@ using Godot;
 using Pal.Core;
 using Pal.Core.Battle;
 
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.Battle;
 
 /// <summary>Per-scene entropy; a seed is a diagnostic input, not SDL sequence compatibility.</summary>
-public sealed class GodotBattleRandom : IBattleRandom, IDisposable
+public sealed class GodotBattleRandom : IForkableBattleRandom
 {
     private readonly RandomNumberGenerator random = new();
     public GodotBattleRandom(ulong? seed)
@@ -25,6 +25,8 @@ public sealed class GodotBattleRandom : IBattleRandom, IDisposable
         try { fork.random.State = random.State; return fork; }
         catch { fork.Dispose(); throw; }
     }
+
+    IForkableBattleRandom IForkableBattleRandom.Fork() => Fork();
 
     public int NextInclusive(int from, int to) => to <= from ? from : random.RandiRange(from, to);
     public float NextInclusive(float from, float to) => to <= from ? from : random.RandfRange(from, to);

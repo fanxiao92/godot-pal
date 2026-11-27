@@ -4,7 +4,7 @@ using Godot;
 using Pal.Core;
 using Pal.Core.Battle;
 
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.Battle;
 
 public enum StoryNumberColor { Yellow, Blue, Cyan }
 public readonly record struct StoryNumberDigit(int Slot, int Digit, StoryNumberColor Color, Vector2 Position, uint BornAt);

@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using Godot;
 
-namespace Pal.Game.Profiles;
+namespace Pal.Game.Resources;
 
 public static class NativeContentDependencies
 {

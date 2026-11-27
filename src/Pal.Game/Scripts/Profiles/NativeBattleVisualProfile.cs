@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using Godot;
 using Pal.Game.Resources;
-using static Pal.Game.Profiles.NativeContentDependencies;
+using static Pal.Game.Resources.NativeContentDependencies;
 using Pal.Core.Battle;
 
 namespace Pal.Game.Profiles;

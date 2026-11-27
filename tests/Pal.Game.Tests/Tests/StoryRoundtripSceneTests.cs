@@ -16,6 +16,7 @@ using Pal.Core.Dialogue;
 using Pal.Core.Battle;
 using Pal.Core.Events;
 using Pal.Core.Save;
+using Pal.Game.Battle;
 
 namespace Pal.Game.Tests;
 
@@ -819,7 +820,7 @@ public class StoryRoundtripSceneTests
         // fixed (150,100) center; the three FX frames blit at BOTH struck enemies without the
         // per-frame x offset; both struck enemies shift color at poses 8-9 and shake -8/-4/-6
         // horizontally at poses 10-12; the HP result reveals at pose 7.
-        var presentation = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+        var presentation = new Pal.Game.Battle.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
             [new Vector2(100, 120), new Vector2(156, 88)], [1, 3], [80, 60], [40, 55], 2, dual: false, secondStrike: false);
         Vector2[] poses =
         [
@@ -854,9 +855,9 @@ public class StoryRoundtripSceneTests
         }
         // fight.c 2080-2101: a dual attack-all actor stays at its home column instead (first
         // strike −8/−4, second strike −20/−12).
-        var first = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+        var first = new Pal.Game.Battle.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
             [new Vector2(100, 120)], [1], [80], [70], 2, dual: true, secondStrike: false);
-        var second = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+        var second = new Pal.Game.Battle.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
             [new Vector2(100, 120)], [1], [70], [60], 2, dual: true, secondStrike: true);
         for (int pose = 0; pose < 16; pose++)
         {
@@ -1547,7 +1548,7 @@ public class StoryRoundtripSceneTests
             bool escapeFailLabel = false;
             await host.Wait(() =>
             {
-                escapeFailLabel |= old.StoryDrawSnapshot?.FeedbackWord == Pal.Game.Dialogue.PalStoryBattleView.EscapeFailWord;
+                escapeFailLabel |= old.StoryDrawSnapshot?.FeedbackWord == Pal.Game.Battle.PalStoryBattleView.EscapeFailWord;
                 return escapeFailLabel;
             });
             await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback);
@@ -1596,7 +1597,7 @@ public class StoryRoundtripSceneTests
             AssertThat(old.StoryCashGranted == 0 && old.StoryExperienceGranted == 0).IsTrue();
             AssertThat(old.Interaction!.Phase).IsEqual(NpcInteractionPhase.Trigger);
             AssertThat(old.StoryBattleMode).IsNull();
-            AssertThat(old.GetChildren().OfType<Pal.Game.Dialogue.PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(old.GetChildren().OfType<Pal.Game.Battle.PalStoryBattleView>().Count()).IsEqual(0);
             // The red fade converges (32 steps of 75ms) with the text palette preserved.
             await host.Wait(() => old.StoryRedFadeStep >= 32);
             var red = old.StoryRedPalette!;
@@ -1664,7 +1665,7 @@ public class StoryRoundtripSceneTests
             await host.Wait(() =>
             {
                 var draw = old.StoryDrawSnapshot;
-                sawEscapeFailLabel |= draw?.FeedbackWord == Pal.Game.Dialogue.PalStoryBattleView.EscapeFailWord;
+                sawEscapeFailLabel |= draw?.FeedbackWord == Pal.Game.Battle.PalStoryBattleView.EscapeFailWord;
                 if (draw is { } snapshot && old.StoryBattleMode == StoryBattlePresentation.Feedback)
                 {
                     Vector2 player = snapshot.PartyPlayers.Count > 0 ? snapshot.PartyPlayers[0].Position : snapshot.PlayerPosition;

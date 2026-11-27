@@ -10,6 +10,7 @@ using Pal.Core.Dialogue;
 using Pal.Core.Events;
 using Pal.Core.Menu;
 using Pal.Core.Save;
+using Pal.Game.Battle;
 
 namespace Pal.Game.Tests;
 
@@ -514,16 +515,16 @@ public class SystemLoadSceneTests
         await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is
             { Display.Current.Phase: DialogueDisplayPhase.WaitingForAdvance });
         host.Tap(Key.Enter); // advance the pre-battle text into the action menu
-        await host.Wait(() => host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.AttackMenu);
+        await host.Wait(() => host.Main.StoryBattleMode == Pal.Game.Battle.StoryBattlePresentation.AttackMenu);
         ulong deadline = Time.GetTicksMsec() + 60000;
         while (host.Main.Dialogue!.Session?.PendingLostReload is null && Time.GetTicksMsec() < deadline)
         {
             var session = host.Main.Dialogue!.Session!;
             if (session.PendingDisplay is { Display.Current.Phase: DialogueDisplayPhase.WaitingForAdvance })
                 host.Tap(Key.Enter); // the centered loss text
-            else if (host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.AttackMenu)
+            else if (host.Main.StoryBattleMode == Pal.Game.Battle.StoryBattlePresentation.AttackMenu)
                 host.Tap(Key.Enter); // commit the selecting member's attack
-            else if (host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.TargetMenu)
+            else if (host.Main.StoryBattleMode == Pal.Game.Battle.StoryBattlePresentation.TargetMenu)
                 host.Tap(Key.Enter); // confirm the first alive target
             await host.Wait(() => true);
         }

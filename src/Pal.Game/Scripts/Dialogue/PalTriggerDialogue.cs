@@ -226,7 +226,7 @@ public partial class PalTriggerDialogue : Node
         if (PreviewSessionFactory is { } factory) return factory();
         // Unknown legacy IBattleRandom implementations remain borrowed. Only the concrete
         // Godot adapter promises a fork; Main always supplies its owned world + RNG factory.
-        var fork = (_previewRandom as GodotBattleRandom)?.Fork();
+        var fork = (_previewRandom as IForkableBattleRandom)?.Fork();
         try
         {
             var preview = _previewContent is { } content && (fork ?? _previewRandom) is { } random

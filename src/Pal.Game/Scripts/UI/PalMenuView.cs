@@ -9,7 +9,7 @@ using Pal.Game.Resources;
 using Pal.Core.Menu;
 using Pal.Core.Save;
 
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.UI;
 
 /// <summary>#213 exploration-menu presentation. Draws the Core menu session's current state with
 /// the prepared dialogue font and the active scene palette (authored layout, not retail art);

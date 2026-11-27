@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Godot;
 
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.Battle;
 
 /// <summary>Single-target, no-dual-attack physical animation, fight.c2008–2292/3670–3754.
 /// The local x/y subtraction before FX never assigns player.pos. No combat or RNG is advanced.</summary>

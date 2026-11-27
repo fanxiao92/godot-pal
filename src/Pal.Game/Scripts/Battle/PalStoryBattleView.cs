@@ -8,7 +8,7 @@ using Pal.Game.Profiles;
 using Pal.Game.Resources;
 using Pal.Core.Battle;
 
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.Battle;
 
 public enum StoryBattlePresentation { AttackMenu, TargetMenu, Resolving, Feedback, HookDialogue, Settlement }
 

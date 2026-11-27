@@ -9,7 +9,7 @@ using Pal.Core;
 using Pal.Game.Dialogue;
 using Pal.Game.Map;
 using Pal.Game.Resources;
-using static Pal.Game.Profiles.NativeContentDependencies;
+using static Pal.Game.Resources.NativeContentDependencies;
 using Pal.Core.State;
 using Pal.Core.Dialogue;
 using Pal.Core.Battle;

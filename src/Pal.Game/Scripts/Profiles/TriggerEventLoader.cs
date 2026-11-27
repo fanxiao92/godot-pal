@@ -8,7 +8,7 @@ using Godot;
 using Pal.Core;
 using Pal.Core.Events;
 
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.Profiles;
 
 /// <summary>Reads only the complete modern event collection, never an original archive.</summary>
 public static class TriggerEventLoader

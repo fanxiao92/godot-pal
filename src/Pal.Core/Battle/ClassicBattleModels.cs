@@ -7,6 +7,12 @@ public interface IBattleRandom
     float NextInclusive(float from, float to);
 }
 
+/// <summary>Optional fork seam for owned native RNG adapters used in isolated preview sessions.</summary>
+public interface IForkableBattleRandom : IBattleRandom, IDisposable
+{
+    IForkableBattleRandom Fork();
+}
+
 public sealed record ClassicBattlePlayer(int RoleId, int Hp, int MaxHp, int Attack, int Defense, int Dexterity)
 {
     public IReadOnlyList<int> Equipment { get; init; } = [];

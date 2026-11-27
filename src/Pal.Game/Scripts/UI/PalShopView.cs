@@ -8,7 +8,7 @@ using Pal.Core;
 using Pal.Game.Resources;
 using Pal.Core.Menu;
 
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.UI;
 
 /// <summary>#217 shop presentation. Draws the Core shop session's current state with the
 /// prepared dialogue font and the active scene palette (authored layout, not retail art);

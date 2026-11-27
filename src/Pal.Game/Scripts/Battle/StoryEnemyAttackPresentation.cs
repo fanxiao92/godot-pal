@@ -4,7 +4,7 @@ using Godot;
 using Pal.Core;
 using Pal.Core.Battle;
 
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.Battle;
 
 /// <summary>Active single-enemy physical sequence, fight.c4987–5135. No RNG or combat advancement.
 /// Main supplies the persistent gesture for TRUE tail segments; this timeline owns active FALSE frames.</summary>

@@ -1,4 +1,4 @@
-namespace Pal.Game.Dialogue;
+namespace Pal.Game.Battle;
 
 /// <summary>25FPS minimum pose duration. Late delivery advances one pose and starts a fresh duration.
 /// Like Core tick comparisons, elapsed intervals must remain below 2^31 milliseconds.</summary>
