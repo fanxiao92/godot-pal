@@ -108,27 +108,32 @@ pwsh -NoProfile -NonInteractive -File ./pal.ps1 report --from .artifacts/pal/ver
 
 ## 仓库结构
 
-- `pal.ps1` —— 跨平台统一前门 CLI（测试、CI、Godot 安装预热、资源准备、证据报告）
+- `pal.ps1` —— 跨平台统一前门 CLI（测试、CI、架构/账本自检、Godot 安装预热、资源准备/脱敏自省、证据报告）
+- `ARCHITECTURE.md` —— [架构总览](ARCHITECTURE.md)（三段管道、归位模块拓扑、编译期护栏与冻结切片边界）
 - `AGENTS.md` —— Agent 按需上下文指针与不可逆安全硬约束
 - `CODING_STANDARDS.md` —— `/code-review` Standards 轴评审标准
 - `GLOSSARY.md` —— 项目领域术语表
+- `.editorconfig` —— 编译期护栏（`RS0030` / `PAL0001`–`PAL0003`）与基础代码风格配置
+- `.agents/skills/` —— 仓内工程级 Skills 单一真源（`verify`、`garden`；Claude Code 本地桥接见 `scripts/Sync-AgentSkills.ps1`）
 - `docs/` —— [文档导航](docs/README.md)
   - `testing/` —— [验证矩阵](docs/testing/verification-matrix.md)及 3 篇专题规范（Game 分层、时序边界、合并保护）
-  - `adr/` —— 架构决策记录（`ADR-0001`–`ADR-0007`）
-  - `design/` —— 项目设计背景、架构与数据/事件/战斗契约
+  - `adr/` —— 架构决策记录（`ADR-0001`–`ADR-0008`）
+  - `design/` —— 有效格式契约与可行性基线（5 篇）
+  - `generated/` —— 代码派生自动生成文档（[`capabilities-ledger.md`](docs/generated/capabilities-ledger.md)）
   - `milestones/` —— 各里程碑实施计划（M0–M6）
   - `agents/` —— Agent 执行环境、Issue 工作流、单票/多票与异常诊断规则
-  - `archive/` —— M0 历史验收归档（按需查阅）
-- `src/Pal.Core/` —— 纯 .NET 核心类库（零 Godot 依赖）
+  - `archive/` —— [历史文档归档索引](docs/archive/README.md)（M0、早期设计稿与 M6 就绪度核对稿）
+- `src/Pal.Core/` —— 纯 .NET 核心类库（零 Godot 依赖，按 9 个子域目录与命名空间组织）
 - `src/Pal.Game/` —— 纯 Godot .NET 游戏生产工程（零测试依赖）
-- `tools/Pal.Extract/` —— 独立离线提取与往返验证 CLI
+- `tools/Pal.Extract/` —— 独立离线提取、往返验证与能力账本导出 CLI
+- `tools/Pal.Analyzers/` —— 仓内编译期 Roslyn 架构护栏（`PAL0001`–`PAL0003`）与 `BannedSymbols.*.txt`
 - `tools/long-running-agent/` —— 基于 GitHub Issues 的长任务编排器
 - `tests/` —— 全部自动化测试工程：
-  - `Pal.Core.UnitTests/`、`Pal.Extract.UnitTests/` —— 纯内存 xUnit 单元测试
+  - `Pal.Core.UnitTests/`、`Pal.Extract.UnitTests/`、`Pal.Analyzers.Tests/` —— 纯内存 xUnit 单元测试
   - `Pal.Extract.IntegrationTests/`、`Pal.Prepare.Tests/` —— CLI 文件进程与 Godot Prepare 集成测试
   - `Pal.Game.Tests/` —— 独立 Godot .NET / 官方 GdUnit4 集成测试与 T3 GPU YAML E2E 场景
   - `affected-map.psd1` —— T0 增量选测映射表
-- `scripts/` —— `pal.ps1` 模块、离线资源准备原语与轻量仓库护栏脚本
+- `scripts/` —— `pal.ps1` 模块、离线资源准备原语、技能本地桥接与轻量仓库护栏脚本
 - `reference/sdlpal/` —— 只读 SDLPal 参考源码（见 [reference/README.md](reference/README.md)）
 - `data/raw/` —— 本地原版 98 柔情版数据目录（不提交，见 [data/raw/README.md](data/raw/README.md)）
 

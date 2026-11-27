@@ -20,6 +20,7 @@
 - [ADR-0005：M7 验证基建重构与四档分层模型](adr/0005-m7-verification-infrastructure.md)
 - [ADR-0006：游戏测试拆出 `tests/Pal.Game.Tests` 并切回官方 GdUnit4 包](adr/0006-split-game-tests-and-official-gdunit.md)
 - [ADR-0007：T3 真实资源 GPU 端到端回归与仓库外共享缓存](adr/0007-t3-gpu-e2e-and-shared-asset-cache.md)
+- [ADR-0008：原生 Harness、模块拓扑与编译期架构机械护栏](adr/0008-native-harness-and-architecture-guardrails.md)
 
 领域术语见根目录 [GLOSSARY.md](../GLOSSARY.md)。
 

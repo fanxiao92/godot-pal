@@ -53,3 +53,6 @@ tests/Pal.Game.Tests/gdunit4_testadapter_v5/
 
 # Front-door pal.ps1 local run artifacts (summaries, TRX, coverage, reports).
 /.artifacts/
+
+# Local Claude Code bridge (.claude/skills -> .agents/skills via scripts/Sync-AgentSkills.ps1) and local session state.
+/.claude/

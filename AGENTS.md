@@ -6,7 +6,7 @@
 
 - **每次 fresh 会话开工前** → 必读[执行环境契约](docs/agents/execution-environment.md)，核对当前仓库、分支、HEAD、已有改动与工具能力。
 - **读取/操作 GitHub Issues（`fanxiao92/godot-pal`）** → 读[Issue 工作流](docs/agents/issue-tracker.md)与[Triage 标签](docs/agents/triage-labels.md)；实时状态以目标 Issue 正文、评论与直接依赖为准。
-- **查阅领域术语或架构决策** → 读根目录 [GLOSSARY.md](GLOSSARY.md)、`docs/adr/` 与[领域文档规则](docs/agents/domain.md)；项目导航见 [docs/README.md](docs/README.md)。
+- **查阅架构总图、实时能力账本或领域术语/决策** → 读根目录 [ARCHITECTURE.md](ARCHITECTURE.md)、[能力账本](docs/generated/capabilities-ledger.md)、[GLOSSARY.md](GLOSSARY.md)、`docs/adr/` 与[领域文档规则](docs/agents/domain.md)；项目导航见 [docs/README.md](docs/README.md)，仓内工程 Skills 真源位于 `.agents/skills/`（`verify`、`garden`）。
 - **实施单票、处理失败或 review repair** → 读[单任务执行与有界纠正](docs/agents/task-execution.md)；本机长任务编排见 [long-running-agent](tools/long-running-agent/README.md)。
 - **协调多票或恢复协调会话** → 读[多票协调与恢复](docs/agents/large-task-handoffs.md)；里程碑合入后显式清理隔离 worktree 与已合并分支（丢弃未提交/未合并残留须先获授权）。
 - **选择测试档位、执行验证或回填证据** → 读[验证矩阵](docs/testing/verification-matrix.md)（统一前门 `./pal.ps1`，CI 为 `ubuntu-24.04` 3 并行 job：`dotnet` / `prepare` / `game`）。

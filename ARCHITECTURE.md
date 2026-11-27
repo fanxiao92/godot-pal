@@ -1,6 +1,6 @@
 # godot-pal 架构总览
 
-本页是仓库当前态架构总图（对应代码地形整备规格 [#270](https://github.com/fanxiao92/godot-pal/issues/270) 与 [架构决策索引](docs/README.md#架构决策记录adr)）。实时指令/模块支持状态见自动生成的 [`sdlpal` 对位与能力账本](docs/generated/capabilities-ledger.md)，验证档位见 [验证矩阵](docs/testing/verification-matrix.md)，引擎参考源码导航见 [reference/README.md](reference/README.md)。
+本页是仓库当前态架构总图（对应 [ADR-0008](docs/adr/0008-native-harness-and-architecture-guardrails.md) 与代码地形整备规格 [#270](https://github.com/fanxiao92/godot-pal/issues/270)）。实时指令/模块支持状态见自动生成的 [`sdlpal` 对位与能力账本](docs/generated/capabilities-ledger.md)，验证档位见 [验证矩阵](docs/testing/verification-matrix.md)，引擎参考源码导航见 [reference/README.md](reference/README.md)。
 
 ## 1. 三段单向数据与运行时管道
 

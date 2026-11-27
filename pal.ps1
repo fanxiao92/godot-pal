@@ -15,6 +15,7 @@ Import-Module (Join-Path $script:RepoRoot 'scripts/pal/AffectedSelection.psm1') 
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/TestReport.psm1') -Force
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/T3Assets.psm1') -Force
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/CapabilityLedger.psm1') -Force
+Import-Module (Join-Path $script:RepoRoot 'scripts/pal/ArchAndAssets.psm1') -Force
 
 function Show-Usage {
     @'
@@ -31,6 +32,7 @@ Commands:
        full | all        Run committable full suite (map self-check + unit + integration + game)
        check-map         Run MSBuild dependency graph & tests/affected-map.psd1 self-check
        check-ledger      Verify code-derived docs/generated/capabilities-ledger.md zero-drift (--update to regenerate)
+       check-arch        Run syntax + boundary + hygiene (-AllDocs) + map + ledger + guardrail build
 
   ci   dotnet            [T1/T2 Job 1] Syntax + boundary + map self-check + Unit (coverlet) + CLI integration
        prepare           [T1/T2 Job 2] Prepare integration tests (requires Godot)
@@ -42,6 +44,7 @@ Commands:
 
   assets prepare         Prepare T3 shared real-asset cache (default) or wrap scripts/Prepare-*.ps1 (--kind)
          status          Show shared T3 asset & golden cache status
+         inspect         Redacted MKF archive & T3 cache inspection (requires PAL_RAW_DATA_DIR; supports --json)
 
   report                 Render Markdown summary / PR evidence comment from run-summary.json & TRX
 
@@ -822,6 +825,9 @@ try {
                 'check-ledger' {
                     Invoke-CapabilityLedgerCheck -RepositoryRoot $script:RepoRoot -Update:$parsed.Flags.ContainsKey('update')
                 }
+                'check-arch' {
+                    Invoke-ArchCheck -RepositoryRoot $script:RepoRoot
+                }
                 'e2e' {
                     $scenarioOpt = if ($parsed.Flags.ContainsKey('scenario')) { [string]$parsed.Flags['scenario'] } else { 'all' }
                     Invoke-E2ETarget -Gpu:$parsed.Flags.ContainsKey('gpu') `
@@ -834,7 +840,7 @@ try {
                 }
                 default {
                     $state.Status = 'error'
-                    throw "Unknown test subcommand '$testSub'. Expected: affected, unit, integration, game, e2e, lra, full, all, check-map, check-ledger."
+                    throw "Unknown test subcommand '$testSub'. Expected: affected, unit, integration, game, e2e, lra, full, all, check-map, check-ledger, check-arch."
                 }
             }
         }
@@ -984,9 +990,12 @@ try {
                         Write-Output "T3 shared asset cache: key=$($info.CacheKey) assets=$assetState goldens=$goldenState (private paths omitted)"
                     }
                 }
+                'inspect' {
+                    Invoke-AssetsInspect -RepositoryRoot $script:RepoRoot -AsJson:$parsed.Flags.ContainsKey('json')
+                }
                 default {
                     $state.Status = 'error'
-                    throw "Unknown assets subcommand '$sub'. Expected: prepare, status."
+                    throw "Unknown assets subcommand '$sub'. Expected: prepare, status, inspect."
                 }
             }
         }
