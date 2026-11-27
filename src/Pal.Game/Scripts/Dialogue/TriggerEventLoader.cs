@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Godot;
 using Pal.Core;
+using Pal.Core.Events;
 
 namespace Pal.Game.Dialogue;
 

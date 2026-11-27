@@ -1,5 +1,7 @@
 using Pal.Core;
 using Xunit;
+using Pal.Core.State;
+using Pal.Core.Battle;
 
 public sealed class EquipmentRemovalTests
 {

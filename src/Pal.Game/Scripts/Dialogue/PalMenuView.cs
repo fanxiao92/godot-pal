@@ -6,6 +6,8 @@ using System.Text;
 using Godot;
 using Pal.Core;
 using Pal.Game.Resources;
+using Pal.Core.Menu;
+using Pal.Core.Save;
 
 namespace Pal.Game.Dialogue;
 

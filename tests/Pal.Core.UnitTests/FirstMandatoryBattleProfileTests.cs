@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Pal.TestFixtures;
 using Pal.Core;
 using Xunit;
+using Pal.Core.Legacy;
 
 namespace Pal.Core.Tests;
 

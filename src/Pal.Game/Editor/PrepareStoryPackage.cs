@@ -9,6 +9,7 @@ using Godot;
 using Pal.Core;
 using Pal.Game.Profiles;
 using Pal.Game.Resources;
+using Pal.Core.Events;
 
 namespace Pal.Game.Editor;
 

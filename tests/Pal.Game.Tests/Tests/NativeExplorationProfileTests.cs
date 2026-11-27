@@ -6,6 +6,7 @@ using GdUnit4;
 using Pal.Core;
 using Pal.Game.Profiles;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
 
 namespace Pal.Game.Tests;
 

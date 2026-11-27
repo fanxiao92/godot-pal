@@ -13,6 +13,10 @@ using System.Text;
 using System.Security.Cryptography;
 using Pal.Game.Editor;
 using static GdUnit4.Assertions;
+using Pal.Core.State;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
 
 namespace Pal.Game.Tests;
 

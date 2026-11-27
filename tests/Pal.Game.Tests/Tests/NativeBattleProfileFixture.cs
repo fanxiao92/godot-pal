@@ -9,6 +9,7 @@ using Pal.Core;
 using Pal.Game.Resources;
 using Pal.Game.Profiles;
 using Pal.TestFixtures;
+using Pal.Core.Legacy;
 
 namespace Pal.Game.Tests;
 

@@ -3,6 +3,7 @@ using Pal.Core;
 using System.Text.Json.Nodes;
 using Xunit;
 using static Pal.Extract.Tests.OpcodeCounterexampleHarness;
+using Pal.Core.Events;
 
 namespace Pal.Extract.Tests;
 

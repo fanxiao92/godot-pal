@@ -9,6 +9,7 @@ using Pal.Core;
 using Pal.Game.Editor;
 using Pal.Game.Profiles;
 using static GdUnit4.Assertions;
+using Pal.Core.Battle;
 
 namespace Pal.Game.Tests;
 

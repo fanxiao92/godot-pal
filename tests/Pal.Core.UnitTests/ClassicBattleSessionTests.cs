@@ -1,4 +1,5 @@
 using Xunit;
+using Pal.Core.Battle;
 
 namespace Pal.Core.Tests;
 

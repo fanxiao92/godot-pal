@@ -1,5 +1,8 @@
 using System.Text.Json.Nodes;
 using Xunit;
+using Pal.Core.State;
+using Pal.Core.Battle;
+using Pal.Core.Events;
 
 namespace Pal.Core.Tests;
 

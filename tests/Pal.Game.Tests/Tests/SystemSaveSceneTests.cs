@@ -6,6 +6,9 @@ using Godot;
 using Pal.Core;
 using InvalidDataException = System.IO.InvalidDataException;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
+using Pal.Core.Menu;
+using Pal.Core.Save;
 
 namespace Pal.Game.Tests;
 

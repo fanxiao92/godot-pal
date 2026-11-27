@@ -8,6 +8,9 @@ using GdUnit4;
 using Godot;
 using Pal.Core;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
+using Pal.Core.Events;
+using Pal.Core.Legacy;
 
 namespace Pal.Game.Tests;
 

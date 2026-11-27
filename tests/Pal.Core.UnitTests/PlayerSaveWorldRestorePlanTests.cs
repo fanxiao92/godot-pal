@@ -1,5 +1,10 @@
 using Pal.Core;
 using Xunit;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
+using Pal.Core.Save;
 
 namespace Pal.Core.Tests;
 

@@ -1,0 +1,83 @@
+namespace Pal.Core.Exploration;
+
+public sealed record ExplorationState(StaticLeader Leader, bool IsWalking, StaticScenePlan Plan);
+
+public sealed class ExplorationSession
+{
+    internal StaticSceneRules Rules => rules;
+    private StaticSceneRules rules;
+    public IReadOnlyList<SceneObject> Objects => rules.Objects;
+    private bool hasUpdated;
+    private uint nextDeadline;
+    public ExplorationState Current { get; private set; }
+
+    public ExplorationSession(StaticSceneRules rules, StaticLeader initialLeader)
+    {
+        this.rules = rules;
+        Current = new(initialLeader, false, rules.BuildPlan(initialLeader));
+    }
+
+    internal bool IsUpdateDue(uint ticksMilliseconds) => !hasUpdated || unchecked((int)(nextDeadline - ticksMilliseconds)) <= 0;
+
+    internal SceneSearchMatch? FindSearchTarget() => rules.FindSearchTarget(Current.Leader);
+
+    internal void PrepareSearch(ushort objectId)
+    {
+        var obj = rules.Objects.Single(o => o.Id == objectId);
+        if (obj.SpriteFrames * 4 <= obj.CurrentFrame) return;
+        var facing = obj with { CurrentFrame = 0, Direction = (ushort)((Current.Leader.Direction + 2) % 4) };
+        var posed = rules.WithObjects(rules.Objects.Select(o => o.Id == objectId ? facing : o));
+        // PAL_Search explicitly uses direction * 3 for the party, not its walking stride.
+        var plan = posed.BuildPlan(Current.Leader, Current.Leader.Direction * 3);
+        rules = posed;
+        Current = new(Current.Leader, false, plan);
+    }
+
+    internal void SaveTriggerEntry(ushort objectId, ushort returnEntry) =>
+        rules = rules.WithObjects(rules.Objects.Select(o => o.Id == objectId ? o with { TriggerEntry = returnEntry } : o));
+
+    // The dynamic event world (script.c object/PC changes) swaps the immutable rule set and
+    // optionally the leader; the retained plan is rebuilt from the current leader position.
+    internal void ReplaceRules(StaticSceneRules replaced, StaticLeader? leader = null)
+    {
+        rules = replaced;
+        var next = leader ?? Current.Leader;
+        Current = new(next, false, rules.BuildPlan(next));
+    }
+
+    public bool Update(uint ticksMilliseconds, int? direction)
+    {
+        if (direction is < 0 or > 3) throw new ArgumentOutOfRangeException(nameof(direction));
+        // SDL_TICKS_PASSED: comparisons require tick differences smaller than 2^31 ms.
+        if (!IsUpdateDue(ticksMilliseconds)) return false;
+        var leader = Current.Leader;
+        int facing = direction ?? leader.Direction;
+        short targetX = unchecked((short)(leader.X + (facing is 0 or 1 ? -16 : 16)));
+        short targetY = unchecked((short)(leader.Y + (facing is 1 or 2 ? -8 : 8)));
+        leader = leader with { Direction = facing };
+        bool walking = direction.HasValue && !rules.IsBlocked(targetX, targetY,
+            checkRange: true, checkObjects: true, selfObjectId: 0);
+        StaticScenePlan plan;
+        if (walking)
+        {
+            leader = leader with
+            {
+                X = targetX,
+                Y = targetY,
+                StepPhase = (leader.StepPhase + 1) % 4
+            };
+            int frameIndex = leader.WalkFramesWord == 4 ? facing * 4 + leader.StepPhase
+                : facing * 3 + (leader.StepPhase % 2 == 0 ? 0 : (leader.StepPhase + 1) / 2);
+            plan = rules.BuildPlan(leader, frameIndex);
+        }
+        else
+        {
+            leader = leader with { StepPhase = (leader.StepPhase & 2) ^ 2 };
+            plan = rules.BuildPlan(leader);
+        }
+        Current = new(leader, walking, plan);
+        nextDeadline = unchecked(ticksMilliseconds + 100);
+        hasUpdated = true;
+        return true;
+    }
+}

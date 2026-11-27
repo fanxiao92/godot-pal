@@ -2,6 +2,13 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Pal.Core;
 using Xunit;
+using Pal.Core.State;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
+using Pal.Core.Menu;
+using Pal.Core.Save;
 
 namespace Pal.Core.Tests;
 

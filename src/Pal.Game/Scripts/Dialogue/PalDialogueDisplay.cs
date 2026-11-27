@@ -5,6 +5,8 @@ using System.Text;
 using Godot;
 using Pal.Core;
 using Pal.Game.Resources;
+using Pal.Core.Dialogue;
+using Pal.Core.Events;
 
 namespace Pal.Game.Dialogue;
 

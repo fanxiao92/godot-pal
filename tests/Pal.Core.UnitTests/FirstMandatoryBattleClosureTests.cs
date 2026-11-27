@@ -1,6 +1,12 @@
 using System.Text.Json.Nodes;
 using Pal.TestFixtures;
 using Xunit;
+using Pal.Core.State;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
+using Pal.Core.Legacy;
 
 namespace Pal.Core.Tests;
 

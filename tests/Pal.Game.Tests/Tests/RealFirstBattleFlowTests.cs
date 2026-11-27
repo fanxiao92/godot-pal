@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 using Godot;
 using GdUnit4;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
 
 namespace Pal.Game.Tests;
 
@@ -91,7 +93,7 @@ public class RealFirstBattleFlowTests
         if (display is not { } shown) return;
         // Enter accelerates typing and advances at the boundary alike (the headless frame
         // delta can be zero, so input-driven advancement is the reliable route).
-        if ((frames & 15) == 0 || shown.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0)
+        if ((frames & 15) == 0 || shown.Display.Current.Phase == Pal.Core.Dialogue.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0)
         {
             scene.Press(Key.Enter);
             pages++;
@@ -113,7 +115,7 @@ public class RealFirstBattleFlowTests
         private readonly System.Collections.Generic.HashSet<Key> keys = [];
         public Main Main { get; }
         public System.Collections.Generic.List<string> Failures { get; } = [];
-        public System.Collections.Generic.List<Pal.Core.ExplorationState> Updates { get; } = [];
+        public System.Collections.Generic.List<Pal.Core.Exploration.ExplorationState> Updates { get; } = [];
 
         public RealFlowScene(Main main)
         {

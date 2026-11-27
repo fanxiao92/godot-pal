@@ -6,6 +6,10 @@ using Godot;
 using Pal.Core;
 using Pal.Game.Resources;
 using Pal.Game.Profiles;
+using Pal.Core.State;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
 
 namespace Pal.Game.Dialogue;
 
@@ -71,7 +75,7 @@ public partial class PalTriggerDialogue : Node
     /// <summary>World supplied before initialization by the first-battle or checked Story host.
     /// A shared world also binds its live role owner to the trigger; null preserves the legacy
     /// battle-only session whose dynamic verbs reject precisely at execution.</summary>
-    public Pal.Core.DynamicEventWorld? FirstBattleWorld { get; set; }
+    public Pal.Core.Events.DynamicEventWorld? FirstBattleWorld { get; set; }
 
     public void Initialize(PalDialogueDisplay display, FirstBattleRealResources resources, string language, IBattleRandom random,
         PalSceneData? scene = null)

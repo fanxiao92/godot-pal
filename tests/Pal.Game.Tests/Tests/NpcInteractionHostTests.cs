@@ -9,6 +9,8 @@ using Pal.Core;
 using Pal.Game.Dialogue;
 using Pal.Game.Map;
 using static GdUnit4.Assertions;
+using Pal.Core.Dialogue;
+using Pal.Core.Events;
 
 namespace Pal.Game.Tests;
 

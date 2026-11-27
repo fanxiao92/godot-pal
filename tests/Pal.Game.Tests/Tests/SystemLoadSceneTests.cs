@@ -5,6 +5,11 @@ using GdUnit4;
 using Godot;
 using Pal.Core;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
+using Pal.Core.Events;
+using Pal.Core.Menu;
+using Pal.Core.Save;
 
 namespace Pal.Game.Tests;
 
@@ -529,7 +534,7 @@ public class SystemLoadSceneTests
     /// iCurMenuItem across close/reopen — a save visit parks it on the SYSTEM entry) and
     /// returns the live status projection. Browses by the observed cursor, never an assumed
     /// fresh position; the caller continues from the open status page.</summary>
-    private static async Task<Pal.Core.ExplorationMenuStatusView> OpenStatusFromRememberedCursor(LoadHost host)
+    private static async Task<Pal.Core.Menu.ExplorationMenuStatusView> OpenStatusFromRememberedCursor(LoadHost host)
     {
         var menu = host.Main.Menu!;
         host.Tap(Key.Escape);

@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using Pal.Core;
 using Pal.Game.Profiles;
+using Pal.Core.Battle;
 
 namespace Pal.Game.Editor;
 

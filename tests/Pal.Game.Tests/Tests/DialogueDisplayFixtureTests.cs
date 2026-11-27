@@ -8,6 +8,7 @@ using Pal.Core;
 using Pal.Game.Dialogue;
 using Pal.Game.Resources;
 using static GdUnit4.Assertions;
+using Pal.Core.Dialogue;
 
 namespace Pal.Game.Tests;
 

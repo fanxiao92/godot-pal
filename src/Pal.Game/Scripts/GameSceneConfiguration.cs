@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Globalization;
 using Pal.Game.Profiles;
+using Pal.Core.Events;
 
 namespace Pal.Game;
 

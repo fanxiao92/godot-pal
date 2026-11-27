@@ -2,6 +2,7 @@ using System;
 using Godot;
 using Pal.Core;
 using InvalidDataException = System.IO.InvalidDataException;
+using Pal.Core.Save;
 
 namespace Pal.Game;
 

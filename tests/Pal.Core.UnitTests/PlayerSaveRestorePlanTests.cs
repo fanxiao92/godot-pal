@@ -1,5 +1,9 @@
 using Pal.Core;
 using Xunit;
+using Pal.Core.State;
+using Pal.Core.Battle;
+using Pal.Core.Menu;
+using Pal.Core.Save;
 
 namespace Pal.Core.Tests;
 

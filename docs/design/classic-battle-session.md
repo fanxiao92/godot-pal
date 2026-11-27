@@ -63,13 +63,13 @@
 
 ### 唯一 bank、声明与启动顺序
 
-- 唯一可变入口存储是既有 [`DynamicEventWorld.ObjectScripts`](../../src/Pal.Core/DynamicEventSession.cs)，键为显式 `(NameObjectId, slot)`：slot0=`FriendDeath`，slot1=`Dying`。`NameObjectId=null` 是未映射的 legacy 静态路径；Name WORD `0`、`0xFFFF` 都是真实名字对象身份，与脚本 entry0 的禁用语义不同。相同 Name 的角色 alias 同一双槽，且声明的 FriendDeath、Dying seed **各自**必须相等；不同 Name 即使 seed 相同也不 alias。
-- [`TriggerScriptSession`](../../src/Pal.Core/TriggerScriptSession.cs) 对选中闭包中可达的 mapped battle 做小型、纯 typed 能力检查：只要有玩家声明 Name，就要求全体玩家映射、Name 在 WORD 范围内、同 Name seeds 一致，并且实际 Start/当前查询绑定 world。不是调用完整 modern 数值格式 validator；legacy 简写数组及既有格式诊断顺序不变。
+- 唯一可变入口存储是既有 [`DynamicEventWorld.ObjectScripts`](../../src/Pal.Core/Events/DynamicEventSession.cs)，键为显式 `(NameObjectId, slot)`：slot0=`FriendDeath`，slot1=`Dying`。`NameObjectId=null` 是未映射的 legacy 静态路径；Name WORD `0`、`0xFFFF` 都是真实名字对象身份，与脚本 entry0 的禁用语义不同。相同 Name 的角色 alias 同一双槽，且声明的 FriendDeath、Dying seed **各自**必须相等；不同 Name 即使 seed 相同也不 alias。
+- [`TriggerScriptSession`](../../src/Pal.Core/Events/TriggerScriptSession.cs) 对选中闭包中可达的 mapped battle 做小型、纯 typed 能力检查：只要有玩家声明 Name，就要求全体玩家映射、Name 在 WORD 范围内、同 Name seeds 一致，并且实际 Start/当前查询绑定 world。不是调用完整 modern 数值格式 validator；legacy 简写数组及既有格式诊断顺序不变。
 - 构造器、`ForSharedRoles`、纯查询均不 seed、不重绑 world/角色 owner。成功 `Start` 先完成全部纯预检，再为实际结构可达 mapped battle 的相关双槽**仅补缺失键**，之后才创建 CallId、改 caller/success/PC、执行前缀及消耗生产 RNG。已有值0优先于声明 seed；无 battle 或 entry0 不因传入 content 而 seed。基本、world-only、battle-only、shared+world 绑定仍各守原能力边界，不从未映射内容制造 owner。
 
 ### 实际参与者的 live reader 与真实完成回写
 
-- 正式路径为 Trigger `Continue(startBattle)` → [`ClassicBattleLifecycleSession`](../../src/Pal.Core/ClassicBattleLifecycleSession.cs) → [`ClassicBattleSession`](../../src/Pal.Core/ClassicBattleSession.cs)。仅 internal overload 借用 `Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript`，每次真实检测按实际 player 的 Name 与 kind 读当前 bank：Dying 读濒死本人，FriendDeath 读实际 coverer，而非死者。live0 是禁用，不是缺失。既有 public 独立 combat/lifecycle 构造器仍传 null、读静态声明，不创建新 bank。
+- 正式路径为 Trigger `Continue(startBattle)` → [`ClassicBattleLifecycleSession`](../../src/Pal.Core/Battle/ClassicBattleLifecycleSession.cs) → [`ClassicBattleSession`](../../src/Pal.Core/Battle/ClassicBattleSession.cs)。仅 internal overload 借用 `Func<ClassicBattlePlayer, ClassicBattleHookKind, int>? readRoleHookScript`，每次真实检测按实际 player 的 Name 与 kind 读当前 bank：Dying 读濒死本人，FriendDeath 读实际 coverer，而非死者。live0 是禁用，不是缺失。既有 public 独立 combat/lifecycle 构造器仍传 null、读静态声明，不创建新 bank。
 - 钩子 caller 是实际 `RoleId`，0 合法，不是 Name、party index 或 EVENTOBJECT count owner。只有外层 `Start` 的 caller `0xFFFF` 继承 `_lastCaller`；Name `0xFFFF` 与根 RoleId0 都不是继承标记。这不引入 [#129](https://github.com/fanxiao92/godot-pal/issues/129) 的嵌套 VM/call、保存入口或 count 语义。
 - `StartBattleHook` 仍先预检**实际 pending entry X**，通过后捕获不可变 `(NameObjectId, slot, X)`；X 不取声明 seed、此刻 bank、返回 PC 或外层 `ReturnEntry`。真实 hook 内 `0090/setObjectScript` 写自身槽Y后等待 display 时保持Y；只有正常根 `keep` 或真实到达 PC0 的完成才把X写回捕获槽，**先写 bank，再清临时 hook owner，再 lifecycle `AcknowledgeRoleHook`**，随后恢复外层 caller。外层 `ReturnEntry` 不是 hook bank；其他 Name/slot 不受该回写影响。
 - 真实用例覆盖 pending5→另一个 executor 写 bank31→hook 自写0→display 等待仍0→真实 display 完成且 owned ACK 后终止→回写5、恢复 outer caller28。仅 display 完成而未 ACK、早到/foreign/stale/重复 display 或 battle 回执均不提交回写；重复回执也不能覆盖后来真实写入。跨文件位置仅用于诊断和寻址，文件名不是 bank key。enemy battle-end 按实际 enemy slot 作 caller，丢弃脚本返回 WORD，没有 Name owner。
@@ -87,7 +87,7 @@
 public TriggerEntryRequirements GetCurrentEntryRequirements(string fileId, string entryId, int caller);
 ```
 
-该既有公开方法绑定当前 `BattleRoles`、`Context.Color`、events/language/content 及相关 world keys，返回既有深不可变 [`TriggerEntryRequirements`](../../src/Pal.Core/TriggerEntryRequirements.cs)（`DisplayBlocks`/消息引用、`PortraitIds`、`BattleTeamIds`），不创建生产调用、seed、重绑、消耗 RNG 或改变 CallId/caller/PC。它与 `Start` 共用 `ValidateSelectedStart` 纯 guard：阻塞中的 active call 抛 `InvalidOperationException`，非 WORD caller 抛 `ArgumentOutOfRangeException`，入口/Name 映射/world 可用性/闭包/语言问题抛带文件或命令位置的 `InvalidDataException`。caller `0xFFFF` 仅保留对 `_lastCaller` 的继承约定，不更新它；查询结果不是跨后续更新有效的授权，真正 `Start` 必须重查。
+该既有公开方法绑定当前 `BattleRoles`、`Context.Color`、events/language/content 及相关 world keys，返回既有深不可变 [`TriggerEntryRequirements`](../../src/Pal.Core/Events/TriggerEntryRequirements.cs)（`DisplayBlocks`/消息引用、`PortraitIds`、`BattleTeamIds`），不创建生产调用、seed、重绑、消耗 RNG 或改变 CallId/caller/PC。它与 `Start` 共用 `ValidateSelectedStart` 纯 guard：阻塞中的 active call 抛 `InvalidOperationException`，非 WORD caller 抛 `ArgumentOutOfRangeException`，入口/Name 映射/world 可用性/闭包/语言问题抛带文件或命令位置的 `InvalidDataException`。caller `0xFFFF` 仅保留对 `_lastCaller` 的继承约定，不更新它；查询结果不是跨后续更新有效的授权，真正 `Start` 必须重查。
 
 静态 `ValidateEntry` 仍是 initial-content、纯且无计数器的预检，以初始角色及声明入口保守纳入相关未来 `0090` 写根，不要求 live world、不读取当前 bank。它不获得 #129 的 call/goto/count 能力或 `ValidateReturnEntryPreserved` checker 权限；当前查询也不扩大既有构造绑定的执行能力。
 

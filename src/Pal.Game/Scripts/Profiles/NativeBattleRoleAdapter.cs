@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using Pal.Core;
 using Pal.Game.Resources;
+using Pal.Core.State;
 
 namespace Pal.Game.Profiles;
 

@@ -7,6 +7,7 @@ using Godot;
 using Pal.Core;
 using Pal.Game.Map;
 using Pal.Game.Resources;
+using Pal.Core.Exploration;
 
 namespace Pal.Game.Profiles;
 

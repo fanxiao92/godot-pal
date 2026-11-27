@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using Pal.TestFixtures;
 using Xunit;
+using Pal.Core.Exploration;
+using Pal.Core.Legacy;
 
 namespace Pal.Core.Tests;
 

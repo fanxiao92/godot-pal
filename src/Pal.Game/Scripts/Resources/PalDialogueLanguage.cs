@@ -5,6 +5,7 @@ using System.Linq;
 using Godot;
 using Godot.Collections;
 using Pal.Core;
+using Pal.Core.Dialogue;
 
 namespace Pal.Game.Resources;
 

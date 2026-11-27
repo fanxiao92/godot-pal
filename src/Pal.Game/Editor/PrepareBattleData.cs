@@ -6,6 +6,7 @@ using System.Text;
 using Godot;
 using Pal.Core;
 using Pal.Game.Profiles;
+using Pal.Core.Battle;
 
 namespace Pal.Game.Editor;
 

@@ -1,6 +1,7 @@
 using System;
 using Godot;
 using Pal.Core;
+using Pal.Core.Battle;
 
 namespace Pal.Game.Dialogue;
 

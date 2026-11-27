@@ -10,6 +10,10 @@ using Pal.Game.Dialogue;
 using Pal.Game.Map;
 using Pal.Game.Resources;
 using static Pal.Game.Profiles.NativeContentDependencies;
+using Pal.Core.State;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
 
 namespace Pal.Game.Profiles;
 

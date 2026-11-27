@@ -4,6 +4,11 @@ using System.Threading.Tasks;
 using Godot;
 using GdUnit4;
 using static GdUnit4.Assertions;
+using Pal.Core.State;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
 
 namespace Pal.Game.Tests;
 
@@ -80,31 +85,31 @@ public class SyntheticFirstBattleClosureTests
         main.Configure(GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri));
         Pal.Game.Dialogue.GodotBattleRandom? productionRandom = null;
         Pal.Game.Dialogue.PalTriggerDialogue? ownedDialogue = null;
-        Pal.Core.DynamicEventWorld? observedWorld = null;
-        Pal.Core.RoleLiveState? observedOwner = null;
-        Pal.Core.TriggerScriptSession? observedSession = null;
-        Pal.Core.BattleRoleSnapshot? initialRoleOne = null, initialRoleZero = null;
-        Pal.Core.BattleRoleSnapshot? firstPrefixZero = null, firstPrefixOne = null;
-        Pal.Core.BattleRoleSnapshot? secondPrefixZero = null, secondPrefixOne = null;
-        Pal.Core.BattleRoleSnapshot? firstReturnedZero = null;
+        Pal.Core.Events.DynamicEventWorld? observedWorld = null;
+        Pal.Core.State.RoleLiveState? observedOwner = null;
+        Pal.Core.Events.TriggerScriptSession? observedSession = null;
+        Pal.Core.State.BattleRoleSnapshot? initialRoleOne = null, initialRoleZero = null;
+        Pal.Core.State.BattleRoleSnapshot? firstPrefixZero = null, firstPrefixOne = null;
+        Pal.Core.State.BattleRoleSnapshot? secondPrefixZero = null, secondPrefixOne = null;
+        Pal.Core.State.BattleRoleSnapshot? firstReturnedZero = null;
         bool firstPrefix = false, secondPrefix = false, firstOuterReturn = false;
         bool secondReturn = false, secondOuterReturn = false, secondMovement = false;
         bool observeSecondMovement = false;
         Guid secondOrigin = Guid.Empty, secondCall = Guid.Empty;
         int firstRewards = 0, secondRewards = 0;
-        Pal.Core.ClassicBattleLifecycleSession? firstLifecycle = null, secondLifecycle = null;
+        Pal.Core.Battle.ClassicBattleLifecycleSession? firstLifecycle = null, secondLifecycle = null;
         Exception? observationError = null;
         bool observedBattle = false, observedReturn = false;
         bool observeMovement = false, observedMovement = false;
-        Pal.Core.ExplorationState? beforeMovement = null;
-        Pal.Core.BattleRoleSnapshot? returnedRoleOne = null;
+        Pal.Core.Exploration.ExplorationState? beforeMovement = null;
+        Pal.Core.State.BattleRoleSnapshot? returnedRoleOne = null;
         Guid firstOrigin = Guid.Empty, firstCall = Guid.Empty;
         int navigation = 0;
         bool observedNavigation = false, secondSearch = false, observedSecondBattle = false;
         bool wrongOwnedRequestRejected = false, firstReplayRejected = false, secondReplayRejected = false;
         bool staleReceiptsRejected = false;
         Guid firstBattleRequest = Guid.Empty, secondBattleRequest = Guid.Empty;
-        Pal.Core.ClassicBattleLifecycleSession.CompletionReceipt? firstReceipt = null;
+        Pal.Core.Battle.ClassicBattleLifecycleSession.CompletionReceipt? firstReceipt = null;
         Action? echoInvariant = null;
         bool echoObserved = false, observeTargetMenu = false, targetMenuObserved = false;
         // Complete records are an invariance oracle, never the numeric expected-value bank.
@@ -181,7 +186,7 @@ public class SyntheticFirstBattleClosureTests
                 AssertThat(main.StoryExperienceGranted).IsEqual(experience);
             };
         }
-        void RejectReceipt(Guid request, Pal.Core.ClassicBattleLifecycleSession.CompletionReceipt receipt)
+        void RejectReceipt(Guid request, Pal.Core.Battle.ClassicBattleLifecycleSession.CompletionReceipt receipt)
         {
             var unchanged = CaptureStableBusinessState();
             AssertThat(main.Dialogue!.AcknowledgeBattle(request, receipt)).IsFalse();
@@ -288,7 +293,7 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(ReferenceEquals(initialRoleOne, firstPrefixOne)).IsFalse();
                     AssertThat(session!.CallId != Guid.Empty).IsTrue();
                     AssertThat(session.SourceRequestId).IsEqual(main.Battle!.PendingRequestId);
-                    AssertThat(session.Phase).IsEqual(Pal.Core.TriggerScriptPhase.WaitingForBattle);
+                    AssertThat(session.Phase).IsEqual(Pal.Core.Events.TriggerScriptPhase.WaitingForBattle);
                 }
                 if (secondSearch && !secondPrefix && !ReferenceEquals(firstReturnedZero, owner.Roles[0]))
                 {
@@ -302,7 +307,7 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(session!.CallId != firstCall).IsTrue();
                     AssertThat(session.SourceRequestId).IsEqual(main.Battle!.PendingRequestId);
                     AssertThat(session.SourceRequestId != firstOrigin).IsTrue();
-                    AssertThat(session.Phase).IsEqual(Pal.Core.TriggerScriptPhase.WaitingForBattle);
+                    AssertThat(session.Phase).IsEqual(Pal.Core.Events.TriggerScriptPhase.WaitingForBattle);
                 }
                 if (main.StoryBattle is { } lifecycle)
                 {
@@ -311,14 +316,14 @@ public class SyntheticFirstBattleClosureTests
                     // Enemy dex18 * .9..1.1 < player dex100 * .9..1.1;
                     // both HP1 slots die before any enemy action (including dual corpse hits).
                     if (lifecycle.Current.Combat.LastAction is { } action)
-                        AssertThat(action.Attacker).IsEqual(Pal.Core.ClassicBattleSide.Player);
+                        AssertThat(action.Attacker).IsEqual(Pal.Core.Battle.ClassicBattleSide.Player);
                     foreach (var player in lifecycle.Current.Combat.Players)
                         AssertThat(player.Hp).IsEqual(secondSearch ? (player.RoleId == 0 ? 120 : 95) : 97);
                     if (!secondSearch && !wrongOwnedRequestRejected && lifecycle.Completion is { } ownedReceipt)
                     {
                         wrongOwnedRequestRejected = true;
                         AssertThat(lifecycle.OwnsCompletion(ownedReceipt)).IsTrue();
-                        AssertThat(session!.Phase).IsEqual(Pal.Core.TriggerScriptPhase.WaitingForBattle);
+                        AssertThat(session!.Phase).IsEqual(Pal.Core.Events.TriggerScriptPhase.WaitingForBattle);
                         AssertThat(session.PendingBattle!.Id != Guid.Empty).IsTrue();
                         RejectReceipt(Guid.Empty, ownedReceipt); // owned receipt, wrong ID while waiting
                     }
@@ -372,7 +377,7 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(initialRoleOne.Mp).IsEqual(5);
                 }
                 if (main.StoryBattle is null && observedReturn && !secondSearch
-                    && session.Phase == Pal.Core.TriggerScriptPhase.Completed && !firstOuterReturn)
+                    && session.Phase == Pal.Core.Events.TriggerScriptPhase.Completed && !firstOuterReturn)
                 {
                     firstOuterReturn = true;
                     AssertRoleNumbers(owner.Roles[0], 123, 33, 52);
@@ -387,7 +392,7 @@ public class SyntheticFirstBattleClosureTests
                     activeScene?.Release(Key.Down);
                     var current = main.Exploration!;
                     AssertThat(firstOuterReturn).IsTrue();
-                    AssertThat(session!.Phase).IsEqual(Pal.Core.TriggerScriptPhase.Completed);
+                    AssertThat(session!.Phase).IsEqual(Pal.Core.Events.TriggerScriptPhase.Completed);
                     AssertThat(session.SourceRequestId).IsEqual(firstOrigin);
                     AssertThat(session.CallId).IsEqual(firstCall);
                     AssertThat(main.Battle!.PendingTrigger).IsNull();
@@ -463,7 +468,7 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(ReferenceEquals(secondPrefixOne, owner.Roles[1])).IsFalse();
                 }
                 if (main.StoryBattle is null && secondReturn && !secondOuterReturn
-                    && session.Phase == Pal.Core.TriggerScriptPhase.Completed)
+                    && session.Phase == Pal.Core.Events.TriggerScriptPhase.Completed)
                 {
                     secondOuterReturn = true;
                     AssertThat(session.SourceRequestId).IsEqual(secondOrigin);
@@ -511,7 +516,7 @@ public class SyntheticFirstBattleClosureTests
             {
                 var display = main.Dialogue?.Session?.PendingDisplay;
                 if (display is not null && ((frames & 15) == 0
-                    || display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
+                    || display.Display.Current.Phase == Pal.Core.Dialogue.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
                 { scene.Press(Key.Enter); pages++; }
                 frames++;
                 await scene.RunnerIdle();
@@ -535,19 +540,19 @@ public class SyntheticFirstBattleClosureTests
             // The Won continuation parks on @09FF displays after the battle view releases;
             // keep advancing until the call completes (same cadence as the pre-battle phase).
             ulong wonDeadline = Time.GetTicksMsec() + 60000;
-            while (main.Dialogue?.Session is { Phase: not Pal.Core.TriggerScriptPhase.Completed } session
+            while (main.Dialogue?.Session is { Phase: not Pal.Core.Events.TriggerScriptPhase.Completed } session
                 && main.Dialogue.Session.PendingLostReload is null && Time.GetTicksMsec() < wonDeadline)
             {
                 var wonDisplay = session.PendingDisplay;
                 if (wonDisplay is not null && ((frames & 15) == 0
-                    || wonDisplay.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
+                    || wonDisplay.Display.Current.Phase == Pal.Core.Dialogue.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
                     scene.Press(Key.Enter);
                 frames++;
                 await scene.RunnerIdle();
             }
             System.Console.WriteLine($"SYN_WON:pages={pages} rounds={rounds} completed={main.Dialogue?.Session?.Phase} lost={main.StoryLostTerminal}");
             AssertThat(main.StoryLostTerminal).IsFalse();
-            AssertThat(main.Dialogue?.Session?.Phase).IsEqual(Pal.Core.TriggerScriptPhase.Completed);
+            AssertThat(main.Dialogue?.Session?.Phase).IsEqual(Pal.Core.Events.TriggerScriptPhase.Completed);
             if (observationError is not null) throw observationError;
             AssertThat(observedBattle).IsTrue();
             AssertThat(observedReturn).IsTrue();
@@ -578,7 +583,7 @@ public class SyntheticFirstBattleClosureTests
             {
                 var display = main.Dialogue?.Session?.PendingDisplay;
                 if (display is not null && ((frames & 15) == 0
-                    || display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
+                    || display.Display.Current.Phase == Pal.Core.Dialogue.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
                     scene.Press(Key.Enter);
                 frames++;
                 await scene.RunnerIdle();
@@ -588,12 +593,12 @@ public class SyntheticFirstBattleClosureTests
             rounds = 0;
             // Completed here only drives input. The outer-return evidence is captured
             // synchronously on the next real committed movement, like the first cycle.
-            while ((main.StoryBattle is not null || main.Dialogue?.Session?.Phase != Pal.Core.TriggerScriptPhase.Completed)
+            while ((main.StoryBattle is not null || main.Dialogue?.Session?.Phase != Pal.Core.Events.TriggerScriptPhase.Completed)
                 && observationError is null && rounds++ < 3000)
             {
                 if (main.StoryBattle is not null) scene.Press(Key.Enter);
                 else if (main.Dialogue?.Session?.PendingDisplay is { } display
-                    && ((frames & 15) == 0 || display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
+                    && ((frames & 15) == 0 || display.Display.Current.Phase == Pal.Core.Dialogue.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
                     scene.Press(Key.Enter);
                 frames++;
                 await scene.RunnerIdle();
@@ -644,7 +649,7 @@ public class SyntheticFirstBattleClosureTests
                     AssertThat(ReferenceEquals(session, observedSession)).IsFalse();
                     AssertThat(ReferenceEquals(freshRandom, productionRandom)).IsFalse();
                     AssertThat(freshRandom.IsDisposed).IsFalse();
-                    AssertThat(session.Phase).IsEqual(Pal.Core.TriggerScriptPhase.Ready);
+                    AssertThat(session.Phase).IsEqual(Pal.Core.Events.TriggerScriptPhase.Ready);
                     AssertThat(world.PartyRoles.SequenceEqual(new[] { 0, 1 })).IsTrue();
                     AssertRoleNumbers(owner.Roles[0], 100, 20, 0);
                     AssertRoleNumbers(owner.Roles[1], 100, 5, 0);
@@ -692,7 +697,7 @@ public class SyntheticFirstBattleClosureTests
                         AssertThat(ReferenceEquals(lifecycle.Current, current)).IsTrue();
                         AssertThat(lifecycle.Completion).IsNull();
                         AssertThat(lifecycle.VictorySettlement).IsNull();
-                        AssertThat(session.Phase).IsEqual(Pal.Core.TriggerScriptPhase.WaitingForBattle);
+                        AssertThat(session.Phase).IsEqual(Pal.Core.Events.TriggerScriptPhase.WaitingForBattle);
                         AssertThat(session.PendingDisplay).IsNull();
                         AssertThat(session.CallId).IsEqual(call);
                         AssertThat(session.SourceRequestId).IsEqual(origin);
@@ -785,7 +790,7 @@ public class SyntheticFirstBattleClosureTests
             while (!activeCaptured && lifetimeError is null && Time.GetTicksMsec() < deadline)
             {
                 if (fresh.Dialogue?.Session?.PendingDisplay is { } display
-                    && ((frames & 15) == 0 || display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
+                    && ((frames & 15) == 0 || display.Display.Current.Phase == Pal.Core.Dialogue.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
                     PressFreshEnter();
                 frames++;
                 await exitRunner.AwaitIdleFrame();
@@ -868,12 +873,12 @@ public class SyntheticFirstBattleClosureTests
         const ulong replayInitialState = 1605564118000691017UL;
         var selection = GameSceneConfiguration.FromArguments("--m4-first-battle-profile", fixture.ProfileUri);
         var main = new Main();
-        Pal.Core.DynamicEventWorld? observedWorld = null;
-        Pal.Core.RoleLiveState? observedOwner = null;
-        Pal.Core.TriggerScriptSession? observedSession = null;
+        Pal.Core.Events.DynamicEventWorld? observedWorld = null;
+        Pal.Core.State.RoleLiveState? observedOwner = null;
+        Pal.Core.Events.TriggerScriptSession? observedSession = null;
         Pal.Game.Dialogue.GodotBattleRandom? observedRandom = null;
-        Pal.Core.ClassicBattleLifecycleSession? firstLifecycle = null;
-        Pal.Core.ClassicBattleLifecycleSession.CompletionReceipt? firstCompletion = null;
+        Pal.Core.Battle.ClassicBattleLifecycleSession? firstLifecycle = null;
+        Pal.Core.Battle.ClassicBattleLifecycleSession.CompletionReceipt? firstCompletion = null;
         Guid firstCall = Guid.Empty;
         Guid? firstOrigin = null;
         Exception? observationError = null;
@@ -899,7 +904,7 @@ public class SyntheticFirstBattleClosureTests
                 {
                     observedStartup = true;
                     AssertThat(inputSent).IsFalse();
-                    AssertThat(session.Phase).IsEqual(Pal.Core.TriggerScriptPhase.Ready);
+                    AssertThat(session.Phase).IsEqual(Pal.Core.Events.TriggerScriptPhase.Ready);
                     AssertThat(random.CurrentState).IsEqual((replayInitialSeed, replayInitialState));
                     observedWorld = world; observedOwner = owner;
                     observedSession = session; observedRandom = random;
@@ -931,7 +936,7 @@ public class SyntheticFirstBattleClosureTests
                         // First real owned receipt, sampled inside Main's completion callback.
                         firstCompletion = receipt;
                         AssertThat(firstLifecycle.OwnsCompletion(receipt)).IsTrue();
-                        AssertThat(receipt.Outcome).IsEqual(Pal.Core.ClassicBattlePhase.Lost);
+                        AssertThat(receipt.Outcome).IsEqual(Pal.Core.Battle.ClassicBattlePhase.Lost);
                     }
                 }
             }
@@ -961,7 +966,7 @@ public class SyntheticFirstBattleClosureTests
                 var display = main.Dialogue?.Session?.PendingDisplay;
                 if (main.StoryBattle is not null) scene.Press(Key.Enter);
                 else if (display is not null && ((frames & 15) == 0
-                    || display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
+                    || display.Display.Current.Phase == Pal.Core.Dialogue.DialogueDisplayPhase.WaitingForAdvance && (frames & 3) == 0))
                     scene.Press(Key.Enter);
                 frames++;
                 await scene.RunnerIdle();
@@ -980,7 +985,7 @@ public class SyntheticFirstBattleClosureTests
         }
     }
 
-    private static void AssertRoleNumbers(Pal.Core.BattleRoleSnapshot role, int hp, int mp, int experience)
+    private static void AssertRoleNumbers(Pal.Core.State.BattleRoleSnapshot role, int hp, int mp, int experience)
     {
         AssertThat(role.Hp).IsEqual(hp);
         AssertThat(role.Mp).IsEqual(mp);
@@ -1030,8 +1035,8 @@ public class SyntheticFirstBattleClosureTests
             preview.Start(entry.FileId, entry.Id, 28);
             while (preview.PendingDisplay is { } display)
             {
-                while (display.Display.Current.Phase != Pal.Core.DialogueDisplayPhase.Completed)
-                    display.Display.Update(display.Display.Current.Phase == Pal.Core.DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
+                while (display.Display.Current.Phase != Pal.Core.Dialogue.DialogueDisplayPhase.Completed)
+                    display.Display.Update(display.Display.Current.Phase == Pal.Core.Dialogue.DialogueDisplayPhase.WaitingForAdvance ? 100u : int.MaxValue, true, true);
                 preview.AcknowledgeDisplay(display.Id);
             }
             AssertThat(preview.PendingBattle).IsNotNull();
