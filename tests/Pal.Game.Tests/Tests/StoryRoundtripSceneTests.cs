@@ -248,8 +248,8 @@ public class StoryRoundtripSceneTests
             bool outputAbsentAfter = !Directory.Exists(rejectedOutput) && !File.Exists(rejectedOutput);
             GD.Print("PAL_HETEROGENEOUS_NEGATIVE_CONTROL:" + JsonSerializer.Serialize(new
             {
-                sourceBefore, sourceAfter, rejectedOutput, outputAbsentBefore, outputAbsentAfter,
-                sourceUnchanged, exception = rejection?.ToString()
+                sourceCount = sourceBefore.Count, rejectedOutput, outputAbsentBefore, outputAbsentAfter,
+                sourceUnchanged, exception = rejection?.Message
             }));
             const string missingFrame = "visual Teams[TeamId=18].EnemySlots[1]: enemy frame metadata references unaddressable frames";
             string expected = "^" + Regex.Escape(fixture.Root + "/RejectedStory/.story-package-")
@@ -268,7 +268,7 @@ public class StoryRoundtripSceneTests
             string[] restored = fixture.Snapshot();
             GD.Print("PAL_HETEROGENEOUS_NEGATIVE_RESTORED:" + JsonSerializer.Serialize(new
             {
-                positiveBytesUnchanged, originalAuthor, restoredAuthor = File.ReadAllBytes(authorPath), before, restored
+                positiveBytesUnchanged, authorBytes = originalAuthor.Length, restoredCount = restored.Length
             }));
             AssertThat(positiveBytesUnchanged).IsTrue();
             AssertThat(File.ReadAllBytes(authorPath).SequenceEqual(originalAuthor)).IsTrue();
