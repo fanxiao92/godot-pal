@@ -823,8 +823,7 @@ public class PrepareStoryPackageTests
         try { Reject(input, output, "reparse"); AssertThat(Directory.Exists(target)).IsTrue(); }
         finally
         {
-            if (OperatingSystem.IsWindows()) Directory.Delete(link);
-            else File.Delete(link);
+            GameProjectMount.DeleteDirectoryLink(link);
             if (kind == "events") Directory.Move(target, Path.Combine(source.Input, "events"));
         }
         AssertThat(Directory.Exists(source.Output)).IsFalse();

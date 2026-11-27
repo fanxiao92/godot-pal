@@ -50,6 +50,7 @@ Common Options:
   --explain              test affected: print file -> rule -> targets without running tests
   --all                  test affected: bypass incremental selection and run full
   --coverage             test unit: enable coverlet.collector XPlat Code Coverage
+  --blame-hang           test game: enable --blame-hang-timeout 2m and normal console logger
   --scenario <name>      test e2e: scenario name (default all)
   --gpu                  test e2e: real GPU mode
   --godot-path <path>    Explicit Godot executable path (overrides GODOT_BIN)
@@ -85,7 +86,7 @@ function Parse-Options {
         'static-resources', 'static-profile', 'battle-resources',
         'from', 'format', 'repo-root'
     )
-    $switchOptions = @('explain', 'all', 'coverage', 'gpu', 'json', 'help', 'include-real-assets')
+    $switchOptions = @('explain', 'all', 'coverage', 'blame-hang', 'gpu', 'json', 'help', 'include-real-assets')
 
     $i = 0
     while ($i -lt $Tokens.Count) {
@@ -220,6 +221,7 @@ function Invoke-DotnetTestStep {
 
     $prevGodot = $env:GODOT_BIN
     $prevPalGodot = $env:PAL_TEST_GODOT
+    $stepSw = [Diagnostics.Stopwatch]::StartNew()
     try {
         if ($GodotExe) {
             $env:GODOT_BIN = $GodotExe
@@ -229,6 +231,7 @@ function Invoke-DotnetTestStep {
         & dotnet @argsList
         $exitCode = $LASTEXITCODE
     } finally {
+        $stepSw.Stop()
         $env:GODOT_BIN = $prevGodot
         $env:PAL_TEST_GODOT = $prevPalGodot
     }
@@ -242,6 +245,14 @@ function Invoke-DotnetTestStep {
         $State.Passed += $trxCounts.passed
         $State.Failed += $trxCounts.failed
         $State.Skipped += $trxCounts.skipped
+        $State.Steps.Add([ordered]@{
+            name        = $Name
+            total       = $trxCounts.total
+            passed      = $trxCounts.passed
+            failed      = $trxCounts.failed
+            skipped     = $trxCounts.skipped
+            durationSec = [Math]::Round($stepSw.Elapsed.TotalSeconds, 2)
+        })
         if ($EmitJunit) {
             $junitPath = Join-Path (Join-Path $ArtifactsDir 'junit') "$Name.xml"
             Convert-TrxToJunit -TrxPath $trxPath -JunitPath $junitPath
@@ -348,6 +359,7 @@ function Invoke-GameTarget {
         [string]$GodotPathOpt,
         [switch]$IncludeRealAssets,
         [switch]$EmitJunit,
+        [switch]$BlameHang,
         [string]$ArtifactsDir,
         [hashtable]$State
     )
@@ -370,7 +382,7 @@ function Invoke-GameTarget {
     Invoke-DotnetTestStep -Name 'Pal.Game.Tests' `
         -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
         -ArtifactsDir $ArtifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
-        -Filter $combinedFilter -EmitJunit:$EmitJunit -BlameHang:$EmitJunit -GodotExe $godot -State $State
+        -Filter $combinedFilter -EmitJunit:$EmitJunit -BlameHang:($EmitJunit -or $BlameHang) -GodotExe $godot -State $State
 }
 
 function Invoke-LraTarget {
@@ -524,6 +536,7 @@ $state = @{
     Passed        = 0
     Failed        = 0
     Skipped       = 0
+    Steps         = [Collections.Generic.List[object]]::new()
     TrxFiles      = [Collections.Generic.List[string]]::new()
     CoverageFiles = [Collections.Generic.List[string]]::new()
     Coverage      = [Collections.Generic.List[object]]::new()
@@ -592,7 +605,7 @@ try {
                     Invoke-IntegrationTarget -ProjectScope $projectOpt -Filter $filterOpt -GodotPathOpt $godotOpt -ArtifactsDir $artifactsDir -State $state
                 }
                 'game' {
-                    Invoke-GameTarget -Categories $parsed.Multi['category'].ToArray() -Filter $filterOpt -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -ArtifactsDir $artifactsDir -State $state
+                    Invoke-GameTarget -Categories $parsed.Multi['category'].ToArray() -Filter $filterOpt -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -BlameHang:$parsed.Flags.ContainsKey('blame-hang') -ArtifactsDir $artifactsDir -State $state
                 }
                 'lra' {
                     Invoke-LraTarget
@@ -767,7 +780,7 @@ try {
 
 $summaryObj = New-RunSummaryObject -Command $commandLabel -Status $state.Status -ErrorMsg $state.ErrorMsg `
     -DurationSec $sw.Elapsed.TotalSeconds -Total $state.Total -Passed $state.Passed -Failed $state.Failed `
-    -Skipped $state.Skipped -TrxFiles $state.TrxFiles.ToArray() -CoverageFiles $state.CoverageFiles.ToArray() `
+    -Skipped $state.Skipped -Steps $state.Steps.ToArray() -TrxFiles $state.TrxFiles.ToArray() -CoverageFiles $state.CoverageFiles.ToArray() `
     -Coverage $state.Coverage.ToArray() -ArtifactsDir (ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $artifactsDir)
 
 $summaryPath = Write-RunSummaryJson -ArtifactsDir $artifactsDir -Summary $summaryObj

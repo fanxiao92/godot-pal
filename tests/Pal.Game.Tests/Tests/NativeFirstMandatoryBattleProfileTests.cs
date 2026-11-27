@@ -474,11 +474,7 @@ public class NativeFirstMandatoryBattleProfileTests
             AssertThat(Snapshot(target)).IsEqual(defect == "dangling-output-ancestor" ? "missing" : targetBefore);
             if (defect.StartsWith("input", StringComparison.Ordinal)) AssertThat(Directory.Exists(output)).IsFalse();
         }
-        finally
-        {
-            if (OperatingSystem.IsWindows()) Directory.Delete(link);
-            else File.Delete(link);
-        }
+        finally { GameProjectMount.DeleteDirectoryLink(link); }
         AssertThat(Snapshot(fixture.PreparationInput)).IsEqual(inputBefore);
         AssertThat(Directory.Exists(fixture.PreparationOutput)).IsFalse();
     }

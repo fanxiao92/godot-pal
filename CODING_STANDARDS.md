@@ -11,7 +11,10 @@ Review-time standards for `/code-review` (Standards axis). Deterministic checks 
 ## Architecture & Testing
 
 - **Pure .NET Core**: Keep `src/Pal.Core` free of Godot types, rendering, and platform I/O. Verify exact business timing through Core's deterministic explicit-time interfaces; verify engine wiring in `tests/Pal.Game.Tests` at real production completion boundaries (`UpdateCompleted`).
-- **Shared test helpers**: Extract repeated input-dispatch or project-mount boilerplate into shared helpers (`SceneRunnerInput`, `GameProjectMount`) instead of duplicating it across test suites.
+- **Shared test helpers**: Extract repeated input-dispatch, link-cleanup, or project-mount boilerplate into shared helpers (`SceneRunnerInput`, `GameProjectMount`, `GameProjectMount.DeleteDirectoryLink`) instead of duplicating it across test suites.
+- **Cross-project sample staging**: Any test in `tests/Pal.Game.Tests` calling `PrepareStoryPackage.Prepare` directly must wrap the call in `using (GameProjectMount.StageSamplesInTestProject())` so `res://Samples/AuthoredBattle` resolves on clean Linux/CI runners.
+- **Cross-platform filesystem assertions**: Never assume Windows-only `FileAttributes` bit combinations (e.g., `Normal | ReadOnly` normalizes to `ReadOnly` on Linux), Windows-only `FileShare.Read` writer conflicts (Linux `flock` requires `FileShare.None` for exclusive writer locks), or `Directory.Delete` on symlinks (`File.Delete` on non-Windows via `GameProjectMount.DeleteDirectoryLink`).
+- **Bounded diagnostic logging in Godot tests**: Print counts, lengths, or SHA256 digests in `GD.Print(...)` — never serialize full raw `byte[]` file dictionaries to stdout.
 - **Standalone Godot observers**: Every `.tscn` observer launched directly via `godot --path tests/Pal.Game.Tests` (outside GdUnit) must mount `src/Pal.Game` via `GameProjectMount.EnsureMounted()` before loading production scenes or resources.
 
 ## Documentation & Repo Hygiene
