@@ -6,7 +6,7 @@
     <TreatNoTestsAsError>true</TreatNoTestsAsError>
   </RunConfiguration>
   <GdUnit4>
-    <Parameters>--headless --audio-driver Dummy --verbose</Parameters>
+    <Parameters>--headless --audio-driver Dummy</Parameters>
     <DisplayName>FullyQualifiedName</DisplayName>
     <CaptureStdOut>true</CaptureStdOut>
     <CompileProcessTimeout>30000</CompileProcessTimeout>
