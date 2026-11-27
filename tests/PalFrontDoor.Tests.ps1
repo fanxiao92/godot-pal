@@ -342,6 +342,27 @@ try {
     Assert-True ($t3Md -match 'raw:sha256-0123456789abcdef \+ prepare:v1' -and $t3Md -match 'boot-and-explore/01-boot-scene4' -and $t3Md -match 'contact-sheet\.png' -and $t3Md -match '人工 5 分钟审阅清单') 'T3 report must render cacheKey, frame SHA256/diff table, contact sheet, and manual review checklist'
     Pass 'assets T3 validation and T3 PR evidence report rendering succeed'
 
+    # Case 22: check-ledger detects drift (exit 1 with regenerate command) and passes when synced
+    $ledgerRes = Invoke-Pal @('test', 'check-ledger')
+    Assert-Equal 0 $ledgerRes.ExitCode "check-ledger on synced repo must exit 0; stderr=$($ledgerRes.Stderr)"
+    $driftDir = Join-Path $workDir 'ledger-drift-test'
+    [void][IO.Directory]::CreateDirectory((Join-Path $driftDir 'docs/generated'))
+    # Copy real ledger and tamper one line, then point check-ledger via a lightweight junction/link to tools/src?
+    # Even cleaner: call Invoke-CapabilityLedgerCheck directly on a synthetic repo copy or tamper check via temp file.
+    # Let's test Pal.Extract export-capability-ledger -> tamper -> verify check fails when ledger differs.
+    Import-Module (Join-Path $repoRoot 'scripts/pal/CapabilityLedger.psm1') -Force
+    $realLedger = Join-Path $repoRoot 'docs/generated/capabilities-ledger.md'
+    $origBytes = [IO.File]::ReadAllBytes($realLedger)
+    try {
+        [IO.File]::WriteAllText($realLedger, ([Text.Encoding]::UTF8.GetString($origBytes) + "`n<!-- tampered -->`n"), $utf8)
+        $driftRes = Invoke-Pal @('test', 'check-ledger')
+        Assert-Equal 1 $driftRes.ExitCode 'tampered capabilities-ledger.md must cause check-ledger to exit 1'
+        Assert-True ($driftRes.Stderr -match 'check-ledger --update') "drift stderr must include regeneration command; got: $($driftRes.Stderr)"
+    } finally {
+        [IO.File]::WriteAllBytes($realLedger, $origBytes)
+    }
+    Pass 'test check-ledger passes when synced and fails with exit 1 on drift'
+
     $completed = $true
     Write-Host "PASS PalFrontDoor regression: $passedCount cases."
 } finally {

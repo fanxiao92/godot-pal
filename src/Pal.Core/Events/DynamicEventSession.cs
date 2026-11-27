@@ -416,6 +416,33 @@ public sealed class DynamicEventWorld
 /// owner: one due tick per call at the 100ms discrete cadence; a late tick never catches up.</summary>
 public sealed class DynamicEventSession
 {
+    /// <summary>Authoritative runtime auto-script opcode capability table. Guarded bidirectionally by
+    /// OpcodeCapabilityClosureTests against ValidateAutoClosure and consumed by Pal.Extract to derive
+    /// docs/generated/capabilities-ledger.md without regex source scanning.</summary>
+    public static IReadOnlyDictionary<int, OpcodeCapability> SupportedOpcodes { get; } = BuildSupportedOpcodes();
+
+    private static IReadOnlyDictionary<int, OpcodeCapability> BuildSupportedOpcodes()
+    {
+        OpcodeCapability[] items =
+        [
+            new(0x0000, "end", OpcodeSupportLevel.Full),
+            new(0x0001, "end", OpcodeSupportLevel.Full),
+            new(0x0002, "end", OpcodeSupportLevel.Full),
+            new(0x0003, "goto", OpcodeSupportLevel.Full),
+            new(0x0009, "waitUpdate", OpcodeSupportLevel.Full),
+            new(0x000B, "walkStep", OpcodeSupportLevel.Full),
+            new(0x000C, "walkStep", OpcodeSupportLevel.Full),
+            new(0x000D, "walkStep", OpcodeSupportLevel.Full),
+            new(0x000E, "walkStep", OpcodeSupportLevel.Full),
+            new(0x000F, "face", OpcodeSupportLevel.Full),
+            new(0x0010, "walkTo", OpcodeSupportLevel.Full),
+            new(0x0049, "setState", OpcodeSupportLevel.Full),
+            new(0x0052, "hide", OpcodeSupportLevel.Full)
+        ];
+        return new System.Collections.ObjectModel.ReadOnlyDictionary<int, OpcodeCapability>(
+            items.ToDictionary(item => item.Opcode));
+    }
+
     private readonly TriggerEventCollection events;
     private readonly DialogueLanguagePackage language;
     private readonly TriggerEventEntry entry;

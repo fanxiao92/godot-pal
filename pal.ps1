@@ -14,6 +14,7 @@ Import-Module (Join-Path $script:RepoRoot 'scripts/pal/PalCommon.psm1') -Force -
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/AffectedSelection.psm1') -Force
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/TestReport.psm1') -Force
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/T3Assets.psm1') -Force
+Import-Module (Join-Path $script:RepoRoot 'scripts/pal/CapabilityLedger.psm1') -Force
 
 function Show-Usage {
     @'
@@ -29,6 +30,7 @@ Commands:
        lra               Run tools/long-running-agent npm test
        full | all        Run committable full suite (map self-check + unit + integration + game)
        check-map         Run MSBuild dependency graph & tests/affected-map.psd1 self-check
+       check-ledger      Verify code-derived docs/generated/capabilities-ledger.md zero-drift (--update to regenerate)
 
   ci   dotnet            [T1/T2 Job 1] Syntax + boundary + map self-check + Unit (coverlet) + CLI integration
        prepare           [T1/T2 Job 2] Prepare integration tests (requires Godot)
@@ -88,7 +90,7 @@ function Parse-Options {
         'static-resources', 'static-profile', 'battle-resources',
         'from', 'format', 'repo-root'
     )
-    $switchOptions = @('explain', 'all', 'coverage', 'blame-hang', 'gpu', 'update-golden', 'json', 'help', 'include-real-assets')
+    $switchOptions = @('explain', 'all', 'coverage', 'blame-hang', 'gpu', 'update-golden', 'update', 'json', 'help', 'include-real-assets')
 
     $i = 0
     while ($i -lt $Tokens.Count) {
@@ -813,6 +815,9 @@ try {
                 'check-map' {
                     Invoke-MapSelfCheck
                 }
+                'check-ledger' {
+                    Invoke-CapabilityLedgerCheck -RepositoryRoot $script:RepoRoot -Update:$parsed.Flags.ContainsKey('update')
+                }
                 'e2e' {
                     $scenarioOpt = if ($parsed.Flags.ContainsKey('scenario')) { [string]$parsed.Flags['scenario'] } else { 'all' }
                     Invoke-E2ETarget -Gpu:$parsed.Flags.ContainsKey('gpu') `
@@ -825,7 +830,7 @@ try {
                 }
                 default {
                     $state.Status = 'error'
-                    throw "Unknown test subcommand '$testSub'. Expected: affected, unit, integration, game, e2e, lra, full, all, check-map."
+                    throw "Unknown test subcommand '$testSub'. Expected: affected, unit, integration, game, e2e, lra, full, all, check-map, check-ledger."
                 }
             }
         }
@@ -867,6 +872,7 @@ try {
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/UnitBoundary.Tests.ps1')
                     if ($LASTEXITCODE -ne 0) { throw "UnitBoundary.Tests.ps1 failed (exit $LASTEXITCODE)." }
                     Invoke-MapSelfCheck
+                    Invoke-CapabilityLedgerCheck -RepositoryRoot $script:RepoRoot
                     Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage -EmitJunit -ArtifactsDir $artifactsDir -State $state
                     Invoke-IntegrationTarget -ProjectScope 'extract' -Filter '' -GodotPathOpt '' -EmitJunit -ArtifactsDir $artifactsDir -State $state
                 }

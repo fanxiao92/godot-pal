@@ -14,6 +14,74 @@ public enum TriggerScriptContext { Event, RoleHook, BattleEnd }
 /// <summary>Runs the supported trigger slice to a real display, battle or stop boundary, never one opcode per tick.</summary>
 public sealed class TriggerScriptSession
 {
+    /// <summary>Authoritative runtime trigger opcode capability table. Guarded bidirectionally by
+    /// OpcodeCapabilityClosureTests against ValidateCapabilityClosure and consumed by Pal.Extract
+    /// to derive docs/generated/capabilities-ledger.md without regex source scanning.</summary>
+    public static IReadOnlyDictionary<int, OpcodeCapability> SupportedOpcodes { get; } = BuildSupportedOpcodes();
+
+    private static IReadOnlyDictionary<int, OpcodeCapability> BuildSupportedOpcodes()
+    {
+        OpcodeCapability[] items =
+        [
+            new(0x0000, "end", OpcodeSupportLevel.Full),
+            new(0x0001, "end", OpcodeSupportLevel.Full),
+            new(0x0002, "end", OpcodeSupportLevel.Full),
+            new(0x0003, "goto", OpcodeSupportLevel.Full),
+            new(0x0004, "call", OpcodeSupportLevel.Full),
+            new(0x0005, "redraw", OpcodeSupportLevel.Full, "World"),
+            new(0x0006, "randomJump", OpcodeSupportLevel.Full, "BattleRng"),
+            new(0x0007, "startBattle", OpcodeSupportLevel.Full, "Battle"),
+            new(0x0008, "advanceEntry", OpcodeSupportLevel.Full),
+            new(0x0009, "waitUpdate", OpcodeSupportLevel.Full, "World"),
+            new(0x000B, "walkStep", OpcodeSupportLevel.Full, "World"),
+            new(0x000C, "walkStep", OpcodeSupportLevel.Full, "World"),
+            new(0x000D, "walkStep", OpcodeSupportLevel.Full, "World"),
+            new(0x000E, "walkStep", OpcodeSupportLevel.Full, "World"),
+            new(0x000F, "face", OpcodeSupportLevel.Full, "World"),
+            new(0x0010, "walkTo", OpcodeSupportLevel.Full, "World"),
+            new(0x0013, "setObjectPosition", OpcodeSupportLevel.Full, "World"),
+            new(0x0014, "setObjectGesture", OpcodeSupportLevel.Full, "World"),
+            new(0x0015, "setPartyFacing", OpcodeSupportLevel.Full, "World"),
+            new(0x001B, "changeHp", OpcodeSupportLevel.Partial, "仅RoleHook单体"),
+            new(0x001C, "changeMp", OpcodeSupportLevel.Partial, "仅RoleHook单体"),
+            new(0x001D, "changeHpMp", OpcodeSupportLevel.Full, "World"),
+            new(0x001E, "changeCash", OpcodeSupportLevel.Full, "Cash"),
+            new(0x001F, "addItem", OpcodeSupportLevel.Full, "Inv"),
+            new(0x0020, "removeItem", OpcodeSupportLevel.Partial, "需完整Owner,非战中"),
+            new(0x0022, "revivePlayer", OpcodeSupportLevel.Partial, "仅HP,无解毒"),
+            new(0x0024, "setAutoEntry", OpcodeSupportLevel.Full, "World"),
+            new(0x0025, "setTriggerEntry", OpcodeSupportLevel.Full, "World"),
+            new(0x0026, "showBuyMenu", OpcodeSupportLevel.Full, "Shop"),
+            new(0x0027, "showSellMenu", OpcodeSupportLevel.Full, "Shop"),
+            new(0x0030, "boostStat", OpcodeSupportLevel.Partial, "仅RoleHook单体"),
+            new(0x003B, "setDialog", OpcodeSupportLevel.Partial, "RngWord=0"),
+            new(0x003C, "setDialog", OpcodeSupportLevel.Partial, "RngWord=0"),
+            new(0x003D, "setDialog", OpcodeSupportLevel.Partial, "RngWord=0"),
+            new(0x003E, "setDialog", OpcodeSupportLevel.Partial, "RngWord=0"),
+            new(0x0040, "setTriggerMode", OpcodeSupportLevel.Full, "World"),
+            new(0x0041, "markFailed", OpcodeSupportLevel.Full),
+            new(0x0043, "setMusic", OpcodeSupportLevel.Full, "State"),
+            new(0x0046, "setPartyPos", OpcodeSupportLevel.Full, "World"),
+            new(0x0049, "setState", OpcodeSupportLevel.Full, "World"),
+            new(0x004A, "setBattlefield", OpcodeSupportLevel.Full, "World"),
+            new(0x004E, "requestReload", OpcodeSupportLevel.Full),
+            new(0x004F, "fadeToRed", OpcodeSupportLevel.Full),
+            new(0x0050, "fadeOut", OpcodeSupportLevel.Full, "World"),
+            new(0x0052, "hide", OpcodeSupportLevel.Full, "World"),
+            new(0x0058, "itemShortageJump", OpcodeSupportLevel.Full, "Inv"),
+            new(0x006D, "setSceneScripts", OpcodeSupportLevel.Full, "World"),
+            new(0x0073, "fadeScene", OpcodeSupportLevel.Full, "World"),
+            new(0x0075, "setParty", OpcodeSupportLevel.Full, "World"),
+            new(0x0078, "noop", OpcodeSupportLevel.Full),
+            new(0x008F, "halveCash", OpcodeSupportLevel.Full, "Cash"),
+            new(0x0090, "setObjectScript", OpcodeSupportLevel.Full, "World"),
+            new(0x009A, "setStateRange", OpcodeSupportLevel.Full, "World"),
+            new(0xFFFF, "showDialog", OpcodeSupportLevel.Full)
+        ];
+        return new System.Collections.ObjectModel.ReadOnlyDictionary<int, OpcodeCapability>(
+            items.ToDictionary(item => item.Opcode));
+    }
+
     private readonly TriggerEventCollection _events;
     private readonly DialogueLanguagePackage _language;
     private int _address;
