@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using GdUnit4;
 using Godot;
+using Pal.Core;
+using Pal.Game.Dialogue;
 using Pal.Game.Map;
 using static GdUnit4.Assertions;
 
@@ -12,117 +16,6 @@ namespace Pal.Game.Tests;
 [TestCategory("Exploration")]
 public class NpcInteractionHostTests
 {
-    [TestCase("matched", Timeout = 20000)]
-    [TestCase("dialogue", Timeout = 20000)]
-    [TestCase("palette", Timeout = 20000)]
-    public async Task RealDialogueFixture_binds_evidence_to_consumed_resource_paths(string kind)
-    {
-        using var fixture = new NpcInteractionFixture();
-        fixture.CopyDialogue();
-        string paletteUri = fixture.Static.Root + "/Palette.tres";
-        string otherPaletteUri = fixture.Static.Root + "/OtherPalette.tres";
-        NativeProfileFixture.SaveResource(fixture.Static.Scene.Palette, paletteUri);
-        File.Copy(ProjectSettings.GlobalizePath(paletteUri), ProjectSettings.GlobalizePath(otherPaletteUri));
-        fixture.Static.Scene.Palette = ResourceLoader.Load<Pal.Game.Resources.PalPalette>(paletteUri);
-        fixture.Static.SavePacked();
-        fixture.Rehash();
-        string actualDialogue = Path.GetFullPath(ProjectSettings.GlobalizePath(fixture.Profile.DialogueDirectory));
-        string actualPalette = Path.GetFullPath(ProjectSettings.GlobalizePath(paletteUri));
-        string providedDialogue = kind == "dialogue"
-            ? Path.GetFullPath(ProjectSettings.GlobalizePath("res://Tests/Fixtures/TriggerDialogue")) : actualDialogue;
-        string providedPalette = kind == "palette" ? Path.GetFullPath(ProjectSettings.GlobalizePath(otherPaletteUri)) : actualPalette;
-        // Both mismatch inputs exist and are byte-identical: hashes cannot establish path identity.
-        AssertThat(Godot.FileAccess.GetSha256(providedDialogue + "/Font.tres"))
-            .IsEqual(Godot.FileAccess.GetSha256(actualDialogue + "/Font.tres"));
-        AssertThat(Godot.FileAccess.GetSha256(providedPalette)).IsEqual(Godot.FileAccess.GetSha256(actualPalette));
-        string parent = OS.GetEnvironment("PAL_RESOURCE_IDENTITY_TEST_EVIDENCE");
-        string evidence = Path.Combine(string.IsNullOrEmpty(parent) ? Path.GetTempPath() : parent, "pal-resource-identity-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(evidence);
-        try
-        {
-            var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
-                "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri],
-                new System.Collections.Generic.Dictionary<string, string?>
-                {
-                    ["PAL_DIALOGUE_GPU_EVIDENCE"] = evidence,
-                    ["PAL_DIALOGUE_NATIVE_ROOT"] = providedDialogue,
-                    ["PAL_DIALOGUE_PALETTE"] = providedPalette
-                });
-            File.WriteAllText(Path.Combine(evidence, "child.log"), result.Text);
-            File.WriteAllText(Path.Combine(evidence, "exit-code.txt"), result.ExitCode.ToString());
-            foreach (string line in result.Text.Split('\n')) GD.Print("Identity child: " + line);
-            if (kind == "matched")
-            {
-                AssertThat(result.ExitCode).IsEqual(0);
-                AssertThat(result.Text.Contains("PAL_INTERACTION_END:language=zh-Hans:calls=2:entry=0188:completed=true")).IsTrue();
-                using var identity = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(evidence, "resource-identity.json")));
-                AssertThat(identity.RootElement.GetProperty("NativeDialogueDirectory").GetString()).IsEqual(actualDialogue);
-                AssertThat(identity.RootElement.GetProperty("PalettePath").GetString()).IsEqual(actualPalette);
-            }
-            else
-            {
-                AssertThat(result.ExitCode).IsEqual(1);
-                string field = kind == "dialogue" ? "NativeDialogueDirectory" : "PalettePath";
-                AssertThat(result.Text.Contains(field + " identity mismatch", StringComparison.Ordinal)).IsTrue();
-                AssertThat(result.Text.Contains("provided='" + (kind == "dialogue" ? providedDialogue : providedPalette) + "'", StringComparison.Ordinal)).IsTrue();
-                AssertThat(result.Text.Contains("actual='" + (kind == "dialogue" ? actualDialogue : actualPalette) + "'", StringComparison.Ordinal)).IsTrue();
-                AssertThat(result.Text.Contains("PAL_INTERACTION_BEGIN")).IsFalse();
-                AssertThat(result.Text.Contains("completed=true")).IsFalse();
-                AssertThat(File.Exists(Path.Combine(evidence, "resource-identity.json"))).IsFalse();
-            }
-        }
-        finally { if (string.IsNullOrEmpty(parent)) Directory.Delete(evidence, true); }
-    }
-
-    [TestCase("evidence-only", Timeout = 20000)]
-    [TestCase("native-only", Timeout = 20000)]
-    [TestCase("palette-only", Timeout = 20000)]
-    public async Task RealDialogueFixture_headless_evidence_does_not_require_GPU_inputs_but_rejects_partial_inputs(string kind)
-    {
-        using var fixture = new NpcInteractionFixture();
-        string paletteUri = fixture.Static.Root + "/Palette.tres";
-        if (kind != "evidence-only")
-            NativeProfileFixture.SaveResource(fixture.Static.Scene.Palette, paletteUri);
-        string parent = OS.GetEnvironment("PAL_RESOURCE_IDENTITY_TEST_EVIDENCE");
-        string evidence = Path.Combine(string.IsNullOrEmpty(parent) ? Path.GetTempPath() : parent, "pal-headless-evidence-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(evidence);
-        try
-        {
-            // Null explicitly removes inherited GPU inputs from the child's environment.
-            var environment = new System.Collections.Generic.Dictionary<string, string?>
-            {
-                ["PAL_DIALOGUE_GPU_EVIDENCE"] = evidence,
-                ["PAL_DIALOGUE_NATIVE_ROOT"] = kind == "native-only" ? ProjectSettings.GlobalizePath(fixture.Profile.DialogueDirectory) : null,
-                ["PAL_DIALOGUE_PALETTE"] = kind == "palette-only" ? ProjectSettings.GlobalizePath(paletteUri) : null
-            };
-            File.WriteAllText(Path.Combine(evidence, "environment.json"), System.Text.Json.JsonSerializer.Serialize(environment));
-            var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
-                "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri], environment);
-            File.WriteAllText(Path.Combine(evidence, "child.log"), result.Text);
-            File.WriteAllText(Path.Combine(evidence, "exit-code.txt"), result.ExitCode.ToString());
-            foreach (string line in result.Text.Split('\n')) GD.Print("Headless evidence child: " + line);
-            if (kind == "evidence-only")
-            {
-                AssertThat(result.ExitCode).IsEqual(0);
-                AssertThat(result.Text.Contains("PAL_INTERACTION_END:language=zh-Hans:calls=2:entry=0188:completed=true")).IsTrue();
-                using var output = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(evidence, "fixture-result.json")));
-                AssertThat(output.RootElement.GetProperty("completed").GetBoolean()).IsTrue();
-                AssertThat(output.RootElement.GetProperty("failures").GetInt32()).IsEqual(0);
-                AssertThat(output.RootElement.GetProperty("actualMain").GetBoolean()).IsTrue();
-                AssertThat(output.RootElement.GetProperty("callsCompleted").GetInt32()).IsEqual(2);
-                AssertThat(File.Exists(Path.Combine(evidence, "resource-identity.json"))).IsFalse();
-            }
-            else
-            {
-                AssertThat(result.ExitCode).IsEqual(1);
-                AssertThat(result.Text.Contains("GPU resource identity requires both PAL_DIALOGUE_NATIVE_ROOT and PAL_DIALOGUE_PALETTE", StringComparison.Ordinal)).IsTrue();
-                AssertThat(result.Text.Contains("PAL_INTERACTION_BEGIN")).IsFalse();
-                AssertThat(result.Text.Contains("completed=true")).IsFalse();
-                AssertThat(File.Exists(Path.Combine(evidence, "resource-identity.json"))).IsFalse();
-            }
-        }
-        finally { if (string.IsNullOrEmpty(parent)) Directory.Delete(evidence, true); }
-    }
 
     [TestCase("mixed")]
     [TestCase("duplicate-profile")]
@@ -203,12 +96,14 @@ public class NpcInteractionHostTests
             command["op"] = "raw"; command["source"]!["opcode"] = 0x7777;
             File.WriteAllText(path, root.ToJsonString()); fixture.Rehash();
         }
-        var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
-            "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri]);
-        foreach (string line in result.Text.Split('\n')) GD.Print("Rejected child: " + line);
-        AssertThat(result.ExitCode).IsEqual(1);
-        AssertThat(result.Text.Contains(diagnostic, StringComparison.OrdinalIgnoreCase)).IsTrue();
-        AssertThat(result.Text.Contains("PAL_INTERACTION_COMPLETE")).IsFalse();
+        var selection = GameSceneConfiguration.FromArguments("--m3-dialogue-profile", fixture.Uri);
+        using var host = new InteractionHost(selection);
+        await host.Wait(() => host.Updates > 0);
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Failure is not null || host.Failures.Count > 0);
+        string failure = host.Main.Failure ?? host.Failures[0];
+        AssertThat(failure.Contains(diagnostic, StringComparison.OrdinalIgnoreCase)).IsTrue();
+        AssertThat(host.Main.Display?.Current?.Phase == DialogueDisplayPhase.WaitingForAdvance).IsFalse();
     }
 
     [TestCase(Timeout = 20000)]
@@ -219,25 +114,40 @@ public class NpcInteractionHostTests
         File.WriteAllText(path, File.ReadAllText(path).Replace("Text = \"AB)\"", "Text = \"AB:\"")
             .Replace("Entries = Array[Resource]([SubResource(\"Entry0\"), SubResource(\"Entry1\")])", "Entries = Array[Resource]([SubResource(\"Entry0\")])"));
         fixture.Rehash();
-        var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
-            "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri]);
-        foreach (string line in result.Text.Split('\n')) GD.Print("No-wait child: " + line);
-        AssertThat(result.ExitCode).IsEqual(0);
-        AssertThat(result.Text.Contains("PAL_INTERACTION_END:language=zh-Hans:calls=2:entry=0188:completed=true")).IsTrue();
-        AssertThat(result.Text.Contains("ERROR:")).IsFalse();
+        var selection = GameSceneConfiguration.FromArguments("--m3-dialogue-profile", fixture.Uri);
+        using var host = new InteractionHost(selection);
+        await host.Wait(() => host.Updates > 0);
+        for (int call = 0; call < 2; call++)
+        {
+            host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Dialogue!.Session!.Phase == TriggerScriptPhase.Completed);
+            AssertThat(host.Main.Dialogue!.Session!.ReturnEntry).IsEqual(0x0188);
+            AssertThat(host.Main.Dialogue.Session.Caller).IsEqual(60);
+            await host.Wait(() => host.Main.Interaction!.Phase == NpcInteractionPhase.Exploring);
+        }
+        host.AssertHealthy();
     }
 
     [TestCase(Timeout = 20000)]
     public async Task Actual_Main_preserves_direction_pressed_to_end_wait_through_return_and_processes_release()
     {
         using var fixture = new NpcInteractionFixture();
-        var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
-            "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri],
-            new System.Collections.Generic.Dictionary<string, string?> { ["PAL_DIALOGUE_HELD_WAIT_TEST"] = "1" });
-        foreach (string line in result.Text.Split('\n')) GD.Print("Held wait child: " + line);
-        AssertThat(result.ExitCode).IsEqual(0);
-        AssertThat(result.Text.Contains("PAL_WAIT_DIRECTION_HELD:actualMain=true:first-return-step=1248,1344:release-processed=true")).IsTrue();
-        AssertThat(result.Text.Contains("ERROR:")).IsFalse();
+        var selection = GameSceneConfiguration.FromArguments("--m3-dialogue-profile", fixture.Uri);
+        using var host = new InteractionHost(selection);
+        await host.Wait(() => host.Updates > 0);
+        host.Tap(Key.Enter);
+        await host.Wait(() => host.Main.Display?.Current?.Phase == DialogueDisplayPhase.WaitingForAdvance);
+        host.Press(Key.Right);
+        await host.Wait(() => host.Main.Interaction!.Phase == NpcInteractionPhase.Exploring
+            && host.Main.Exploration!.Leader.X == 1248 && host.Main.Exploration.Leader.Y == 1344);
+        host.Release(Key.Right);
+        short xAfter = host.Main.Exploration!.Leader.X;
+        short yAfter = host.Main.Exploration.Leader.Y;
+        int updatesAfter = host.Updates;
+        await host.Wait(() => host.Updates > updatesAfter + 3);
+        AssertThat(host.Main.Exploration.Leader.X).IsEqual(xAfter);
+        AssertThat(host.Main.Exploration.Leader.Y).IsEqual(yAfter);
+        host.AssertHealthy();
     }
 
     [TestCase("zh-Hans", Timeout = 20000)]
@@ -245,12 +155,70 @@ public class NpcInteractionHostTests
     public async Task Actual_Main_search_executes_full_event_returns_and_repeats(string language)
     {
         using var fixture = new NpcInteractionFixture();
-        var result = await MainProcessTests.Run(["--headless", "--path", ProjectSettings.GlobalizePath("res://"),
-            "res://Tests/RealDialogueFixture.tscn", "--", "--m3-dialogue-profile", fixture.Uri, "--m3-dialogue-language", language]);
-        foreach (string line in result.Text.Split('\n')) GD.Print("Interaction child: " + line);
-        AssertThat(result.ExitCode).IsEqual(0);
-        AssertThat(result.Text.Contains($"PAL_INTERACTION_END:language={language}:calls=2:entry=0188:completed=true")).IsTrue();
-        AssertThat(result.Text.Contains("ERROR:")).IsFalse();
+        var selection = GameSceneConfiguration.FromArguments("--m3-dialogue-profile", fixture.Uri, "--m3-dialogue-language", language);
+        using var host = new InteractionHost(selection);
+        await host.Wait(() => host.Updates > 0);
+        AssertThat(host.Main.SelectedLanguage).IsEqual(language);
+        for (int call = 0; call < 2; call++)
+        {
+            host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Display?.Current?.Phase == DialogueDisplayPhase.WaitingForAdvance);
+            host.Tap(Key.Enter);
+            await host.Wait(() => host.Main.Dialogue!.Session!.Phase == TriggerScriptPhase.Completed);
+            AssertThat(host.Main.Dialogue!.Session!.ReturnEntry).IsEqual(0x0188);
+            AssertThat(host.Main.Dialogue.Session.Caller).IsEqual(60);
+            await host.Wait(() => host.Main.Interaction!.Phase == NpcInteractionPhase.Exploring);
+        }
+        host.AssertHealthy();
+    }
+
+    private sealed class InteractionHost : IDisposable
+    {
+        internal Main Main { get; } = new();
+        private readonly ISceneRunner runner;
+        private readonly HashSet<Key> held = [];
+        internal int Updates { get; private set; }
+        internal List<string> Failures { get; } = [];
+
+        public InteractionHost(GameSceneConfiguration selection)
+        {
+            Main.Configure(selection);
+            Main.Failed += msg => Failures.Add(msg);
+            Main.UpdateCompleted += () => Updates++;
+            var container = new Node();
+            container.AddChild(Main);
+            runner = ISceneRunner.Load(container, autoFree: true);
+        }
+
+        public void AssertHealthy()
+        {
+            AssertThat(Main.Failure).IsNull();
+            AssertThat(Failures.Count).IsEqual(0);
+        }
+
+        public void Press(Key key) { held.Add(key); runner.SimulateKeyPress(key); }
+        public void Release(Key key) { runner.SimulateKeyRelease(key); held.Remove(key); }
+        public void Tap(Key key) { Press(key); Release(key); }
+
+        public async Task Wait(Func<bool> predicate, int timeoutMs = 15000)
+        {
+            ulong start = Time.GetTicksMsec();
+            while (!predicate())
+            {
+                if (Time.GetTicksMsec() - start > (ulong)timeoutMs)
+                    throw new TimeoutException("Timed out waiting for interaction condition; failure=" + Main.Failure);
+                await runner.AwaitIdleFrame();
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var key in held.ToArray()) runner.SimulateKeyRelease(key);
+            runner.Dispose();
+            if (GodotObject.IsInstanceValid(Main)) Main.Free();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
     }
 
     [TestCase(Timeout = 20000)]

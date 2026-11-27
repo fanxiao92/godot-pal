@@ -1,0 +1,46 @@
+name: boot-and-explore
+version: "1"
+description: "Real Scene 4 / Map 10 startup, collision boundary check, exploration walking, and clean exit."
+timeoutSeconds: 90
+tolerancePercent: 1.0
+args:
+  - --m3-static-resources
+  - res://Assets/T3Real/Scene4
+  - --m3-static-profile
+  - res://Assets/T3Real/Scene4/Exploration.tres
+steps:
+  - action: wait
+    condition: "updates >= 1"
+    timeoutMs: 15000
+  - action: assert
+    assertions:
+      - "failure == null"
+      - "leader.x == 1232"
+      - "leader.y == 1336"
+  - action: capture
+    name: "01-boot-scene4"
+    settleFrames: 3
+  # South neighbor (1216,1344) is occupied by owner 60: holding Down must collide without moving.
+  - action: key_hold
+    key: Down
+    holdUpdates: 4
+    timeoutMs: 10000
+  - action: assert
+    assertions:
+      - "leader.x == 1232"
+      - "leader.y == 1336"
+  - action: capture
+    name: "02-collision-blocked"
+    settleFrames: 2
+  # East neighbor (1248,1344) is walkable: holding Right moves leader cleanly.
+  - action: key_hold
+    key: Right
+    condition: "leader.x == 1248 && leader.y == 1344"
+    timeoutMs: 10000
+  - action: assert
+    assertions:
+      - "leader.x == 1248"
+      - "leader.y == 1344"
+  - action: capture
+    name: "03-walked-east"
+    settleFrames: 2

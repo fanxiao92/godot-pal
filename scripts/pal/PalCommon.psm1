@@ -41,7 +41,7 @@ function Resolve-GodotBinary {
         if ($cmd) { return $cmd.Source }
         throw "Configured Godot executable not found: $candidate"
     }
-    foreach ($name in @('godot-mono.console.exe', 'godot-mono', 'godot')) {
+    foreach ($name in @('godot-mono.console.exe', 'godot-mono.exe', 'godot-mono', 'godot')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
         if ($cmd) { return $cmd.Source }
     }
@@ -87,9 +87,10 @@ function New-RunSummaryObject {
         [AllowEmptyCollection()][string[]]$TrxFiles = @(),
         [AllowEmptyCollection()][string[]]$CoverageFiles = @(),
         [AllowEmptyCollection()][object[]]$Coverage = @(),
+        [AllowNull()][object]$E2E = $null,
         [Parameter(Mandatory)][string]$ArtifactsDir
     )
-    return [ordered]@{
+    $obj = [ordered]@{
         command       = $Command
         status        = $Status
         errorMsg      = $ErrorMsg
@@ -105,6 +106,10 @@ function New-RunSummaryObject {
         coverage      = @($Coverage)
         artifactsDir  = $ArtifactsDir
     }
+    if ($null -ne $E2E) {
+        $obj['e2e'] = $E2E
+    }
+    return $obj
 }
 
 Export-ModuleMember -Function @(

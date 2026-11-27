@@ -1,0 +1,63 @@
+name: real-dialogue-bilingual
+version: "1"
+description: "Real Scene 4 / Map 10 / owner 60 (0x0188) NPC dialogue in both zh-Hans and en."
+timeoutSeconds: 90
+tolerancePercent: 1.0
+sessions:
+  - name: zh-Hans
+    args:
+      - --m3-dialogue-profile
+      - res://Assets/T3Real/Scene4/NpcInteraction.tres
+      - --m3-dialogue-language
+      - zh-Hans
+    steps:
+      - action: wait
+        condition: "updates >= 1"
+        timeoutMs: 15000
+      - action: assert
+        assertions:
+          - "language == zh-Hans"
+          - "interaction.phase == Exploring"
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "dialogue.active == true && dialogue.phase == WaitingForAdvance"
+        timeoutMs: 15000
+      - action: capture
+        name: "01-dialogue-zh"
+        settleFrames: 3
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "dialogue.active == false && interaction.phase == Exploring"
+        timeoutMs: 15000
+      - action: capture
+        name: "02-restored-zh"
+        settleFrames: 2
+  - name: en
+    args:
+      - --m3-dialogue-profile
+      - res://Assets/T3Real/Scene4/NpcInteraction.tres
+      - --m3-dialogue-language
+      - en
+    steps:
+      - action: wait
+        condition: "updates >= 1"
+        timeoutMs: 15000
+      - action: assert
+        assertions:
+          - "language == en"
+          - "interaction.phase == Exploring"
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "dialogue.active == true && dialogue.phase == WaitingForAdvance"
+        timeoutMs: 15000
+      - action: capture
+        name: "03-dialogue-en"
+        settleFrames: 3
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "dialogue.active == false && interaction.phase == Exploring"
+        timeoutMs: 15000

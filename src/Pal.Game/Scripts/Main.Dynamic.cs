@@ -45,7 +45,7 @@ public partial class Main
             display.Failed += DisplayFailed;
             display.ActivePaletteChanged += colors =>
             {
-                if (Failure is null || exited) return;
+                if (Failure is not null || exited) return;
                 checkedStory.Exploration.SetPalette(map.Data, colors);
                 if (dynamicSession is { } dynamic) map.UpdateScene(dynamic.Current.Plan);
             };
@@ -91,22 +91,23 @@ public partial class Main
         bool changed = dynamic.Update(unchecked((uint)Time.GetTicksMsec()));
         BindDynamicDisplay();
         CompleteDynamicTransition();
-        if (dynamic.PendingTrigger is null && dynamic.Trigger is null) dynamicDrawn = false;
-        else if (dynamic.PendingTrigger is not null && !dynamicDrawn)
+        if (dynamic.PendingTrigger is null || dynamic.Trigger is not null) dynamicDrawn = false;
+        else if (!dynamicDrawn)
         {
             // PAL_Search redraws the searched pose; the call starts only after that draw.
             // The headless runner has no presented frame, so the redraw boundary is the callback.
             if (DisplayServer.GetName() == "headless") StartDynamicTrigger();
+            else dynamicDrawn = true;
         }
         if (changed) mapScene!.UpdateScene(dynamic.Current.Plan);
     }
 
     private void StartDynamicTrigger()
     {
-        if (dynamicSession is not { } dynamic || dynamic.PendingTrigger is not { } request) return;
+        if (dynamicSession is not { } dynamic || dynamic.PendingTrigger is not { } request || dynamic.Trigger is not null) return;
         try
         {
-            dynamicDrawn = true;
+            dynamicDrawn = false;
             _ = dynamic.StartTrigger(request.Id);
             BindDynamicDisplay();
         }

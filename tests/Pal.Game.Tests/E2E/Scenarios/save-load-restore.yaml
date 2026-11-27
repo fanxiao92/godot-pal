@@ -1,0 +1,289 @@
+name: save-load-restore
+version: "1"
+description: "Covers all 5 #231 interactions across two separate processes: browse/cancel/save -> cross-process restart & load -> defeat reload recovery slot -> defeat without recovery slot."
+timeoutSeconds: 120
+tolerancePercent: 1.0
+phases:
+  - name: process-1-save-and-cancel
+    saveNamespace: "user://t3-e2e-save-load-restore"
+    cleanupSaveBefore: true
+    cleanupSaveAfter: false
+    args:
+      - --story-profile
+      - res://Assets/T3Real/BattleStory/Story/Story.tres
+      - --battle-visual-profile
+      - res://Assets/T3Real/BattleStory/Story/Visual.tres
+      - --battle-seed
+      - "42"
+      - --story-language
+      - en
+      - --save-directory
+      - user://t3-e2e-save-load-restore
+    steps:
+      - action: wait
+        condition: "updates >= 1"
+        timeoutMs: 15000
+      - action: assert
+        assertions:
+          - "menu.mode == Closed"
+          - "recoverySlot == null"
+          - "slot2.exists == false"
+      # 1) System menu -> SAVE -> browse 5 slots without writing
+      - action: key_tap
+        key: Escape
+      - action: wait
+        condition: "menu.mode == MainMenu"
+      - action: key_tap
+        key: Down
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "menu.mode == SystemItems"
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "menu.mode == SystemMenu"
+      - action: key_tap
+        key: Down
+      - action: wait
+        condition: "menu.selectedSaveSlot == 2"
+      - action: key_tap
+        key: Down
+      - action: wait
+        condition: "menu.selectedSaveSlot == 3"
+      - action: assert
+        assertions:
+          - "slot1.exists == false"
+          - "slot2.exists == false"
+          - "slot3.exists == false"
+          - "recoverySlot == null"
+      - action: capture
+        name: "01-save-browse"
+        settleFrames: 2
+      # 2) Cancel save without writing or mutating state
+      - action: key_tap
+        key: Escape
+      - action: wait
+        condition: "menu.mode == SystemItems"
+      - action: key_tap
+        key: Escape
+      - action: wait
+        condition: "menu.mode == MainMenu"
+      - action: key_tap
+        key: Escape
+      - action: wait
+        condition: "menu.mode == Closed"
+      - action: assert
+        assertions:
+          - "slot1.exists == false"
+          - "slot2.exists == false"
+          - "slot3.exists == false"
+          - "recoverySlot == null"
+      # 3) Re-enter SAVE, select slot 2, confirm write
+      - action: key_tap
+        key: Escape
+      - action: wait
+        condition: "menu.mode == MainMenu"
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "menu.mode == SystemItems"
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "menu.mode == SystemMenu"
+      - action: key_tap
+        key: Up
+      - action: wait
+        condition: "menu.selectedSaveSlot == 2"
+      - action: key_tap
+        key: Enter
+      - action: wait
+        condition: "recoverySlot == 2"
+      - action: assert
+        assertions:
+          - "slot2.exists == true"
+          - "slot1.exists == false"
+          - "slot3.exists == false"
+      - action: capture
+        name: "02-save-confirmed"
+        settleFrames: 2
+  - name: process-2-restart-load-and-defeat
+    sessions:
+      # 4) Cross-process restart -> walk away -> LOAD slot 2 -> restore saved coordinates
+      - name: cross-process-load
+        saveNamespace: "user://t3-e2e-save-load-restore"
+        cleanupSaveBefore: false
+        cleanupSaveAfter: true
+        args:
+          - --story-profile
+          - res://Assets/T3Real/BattleStory/Story/Story.tres
+          - --battle-visual-profile
+          - res://Assets/T3Real/BattleStory/Story/Visual.tres
+          - --battle-seed
+          - "42"
+          - --story-language
+          - en
+          - --save-directory
+          - user://t3-e2e-save-load-restore
+        steps:
+          - action: wait
+            condition: "updates >= 1"
+            timeoutMs: 15000
+          - action: assert
+            assertions:
+              - "slot2.exists == true"
+              - "recoverySlot == null"
+              - "leader.x == 320"
+              - "leader.y == 320"
+          - action: key_hold
+            key: Left
+            condition: "leader.x == 304 && leader.y == 312"
+            timeoutMs: 10000
+          - action: key_tap
+            key: Escape
+          - action: wait
+            condition: "menu.mode == MainMenu"
+          - action: key_tap
+            key: Down
+          - action: key_tap
+            key: Enter
+          - action: wait
+            condition: "menu.mode == SystemItems"
+          - action: key_tap
+            key: Down
+          - action: key_tap
+            key: Enter
+          - action: wait
+            condition: "menu.mode == SystemMenu && menu.systemIntent == Load"
+          - action: key_tap
+            key: Down
+          - action: wait
+            condition: "menu.selectedSaveSlot == 2"
+          - action: key_tap
+            key: Enter
+          - action: wait
+            condition: "menu.mode == Closed && leader.x == 320 && leader.y == 320"
+            timeoutMs: 15000
+          - action: assert
+            assertions:
+              - "recoverySlot == 2"
+              - "leader.x == 320"
+              - "leader.y == 320"
+          - action: capture
+            name: "03-loaded-after-restart"
+            settleFrames: 2
+      # 5a) Defeat -> loss story -> reload recovery slot (returns to saved state)
+      - name: defeat-reload-recovery-slot
+        saveNamespace: "user://t3-e2e-defeat-reload"
+        cleanupSaveBefore: true
+        cleanupSaveAfter: true
+        args:
+          - --story-profile
+          - res://Assets/T3Real/LostReloadStory/Story/Story.tres
+          - --battle-visual-profile
+          - res://Assets/T3Real/LostReloadStory/Story/Visual.tres
+          - --battle-seed
+          - "1"
+          - --story-language
+          - en
+          - --save-directory
+          - user://t3-e2e-defeat-reload
+        steps:
+          - action: wait
+            condition: "updates >= 1"
+            timeoutMs: 15000
+          # Save slot 2 at start (320,320) to set recoverySlot = 2
+          - action: key_tap
+            key: Escape
+          - action: wait
+            condition: "menu.mode == MainMenu"
+          - action: key_tap
+            key: Down
+          - action: key_tap
+            key: Enter
+          - action: wait
+            condition: "menu.mode == SystemItems"
+          - action: key_tap
+            key: Enter
+          - action: wait
+            condition: "menu.mode == SystemMenu"
+          - action: key_tap
+            key: Down
+          - action: wait
+            condition: "menu.selectedSaveSlot == 2"
+          - action: key_tap
+            key: Enter
+          - action: wait
+            condition: "recoverySlot == 2"
+          - action: key_tap
+            key: Escape
+          - action: wait
+            condition: "menu.mode == SystemItems"
+          - action: key_tap
+            key: Escape
+          - action: wait
+            condition: "menu.mode == MainMenu"
+          - action: key_tap
+            key: Escape
+          - action: wait
+            condition: "menu.mode == Closed"
+          # Enter losing battle -> loss dialogue -> automatic reload of recovery slot 2
+          - action: key_tap
+            key: Enter
+          - action: advance_dialogue
+            condition: "battle.active == true && battle.mode == AttackMenu"
+            timeoutMs: 25000
+          - action: battle_attack_rounds
+            condition: "battle.active == false && dialogue.active == false && interaction.phase == Exploring"
+            timeoutMs: 60000
+            maxRounds: 200
+          - action: assert
+            assertions:
+              - "lostTerminal == false"
+              - "lostReloadFailure == null"
+              - "recoverySlot == 2"
+              - "storyCashGranted == 0"
+          - action: capture
+            name: "04-defeat-reloaded"
+            settleFrames: 2
+      # 5b) Defeat without recovery slot -> closable failure terminal with explicit reason
+      - name: defeat-no-recovery-slot
+        saveNamespace: "user://t3-e2e-defeat-no-slot"
+        cleanupSaveBefore: true
+        cleanupSaveAfter: true
+        args:
+          - --story-profile
+          - res://Assets/T3Real/LostReloadStory/Story/Story.tres
+          - --battle-visual-profile
+          - res://Assets/T3Real/LostReloadStory/Story/Visual.tres
+          - --battle-seed
+          - "1"
+          - --story-language
+          - en
+          - --save-directory
+          - user://t3-e2e-defeat-no-slot
+        steps:
+          - action: wait
+            condition: "updates >= 1"
+            timeoutMs: 15000
+          - action: assert
+            assertions:
+              - "recoverySlot == null"
+          - action: key_tap
+            key: Enter
+          - action: advance_dialogue
+            condition: "battle.active == true && battle.mode == AttackMenu"
+            timeoutMs: 25000
+          - action: battle_attack_rounds
+            condition: "lostTerminal == true && lostReloadFailure == no-current-slot"
+            timeoutMs: 60000
+            maxRounds: 200
+          - action: assert
+            assertions:
+              - "lostTerminal == true"
+              - "lostReloadFailure == no-current-slot"
+              - "lostReloadDiagnostics == 1"
+          - action: capture
+            name: "05-defeat-no-slot-terminal"
+            settleFrames: 2

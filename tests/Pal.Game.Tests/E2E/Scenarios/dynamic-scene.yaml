@@ -1,0 +1,39 @@
+name: dynamic-scene
+version: "1"
+description: "No-combat --dynamic-profile startup, trigger dialogue, auto-walker & NPC movement, and retained exploration exit."
+timeoutSeconds: 90
+tolerancePercent: 1.0
+args:
+  - --dynamic-profile
+  - res://Assets/T3Real/DynamicStory/Story/Story.tres
+  - --story-language
+  - zh-Hans
+steps:
+  - action: wait
+    condition: "updates >= 1"
+    timeoutMs: 15000
+  - action: assert
+    assertions:
+      - "failure == null"
+      - "dynamic.phase == Exploring"
+  - action: capture
+    name: "01-dynamic-start"
+    settleFrames: 2
+  - action: key_tap
+    key: Enter
+  - action: wait
+    condition: "dialogue.active == true && dialogue.phase == WaitingForAdvance"
+    timeoutMs: 15000
+  - action: capture
+    name: "02-dynamic-dialogue"
+    settleFrames: 2
+  - action: advance_dialogue
+    condition: "dynamic.triggerActive == false && dynamic.phase == Exploring"
+    timeoutMs: 45000
+  - action: assert
+    assertions:
+      - "dynamic.phase == Exploring"
+      - "dynamic.lastScriptSuccess == true"
+  - action: capture
+    name: "03-dynamic-retained"
+    settleFrames: 2

@@ -221,10 +221,67 @@ function Format-MarkdownReport {
         }
     }
 
-    if ($Format -eq 'pr-comment') {
+    $e2eBlocks = [Collections.Generic.List[object]]::new()
+    foreach ($s in $Summaries) {
+        if ($s.PSObject.Properties['e2e'] -and $null -ne $s.e2e) {
+            $e2eBlocks.Add(@{ Summary = $s; E2E = $s.e2e })
+        }
+    }
+
+    if ($e2eBlocks.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('#### T3 端到端 / 截图对比（预留）')
-        $lines.Add('- 本次报告未包含 T3 GPU 截图产物（由 M7-5 补齐）。')
+        $lines.Add('#### T3 端到端回归（本地 GPU + 金图比对）')
+        foreach ($blk in $e2eBlocks) {
+            $e2e = $blk.E2E
+            $sum = $blk.Summary
+            if ($e2e.PSObject.Properties['cacheKey'] -and $e2e.cacheKey) {
+                $lines.Add("- **真实资源缓存键**：``$($e2e.cacheKey)``（不提交、不上传真实资产与版权截图）")
+            }
+            if ($e2e.PSObject.Properties['updateGolden'] -and $e2e.updateGolden) {
+                $lines.Add('- **模式**：显式金图基线刷新（`--update-golden`）')
+            }
+            if ($sum.artifactsDir) {
+                $cs = if ($e2e.PSObject.Properties['contactSheet'] -and $e2e.contactSheet) { "，拼图 ``$($e2e.contactSheet)``" } else { '' }
+                $lines.Add("- **本地产物目录**：``$($sum.artifactsDir)``$cs")
+            }
+            $lines.Add('')
+            $lines.Add('| 场景 | 探针断言 | 金图比对 | 耗时 | 关键帧数 |')
+            $lines.Add('| :--- | :---: | :---: | ---: | ---: |')
+            foreach ($sc in @($e2e.scenarios)) {
+                $probeMark = if ($sc.probePassed) { 'PASS' } else { 'FAIL' }
+                $frames = @($sc.frames)
+                $maxDiff = 0.0
+                $tol = 1.0
+                $anyFrameFail = $false
+                foreach ($fr in $frames) {
+                    if ([double]$fr.diffPercent -gt $maxDiff) { $maxDiff = [double]$fr.diffPercent }
+                    if ($fr.PSObject.Properties['tolerancePercent']) { $tol = [double]$fr.tolerancePercent }
+                    if ($fr.status -eq 'failed') { $anyFrameFail = $true }
+                }
+                $goldMark = if ($anyFrameFail) { "FAIL (max ``$maxDiff%`` / ``≤ $tol%``)" } else { "PASS (max ``$maxDiff%`` / ``≤ $tol%``)" }
+                $lines.Add("| ``$($sc.scenario)`` | $probeMark | $goldMark | ``$($sc.durationSec)s`` | $($frames.Count) |")
+            }
+
+            $lines.Add('')
+            $lines.Add('| 场景 / 帧 | 状态 | Diff % / 容差 | 实际图 SHA-256 | 金图 SHA-256 | 差异图 |')
+            $lines.Add('| :--- | :---: | :---: | :--- | :--- | :--- |')
+            foreach ($sc in @($e2e.scenarios)) {
+                foreach ($fr in @($sc.frames)) {
+                    $aSha = if ($fr.actualSha256) { "``$(([string]$fr.actualSha256).Substring(0, [Math]::Min(16, ([string]$fr.actualSha256).Length)))``" } else { '-' }
+                    $gSha = if ($fr.goldenSha256) { "``$(([string]$fr.goldenSha256).Substring(0, [Math]::Min(16, ([string]$fr.goldenSha256).Length)))``" } else { '<missing>' }
+                    $diffCol = if ($fr.diffPath) { "``$($fr.diffPath)``" } else { '-' }
+                    $lines.Add("| ``$($sc.scenario)/$($fr.frameName)`` | $($fr.status.ToUpperInvariant()) | ``$($fr.diffPercent)% / ≤ $($fr.tolerancePercent)%`` | $aSha | $gSha | $diffCol |")
+                }
+            }
+        }
+        if ($Format -eq 'pr-comment') {
+            $lines.Add('')
+            $lines.Add('- **人工 5 分钟审阅清单**：[ ] 打开本地 `contact-sheet.png` 核对画面无花屏/错位/字体缺字；[ ] 抽查变更相关场景原图与探针 JSON。')
+        }
+    } elseif ($Format -eq 'pr-comment') {
+        $lines.Add('')
+        $lines.Add('#### T3 端到端 / 截图对比')
+        $lines.Add('- 本次报告未包含 T3 GPU 端到端产物（如需 T3 证据，请运行 `./pal.ps1 test e2e --gpu`）。')
     }
 
     return ($lines -join "`n") + "`n"
