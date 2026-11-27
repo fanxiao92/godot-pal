@@ -23,7 +23,7 @@ Without --commit, a verified dirty candidate waits for your commit. Run the same
 Stopped attempts require --resume; interrupted/unknown owners also require --confirm-quiescent.
 Optional: --cwd <checkout>, --state <directory>, --max-iterations <count>, --provider/--model,
           --max-turns <count>, --session-timeout-ms <ms>, --json.
-Prepare/Game: --engine-checks --godot-path <approved-console> --fixed-package-directory <verified-bundle>.
+Prepare/Game: --engine-checks --godot-path <approved-console>.
 Corrections: at most three repairs per stable root-cause problem across check/review/resume.
 --extra-corrections cannot extend this cap; unmapped legacy ledgers require parent-only migration.
 Exit 0 requires the final read-only parent-spec audit, not just leaf queue exhaustion.
@@ -62,11 +62,11 @@ export async function githubMain(argv: string[]): Promise<number> {
     issue: { type: 'string' }, cwd: { type: 'string' }, state: { type: 'string' }, commit: { type: 'boolean' },
     resume: { type: 'boolean' }, 'confirm-quiescent': { type: 'boolean' }, offline: { type: 'boolean' }, json: { type: 'boolean' }, 'auto-receipt': { type: 'boolean' },
     'max-iterations': { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, 'max-turns': { type: 'string' }, 'session-timeout-ms': { type: 'string' },
-    'engine-checks': { type: 'boolean' }, 'godot-path': { type: 'string' }, 'fixed-package-directory': { type: 'string' }, 'extra-corrections': { type: 'string' },
+    'engine-checks': { type: 'boolean' }, 'godot-path': { type: 'string' }, 'extra-corrections': { type: 'string' },
   } });
   const command = positionals[0];
   if (positionals.length !== 1 || !['run', 'status', 'preflight'].includes(command)) throw new Error(githubHelp);
-  const allowed = command === 'status' ? ['issue', 'cwd', 'state', 'offline', 'json'] : command === 'preflight' ? ['issue', 'cwd', 'state', 'engine-checks', 'godot-path', 'fixed-package-directory'] : ['issue', 'cwd', 'state', 'commit', 'auto-receipt', 'resume', 'confirm-quiescent', 'json', 'max-iterations', 'provider', 'model', 'max-turns', 'session-timeout-ms', 'engine-checks', 'godot-path', 'fixed-package-directory', 'extra-corrections'];
+  const allowed = command === 'status' ? ['issue', 'cwd', 'state', 'offline', 'json'] : command === 'preflight' ? ['issue', 'cwd', 'state', 'engine-checks', 'godot-path'] : ['issue', 'cwd', 'state', 'commit', 'auto-receipt', 'resume', 'confirm-quiescent', 'json', 'max-iterations', 'provider', 'model', 'max-turns', 'session-timeout-ms', 'engine-checks', 'godot-path', 'extra-corrections'];
   if (Object.keys(values).some(key => !allowed.includes(key))) throw new Error(`Inappropriate option for ${command}`);
   if (values['confirm-quiescent'] && !values.resume) throw new Error('--confirm-quiescent requires --resume');
   if (Boolean(values.provider) !== Boolean(values.model)) throw new Error('Use existing Pi configuration, or specify both --provider and --model');
@@ -77,8 +77,8 @@ export async function githubMain(argv: string[]): Promise<number> {
   const maxIterations = positive(values['max-iterations']), maxTurns = positive(values['max-turns']), timeoutMs = positive(values['session-timeout-ms']);
   const extraCorrections = positive(values['extra-corrections']);
   if (extraCorrections) throw new Error('--extra-corrections cannot extend the per-problem three-round cap');
-  if (Boolean(values['engine-checks']) !== Boolean(values['godot-path'] && values['fixed-package-directory']) || (!values['engine-checks'] && (values['godot-path'] || values['fixed-package-directory']))) throw new Error('Engine checks require all of --engine-checks, --godot-path and --fixed-package-directory');
-  const engine = values['engine-checks'] ? { godotPath: fs.realpathSync(path.resolve(values['godot-path']!)), fixedPackageDirectory: fs.realpathSync(path.resolve(values['fixed-package-directory']!)) } : undefined;
+  if (Boolean(values['engine-checks']) !== Boolean(values['godot-path'])) throw new Error('Engine checks require both --engine-checks and --godot-path');
+  const engine = values['engine-checks'] ? { godotPath: fs.realpathSync(path.resolve(values['godot-path']!)) } : undefined;
   const root = issueNumber(values.issue);
   const start = fs.realpathSync(path.resolve(values.cwd ?? process.cwd()));
   const cwd = fs.realpathSync(git(start, 'rev-parse', '--show-toplevel').trim());

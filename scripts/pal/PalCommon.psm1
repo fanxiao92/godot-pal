@@ -88,6 +88,7 @@ function New-RunSummaryObject {
         [AllowEmptyCollection()][string[]]$CoverageFiles = @(),
         [AllowEmptyCollection()][object[]]$Coverage = @(),
         [AllowNull()][object]$E2E = $null,
+        [AllowEmptyCollection()][object[]]$Steps = @(),
         [Parameter(Mandatory)][string]$ArtifactsDir
     )
     $obj = [ordered]@{
@@ -101,6 +102,7 @@ function New-RunSummaryObject {
             failed  = $Failed
             skipped = $Skipped
         }
+        steps         = @($Steps)
         trxFiles      = @($TrxFiles)
         coverageFiles = @($CoverageFiles)
         coverage      = @($Coverage)

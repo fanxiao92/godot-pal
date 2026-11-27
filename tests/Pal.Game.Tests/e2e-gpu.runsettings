@@ -6,9 +6,9 @@
     <TreatNoTestsAsError>true</TreatNoTestsAsError>
   </RunConfiguration>
   <GdUnit4>
-    <Parameters>--audio-driver Dummy --verbose</Parameters>
+    <Parameters>--audio-driver Dummy</Parameters>
     <DisplayName>FullyQualifiedName</DisplayName>
-    <CaptureStdOut>true</CaptureStdOut>
+    <CaptureStdOut>false</CaptureStdOut>
     <CompileProcessTimeout>30000</CompileProcessTimeout>
     <GodotConnectTimeout>15000</GodotConnectTimeout>
     <TolerateExitCodeAfterCompletion>false</TolerateExitCodeAfterCompletion>

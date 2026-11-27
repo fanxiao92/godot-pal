@@ -237,6 +237,10 @@ try {
         errorMsg = "Test step 'sample' failed with exit code 1."
         durationSec = 12.5
         counts = [ordered]@{ total = 2; passed = 1; failed = 1; skipped = 0 }
+        steps = @(
+            [ordered]@{ name = 'Pal.Game.Tests.ProfilesPrepare'; total = 775; passed = 775; failed = 0; skipped = 0; durationSec = 91.2 }
+            [ordered]@{ name = 'Pal.Game.Tests.Runtime'; total = 321; passed = 320; failed = 1; skipped = 0; durationSec = 240.4 }
+        )
         trxFiles = @('sample.trx')
         coverageFiles = @('coverage/Pal.Core.UnitTests/coverage.cobertura.xml')
         coverage = @($covEntries) + @([ordered]@{ package = 'Pal.Core'; lineRate = 15.1; branchRate = 15.4 })
@@ -247,7 +251,7 @@ try {
     $repRes = Invoke-Pal @('report', '--from', $repDir, '--out', $mdOut)
     Assert-Equal 0 $repRes.ExitCode 'pal.ps1 report must exit 0'
     $mdText = [IO.File]::ReadAllText($mdOut, $utf8)
-    Assert-True ($mdText -match 'ci dotnet' -and $mdText -match '84\.2%' -and $mdText -notmatch '15\.1%' -and $mdText -match 'FailCase' -and $mdText -match 'Expected 1 got 2' -and $mdText -match 'T3') 'report markdown must include TRX failure details, highest package coverage, command, and T3 placeholder'
+    Assert-True ($mdText -match 'ci dotnet' -and $mdText -match 'Pal\.Game\.Tests\.ProfilesPrepare' -and $mdText -match '775' -and $mdText -match 'Pal\.Game\.Tests\.Runtime' -and $mdText -match '84\.2%' -and $mdText -notmatch '15\.1%' -and $mdText -match 'FailCase' -and $mdText -match 'Expected 1 got 2' -and $mdText -match 'T3') 'report markdown must include per-step breakdown, TRX failure details, highest package coverage, command, and T3 placeholder'
     Pass 'TRX/JUnit/Cobertura parsing and pal.ps1 report generation'
 
     # 7. Script hygiene: Get-Godot.ps1 Linux support & Prepare-DialoguePackage.ps1 cleanup

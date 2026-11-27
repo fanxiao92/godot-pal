@@ -176,6 +176,7 @@ function Format-MarkdownReport {
 
     $coverageMap = [ordered]@{}
     $errors = [Collections.Generic.List[string]]::new()
+    $stepRows = [Collections.Generic.List[object]]::new()
     foreach ($s in $Summaries) {
         $st = if ($s.status -eq 'passed') { 'PASS' } else { [string]$s.status.ToUpperInvariant() }
         $passed = if ($s.counts) { [int]$s.counts.passed } else { 0 }
@@ -185,6 +186,9 @@ function Format-MarkdownReport {
         $art = if ($s.artifactsDir) { "``$($s.artifactsDir)``" } else { '-' }
         $lines.Add("| ``$($s.command)`` | $st | $passed | $failed | $skipped | ``$dur`` | $art |")
         if ($s.errorMsg) { $errors.Add("- ``$($s.command)``: $($s.errorMsg)") }
+        if ($s.PSObject.Properties['steps'] -and $s.steps) {
+            foreach ($step in @($s.steps)) { $stepRows.Add($step) }
+        }
         if ($s.PSObject.Properties['coverage'] -and $s.coverage) {
             foreach ($c in @($s.coverage)) {
                 $pkg = [string]$c.package
@@ -194,6 +198,17 @@ function Format-MarkdownReport {
                     }
                 }
             }
+        }
+    }
+
+    if ($stepRows.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('#### 分步明细')
+        $lines.Add('| 步骤 | 通过 | 失败 | 跳过 | 耗时 |')
+        $lines.Add('| :--- | ---: | ---: | ---: | ---: |')
+        foreach ($stRow in $stepRows) {
+            $sDur = "$([Math]::Round([double]$stRow.durationSec, 1))s"
+            $lines.Add("| ``$($stRow.name)`` | $([int]$stRow.passed) | $([int]$stRow.failed) | $([int]$stRow.skipped) | ``$sDur`` |")
         }
     }
 

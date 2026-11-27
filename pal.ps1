@@ -51,6 +51,7 @@ Common Options:
   --explain              test affected: print file -> rule -> targets without running tests
   --all                  test affected: bypass incremental selection and run full
   --coverage             test unit: enable coverlet.collector XPlat Code Coverage
+  --blame-hang           test game: enable --blame-hang-timeout 2m and normal console logger
   --scenario <name|path> test e2e: scenario name, YAML file path, or all (default all)
   --gpu                  test e2e: real GPU mode (required for T3 E2E)
   --update-golden        test e2e: explicitly create/refresh local golden screenshots & manifest
@@ -87,7 +88,7 @@ function Parse-Options {
         'static-resources', 'static-profile', 'battle-resources',
         'from', 'format', 'repo-root'
     )
-    $switchOptions = @('explain', 'all', 'coverage', 'gpu', 'update-golden', 'json', 'help', 'include-real-assets')
+    $switchOptions = @('explain', 'all', 'coverage', 'blame-hang', 'gpu', 'update-golden', 'json', 'help', 'include-real-assets')
 
     $i = 0
     while ($i -lt $Tokens.Count) {
@@ -172,6 +173,7 @@ function Invoke-DotnetTestStep {
         [switch]$CollectCoverage,
         [string]$CoveragePackage = '',
         [switch]$EmitJunit,
+        [switch]$BlameHang,
         [string]$GodotExe = '',
         [Parameter(Mandatory)][hashtable]$State
     )
@@ -200,6 +202,15 @@ function Invoke-DotnetTestStep {
     }
     $argsList.Add('--logger')
     $argsList.Add("trx;LogFileName=$trxName")
+    if ($BlameHang) {
+        $argsList.Add('--logger')
+        $argsList.Add('console;verbosity=normal')
+        $argsList.Add('--blame-hang')
+        $argsList.Add('--blame-hang-timeout')
+        $argsList.Add('2m')
+        $argsList.Add('--blame-hang-dump-type')
+        $argsList.Add('mini')
+    }
     $argsList.Add('--results-directory')
     $argsList.Add($rawDir)
     if ($CollectCoverage) {
@@ -212,6 +223,7 @@ function Invoke-DotnetTestStep {
 
     $prevGodot = $env:GODOT_BIN
     $prevPalGodot = $env:PAL_TEST_GODOT
+    $stepSw = [Diagnostics.Stopwatch]::StartNew()
     try {
         if ($GodotExe) {
             $env:GODOT_BIN = $GodotExe
@@ -221,6 +233,7 @@ function Invoke-DotnetTestStep {
         & dotnet @argsList
         $exitCode = $LASTEXITCODE
     } finally {
+        $stepSw.Stop()
         $env:GODOT_BIN = $prevGodot
         $env:PAL_TEST_GODOT = $prevPalGodot
     }
@@ -234,6 +247,14 @@ function Invoke-DotnetTestStep {
         $State.Passed += $trxCounts.passed
         $State.Failed += $trxCounts.failed
         $State.Skipped += $trxCounts.skipped
+        $State.Steps.Add([ordered]@{
+            name        = $Name
+            total       = $trxCounts.total
+            passed      = $trxCounts.passed
+            failed      = $trxCounts.failed
+            skipped     = $trxCounts.skipped
+            durationSec = [Math]::Round($stepSw.Elapsed.TotalSeconds, 2)
+        })
         if ($EmitJunit) {
             $junitPath = Join-Path (Join-Path $ArtifactsDir 'junit') "$Name.xml"
             Convert-TrxToJunit -TrxPath $trxPath -JunitPath $junitPath
@@ -255,6 +276,17 @@ function Invoke-DotnetTestStep {
                 if (-not $CoveragePackage -or ([string]$entry.package -ieq $CoveragePackage)) {
                     $State.Coverage.Add($entry)
                 }
+            }
+        }
+    }
+
+    if ($BlameHang) {
+        $blameFiles = @(Get-ChildItem -LiteralPath $rawDir -Recurse -File -Include 'Sequence*.xml', '*.dmp' -ErrorAction SilentlyContinue)
+        if ($blameFiles.Count -gt 0) {
+            $blameDir = Join-Path $ArtifactsDir 'blame'
+            [void][IO.Directory]::CreateDirectory($blameDir)
+            foreach ($bf in $blameFiles) {
+                Copy-Item -LiteralPath $bf.FullName -Destination (Join-Path $blameDir $bf.Name) -Force
             }
         }
     }
@@ -329,6 +361,7 @@ function Invoke-GameTarget {
         [string]$GodotPathOpt,
         [switch]$IncludeRealAssets,
         [switch]$EmitJunit,
+        [switch]$BlameHang,
         [string]$ArtifactsDir,
         [hashtable]$State
     )
@@ -355,7 +388,7 @@ function Invoke-GameTarget {
     Invoke-DotnetTestStep -Name 'Pal.Game.Tests' `
         -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
         -ArtifactsDir $ArtifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
-        -Filter $combinedFilter -EmitJunit:$EmitJunit -GodotExe $godot -State $State
+        -Filter $combinedFilter -EmitJunit:$EmitJunit -BlameHang:($EmitJunit -or $BlameHang) -GodotExe $godot -State $State
 }
 
 function Invoke-LraTarget {
@@ -363,14 +396,27 @@ function Invoke-LraTarget {
     if (-not (Test-Path -LiteralPath (Join-Path $lraDir 'package.json') -PathType Leaf)) {
         throw "LRA package.json not found under $lraDir"
     }
+    $prevSdkRoot = $env:PAL_PI_SDK_ROOT
+    $localSdkRoot = Join-Path $lraDir 'node_modules/@earendil-works/pi-coding-agent'
     Push-Location $lraDir
     try {
+        if (-not $env:PAL_PI_SDK_ROOT -and (Test-Path -LiteralPath $localSdkRoot -PathType Container)) {
+            $env:PAL_PI_SDK_ROOT = $localSdkRoot
+        }
+        Write-Host '==> npm run typecheck (tools/long-running-agent)'
+        & npm run typecheck
+        if ($LASTEXITCODE -ne 0) {
+            throw "LRA npm run typecheck failed with exit code $LASTEXITCODE."
+        }
         Write-Host '==> npm test (tools/long-running-agent)'
         & npm test
         if ($LASTEXITCODE -ne 0) {
             throw "LRA npm test failed with exit code $LASTEXITCODE."
         }
-    } finally { Pop-Location }
+    } finally {
+        $env:PAL_PI_SDK_ROOT = $prevSdkRoot
+        Pop-Location
+    }
 }
 
 function Invoke-MapSelfCheck {
@@ -689,6 +735,7 @@ $state = @{
     Passed        = 0
     Failed        = 0
     Skipped       = 0
+    Steps         = [Collections.Generic.List[object]]::new()
     TrxFiles      = [Collections.Generic.List[string]]::new()
     CoverageFiles = [Collections.Generic.List[string]]::new()
     Coverage      = [Collections.Generic.List[object]]::new()
@@ -758,7 +805,7 @@ try {
                     Invoke-IntegrationTarget -ProjectScope $projectOpt -Filter $filterOpt -GodotPathOpt $godotOpt -ArtifactsDir $artifactsDir -State $state
                 }
                 'game' {
-                    Invoke-GameTarget -Categories $parsed.Multi['category'].ToArray() -Filter $filterOpt -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -ArtifactsDir $artifactsDir -State $state
+                    Invoke-GameTarget -Categories $parsed.Multi['category'].ToArray() -Filter $filterOpt -GodotPathOpt $godotOpt -IncludeRealAssets:$parsed.Flags.ContainsKey('include-real-assets') -BlameHang:$parsed.Flags.ContainsKey('blame-hang') -ArtifactsDir $artifactsDir -State $state
                 }
                 'lra' {
                     Invoke-LraTarget
@@ -785,6 +832,17 @@ try {
         'ci' {
             switch ($sub) {
                 'dotnet' {
+                    Write-Host '==> Guard: No Git LFS pointers in committable trees (src/tests/tools)'
+                    Push-Location $script:RepoRoot
+                    try {
+                        $pointers = @(& git grep --cached -l -e 'version https://git-lfs' -- src tests tools)
+                        $grepExit = $LASTEXITCODE
+                        if ($grepExit -gt 1) { throw "git grep failed with exit $grepExit." }
+                        if ($grepExit -eq 0 -and $pointers.Count -gt 0) {
+                            throw "LFS pointers inside committable trees (src/tests/tools): $($pointers -join ', ')"
+                        }
+                    } finally { Pop-Location }
+
                     Write-Host '==> Guard: PowerShell syntax'
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-PowerShellSyntax.ps1') -RepositoryRoot $script:RepoRoot
                     if ($LASTEXITCODE -ne 0) { throw "Test-PowerShellSyntax.ps1 failed (exit $LASTEXITCODE)." }
@@ -793,6 +851,21 @@ try {
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-UnitBoundary.ps1') -RepositoryRoot $script:RepoRoot
                     if ($LASTEXITCODE -ne 0) { throw "Test-UnitBoundary.ps1 failed (exit $LASTEXITCODE)." }
 
+                    Write-Host '==> Guard: Repo hygiene'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-RepoHygiene.ps1') -RepositoryRoot $script:RepoRoot
+                    if ($LASTEXITCODE -ne 0) { throw "Test-RepoHygiene.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Self-test: PalFrontDoor.Tests.ps1'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/PalFrontDoor.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "PalFrontDoor.Tests.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Self-test: Test-PowerShellSyntax.Tests.ps1'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/Test-PowerShellSyntax.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "Test-PowerShellSyntax.Tests.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Self-test: UnitBoundary.Tests.ps1'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/UnitBoundary.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "UnitBoundary.Tests.ps1 failed (exit $LASTEXITCODE)." }
                     Invoke-MapSelfCheck
                     Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage -EmitJunit -ArtifactsDir $artifactsDir -State $state
                     Invoke-IntegrationTarget -ProjectScope 'extract' -Filter '' -GodotPathOpt '' -EmitJunit -ArtifactsDir $artifactsDir -State $state
@@ -801,7 +874,17 @@ try {
                     Invoke-IntegrationTarget -ProjectScope 'prepare' -Filter '' -GodotPathOpt $godotOpt -EmitJunit -ArtifactsDir $artifactsDir -State $state
                 }
                 'game' {
-                    Invoke-GameTarget -Categories @() -Filter '' -GodotPathOpt $godotOpt -EmitJunit -ArtifactsDir $artifactsDir -State $state
+                    # Partition into two disjoint Godot sessions: Profiles+Prepare (775 tests) vs Runtime/Scene/Process (321 tests),
+                    # so neither process accumulates 930+ tests of RefCounted Gen2 wrappers (avoids Godot 4.7.2 mono_object_disposed_baseref GC crash).
+                    $godot = Resolve-ReadyGodotBinary -ExplicitPath $godotOpt
+                    Invoke-DotnetTestStep -Name 'Pal.Game.Tests.ProfilesPrepare' `
+                        -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
+                        -ArtifactsDir $artifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
+                        -Filter '(TestCategory=Profiles|TestCategory=Prepare)&TestCategory!=RealAssets&TestCategory!=E2E' -EmitJunit -BlameHang -GodotExe $godot -State $state
+                    Invoke-DotnetTestStep -Name 'Pal.Game.Tests.Runtime' `
+                        -ProjectRelPath 'tests/Pal.Game.Tests/Pal.Game.Tests.csproj' `
+                        -ArtifactsDir $artifactsDir -RunSettingsRelPath 'tests/Pal.Game.Tests/game.runsettings' `
+                        -Filter 'TestCategory!=Profiles&TestCategory!=Prepare&TestCategory!=RealAssets&TestCategory!=E2E' -EmitJunit -BlameHang -GodotExe $godot -State $state
                 }
                 default {
                     $state.Status = 'error'
@@ -908,7 +991,7 @@ try {
 
 $summaryObj = New-RunSummaryObject -Command $commandLabel -Status $state.Status -ErrorMsg $state.ErrorMsg `
     -DurationSec $sw.Elapsed.TotalSeconds -Total $state.Total -Passed $state.Passed -Failed $state.Failed `
-    -Skipped $state.Skipped -TrxFiles $state.TrxFiles.ToArray() -CoverageFiles $state.CoverageFiles.ToArray() `
+    -Skipped $state.Skipped -Steps $state.Steps.ToArray() -TrxFiles $state.TrxFiles.ToArray() -CoverageFiles $state.CoverageFiles.ToArray() `
     -Coverage $state.Coverage.ToArray() -E2E $state.E2E `
     -ArtifactsDir (ConvertTo-RepoRelativePath -RepositoryRoot $script:RepoRoot -Path $artifactsDir)
 
@@ -916,7 +999,14 @@ $summaryPath = Write-RunSummaryJson -ArtifactsDir $artifactsDir -Summary $summar
 
 if ($cmd -eq 'ci') {
     $sha = Get-CurrentCommitSha -Root $script:RepoRoot
-    $md = Format-MarkdownReport -Summaries @(([PSCustomObject]$summaryObj)) -CommitSha $sha -Format 'summary'
+    $ciFailures = [Collections.Generic.List[object]]::new()
+    foreach ($relTrx in $state.TrxFiles) {
+        $trxFull = Resolve-PathUnderRoot -Root $artifactsDir -Path $relTrx
+        foreach ($failItem in @(Read-TrxFailures -TrxPath $trxFull)) {
+            $ciFailures.Add($failItem)
+        }
+    }
+    $md = Format-MarkdownReport -Summaries @(([PSCustomObject]$summaryObj)) -CommitSha $sha -Format 'summary' -TrxFailures $ciFailures.ToArray()
     $mdPath = Join-Path $artifactsDir 'summary.md'
     [IO.File]::WriteAllText($mdPath, $md, [Text.UTF8Encoding]::new($false))
     if ($env:GITHUB_STEP_SUMMARY) {

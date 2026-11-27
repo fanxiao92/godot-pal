@@ -154,7 +154,7 @@ public class PrepareBattleDataTests
         }
         finally
         {
-            if (link is not null) Directory.Delete(link);
+            if (link is not null) GameProjectMount.DeleteDirectoryLink(link);
             if (defect == "directory") Directory.Delete(receipt!);
         }
     }
@@ -166,7 +166,8 @@ public class PrepareBattleDataTests
         using var fixture = new Preparation(); fixture.UseProjection();
         string path = selected == "numeric" ? fixture.Source : fixture.Receipt;
         byte[] before = File.ReadAllBytes(path);
-        using (var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+        FileShare writerShare = OperatingSystem.IsWindows() ? FileShare.Read : FileShare.None;
+        using (var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, writerShare))
         {
             IOException? failure = null;
             try { PrepareBattleData.Prepare(fixture.Input, fixture.Output, fixture.Receipt); }
@@ -617,7 +618,7 @@ public class PrepareBattleDataTests
         }
         finally
         {
-            Directory.Delete(link);
+            GameProjectMount.DeleteDirectoryLink(link);
             if (target != fixture.Input && Directory.Exists(target)) Directory.Delete(target);
         }
     }
