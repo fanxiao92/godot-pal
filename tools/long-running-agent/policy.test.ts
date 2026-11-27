@@ -98,10 +98,14 @@ test('third same-problem failure ends writes immediately and keeps all original 
   assert.equal(ledger.corrections!.length, 3);
   assert.throws(() => approveCorrection(ledger, { ...correction(), problemId: 'renamed' }), /Same evidence/);
 });
-test('Unit remains complete-project feedback and accepts only one FQN filter', () => {
+test('Unit routes through pal.ps1 with complete-project feedback and accepts only one FQN filter', () => {
   const check = buildCheck(process.cwd(), '/owned/check', { scope: 'unit', project: unitProjects[0] });
-  assert.equal(check.executable, 'dotnet');
-  assert.ok(check.args.includes('tests/unit.runsettings'));
+  assert.equal(check.kind, 'non_engine');
+  assert.equal(check.executable, 'pwsh');
+  assert.ok(check.args.some(arg => arg.endsWith('pal.ps1')));
+  assert.ok(check.args.includes('unit'));
+  assert.ok(check.args.includes('core'));
+  assert.ok(check.args.includes('--json'));
   assert.ok(!check.args.some(arg => /--no-build|--no-restore|--filter/.test(arg)));
   const filtered = buildCheck(process.cwd(), '/owned/check', { scope: 'unit', project: unitProjects[0], filter: 'FullyQualifiedName~Pal.Core.UnitTests.' });
   assert.ok(filtered.args.includes('--filter'));
@@ -110,19 +114,28 @@ test('Unit remains complete-project feedback and accepts only one FQN filter', (
     assert.throws(() => buildCheck('.', '.', { scope: 'unit', project: unitProjects[0], filter }), /FQN/);
   }
 });
-test('engine capability is explicit and uses only existing bounded Prepare/Game range commands', () => {
-  const engine = { godotPath: path.resolve('approved-godot.exe'), fixedPackageDirectory: path.resolve('verified-bundle') };
-  assert.throws(() => buildCheck('.', '.', { scope: 'game', batch: 'native-map' }), /explicit/);
+test('engine capability is explicit and routes Prepare/Game through pal.ps1 without private RealAssets', () => {
+  const engine = { godotPath: path.resolve('approved-godot.exe') };
+  assert.throws(() => buildCheck('.', '.', { scope: 'game', category: 'Profiles' }), /explicit/);
   assert.throws(() => buildCheck('.', '.', { scope: 'prepare', filter: 'FullyQualifiedName=X.Y' }, engine), /whole scope/);
-  assert.throws(() => buildCheck('.', '.', { scope: 'game', batch: 'failure-control' }, engine), /positive Game batch/);
+  assert.throws(() => buildCheck('.', '.', { scope: 'game', category: 'RealAssets' }, engine), /committable Game category/);
+  assert.throws(() => buildCheck('.', '.', { scope: 'game', category: 'failure-control' }, engine), /committable Game category/);
   for (const filter of ['DisplayName=X', 'FullyQualifiedName=X.Y|FullyQualifiedName=A.B', 'FullyQualifiedName~X;exit']) {
-    assert.throws(() => buildCheck('.', '.', { scope: 'game', batch: 'native-map', filter }, engine), /FQN/);
+    assert.throws(() => buildCheck('.', '.', { scope: 'game', category: 'Profiles', filter }, engine), /FQN/);
   }
-  const check = buildCheck(process.cwd(), path.resolve('owned-check'), { scope: 'game', batch: 'native-map', filter: 'FullyQualifiedName~Pal.Game.Tests.Native.' }, engine);
+  const prepareCheck = buildCheck(process.cwd(), path.resolve('owned-check'), { scope: 'prepare' }, engine);
+  assert.equal(prepareCheck.kind, 'engine'); assert.equal(prepareCheck.timeoutMs, 900_000);
+  assert.ok(prepareCheck.args.some(arg => arg.endsWith('pal.ps1')));
+  assert.ok(prepareCheck.args.includes('integration'));
+  assert.ok(prepareCheck.args.includes('prepare'));
+  const check = buildCheck(process.cwd(), path.resolve('owned-check'), { scope: 'game', category: 'Profiles', filter: 'FullyQualifiedName~Pal.Game.Tests.Native.' }, engine);
   assert.equal(check.kind, 'engine'); assert.equal(check.timeoutMs, 900_000);
-  assert.ok(check.args.some(arg => arg.endsWith('Test-Range.ps1')));
-  assert.ok(!check.args.includes('-SkipAffectedBatchGuard'));
-  assert.ok(!check.args.some(arg => /Test-M0|data.raw|TestSessionTimeout/.test(arg)));
+  assert.ok(check.args.some(arg => arg.endsWith('pal.ps1')));
+  assert.ok(check.args.includes('game'));
+  assert.ok(check.args.includes('--category'));
+  assert.ok(check.args.includes('Profiles'));
+  assert.ok(check.args.includes('--json'));
+  assert.ok(!check.args.some(arg => /Test-Range|Test-M0|data\.raw|include-real-assets|FixedPackageDirectory/i.test(arg)));
 });
 test('explicit authorized path sets may exceed ten without weakening path authorization', () => {
   const plan = parsePlan({ version: 1, repository: 'fanxiao92/godot-pal', cwd: path.resolve('approved-repo'), baseHead: 'a'.repeat(40), sdkRoot: path.resolve('sdk'), agentDir: path.resolve('agent'), provider: 'explicit', model: 'explicit', approval: { id: 'test', approvedBy: 'operator', deadlineUtc: '2030-01-01T00:00:00Z', localCommits: false, autoAdvance: false }, limits: { maxTurns: 1, timeoutMs: 1000 }, prerequisites: [], tasks: [{ issue: 2, dependsOn: [], contextIssues: [], allowedWritePaths: Array.from({ length: 12 }, (_, index) => `src/consumer${index}.cs`), readPaths: ['src'], checks: [{ kind: 'non_engine', executable: process.execPath, args: [], timeoutMs: 1000 }] }] });
