@@ -8,7 +8,7 @@
   <GdUnit4>
     <Parameters>--headless --audio-driver Dummy</Parameters>
     <DisplayName>FullyQualifiedName</DisplayName>
-    <CaptureStdOut>true</CaptureStdOut>
+    <CaptureStdOut>false</CaptureStdOut>
     <CompileProcessTimeout>30000</CompileProcessTimeout>
     <GodotConnectTimeout>10000</GodotConnectTimeout>
     <TolerateExitCodeAfterCompletion>false</TolerateExitCodeAfterCompletion>
