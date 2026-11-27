@@ -102,6 +102,12 @@ $process.Other('WaitForExit')
     Check 'AST allows timed and async waits and ignores non-call mentions and non-PS text' @('ast/allowed') 0 'PASS syntax: 1 file' -RejectParameterlessWaitForExit
     Check 'AST failure is not hidden by a later valid file' @($wait, $good) 1 '\[syntax:parameterless-wait-for-exit\]' -RejectParameterlessWaitForExit
     Check 'AST still parses syntax errors' @($bracket) 1 '\[syntax:error\]' -RejectParameterlessWaitForExit
+    $trimBad = Put 'ast/trim-bad.ps1' '$p = $raw.TrimStart("./")'
+    Check 'AST rejects TrimStart path-prefix misuse' @($trimBad) 1 '\[syntax:trimstart-path-prefix\]'
+    $nestedForceBad = Put 'ast/nested-force.psm1' 'Import-Module ./PalCommon.psm1 -Force'
+    Check 'AST rejects nested Import-Module -Force without -Global in psm1' @($nestedForceBad) 1 '\[syntax:nested-force-import\]'
+    $nestedForceOk = Put 'ast/nested-global.psm1' 'Import-Module ./PalCommon.psm1 -Force -Global'
+    Check 'AST allows Import-Module -Force -Global in psm1' @($nestedForceOk) 0 'PASS syntax: 1 file'
     if (Test-Path -LiteralPath $marker) { throw 'AST checker executed its target.' }
     $completed = $true
     Write-Host "PASS syntax regression: $($records.Count) public invocations; no target execution."

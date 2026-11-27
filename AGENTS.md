@@ -40,14 +40,13 @@
 ## 项目边界
 
 - `src/Pal.Core` 保持纯 .NET 业务逻辑；Godot 节点、输入、渲染和平台 I/O 留在外层。测试优先使用公开构造、事件与更新接口，预期值来自独立规格或参考核对，而非被测实现生成。
-- 原版行为按 `reference/README.md` 导航查阅 SDLPal；参考源码只读，不编译或运行。忠实移植与新增扩展分开说明，扩展需有明确决定，不将其宣称为原版行为。
+- 原版行为按 `reference/README.md` 导航查阅 SDLPal；参考源码只读，不编译或运行（路径/文本检索默认排除 `reference/sdlpal/`）。忠实移植与新增扩展分开说明，扩展需有明确决定，不将其宣称为原版行为。
 - 当前运行时按已交付 M2/M3 边界使用 Godot 原生 Resource、PackedScene、Texture2D：M1 PNG/JSON 包仅作显式离线准备与独立核对输入，不是运行时 JSON/MKF 加载或自动同步源；M3 独立 scene4/map10/owner60 切片可消费显式准备的现代事件/语言/字形资源，但不扩大为全量 VM、auto、正常场景4自由探索或完整剧情。复用已准备资源，真实原始数据及资源不提交、不上传。
 
 ## 测试
 
-- Unit 默认反馈按[短指南](docs/testing/getting-started.md)选择明确工程，直接使用 dotnet CLI 与原生配置；需要强审计/维护能力时再读 [Unit 专题](docs/testing/unit-entry.md)。选择非 Unit 层时读[测试职责矩阵](docs/testing/test-layers.md)；新增或迁移 Game 集成测试再读[Game 测试分层与 SceneRunner](docs/testing/game-test-layers.md)。各层证据不可互换，Unit 反馈不是完整验收。
-- 时序变更、Game 迁移、调度偶发或变异断言前，先读[时序验证细则](docs/testing/time-boundaries.md)；输出捕获或完整门异常进入[当前诊断规则](docs/agents/test-diagnostics.md)。普通任务不递归读取历史。
-- 具体 Game 更新边界、timeout 分类、SceneRunner 生命周期和完整门操作见 [Game 测试分层](docs/testing/game-test-layers.md)；异常分类与停止顺序见 [测试异常处理规则](docs/agents/test-diagnostics.md)。触发时再按其中的历史指针追溯原症状、变异和交付年表。
+- Unit 默认反馈按[短指南](docs/testing/getting-started.md)选择明确工程，直接使用 dotnet CLI 与原生配置；需要强审计/维护能力时再读 [Unit 专题](docs/testing/unit-entry.md)。选择非 Unit 层时读[测试职责矩阵](docs/testing/test-layers.md)；新增、迁移或排查 Game 集成测试（更新边界、timeout、SceneRunner、完整门）读[Game 测试分层与 SceneRunner](docs/testing/game-test-layers.md)。各层证据不可互换，Unit 反馈不是完整验收。
+- 时序变更、Game 迁移、调度偶发或变异断言前，先读[时序验证细则](docs/testing/time-boundaries.md)；输出捕获、异常分类与停止顺序进入[当前诊断规则](docs/agents/test-diagnostics.md)。普通任务不递归读取历史。
 
 ### 执行与证据
 
@@ -55,10 +54,6 @@
 - 进程诊断仅收集任务自有句柄或服务端筛选的明确仓库执行器。全局 Godot 检查仅获取 PID/Name；不先获取全机详细信息再过滤，不收集外部项目命令行、父链、文件或日志。
 - 普通 Unit 按短指南的原生结果和本轮报告判定，不默认要求独立 TRX 图审计。显式维护/完整验收仍按对应契约核对实际退出码、TRX Summary/RunInfo、完整性与预期诊断；部分通过或 aborted=0 不等于会话完成。预期失败控制必须是指定失败原因，不能由崩溃或超时代替。
 - 发生会话中止、崩溃或未知退出时，保留实际命令、提交、原日志和部分结果后停止；重试、续跑或改变运行参数需明确批准。区分 headless 行为、GPU 像素核对、人工桌面验收和远端 CI，不相互代替。
-
-### 时序与外部调度延迟
-
-修改业务时间、输入更新边界或相关断言前，必须读取[时序与外部调度延迟](docs/testing/time-boundaries.md)；该处是 Core 确定性边界、真实更新完成、反例、超时分类与定点诊断的完整权威规则。本锚点保留供旧链接进入，不另维护副本。
 
 ## 其它
 

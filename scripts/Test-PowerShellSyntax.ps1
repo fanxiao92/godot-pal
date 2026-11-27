@@ -66,6 +66,26 @@ try {
             foreach ($errorRecord in $errors) {
                 Diagnostic 'error' ("{0}:{1}:{2}: {3}" -f $file, $errorRecord.Extent.StartLineNumber, $errorRecord.Extent.StartColumnNumber, $errorRecord.Message)
             }
+            $trimCalls = $ast.FindAll({ param($node)
+                $node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and
+                $node.Member -is [Management.Automation.Language.StringConstantExpressionAst] -and
+                $node.Member.Value -ieq 'TrimStart' -and $node.Arguments.Count -eq 1 -and
+                $node.Arguments[0] -is [Management.Automation.Language.StringConstantExpressionAst] -and
+                $node.Arguments[0].Value -in @('./', '.\')
+            }, $true)
+            foreach ($call in $trimCalls) {
+                Diagnostic 'trimstart-path-prefix' ("{0}:{1}:{2}: TrimStart('{3}') strips leading dots from dotfiles; use -replace '^\./', '' instead." -f $file, $call.Extent.StartLineNumber, $call.Extent.StartColumnNumber, $call.Arguments[0].Value)
+            }
+            if ([IO.Path]::GetExtension($file) -ieq '.psm1') {
+                $importCalls = $ast.FindAll({ param($node)
+                    if ($node -isnot [Management.Automation.Language.CommandAst] -or ($node.GetCommandName() -ine 'Import-Module')) { return $false }
+                    $params = @($node.CommandElements | Where-Object { $_ -is [Management.Automation.Language.CommandParameterAst] } | ForEach-Object ParameterName)
+                    return ($params -contains 'Force') -and ($params -notcontains 'Global')
+                }, $true)
+                foreach ($call in $importCalls) {
+                    Diagnostic 'nested-force-import' ("{0}:{1}:{2}: Import-Module -Force inside a .psm1 module without -Global shadows caller exports." -f $file, $call.Extent.StartLineNumber, $call.Extent.StartColumnNumber)
+                }
+            }
             if ($RejectParameterlessWaitForExit) {
                 $calls = $ast.FindAll({ param($node)
                     $node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and

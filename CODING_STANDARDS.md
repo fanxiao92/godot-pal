@@ -18,3 +18,9 @@ Review-time standards for `/code-review` (Standards axis). Deterministic checks 
 
 - **Keep pointers synchronized**: When moving or deleting files, update every referencing path in `AGENTS.md`, `docs/`, and `tools/` in the same change.
 - **Isolate non-Godot fixtures**: Place `.gdignore` in any non-Godot fixture directory under a Godot project root so engine scans never emit stray `.uid` files.
+
+## PowerShell Front-Door & Script Contracts
+
+- **Uniform error persistence**: Every `pal.ps1` command and early-return error path (including argument parsing and `report`) must write `errorMsg` to stderr and persist `run-summary.json` with `status: "error"|"failed"` and exit `1`.
+- **Verify TRX outcome alongside exit code**: Test runner wrappers must check both process exit code and TRX `outcome`/`failed` counts; exit `0` alone is not sufficient proof of a completed passing run.
+- **Match wrapped script signatures**: When wrapping existing `scripts/*.ps1` entry points (e.g., `assets prepare`), verify and forward every required parameter of each target script rather than assuming a uniform flag set.
