@@ -1,9 +1,10 @@
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'pal/PalCommon.psm1') -Force
 $options = @{}
 for ($i = 0; $i -lt $args.Count; $i += 2) {
     $key = [string]$args[$i]
     if ($key -notin @('-InputPath', '-OutputPath', '-GodotPath') -or $options.ContainsKey($key) -or $i + 1 -ge $args.Count -or [string]::IsNullOrWhiteSpace([string]$args[$i + 1])) {
-        [Console]::Error.WriteLine('Usage: Prepare-DialoguePackage.ps1 -InputPath <extract-output> -OutputPath <new-or-empty-Assets-path> [-GodotPath <godot-mono.console.exe>]')
+        [Console]::Error.WriteLine('Usage: Prepare-DialoguePackage.ps1 -InputPath <extract-output> -OutputPath <new-or-empty-Assets-path> [-GodotPath <godot-executable>]')
         exit 2
     }
     $options[$key] = [string]$args[$i + 1]
@@ -32,14 +33,7 @@ try {
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot
     if ([IO.File]::Exists($outputRoot)) { throw 'OutputPath is an existing file.' }
     if ([IO.Directory]::Exists($outputRoot) -and @([IO.Directory]::EnumerateFileSystemEntries($outputRoot)).Count -ne 0) { throw 'OutputPath must be new or empty; no overwrite is supported.' }
-    $godot = $options['-GodotPath']; if (-not $godot) { $godot = $env:GODOT_BIN }
-    if (-not $godot) { $godot = 'C:\Users\xiaofan\scoop\apps\godot-mono\4.7.2\godot-mono.console.exe' }
-    & pwsh -NoLogo -NoProfile -File (Join-Path $PSScriptRoot 'Get-TestProcesses.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'Godot process check failed.' }
-    $processes = Get-Process -Name 'godot*' -ErrorAction SilentlyContinue
-    if ($processes) { $processes | Select-Object Id, ProcessName; throw 'Godot process already exists; stop and confirm ownership before preparation.' }
-    $version = (& $godot --version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -ne '4.7.2.stable.mono.official.ed1daf0bf') { throw "Pinned Godot version check failed: $version" }
+    $godot = Resolve-ReadyGodotBinary -ExplicitPath $options['-GodotPath']
     dotnet build (Join-Path $project 'Pal.Game.csproj') --nologo --verbosity quiet
     if ($LASTEXITCODE -ne 0) { throw 'Pal.Game build failed.' }
     & $godot --headless --path $project 'res://Editor/PrepareDialogue.tscn' -- '--prepare-input' $inputRoot '--prepare-output' $outputRoot

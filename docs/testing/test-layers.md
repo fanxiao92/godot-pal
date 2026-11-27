@@ -14,7 +14,7 @@
 
 1. 先写出要证明的契约和独立预期；在能直接观察该契约、依赖最少的适用层断言。独立业务规则与跨层接线分别覆盖，不用一层替另一层签字。
 2. 业务时间留在 Core 的显式时间接口；真实输入、信号和资源装配进入 SceneRunner；argv、退出和诊断保留真实进程。
-3. 需要迁移或改写 Game 集成测试时，先读 [Game 分层与 SceneRunner](game-test-layers.md)。需要 CLI 项目/文件集成时，读 [CLI 迁移](cli-test-migration.md)。固定 GdUnit 包只在还原、排查或获准运行 Game 时读取[包说明](gdunit-source-packages.md)。
+3. 需要迁移或改写 Game 集成测试时，先读 [Game 分层与 SceneRunner](game-test-layers.md)。需要 CLI 项目/文件集成时，读 [CLI 迁移](cli-test-migration.md)。Game 测试工程与运行参数见 [Pal.Game.Tests.csproj](../../tests/Pal.Game.Tests/Pal.Game.Tests.csproj) 与 [game.runsettings](../../tests/Pal.Game.Tests/game.runsettings)。
 4. 完整验收仅在明确选中并获准时调用共享入口，不因“最终候选”自动启动，不从局部命令拼出成功；失败、取消、中止、未知退出或结果不完整时保留原件并停止。
 
 ### 共同证据边界
