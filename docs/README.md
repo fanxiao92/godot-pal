@@ -35,8 +35,9 @@
 - [M4 首个必经剧情战](milestones/m4/plan.md)（已交付）
 - [M5 数据与脚本全量转换](milestones/m5/plan.md)（已交付）：附 [opcode 清单](milestones/m5/opcode-inventory.md)
 - [M6 完整战斗、菜单与存读档](milestones/m6/plan.md)（已交付并合入 `main`）：附 [M6-C 存档保留矩阵](milestones/m6/m6c-save-matrix.md)
+- [M8 全场景运行时](milestones/m8/plan.md)（规划已定稿，实施中）：正常新游戏开局、全场景 `trigger`/`auto`、多场景切换与 `PlayerSaveV2`
 
-M7（agent 适配与验证基建）规格与叶票跟踪见 GitHub Issue [#249](https://github.com/fanxiao92/godot-pal/issues/249)。
+M7（agent 适配与验证基建，已交付并合入 `main`）规格与叶票归档见 GitHub Issue [#249](https://github.com/fanxiao92/godot-pal/issues/249)；原生 Harness 整备见 [#270](https://github.com/fanxiao92/godot-pal/issues/270)。
 
 ## 有效格式契约与可行性：`design/`（5 篇）
 
