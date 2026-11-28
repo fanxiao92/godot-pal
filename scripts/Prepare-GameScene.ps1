@@ -81,7 +81,7 @@ try {
     if (-not $godot) { $godot = (Get-Command godot -ErrorAction Stop).Source }
     $godot = (Get-Command $godot -ErrorAction Stop).Source
     Invoke-Checked $godot @('--version') '4.7.2.stable.mono.official.ed1daf0bf'
-    Invoke-Checked 'dotnet' @('build', (Join-Path $project 'Pal.Game.csproj'), '--nologo', '--verbosity', 'quiet') ''
+    Invoke-Checked 'dotnet' @('build', (Join-Path $project 'Pal.Game.csproj'), '--disable-build-servers', '--nologo', '--verbosity', 'quiet') ''
     $common = @('--headless', '--path', $project, 'res://Editor/PrepareScene.tscn', '--', '--prepare-input', $inputRoot, '--prepare-output', $outputRoot, '--prepare-phase')
     Invoke-Checked $godot ($common + 'textures') 'PAL_PREPARE_TEXTURES'
     # Import PNGs through the official Godot importer before saving native references to them.

@@ -6,6 +6,7 @@ using Godot;
 using Pal.Core;
 using Pal.Game.Resources;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
 
 namespace Pal.Game.Tests;
 

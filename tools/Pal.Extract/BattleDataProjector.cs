@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Pal.Core;
+using Pal.Core.Battle;
 
 namespace Pal.Extract;
 

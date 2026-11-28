@@ -7,6 +7,11 @@ using Godot;
 using Pal.Core;
 using Pal.Game.Dialogue;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
+using Pal.Core.Events;
+using Pal.Core.Menu;
+using Pal.Game.Battle;
 
 namespace Pal.Game.Tests;
 

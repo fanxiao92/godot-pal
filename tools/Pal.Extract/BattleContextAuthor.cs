@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using Pal.Core;
+using Pal.Core.Legacy;
 
 namespace Pal.Extract;
 

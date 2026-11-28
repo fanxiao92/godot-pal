@@ -166,6 +166,20 @@ try {
     Put 'src/Pal.Core/Pal.Core.csproj' '<Project>'
     Check 'malformed project XML rejected' 1 '[boundary:project-read]'
     Reset-Fixture
+    Put '.editorconfig' 'root = true'
+    Put 'ARCHITECTURE.md' '# Architecture'
+    [void][IO.Directory]::CreateDirectory((Join-Path $root '.agents'))
+    [void][IO.Directory]::CreateDirectory((Join-Path $root '.claude'))
+    [void][IO.Directory]::CreateDirectory((Join-Path $root 'signals'))
+    Put 'src/Pal.Core/Pal.Core.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="3.3.4" /><AdditionalFiles Include="../../tools/Pal.Analyzers/BannedSymbols.PureDotNet.txt" Link="BannedSymbols.PureDotNet.txt" /><ProjectReference Include="../../tools/Pal.Analyzers/Pal.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" /></ItemGroup></Project>'
+    Check 'Harness-4 allowlisted root entries, BannedApiAnalyzers, AdditionalFiles, and Pal.Analyzers reference accepted' 0 'PASS unit-boundary: core'
+    Reset-Fixture
+    Put 'src/Pal.Core/Pal.Core.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><AdditionalFiles Include="../../tools/Pal.Analyzers/Other.txt" /></ItemGroup></Project>'
+    Check 'non-BannedSymbols AdditionalFiles rejected' 1 '[boundary:project-shape]'
+    Reset-Fixture
+    Put 'src/Pal.Core/Pal.Core.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include="../../tools/Pal.Extract/Pal.Extract.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" /></ItemGroup></Project>'
+    Check 'non-Pal.Analyzers analyzer ProjectReference rejected' 1 '[boundary:project-shape]'
+    Reset-Fixture
     Check 'final clean invocation after all failures' 0 'PASS unit-boundary: cli-unit'
 } finally {
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }

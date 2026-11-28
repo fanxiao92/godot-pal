@@ -3,6 +3,9 @@ using System.Threading.Tasks;
 using Godot;
 using Pal.Core;
 using Pal.Game.Dialogue;
+using Pal.Core.Dialogue;
+using Pal.Core.Events;
+using Pal.Game.Battle;
 
 namespace Pal.Game.Tests;
 

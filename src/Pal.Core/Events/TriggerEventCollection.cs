@@ -1,0 +1,624 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Pal.Core.Shared;
+
+namespace Pal.Core.Events;
+
+/// <summary>A complete modern faithful event collection. Content is supplied by the I/O host.</summary>
+public sealed class TriggerEventCollection
+{
+    private readonly Dictionary<(string FileId, string Id), TriggerEventEntry> _entries = [];
+    private readonly Dictionary<int, TriggerCommand> _commands = [];
+    private readonly Dictionary<(string FileId, string Label), int> _labels = [];
+    internal TriggerCommand CommandAt(int address) => _commands[address];
+    public int InstructionCount { get; private init; }
+    public IReadOnlyList<TriggerEventEntry> Entries => Array.AsReadOnly(_entries.Values.ToArray());
+    /// <summary>Retained source is diagnostic data, never an execution route for raw opcodes.</summary>
+    public TriggerCommandSource GetSource(int sourceAddress) => _commands.TryGetValue(sourceAddress, out var command)
+        ? command.Source : throw new ArgumentOutOfRangeException(nameof(sourceAddress));
+
+    /// <summary>Immutable supplied modern command, including semantic fields and diagnostic source.
+    /// Content retention does not grant execution capability.</summary>
+    public JsonElement GetCommandContent(int sourceAddress) => _commands.TryGetValue(sourceAddress, out var command)
+        ? command.Content : throw new ArgumentOutOfRangeException(nameof(sourceAddress));
+
+    public TriggerEventEntry GetEntry(string fileId, string id) => _entries.TryGetValue((fileId, id), out var entry)
+        ? entry : throw new InvalidDataException($"{fileId}.json: missing entry '{id}'.");
+
+    /// <summary>Resolves a command's control-flow reference (goto / end redirect) to its address.</summary>
+    internal int ResolveControlTarget(TriggerCommand command) =>
+        Resolve(command.TargetReference!, command.Position.FileId, command.Position.ToString());
+
+    public static TriggerEventCollection Parse(string indexText, IReadOnlyDictionary<string, string> eventTexts)
+    {
+        ArgumentNullException.ThrowIfNull(eventTexts);
+        using var index = EventJson.Parse(indexText, "index.json");
+        JsonElement root = index.RootElement;
+        EventJson.Keys(root, "index.json", "formatVersion", "profile", "source", "files");
+        EventJson.Version(root, "index.json");
+        JsonElement source = root.GetProperty("source");
+        EventJson.Keys(source, "index.json.source", "archive", "chunk", "byteOrder", "instructionCount", "byteLength", "sha256");
+        if (EventJson.Text(source, "archive") != "SSS.MKF" || EventJson.Number(source, "chunk") != 4 || EventJson.Text(source, "byteOrder") != "little")
+            throw new InvalidDataException("index.json: unsupported source identity.");
+        int count = EventJson.Number(source, "instructionCount");
+        if (count is < 1 or > 65536 || EventJson.Number(source, "byteLength") != count * 8)
+            throw new InvalidDataException("index.json: invalid instructionCount/byteLength.");
+        if (!Regex.IsMatch(EventJson.Text(source, "sha256"), @"^[0-9a-f]{64}\z", RegexOptions.CultureInvariant))
+            throw new InvalidDataException("index.json: invalid source sha256.");
+        string[] fileIds = EventJson.Array(root, "files").Select(value => EventJson.TextValue(value, "index.json.files")).ToArray();
+        if (fileIds.Length == 0 || fileIds.Any(id => !EventJson.IsIdentifier(id)) || fileIds.Distinct(StringComparer.Ordinal).Count() != fileIds.Length
+            || !fileIds.SequenceEqual(fileIds.Order(StringComparer.Ordinal)))
+            throw new InvalidDataException("index.json: files must be sorted unique identifiers.");
+        if (!fileIds.ToHashSet(StringComparer.Ordinal).SetEquals(eventTexts.Keys))
+            throw new InvalidDataException("index.json: supplied event files do not match the complete files list.");
+        var collection = new TriggerEventCollection { InstructionCount = count };
+        foreach (string fileId in fileIds)
+        {
+            using var file = EventJson.Parse(eventTexts[fileId], fileId + ".json");
+            JsonElement data = file.RootElement;
+            EventJson.Keys(data, fileId + ".json", "formatVersion", "profile", "fileId", "entries", "commands");
+            EventJson.Version(data, fileId + ".json");
+            if (EventJson.Text(data, "fileId") != fileId) throw new InvalidDataException($"{fileId}.json: mismatched fileId.");
+            foreach (var entry in EventJson.Array(data, "entries"))
+            {
+                try
+                {
+                    EventJson.Keys(entry, "entry", "id", "owner", "slot", "kind", "target", "sourceAddress");
+                    var owner = entry.GetProperty("owner");
+                    EventJson.Keys(owner, "owner", "type", "id");
+                    string id = EventJson.Text(entry, "id");
+                    string type = EventJson.Text(owner, "type"), slot = EventJson.Text(entry, "slot"), kind = EventJson.Text(entry, "kind");
+                    int ownerId = EventJson.Word(owner, "id"), address = EventJson.Word(entry, "sourceAddress");
+                    string? target = EventJson.Reference(entry, "target");
+                    if (!EventJson.IsIdentifier(id) || !ValidSlot(type, slot, kind)) throw new InvalidDataException("Invalid entry id or owner/slot/kind.");
+                    if ((address == 0) != (target is null) || address >= count) throw new InvalidDataException($"{id}: invalid zero entry/target or address.");
+                    if (!collection._entries.TryAdd((fileId, id), new TriggerEventEntry(fileId, id, type, ownerId, slot, kind, address) { Target = target }))
+                        throw new InvalidDataException($"Duplicate entry '{id}'.");
+                }
+                catch (InvalidDataException exception) { throw new InvalidDataException($"{fileId}.json: {exception.Message}", exception); }
+            }
+            int previous = -1;
+            foreach (var node in EventJson.Array(data, "commands"))
+            {
+                TriggerCommand command = ParseCommand(node, fileId, count);
+                if (command.Position.SourceAddress <= previous) throw new InvalidDataException($"{command.Position}: commands must be ordered by source.index.");
+                previous = command.Position.SourceAddress;
+                if (!collection._commands.TryAdd(previous, command)) throw new InvalidDataException($"{command.Position}: duplicate source address.");
+                if (!collection._labels.TryAdd((fileId, command.Position.Label), previous)) throw new InvalidDataException($"{command.Position}: duplicate label.");
+            }
+        }
+        if (collection._commands.Count != count) throw new InvalidDataException("index.json: commands must cover every source address exactly once.");
+        foreach (var command in collection._commands.Values)
+        {
+            int nextAddress = (command.Position.SourceAddress + 1) & 65535;
+            int? expected = nextAddress < count ? nextAddress : null;
+            int? actual = command.NextReference is null ? null : collection.Resolve(command.NextReference, command.Position.FileId, command.Position.ToString());
+            if (expected != actual) throw new InvalidDataException($"{command.Position}: next must resolve to its WORD-order successor.");
+            command.NextAddress = actual;
+            if (command.TargetReference is not null)
+            {
+                int target = collection.Resolve(command.TargetReference, command.Position.FileId,
+                    command.Op is "changeCash" or "itemShortageJump" ? $"{command.Position} {command.Op}.to"
+                        : command.Op == "removeItem" ? $"{command.Position} removeItem.shortageTarget" : command.Position.ToString());
+                if (command.Op is "randomJump" or "changeCash" or "itemShortageJump" or "removeItem") command.TargetAddress = target;
+            }
+            foreach (var reference in command.ContentReferences)
+            {
+                int target = collection.Resolve(reference.Reference, command.Position.FileId, $"{command.Position} {command.Op}.{reference.Field}");
+                if (reference.RequiresNonzeroAddress && target == 0)
+                    throw new InvalidDataException($"{command.Position} {command.Op}.{reference.Field}: address zero must use null, not a reference.");
+            }
+            if (command.Op == "startBattle")
+            {
+                command.LossAddress = collection.ResolveBattleTarget(command.LossReference, command.Position, "lossTarget");
+                command.FleeAddress = collection.ResolveBattleTarget(command.FleeReference, command.Position, "fleeTarget");
+            }
+        }
+        foreach (var entry in collection._entries.Values)
+            if (entry.Target is not null && collection.Resolve(entry.Target, entry.FileId, entry.Id) != entry.SourceAddress)
+                throw new InvalidDataException($"{entry.FileId}.json entry {entry.Id}: target disagrees with sourceAddress {entry.SourceAddress:X4}.");
+        return collection;
+    }
+
+    private int Resolve(string reference, string fileId, string context)
+    {
+        string[] pieces = reference.Split('#');
+        var key = pieces.Length == 1 ? (fileId, pieces[0]) : (pieces[0], pieces[1]);
+        return _labels.TryGetValue(key, out int address) ? address
+            : throw new InvalidDataException($"{fileId}.json {context}: dangling reference '{reference}'.");
+    }
+
+    private int? ResolveBattleTarget(string? reference, TriggerPosition position, string field)
+    {
+        if (reference is null) return null;
+        int address = Resolve(reference, position.FileId, $"{position}.{field}");
+        if (address == 0) throw new InvalidDataException($"{position}.{field}: address zero must use null, not a reference.");
+        return address;
+    }
+
+    private static bool ValidSlot(string type, string slot, string kind) =>
+        type == "scene" && slot is "wScriptOnEnter" or "wScriptOnTeleport" && kind == "trigger"
+        || type == "eventObject" && (slot == "wTriggerScript" && kind == "trigger" || slot == "wAutoScript" && kind == "auto")
+        || type == "object" && (kind == "trigger" && slot is "player.wScriptOnFriendDeath" or "player.wScriptOnDying"
+            or "item.wScriptOnUse" or "item.wScriptOnEquip" or "item.wScriptOnThrow" or "magic.wScriptOnUse" or "magic.wScriptOnSuccess"
+            or "enemy.wScriptOnTurnStart" or "enemy.wScriptOnBattleEnd" or "enemy.wScriptOnReady" or "poison.wPlayerScript" or "poison.wEnemyScript"
+            || kind == "auto" && slot is "item.wScriptDesc" or "magic.wScriptDesc");
+
+    private static void ReadTarget(JsonElement node, TriggerCommand command)
+    {
+        command.TargetReference = EventJson.Reference(node, "to") ?? throw new InvalidDataException("Control-flow target must be a reference, including address zero.");
+        command.Limit = EventJson.Word(node, "limit");
+    }
+
+    private static TriggerCommand ParseCommand(JsonElement node, string fileId, int count)
+    {
+        string context = fileId + ".json command";
+        try
+        {
+            if (node.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Command must be an object.");
+            string label = EventJson.Text(node, "label");
+            context += " " + label;
+            if (!EventJson.IsIdentifier(label)) throw new InvalidDataException("Invalid label.");
+            if (!node.TryGetProperty("source", out var source)) throw new InvalidDataException("Missing source.");
+            EventJson.Keys(source, "source", "index", "opcode", "operands");
+            int address = EventJson.Word(source, "index"), opcode = EventJson.Word(source, "opcode");
+            context += $" @{address:X4}";
+            if (address >= count) throw new InvalidDataException("Source index outside instructionCount.");
+            var operands = EventJson.Array(source, "operands").ToArray();
+            if (operands.Length != 3 || operands.Any(v => v.ValueKind != JsonValueKind.Number || !v.TryGetInt32(out int n) || n is < 0 or > 65535))
+                throw new InvalidDataException("source.operands must contain exactly three WORD values.");
+            string op = EventJson.Text(node, "op");
+            string[] fields = op switch
+            {
+                "raw" => [],
+                "end" => EventJson.Text(node, "mode") == "redirect" ? ["mode", "to", "limit"] : ["mode"],
+                "goto" => ["to", "limit"], "call" => ["to", "eventObjectId"], "advanceEntry" => [],
+                "addItem" => ["itemId", "count"],
+                "randomJump" => ["rate", "to"],
+                "changeHp" => ["scope", "amount"], "changeMp" => ["scope", "amount"],
+                "boostStat" => ["field", "percent", "roleOperand"],
+                "setDialog" => EventJson.Text(node, "box") switch
+                {
+                    "upper" or "lower" => ["box", "portraitId", "color", "rngWord"],
+                    "center" => ["box", "color", "rngWord"],
+                    "centerWindow" => ["box", "color"],
+                    _ => throw new InvalidDataException("Unknown dialogue box.")
+                },
+                "showDialog" => ["messageId", "descriptionLineWord"],
+                "startBattle" => ["enemyTeamId", "lossTarget", "isBoss", "fleeTarget"],
+                "setMusic" => ["musicId", "mode"],
+                // #53 retail verbs (script.c), all non-branching word writes/transitions.
+                "setObjectPosition" => ["eventObjectId", "x", "y"],
+                "setObjectGesture" => ["frame"],
+                "changeHpMp" => ["scope", "amount"],
+                "revivePlayer" => ["scope", "healthTenths"],
+                "setAutoEntry" => ["eventObjectId", "entry"],
+                "setTriggerEntry" => ["eventObjectId", "entry"],
+                "setBattlefield" => ["battlefieldId"],
+                "fadeOut" => ["delay"],
+                "setParty" => ["roleId0", "roleId1", "roleId2"],
+                "noop" => [],
+                "setStateRange" => ["fromEventObjectId", "toEventObjectId", "state"],
+                "fadeToRed" => [],
+                "requestReload" => [],
+                // #52 dynamic-story verbs (script.c), shared by trigger and auto contexts.
+                "walkStep" => ["direction"],
+                "face" => ["direction", "frame"],
+                "walkTo" => ["x", "y", "h"],
+                "setState" => ["eventObjectId", "state"],
+                "hide" => ["frames"],
+                "setTriggerMode" => ["eventObjectId", "mode"],
+                "setSceneScripts" => ["sceneId", "onEnter", "onTeleport"],
+                "setObjectScript" => ["objectId", "value", "slotIndex"],
+                "setPartyPos" => ["x", "y", "h"],
+                "setPartyFacing" => ["direction", "gesture", "memberIndex"],
+                "waitUpdate" => ["frames", "runTriggers", "updateGestures"],
+                "redraw" => ["delayUnits", "updateGestures"],
+                "fadeScene" => ["speed"],
+                "markFailed" => [],
+                _ => TriggerNamedContentProfile.Fields(op, opcode)
+            };
+            EventJson.Keys(node, context, ["label", "op", "next", "source", ..fields]);
+            var position = new TriggerPosition(fileId, label, address);
+            var retainedSource = new TriggerCommandSource(position, opcode, Array.AsReadOnly(operands.Select(value => value.GetInt32()).ToArray()));
+            var command = new TriggerCommand(retainedSource, op, EventJson.Reference(node, "next"), node.Clone());
+            switch (op)
+            {
+                case "raw":
+                    // Registered opcodes must use their named mapping: end/setDialog/showDialog/startBattle
+                    // since M3, the #49 role-hook verbs randomJump/changeHp/changeMp/boostStat, plus
+                    // the #51 failure-boundary verbs setMusic/fadeToRed/requestReload, and the #52
+                    // dynamic-story verbs walkStep/face/walkTo/setState/hide/setTriggerMode/
+                    // setSceneScripts/setObjectScript/setPartyPos/setPartyFacing/waitUpdate/redraw/
+                    // fadeScene/markFailed.
+                    if (opcode is 0 or 0x3c or 0xffff or 6 or 27 or 28 or 48 or 0x43 or 0x4e or 0x4f
+                        or >= 0x0b and <= 0x10 or 0x15 or 0x40 or 0x46 or 0x49 or 0x52 or 0x6d or 0x73 or 0x90
+                        or 5 or 9 or 0x41 or 0x13 or 0x14 or 0x1d or 0x22 or 0x24 or 0x25 or 0x4a or 0x50
+                        or 0x75 or 0x78 or 0x9a)
+                        throw new InvalidDataException("Registered opcode must use named mapping.");
+                    break;
+                case "end":
+                    command.Mode = EventJson.Text(node, "mode");
+                    if (opcode != (command.Mode switch { "keep" => 0, "advance" => 1, "redirect" => 2, _ => -1 }))
+                        throw new InvalidDataException("Invalid end mapping.");
+                    if (command.Mode == "redirect") ReadTarget(node, command);
+                    break;
+                case "goto":
+                    if (opcode != 3) throw new InvalidDataException("Invalid goto mapping.");
+                    ReadTarget(node, command);
+                    break;
+                case "call":
+                    // script.c 0x0004: call the target entry, then resume at this instruction's
+                    // successor. Operand1 is a literal caller WORD; word zero inherits the current
+                    // caller and word 0xFFFF resolves to the global last event object inside the
+                    // nested entry (0xFFFF is not the host start-entry spelling here).
+                    if (opcode != 4) throw new InvalidDataException("Invalid call mapping.");
+                    command.TargetReference = EventJson.Reference(node, "to")
+                        ?? throw new InvalidDataException("call.to must be a reference, including address zero.");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
+                    break;
+                case "advanceEntry":
+                    // script.c 0x0008 (trigger) / 0x00A7 (auto): replace the returned entry with the
+                    // next instruction. The two switch-only twins stay distinct so the trigger and
+                    // auto closures each reject the other one's opcode.
+                    if (opcode is not (0x0008 or 0x00A7)) throw new InvalidDataException("Invalid advanceEntry mapping.");
+                    break;
+                case "addItem":
+                    // #116: the frozen 0x001F verb is addItem (#100); the v1 placeholder giveItem is rejected.
+                    if (opcode != 31) throw new InvalidDataException("Invalid addItem mapping.");
+                    command.ObjectId = EventJson.Word(node, "itemId");
+                    if (EventJson.Number(node, "count") is < -32768 or > 32767) throw new InvalidDataException("addItem.count must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "count");
+                    break;
+                case "removeItem":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.ObjectId = EventJson.Word(node, "itemId");
+                    command.Amount = EventJson.Word(node, "count");
+                    command.TargetReference = EventJson.Reference(node, "shortageTarget");
+                    break;
+                case "itemShortageJump":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.ObjectId = EventJson.Word(node, "itemId");
+                    command.Amount = EventJson.Number(node, "count");
+                    command.TargetReference = EventJson.Reference(node, "to");
+                    break;
+                case "randomJump":
+                    // script.c:3301-3312: draw RandomLong(1,100); the jump is taken when draw >= rate.
+                    if (opcode != 6) throw new InvalidDataException("Invalid randomJump mapping.");
+                    command.Rate = EventJson.Word(node, "rate");
+                    command.TargetReference = EventJson.Reference(node, "to");
+                    break;
+                case "changeHp":
+                case "changeMp":
+                    // script.c 0x001B/0x001C: operand 0 selects the caller (0) or the whole party (nonzero).
+                    if (opcode != (op == "changeHp" ? 27 : 28)) throw new InvalidDataException($"Invalid {op} mapping.");
+                    command.Scope = EventJson.Word(node, "scope");
+                    if (EventJson.Number(node, "amount") is < -32768 or > 32767) throw new InvalidDataException($"{op}.amount must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "amount");
+                    break;
+                case "boostStat":
+                    // script.c 0x0030: extra[field][role] = base panel field * percent / 100 (WORD).
+                    if (opcode != 48) throw new InvalidDataException("Invalid boostStat mapping.");
+                    command.StatField = EventJson.Word(node, "field");
+                    if (EventJson.Number(node, "percent") is < -32768 or > 32767) throw new InvalidDataException("boostStat.percent must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "percent");
+                    command.RoleOperand = EventJson.Word(node, "roleOperand");
+                    break;
+                case "setDialog":
+                    command.Box = EventJson.Text(node, "box");
+                    if (command.Box is "upper" or "lower") command.PortraitId = EventJson.Word(node, "portraitId");
+                    command.Color = EventJson.Number(node, "color");
+                    if (command.Box != "centerWindow") command.RngWord = EventJson.Word(node, "rngWord");
+                    if (opcode != (command.Box switch { "center" => 59, "upper" => 60, "lower" => 61, "centerWindow" => 62, _ => -1 })
+                        || command.Color is < 0 or > 255) throw new InvalidDataException("Invalid setDialog mapping/color.");
+                    break;
+                case "startBattle":
+                    if (opcode != 7) throw new InvalidDataException("Invalid startBattle mapping.");
+                    command.EnemyTeamId = EventJson.Word(node, "enemyTeamId");
+                    command.LossReference = EventJson.Reference(node, "lossTarget");
+                    command.FleeReference = EventJson.Reference(node, "fleeTarget");
+                    var isBoss = node.GetProperty("isBoss");
+                    if (isBoss.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new InvalidDataException("startBattle.isBoss must be a boolean.");
+                    command.IsBoss = isBoss.GetBoolean();
+                    if (command.IsBoss != (command.FleeReference is null))
+                        throw new InvalidDataException("startBattle.isBoss must equal fleeTarget being null.");
+                    break;
+                case "showDialog":
+                    command.MessageId = EventJson.Word(node, "messageId");
+                    _ = EventJson.Word(node, "descriptionLineWord");
+                    if (opcode != 0xffff) throw new InvalidDataException("Invalid showDialog mapping.");
+                    break;
+                case "setMusic":
+                    // script.c 0x0043: wNumMusic = operand0 and the operand1 play mode (0 loop, 1 once, 3 fade).
+                    if (opcode != 0x43) throw new InvalidDataException("Invalid setMusic mapping.");
+                    command.MusicId = EventJson.Word(node, "musicId");
+                    command.MusicMode = EventJson.Word(node, "mode");
+                    break;
+                case "setObjectPosition":
+                    // script.c 0x0013: pCurrent x/y words; operand 0/0xFFFF selects the caller.
+                    if (opcode != 0x13) throw new InvalidDataException("Invalid setObjectPosition mapping.");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
+                    command.TileX = EventJson.Word(node, "x");
+                    command.TileY = EventJson.Word(node, "y");
+                    break;
+                case "setObjectGesture":
+                    // script.c 0x0014: caller's current frame word and direction = south.
+                    if (opcode != 0x14) throw new InvalidDataException("Invalid setObjectGesture mapping.");
+                    command.Frame = EventJson.Word(node, "frame");
+                    break;
+                case "changeHpMp":
+                    // script.c 0x001D: the same signed amount changes HP and MP; scope 0 = the
+                    // caller role, nonzero = the whole party. Retail @0A25 uses scope 1, +9999.
+                    if (opcode != 0x1d) throw new InvalidDataException("Invalid changeHpMp mapping.");
+                    command.Scope = EventJson.Word(node, "scope");
+                    if (EventJson.Number(node, "amount") is < short.MinValue or > short.MaxValue)
+                        throw new InvalidDataException("changeHpMp.amount must be a signed WORD.");
+                    command.Amount = EventJson.Number(node, "amount");
+                    break;
+                case "revivePlayer":
+                    // script.c 0x0022: HP = maxHP * operand1 / 10 for dead roles; scope as 0x001D.
+                    if (opcode != 0x22) throw new InvalidDataException("Invalid revivePlayer mapping.");
+                    command.Scope = EventJson.Word(node, "scope");
+                    command.Amount = EventJson.Word(node, "healthTenths");
+                    break;
+                case "setAutoEntry":
+                    // script.c 0x0024: pCurrent wAutoScript = operand1 when operand0 selects one.
+                    if (opcode != 0x24) throw new InvalidDataException("Invalid setAutoEntry mapping.");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
+                    command.Value = EventJson.Word(node, "entry");
+                    break;
+                case "setTriggerEntry":
+                    // script.c 0x0025: pCurrent wTriggerScript = operand1 when operand0 selects one.
+                    if (opcode != 0x25) throw new InvalidDataException("Invalid setTriggerEntry mapping.");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
+                    command.Value = EventJson.Word(node, "entry");
+                    break;
+                case "showBuyMenu":
+                    // script.c 0x0026: PAL_MakeScene + PAL_BuyMenu(operand0) — the store table row
+                    // lprgStore[wStoreNum].rgwItems (uigame.c PAL_BuyMenu over the authored stores).
+                    if (opcode != 0x26) throw new InvalidDataException("Invalid showBuyMenu mapping.");
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.StoreId = EventJson.Word(node, "storeId");
+                    break;
+                case "showSellMenu":
+                    // script.c 0x0027: PAL_MakeScene + PAL_SellMenu() — the sold items come from
+                    // the player's bag (kItemFlagSellable rows), not from a store row.
+                    if (opcode != 0x27) throw new InvalidDataException("Invalid showSellMenu mapping.");
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    break;
+                case "setBattlefield":
+                    // script.c 0x004A: wNumBattleField = operand0. Retail @09FD sets 24.
+                    if (opcode != 0x4a) throw new InvalidDataException("Invalid setBattlefield mapping.");
+                    command.Frames = EventJson.Word(node, "battlefieldId");
+                    break;
+                case "fadeOut":
+                    // script.c 0x0050: PAL_FadeOut(delay or 1) — the palette fade-to-black step
+                    // unit (total duration = delay * 600 ms), not a frame count; the next
+                    // scene fades back in afterwards.
+                    if (opcode != 0x50) throw new InvalidDataException("Invalid fadeOut mapping.");
+                    command.FadeOutDelay = EventJson.Word(node, "delay");
+                    break;
+                case "setParty":
+                    // script.c 0x0075: party = operand+1 role words, 0 = empty; empty keeps role0.
+                    if (opcode != 0x75) throw new InvalidDataException("Invalid setParty mapping.");
+                    command.Role0 = EventJson.Word(node, "roleId0");
+                    command.Role1 = EventJson.Word(node, "roleId1");
+                    command.Role2 = EventJson.Word(node, "roleId2");
+                    break;
+                case "noop":
+                    // script.c 0x0078: the reference implementation does nothing for this opcode.
+                    if (opcode != 0x78) throw new InvalidDataException("Invalid noop mapping.");
+                    break;
+                case "setStateRange":
+                    // script.c 0x009A: sState = operand2 for object IDs operand0..operand1.
+                    if (opcode != 0x9a) throw new InvalidDataException("Invalid setStateRange mapping.");
+                    command.EventObjectId = EventJson.Word(node, "fromEventObjectId");
+                    command.ToEventObjectId = EventJson.Word(node, "toEventObjectId");
+                    command.State = EventJson.Number(node, "state");
+                    if (command.State is < short.MinValue or > short.MaxValue)
+                        throw new InvalidDataException("setStateRange.state must be a signed WORD.");
+                    break;
+                case "fadeToRed":
+                    // script.c 0x004F: fade the whole screen to red (game over); no operands.
+                    if (opcode != 0x4f) throw new InvalidDataException("Invalid fadeToRed mapping.");
+                    break;
+                case "requestReload":
+                    // script.c 0x004E: load the last saved game; the script stops here (return 0).
+                    if (opcode != 0x4e) throw new InvalidDataException("Invalid requestReload mapping.");
+                    break;
+                case "walkStep":
+                    // script.c 0x000B-0x000E: caller direction = opcode - 0x000B, then one step at speed 2.
+                    command.Direction = EventJson.Word(node, "direction");
+                    if (command.Direction is < 0 or > 3 || opcode != 0x000b + command.Direction)
+                        throw new InvalidDataException("Invalid walkStep direction/opcode mapping.");
+                    break;
+                case "face":
+                    // script.c 0x000F: direction/gesture are plain WORDs (retail rows use gesture
+                    // poses beyond 3); 0xFFFF keeps the current value for that word.
+                    if (opcode != 0x000f) throw new InvalidDataException("Invalid face mapping.");
+                    command.Direction = EventJson.Word(node, "direction");
+                    command.Frame = EventJson.Word(node, "frame");
+                    break;
+                case "walkTo":
+                    // script.c 0x0010: caller walks to map tile (x,y,h) at speed 3; the command
+                    // repeats until arrival (auto: entry stays; trigger: a movement request).
+                    if (opcode != 0x10) throw new InvalidDataException("Invalid walkTo mapping.");
+                    command.TileX = EventJson.Word(node, "x");
+                    command.TileY = EventJson.Word(node, "y");
+                    command.Layer = EventJson.Word(node, "h");
+                    if (command.Layer is < 0 or > 1) throw new InvalidDataException("walkTo.h must be 0 or 1.");
+                    break;
+                case "setState":
+                    // script.c 0x0049: operand0 selects pCurrent (0/0xFFFF = caller); state is a SHORT.
+                    if (opcode != 0x49) throw new InvalidDataException("Invalid setState mapping.");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
+                    command.State = EventJson.Number(node, "state");
+                    if (command.State is < short.MinValue or > short.MaxValue)
+                        throw new InvalidDataException("setState.state must be a signed SHORT.");
+                    break;
+                case "hide":
+                    // script.c 0x0052: caller's state *= -1 and vanish time = frames (0 -> 800).
+                    if (opcode != 0x52) throw new InvalidDataException("Invalid hide mapping.");
+                    command.Frames = EventJson.Word(node, "frames");
+                    break;
+                case "setTriggerMode":
+                    // script.c 0x0040: operand0 selects pCurrent (0/0xFFFF = caller).
+                    if (opcode != 0x40) throw new InvalidDataException("Invalid setTriggerMode mapping.");
+                    command.EventObjectId = EventJson.Word(node, "eventObjectId");
+                    command.TriggerModeWord = EventJson.Word(node, "mode");
+                    break;
+                case "setSceneScripts":
+                    // script.c 0x006D: per-field writes into the scene's enter/teleport script words.
+                    if (opcode != 0x6d) throw new InvalidDataException("Invalid setSceneScripts mapping.");
+                    command.SceneId = EventJson.Word(node, "sceneId");
+                    command.OnEnter = EventJson.Word(node, "onEnter");
+                    command.OnTeleport = EventJson.Word(node, "onTeleport");
+                    break;
+                case "setObjectScript":
+                    // script.c 0x0090: gpGlobals->g.rgObject[id].rgwData[2+slot] = value (cross-scene).
+                    if (opcode != 0x90) throw new InvalidDataException("Invalid setObjectScript mapping.");
+                    command.ObjectId = EventJson.Word(node, "objectId");
+                    command.Value = EventJson.Word(node, "value");
+                    command.SlotIndex = EventJson.Word(node, "slotIndex");
+                    if (command.SlotIndex > 5) throw new InvalidDataException("setObjectScript.slotIndex must be 0..5.");
+                    break;
+                case "setPartyPos":
+                    // script.c 0x0046: party/viewport placed at map tile (x,y,h); direction offsets
+                    // only affect trailing members, which the leader-only world does not model.
+                    if (opcode != 0x46) throw new InvalidDataException("Invalid setPartyPos mapping.");
+                    command.TileX = EventJson.Word(node, "x");
+                    command.TileY = EventJson.Word(node, "y");
+                    command.Layer = EventJson.Word(node, "h");
+                    if (command.Layer is < 0 or > 1) throw new InvalidDataException("setPartyPos.h must be 0 or 1.");
+                    break;
+                case "setPartyFacing":
+                    // script.c 0x0015: wPartyDirection and the member gesture are plain WORDs
+                    // (retail rows use gesture poses well beyond 2; frame = direction*3+gesture
+                    // at render time). memberIndex still bounds the party array.
+                    if (opcode != 0x15) throw new InvalidDataException("Invalid setPartyFacing mapping.");
+                    command.Direction = EventJson.Word(node, "direction");
+                    command.Frame = EventJson.Word(node, "gesture");
+                    command.MemberIndex = EventJson.Word(node, "memberIndex");
+                    if (command.MemberIndex > 4)
+                        throw new InvalidDataException("setPartyFacing memberIndex is outside the party array.");
+                    break;
+                case "waitUpdate":
+                    // script.c 0x0009: wait frames while running the real scene update each frame
+                    // (triggers optional per operand1, party gestures per operand2). The reference
+                    // tests both operands for truthiness only; retail rows carry 0xFFFF too.
+                    if (opcode != 9) throw new InvalidDataException("Invalid waitUpdate mapping.");
+                    command.Frames = EventJson.Word(node, "frames");
+                    command.RunTriggers = EventJson.Word(node, "runTriggers");
+                    command.UpdateGestures = EventJson.Word(node, "updateGestures");
+                    break;
+                case "redraw":
+                    // script.c 0x0005: redraw the scene and delay 60ms units (0 -> 1); the
+                    // delay word is operand 1 and the truthy gesture word is operand 2 (the
+                    // party-gesture update flag, retained here; #99 re-binding).
+                    if (opcode != 5) throw new InvalidDataException("Invalid redraw mapping.");
+                    command.Frames = EventJson.Word(node, "delayUnits");
+                    command.UpdateGestures = EventJson.Word(node, "updateGestures");
+                    break;
+                case "fadeScene":
+                    // script.c 0x0073: backup screen, rebuild the scene, VIDEO_FadeScreen(speed)
+                    // — the cross-fade pacing word (larger = slower), not a mode selector.
+                    if (opcode != 0x73) throw new InvalidDataException("Invalid fadeScene mapping.");
+                    command.FadeSpeed = EventJson.Word(node, "speed");
+                    break;
+                case "changeCash":
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    command.Amount = EventJson.Number(node, "amount");
+                    command.TargetReference = EventJson.Reference(node, "to");
+                    break;
+                case "halveCash":
+                    _ = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    break;
+                case "markFailed":
+                    // script.c 0x0041: g_fScriptSuccess = FALSE.
+                    if (opcode != 0x41) throw new InvalidDataException("Invalid markFailed mapping.");
+                    break;
+                default:
+                    command.IsContentOnly = true;
+                    command.ContentReferences = TriggerNamedContentProfile.Validate(node, op, opcode);
+                    break;
+            }
+            return command;
+        }
+        catch (InvalidDataException exception) { throw new InvalidDataException($"{context}: {exception.Message}", exception); }
+    }
+}
+
+public sealed record TriggerEventEntry(string FileId, string Id, string OwnerType, int OwnerId, string Slot, string Kind, int SourceAddress)
+{
+    internal string? Target { get; init; }
+}
+
+public sealed record TriggerPosition(string FileId, string Label, int SourceAddress)
+{
+    public override string ToString() => $"{FileId}.json#{Label} @{SourceAddress:X4}";
+}
+
+public sealed record TriggerCommandSource(TriggerPosition Position, int Opcode, IReadOnlyList<int> Operands);
+
+internal sealed class TriggerCommand(TriggerCommandSource source, string op, string? nextReference, JsonElement content)
+{
+    internal JsonElement Content { get; } = content;
+    internal TriggerCommandSource Source { get; } = source;
+    internal TriggerPosition Position => Source.Position;
+    internal string Op { get; } = op;
+    internal bool IsContentOnly { get; set; }
+    internal IReadOnlyList<TriggerContentReference> ContentReferences { get; set; } = [];
+    internal string? NextReference { get; } = nextReference;
+    internal int? NextAddress { get; set; }
+    internal string? TargetReference { get; set; }
+    internal int Limit { get; set; }
+    internal string? Mode { get; set; }
+    internal string? Box { get; set; }
+    internal int PortraitId { get; set; }
+    internal int Color { get; set; }
+    internal int RngWord { get; set; }
+    internal int MessageId { get; set; }
+    internal int EnemyTeamId { get; set; }
+    internal bool IsBoss { get; set; }
+    internal string? LossReference { get; set; }
+    internal string? FleeReference { get; set; }
+    internal int? LossAddress { get; set; }
+    internal int? FleeAddress { get; set; }
+    internal int Rate { get; set; }
+    internal int? TargetAddress { get; set; }
+    internal int Scope { get; set; }
+    internal int Amount { get; set; }
+    internal int StatField { get; set; }
+    internal int RoleOperand { get; set; }
+    internal int MusicId { get; set; }
+    internal int MusicMode { get; set; }
+    // #52 dynamic-story fields (script.c operand words, retained as parsed).
+    internal int Direction { get; set; }
+    internal int Frame { get; set; }
+    internal int TileX { get; set; }
+    internal int TileY { get; set; }
+    internal int Layer { get; set; }
+    internal int EventObjectId { get; set; }
+    internal int ToEventObjectId { get; set; }
+    internal int ObjectId { get; set; }
+    internal int State { get; set; }
+    internal int Frames { get; set; }
+    internal int FadeOutDelay { get; set; }
+    internal int TriggerModeWord { get; set; }
+    internal int FadeSpeed { get; set; }
+    internal int SceneId { get; set; }
+    internal int OnEnter { get; set; }
+    internal int OnTeleport { get; set; }
+    internal int Value { get; set; }
+    internal int SlotIndex { get; set; }
+    internal int MemberIndex { get; set; }
+    // #53 setParty role words (script.c 0x0075).
+    internal int Role0 { get; set; }
+    internal int Role1 { get; set; }
+    internal int Role2 { get; set; }
+    internal int RunTriggers { get; set; }
+    internal int UpdateGestures { get; set; }
+    // #217 script.c 0x0026 showBuyMenu's store-table row word (lprgStore index).
+    internal int StoreId { get; set; }
+}

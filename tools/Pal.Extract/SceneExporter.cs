@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using static Pal.Extract.ExportSupport;
+using Pal.Core.Exploration;
 
 namespace Pal.Extract;
 

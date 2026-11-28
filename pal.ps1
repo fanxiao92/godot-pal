@@ -14,6 +14,8 @@ Import-Module (Join-Path $script:RepoRoot 'scripts/pal/PalCommon.psm1') -Force -
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/AffectedSelection.psm1') -Force
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/TestReport.psm1') -Force
 Import-Module (Join-Path $script:RepoRoot 'scripts/pal/T3Assets.psm1') -Force
+Import-Module (Join-Path $script:RepoRoot 'scripts/pal/CapabilityLedger.psm1') -Force
+Import-Module (Join-Path $script:RepoRoot 'scripts/pal/ArchAndAssets.psm1') -Force
 
 function Show-Usage {
     @'
@@ -29,6 +31,8 @@ Commands:
        lra               Run tools/long-running-agent npm test
        full | all        Run committable full suite (map self-check + unit + integration + game)
        check-map         Run MSBuild dependency graph & tests/affected-map.psd1 self-check
+       check-ledger      Verify code-derived docs/generated/capabilities-ledger.md zero-drift (--update to regenerate)
+       check-arch        Run syntax + boundary + hygiene (-AllDocs) + map + ledger + guardrail build
 
   ci   dotnet            [T1/T2 Job 1] Syntax + boundary + map self-check + Unit (coverlet) + CLI integration
        prepare           [T1/T2 Job 2] Prepare integration tests (requires Godot)
@@ -40,6 +44,7 @@ Commands:
 
   assets prepare         Prepare T3 shared real-asset cache (default) or wrap scripts/Prepare-*.ps1 (--kind)
          status          Show shared T3 asset & golden cache status
+         inspect         Redacted MKF archive & T3 cache inspection (requires PAL_RAW_DATA_DIR; supports --json)
 
   report                 Render Markdown summary / PR evidence comment from run-summary.json & TRX
 
@@ -88,7 +93,7 @@ function Parse-Options {
         'static-resources', 'static-profile', 'battle-resources',
         'from', 'format', 'repo-root'
     )
-    $switchOptions = @('explain', 'all', 'coverage', 'blame-hang', 'gpu', 'update-golden', 'json', 'help', 'include-real-assets')
+    $switchOptions = @('explain', 'all', 'coverage', 'blame-hang', 'gpu', 'update-golden', 'update', 'json', 'help', 'include-real-assets')
 
     $i = 0
     while ($i -lt $Tokens.Count) {
@@ -311,10 +316,14 @@ function Invoke-UnitTarget {
         [hashtable]$State
     )
     $selected = switch ($ProjectScope) {
-        'core'    { @(@{ Name = 'Pal.Core.UnitTests'; Path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; Package = 'Pal.Core' }) }
+        'core'    { @(
+            @{ Name = 'Pal.Core.UnitTests'; Path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; Package = 'Pal.Core' },
+            @{ Name = 'Pal.Analyzers.Tests'; Path = 'tests/Pal.Analyzers.Tests/Pal.Analyzers.Tests.csproj'; Package = 'Pal.Analyzers' }
+        ) }
         'extract' { @(@{ Name = 'Pal.Extract.UnitTests'; Path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; Package = 'Pal.Extract' }) }
         ''        { @(
             @{ Name = 'Pal.Core.UnitTests'; Path = 'tests/Pal.Core.UnitTests/Pal.Core.UnitTests.csproj'; Package = 'Pal.Core' },
+            @{ Name = 'Pal.Analyzers.Tests'; Path = 'tests/Pal.Analyzers.Tests/Pal.Analyzers.Tests.csproj'; Package = 'Pal.Analyzers' },
             @{ Name = 'Pal.Extract.UnitTests'; Path = 'tests/Pal.Extract.UnitTests/Pal.Extract.UnitTests.csproj'; Package = 'Pal.Extract' }
         ) }
         default   { throw "Unknown unit project '$ProjectScope'. Allowed: core, extract." }
@@ -813,6 +822,12 @@ try {
                 'check-map' {
                     Invoke-MapSelfCheck
                 }
+                'check-ledger' {
+                    Invoke-CapabilityLedgerCheck -RepositoryRoot $script:RepoRoot -Update:$parsed.Flags.ContainsKey('update')
+                }
+                'check-arch' {
+                    Invoke-ArchCheck -RepositoryRoot $script:RepoRoot
+                }
                 'e2e' {
                     $scenarioOpt = if ($parsed.Flags.ContainsKey('scenario')) { [string]$parsed.Flags['scenario'] } else { 'all' }
                     Invoke-E2ETarget -Gpu:$parsed.Flags.ContainsKey('gpu') `
@@ -825,7 +840,7 @@ try {
                 }
                 default {
                     $state.Status = 'error'
-                    throw "Unknown test subcommand '$testSub'. Expected: affected, unit, integration, game, e2e, lra, full, all, check-map."
+                    throw "Unknown test subcommand '$testSub'. Expected: affected, unit, integration, game, e2e, lra, full, all, check-map, check-ledger, check-arch."
                 }
             }
         }
@@ -852,7 +867,7 @@ try {
                     if ($LASTEXITCODE -ne 0) { throw "Test-UnitBoundary.ps1 failed (exit $LASTEXITCODE)." }
 
                     Write-Host '==> Guard: Repo hygiene'
-                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-RepoHygiene.ps1') -RepositoryRoot $script:RepoRoot
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'scripts/Test-RepoHygiene.ps1') -RepositoryRoot $script:RepoRoot -AllDocs
                     if ($LASTEXITCODE -ne 0) { throw "Test-RepoHygiene.ps1 failed (exit $LASTEXITCODE)." }
 
                     Write-Host '==> Self-test: PalFrontDoor.Tests.ps1'
@@ -866,7 +881,12 @@ try {
                     Write-Host '==> Self-test: UnitBoundary.Tests.ps1'
                     & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/UnitBoundary.Tests.ps1')
                     if ($LASTEXITCODE -ne 0) { throw "UnitBoundary.Tests.ps1 failed (exit $LASTEXITCODE)." }
+
+                    Write-Host '==> Self-test: RepoHygiene.Tests.ps1'
+                    & pwsh -NoProfile -NonInteractive -File (Join-Path $script:RepoRoot 'tests/RepoHygiene.Tests.ps1')
+                    if ($LASTEXITCODE -ne 0) { throw "RepoHygiene.Tests.ps1 failed (exit $LASTEXITCODE)." }
                     Invoke-MapSelfCheck
+                    Invoke-CapabilityLedgerCheck -RepositoryRoot $script:RepoRoot
                     Invoke-UnitTarget -ProjectScope '' -Filter '' -Coverage -EmitJunit -ArtifactsDir $artifactsDir -State $state
                     Invoke-IntegrationTarget -ProjectScope 'extract' -Filter '' -GodotPathOpt '' -EmitJunit -ArtifactsDir $artifactsDir -State $state
                 }
@@ -970,9 +990,12 @@ try {
                         Write-Output "T3 shared asset cache: key=$($info.CacheKey) assets=$assetState goldens=$goldenState (private paths omitted)"
                     }
                 }
+                'inspect' {
+                    Invoke-AssetsInspect -RepositoryRoot $script:RepoRoot -AsJson:$parsed.Flags.ContainsKey('json')
+                }
                 default {
                     $state.Status = 'error'
-                    throw "Unknown assets subcommand '$sub'. Expected: prepare, status."
+                    throw "Unknown assets subcommand '$sub'. Expected: prepare, status, inspect."
                 }
             }
         }
@@ -1014,7 +1037,7 @@ if ($cmd -eq 'ci') {
     }
 }
 
-if ($parsed.Flags.ContainsKey('json')) {
+if ($parsed.Flags.ContainsKey('json') -and -not ($cmd -eq 'assets' -and $sub -eq 'inspect')) {
     Write-Output "PAL_SUMMARY_JSON=$summaryPath"
 }
 

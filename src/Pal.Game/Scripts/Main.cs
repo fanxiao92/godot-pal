@@ -8,6 +8,14 @@ using Pal.Game.Dialogue;
 using Pal.Game.Map;
 using Pal.Game.Profiles;
 using Pal.Game.Resources;
+using Pal.Core.State;
+using Pal.Core.Exploration;
+using Pal.Core.Events;
+using Pal.Core.Menu;
+using Pal.Core.Save;
+using Pal.Core.Legacy;
+using Pal.Game.Battle;
+using Pal.Game.UI;
 
 namespace Pal.Game;
 
@@ -531,7 +539,7 @@ public partial class Main : Node2D
             // World-wired first-battle call: the parked scene waits and counted movements
             // advance one step per committed update tick (the same per-tick ownership the
             // dynamic host uses); the map only redraws when the exploration really changed.
-            if (firstBattleWorld is { } world && Dialogue?.Session is { Phase: Pal.Core.TriggerScriptPhase.WaitingForSceneWait or Pal.Core.TriggerScriptPhase.WaitingForMovement } trigger)
+            if (firstBattleWorld is { } world && Dialogue?.Session is { Phase: Pal.Core.Events.TriggerScriptPhase.WaitingForSceneWait or Pal.Core.Events.TriggerScriptPhase.WaitingForMovement } trigger)
             {
                 // One world step per 100ms due tick (the dynamic host's cadence), independent
                 // of exploration movement commits; the acknowledged park may advance into a

@@ -9,10 +9,11 @@ function Fail([string]$Code, [string]$Message) { throw "[boundary:$Code] $Messag
 # Root-level entries are allowlisted: one-off helper scripts accidentally committed at the repository
 # root (e.g. _fix_loader.py in #53, _pb2.py caught by the M4 dual review) must fail here instead of
 # riding along in delivery diffs. Missing entries are fine; unexpected entries are not.
-$script:AllowedRootFiles = @('.gitattributes', '.gitignore', 'AGENTS.md', 'CODING_STANDARDS.md', 'GLOSSARY.md', 'GodotPal.sln', 'NuGet.Config', 'README.md', 'global.json', 'pal.ps1')
+$script:AllowedRootFiles = @('.editorconfig', '.gitattributes', '.gitignore', 'AGENTS.md', 'ARCHITECTURE.md', 'CODING_STANDARDS.md', 'GLOSSARY.md', 'GodotPal.sln', 'NuGet.Config', 'README.md', 'global.json', 'pal.ps1')
 # NuGet.Config and the locked GdUnit bootstrap require .packages; .pi holds project-trusted
-# Pi subagent configuration (docs/agents/execution-environment.md). Neither is a unit compilation source.
-$script:AllowedRootDirectories = @('.artifacts', '.github', '.packages', '.pi', 'data', 'docs', 'reference', 'samples', 'scripts', 'src', 'tests', 'tools')
+# Pi subagent configuration (docs/agents/execution-environment.md); .agents/.claude hold repo
+# engineering skills (local junction); signals holds LRA retro signals. None is a unit source.
+$script:AllowedRootDirectories = @('.agents', '.artifacts', '.claude', '.github', '.packages', '.pi', 'data', 'docs', 'reference', 'samples', 'scripts', 'signals', 'src', 'tests', 'tools')
 function Test-RootFiles([string]$Root) {
     foreach ($entry in @(Get-ChildItem -LiteralPath $Root -Force | Where-Object Name -ne '.git')) {
         if ($entry.PSIsContainer) {
@@ -33,18 +34,20 @@ $production = @{
 }
 function Test-ProjectShape([string]$Path, [xml]$Xml) {
     $allowedProperties = @('TargetFramework', 'ImplicitUsings', 'Nullable', 'IsPackable', 'IsTestProject', 'OutputType')
-    $allowedPackages = @('Microsoft.NET.Test.Sdk', 'xunit', 'xunit.runner.visualstudio', 'coverlet.collector')
+    $allowedPackages = @('Microsoft.NET.Test.Sdk', 'xunit', 'xunit.runner.visualstudio', 'coverlet.collector', 'Microsoft.CodeAnalysis.BannedApiAnalyzers')
     # Only the InternalsVisibleToAttribute assembly attribute (friend assembly for Pal.Extract) is allowed;
     # any other AssemblyAttribute keeps failing this allowlist.
     $allowedAssemblyAttributes = @('System.Runtime.CompilerServices.InternalsVisibleToAttribute')
     if ($Xml.DocumentElement.Name -cne 'Project' -or $Xml.DocumentElement.NamespaceURI -or $Xml.Project.Sdk -cne 'Microsoft.NET.Sdk') {
         Fail 'project-shape' "$Path requires the ordinary Microsoft.NET.Sdk project shape"
     }
+    $analyzerProjectFull = [IO.Path]::GetFullPath((Join-Path $root 'tools/Pal.Analyzers/Pal.Analyzers.csproj'))
     foreach ($node in $Xml.SelectNodes('//*')) {
         $allowedAttributes = switch -CaseSensitive ($node.Name) {
             Project { @('Sdk') }
-            ProjectReference { @('Include') }
+            ProjectReference { @('Include', 'OutputItemType', 'ReferenceOutputAssembly') }
             PackageReference { @('Include', 'Version') }
+            AdditionalFiles { @('Include', 'Link') }
             Compile { @('Include', 'Link') }
             AssemblyAttribute { @('Include') }
             default { @() }
@@ -59,7 +62,7 @@ function Test-ProjectShape([string]$Path, [xml]$Xml) {
             '#document' { $node.Name -ceq 'Project' }
             Project { $node.Name -cin @('PropertyGroup', 'ItemGroup') }
             PropertyGroup { $node.Name -cin $allowedProperties -and -not [string]::IsNullOrWhiteSpace($node.InnerText) -and $node.InnerText -notmatch '[$@]' -and $node.SelectNodes('*').Count -eq 0 }
-            ItemGroup { $node.Name -cin @('ProjectReference', 'PackageReference', 'Compile', 'AssemblyAttribute') }
+            ItemGroup { $node.Name -cin @('ProjectReference', 'PackageReference', 'AdditionalFiles', 'Compile', 'AssemblyAttribute') }
             PackageReference { $node.Name -cin @('PrivateAssets', 'IncludeAssets') -and $node.SelectNodes('*').Count -eq 0 -and $node.InnerText -notmatch '[$@]' }
             AssemblyAttribute { $node.Name -ceq '_Parameter1' -and $node.SelectNodes('*').Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($node.InnerText) -and $node.InnerText -notmatch '[$@]' }
             default { $false }
@@ -70,6 +73,23 @@ function Test-ProjectShape([string]$Path, [xml]$Xml) {
         }
         if ($node.Name -ceq 'AssemblyAttribute' -and $node.Include -cnotin $allowedAssemblyAttributes) {
             Fail 'project-shape' "$Path unapproved assembly attribute: $($node.Include)"
+        }
+        if ($node.Name -ceq 'AdditionalFiles') {
+            $addInclude = $node.GetAttribute('Include')
+            if (-not $addInclude -or $addInclude -match '[$*?;]' -or ([IO.Path]::GetFileName($addInclude) -notmatch '^BannedSymbols.*\.txt$')) {
+                Fail 'project-shape' "$Path unapproved AdditionalFiles entry: $addInclude"
+            }
+        }
+        if ($node.Name -ceq 'ProjectReference') {
+            $outType = $node.GetAttribute('OutputItemType')
+            $refOut = $node.GetAttribute('ReferenceOutputAssembly')
+            if ($outType -or $refOut) {
+                $inc = $node.GetAttribute('Include')
+                $resolvedRef = if ($inc -and $inc -notmatch '[$*?;]') { [IO.Path]::GetFullPath((Join-Path (Split-Path $Path -Parent) $inc)) } else { '' }
+                if ($outType -cne 'Analyzer' -or $refOut -cne 'false' -or $resolvedRef -cne $analyzerProjectFull) {
+                    Fail 'project-shape' "$Path unsupported analyzer ProjectReference attributes on: $inc"
+                }
+            }
         }
     }
     $directory = Split-Path $Path -Parent
@@ -157,24 +177,26 @@ try {
         $testIdentity = @($xml.SelectNodes('/Project/PropertyGroup/IsTestProject'))
         if ($testIdentity.Count -ne 1 -or $testIdentity[0].InnerText -ne 'true') { Fail 'test-project' "$path requires explicit IsTestProject=true" }
         $expected = [IO.Path]::GetFullPath((Join-Path $root $production[$name]))
-        $references = @($xml.SelectNodes('//ProjectReference'))
-        foreach ($reference in $references) {
+        $runtimeRefs = @($xml.SelectNodes('//ProjectReference') | Where-Object { $_.GetAttribute('OutputItemType') -cne 'Analyzer' })
+        foreach ($reference in $runtimeRefs) {
             $include = $reference.GetAttribute('Include')
             if ($include -match '[$*?;]' -or [IO.Path]::GetFullPath((Join-Path (Split-Path $path -Parent) $include)) -ne $expected) {
                 Fail 'project-reference' "$path references forbidden or nonliteral project: $include"
             }
         }
-        if ($references.Count -ne 1) { Fail 'project-reference' "$path must reference exactly $expected" }
+        if ($runtimeRefs.Count -ne 1) { Fail 'project-reference' "$path must reference exactly $expected" }
         if (-not [IO.File]::Exists($expected)) { Fail 'project-missing' "Missing production project: $expected" }
         $productionXml = Read-Project $expected
         # Approved production-to-production references keep the unit closure pure .NET:
         # Pal.Core must stay self-contained; the Pal.Extract CLI may reference only Pal.Core.
+        # Compile-time Analyzer references (OutputItemType="Analyzer", ReferenceOutputAssembly="false")
+        # are already restricted to tools/Pal.Analyzers in Test-ProjectShape and excluded from runtime count.
         $approvedProductionReferences = @{
             core = @()
             'cli-unit' = @([IO.Path]::GetFullPath((Join-Path $root 'src/Pal.Core/Pal.Core.csproj')))
         }
         $approved = @($approvedProductionReferences[$name] | ForEach-Object { [string]$_ })
-        foreach ($reference in @($productionXml.SelectNodes('//ProjectReference'))) {
+        foreach ($reference in @($productionXml.SelectNodes('//ProjectReference') | Where-Object { $_.GetAttribute('OutputItemType') -cne 'Analyzer' })) {
             $include = $reference.GetAttribute('Include')
             if ($include -match '[$*?;]') { Fail 'project-reference' "$expected has a nonliteral production reference: $include" }
             $resolved = [IO.Path]::GetFullPath((Join-Path (Split-Path $expected -Parent) $include))

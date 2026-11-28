@@ -47,7 +47,7 @@ try {
     if($processes.Count){$processes | Format-Table | Out-String | Write-Host; throw 'Godot process already exists; stop and confirm ownership.'}
     $godot=$options['-GodotPath']; if(-not $godot){$godot=$env:GODOT_BIN}; if(-not $godot){$godot=(Get-Command godot -ErrorAction Stop).Source}; $godot=(Get-Command $godot -ErrorAction Stop).Source
     Invoke-Checked $godot @('--version') '4.7.2.stable.mono.official.ed1daf0bf'
-    Invoke-Checked 'dotnet' @('build',(Join-Path $project 'Pal.Game.csproj'),'--nologo','--verbosity','quiet') ''
+    Invoke-Checked 'dotnet' @('build',(Join-Path $project 'Pal.Game.csproj'),'--disable-build-servers','--nologo','--verbosity','quiet') ''
     # The public Editor API repeats all checks and owns stable source reading/publication.
     Assert-NoLink $inputRoot; Assert-NoLink $outputRoot; Assert-TreeNoLink $inputRoot
     Invoke-Checked $godot @('--headless','--path',$project,'res://Editor/PrepareItemBitmaps.tscn','--','--ball-input',$inputRoot,'--ball-output',$outputRoot) 'PAL_PREPARE_ITEM_BITMAPS:'

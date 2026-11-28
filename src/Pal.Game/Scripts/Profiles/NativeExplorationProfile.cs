@@ -7,20 +7,15 @@ using Godot;
 using Pal.Core;
 using Pal.Game.Map;
 using Pal.Game.Resources;
+using Pal.Core.Exploration;
 
 namespace Pal.Game.Profiles;
 
 public static class NativeExplorationProfile
 {
-    public const string DefaultUri = "res://Assets/Profiles/Exploration.tres";
+    public const string DefaultUri = NativeContentDependencies.DefaultExplorationProfileUri;
 
-    internal static void ValidateUri(string profileUri)
-    {
-        Require(profileUri != null && profileUri.StartsWith("res://", StringComparison.Ordinal), "profile requires a normalized res:// resource URI");
-        foreach (string segment in profileUri[6..].Split('/'))
-            Require(segment.Length > 0 && segment is not ("." or "..") && !segment.EndsWith('.') && segment == segment.Trim()
-                && !segment.Any(c => char.IsControl(c) || "\\:%?#*\"<>|".Contains(c)), "profile requires a normalized res:// resource URI");
-    }
+    internal static void ValidateUri(string profileUri) => NativeContentDependencies.ValidateUri(profileUri);
 
     public static CheckedExplorationProfile Load(string profileUri, PalSceneData scene)
     {

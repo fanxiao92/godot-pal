@@ -1,6 +1,12 @@
 using System.Text.Json.Nodes;
 using Pal.TestFixtures;
 using Xunit;
+using Pal.Core.State;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
+using Pal.Core.Legacy;
 
 namespace Pal.Core.Tests;
 
@@ -844,7 +850,6 @@ public sealed class FirstMandatoryBattleClosureTests
     {
         context.Document["snapshot"]!["world"]!["leader"]!["x"] = 1264;
         context.Document["snapshot"]!["world"]!["leader"]!["y"] = 248;
-        context.Document["snapshot"]!["world"]!["searchProof"]!["sampleIndex"] = 1;
         if (prepared)
             foreach (var node in context.Document["closure"]!["entries"]!.AsArray())
                 node!["status"] = "prepared";

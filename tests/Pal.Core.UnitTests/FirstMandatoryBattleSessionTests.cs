@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using Pal.TestFixtures;
 using Xunit;
+using Pal.Core.Exploration;
+using Pal.Core.Legacy;
 
 namespace Pal.Core.Tests;
 
@@ -108,7 +110,6 @@ public sealed class FirstMandatoryBattleSessionTests
         var fixture = BattleContextTestFixture.Valid();
         fixture.Document["snapshot"]!["world"]!["leader"]!["x"] = 1264;
         fixture.Document["snapshot"]!["world"]!["leader"]!["y"] = 248;
-        fixture.Document["snapshot"]!["world"]!["searchProof"]!["sampleIndex"] = 1;
         byte[] context = Encoding.UTF8.GetBytes(fixture.Document.ToJsonString());
         string hash = Convert.ToHexStringLower(SHA256.HashData(context));
         byte[] index = Encoding.UTF8.GetBytes($"{{\"formatVersion\":1,\"profile\":\"first-mandatory-battle-pre-trigger-v1\",\"contextFile\":\"battle-context.json\",\"contextSha256\":\"{hash}\"}}");

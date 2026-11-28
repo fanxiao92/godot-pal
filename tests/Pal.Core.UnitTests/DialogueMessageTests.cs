@@ -1,5 +1,6 @@
 using Pal.Core;
 using Xunit;
+using Pal.Core.Dialogue;
 
 namespace Pal.Core.Tests;
 
@@ -36,17 +37,6 @@ public class DialogueMessageTests
             new DialogueMessageBlock(61, 62, [DialogueMessagePart.FromText("valid")]),
             new DialogueMessageBlock(61, 62, [DialogueMessagePart.FromText("duplicate")])]));
         Assert.Throws<ArgumentException>(() => new DialogueLanguagePackage("fr", []));
-    }
-
-    [Fact]
-    public void Language_selection_defaults_to_simplified_chinese_and_selects_english_only_when_explicit()
-    {
-        var chinese = new DialogueLanguagePackage("zh-Hans", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("zh")])]);
-        var english = new DialogueLanguagePackage("en", [new DialogueMessageBlock(61, 61, [DialogueMessagePart.FromText("en")])]);
-
-        Assert.Equal("zh-Hans", new DialogueLanguageSelection().Select(chinese, english).Language);
-        Assert.Equal("en", new DialogueLanguageSelection("en").Select(chinese, english).Language);
-        Assert.Throws<InvalidDataException>(() => new DialogueLanguageSelection("en").Select(english, chinese));
     }
 
     [Fact]

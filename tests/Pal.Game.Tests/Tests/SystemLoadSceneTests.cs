@@ -5,6 +5,12 @@ using GdUnit4;
 using Godot;
 using Pal.Core;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
+using Pal.Core.Dialogue;
+using Pal.Core.Events;
+using Pal.Core.Menu;
+using Pal.Core.Save;
+using Pal.Game.Battle;
 
 namespace Pal.Game.Tests;
 
@@ -509,16 +515,16 @@ public class SystemLoadSceneTests
         await host.Wait(() => host.Main.Dialogue!.Session!.PendingDisplay is
             { Display.Current.Phase: DialogueDisplayPhase.WaitingForAdvance });
         host.Tap(Key.Enter); // advance the pre-battle text into the action menu
-        await host.Wait(() => host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.AttackMenu);
+        await host.Wait(() => host.Main.StoryBattleMode == Pal.Game.Battle.StoryBattlePresentation.AttackMenu);
         ulong deadline = Time.GetTicksMsec() + 60000;
         while (host.Main.Dialogue!.Session?.PendingLostReload is null && Time.GetTicksMsec() < deadline)
         {
             var session = host.Main.Dialogue!.Session!;
             if (session.PendingDisplay is { Display.Current.Phase: DialogueDisplayPhase.WaitingForAdvance })
                 host.Tap(Key.Enter); // the centered loss text
-            else if (host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.AttackMenu)
+            else if (host.Main.StoryBattleMode == Pal.Game.Battle.StoryBattlePresentation.AttackMenu)
                 host.Tap(Key.Enter); // commit the selecting member's attack
-            else if (host.Main.StoryBattleMode == Pal.Game.Dialogue.StoryBattlePresentation.TargetMenu)
+            else if (host.Main.StoryBattleMode == Pal.Game.Battle.StoryBattlePresentation.TargetMenu)
                 host.Tap(Key.Enter); // confirm the first alive target
             await host.Wait(() => true);
         }
@@ -529,7 +535,7 @@ public class SystemLoadSceneTests
     /// iCurMenuItem across close/reopen — a save visit parks it on the SYSTEM entry) and
     /// returns the live status projection. Browses by the observed cursor, never an assumed
     /// fresh position; the caller continues from the open status page.</summary>
-    private static async Task<Pal.Core.ExplorationMenuStatusView> OpenStatusFromRememberedCursor(LoadHost host)
+    private static async Task<Pal.Core.Menu.ExplorationMenuStatusView> OpenStatusFromRememberedCursor(LoadHost host)
     {
         var menu = host.Main.Menu!;
         host.Tap(Key.Escape);

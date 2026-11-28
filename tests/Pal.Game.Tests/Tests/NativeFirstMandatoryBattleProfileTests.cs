@@ -229,7 +229,7 @@ public class NativeFirstMandatoryBattleProfileTests
     [TestCase("hash")]
     [TestCase("identity")]
     [TestCase("references")]
-    [TestCase("closure-identity")]
+    [TestCase("closure-category")]
     [TestCase("static-hash")]
     public void NativeProfileRejectsCorruptEnvelope(string defect)
     {
@@ -240,7 +240,7 @@ public class NativeFirstMandatoryBattleProfileTests
             case "hash": fixture.Native.ContextSha256 = new string('0', 64); break;
             case "identity": fixture.Native.Identity!.OwnerId = 29; break;
             case "references": fixture.Native.Resources[0].Id = "wrong"; break;
-            case "closure-identity": ((PalBattleEventRangeIdentity)fixture.Native.Closure!.Entries[0].Identity!).BattleAddress++; break;
+            case "closure-category": fixture.Native.Closure!.Entries[0].Category = "wrong"; break;
             case "static-hash": fixture.Native.StaticSceneSha256 = new string('0', 64); break;
         }
         fixture.Save();

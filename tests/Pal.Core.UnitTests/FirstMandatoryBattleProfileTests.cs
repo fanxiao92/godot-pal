@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Pal.TestFixtures;
 using Pal.Core;
 using Xunit;
+using Pal.Core.Legacy;
 
 namespace Pal.Core.Tests;
 
@@ -33,15 +34,12 @@ public sealed class FirstMandatoryBattleProfileTests
         Assert.Equal(7, profile.Roles[0].HiddenExperience.Count);
         Assert.Equal(9, profile.Roles[0].Statuses.Count);
         Assert.Equal((1248, 256, "east", 0), (profile.World.Leader.X, profile.World.Leader.Y, profile.World.Leader.Direction, profile.World.Leader.Phase));
-        Assert.Equal((28, 3, true), (profile.World.SearchProof.OwnerId, profile.World.SearchProof.SampleIndex, profile.World.SearchProof.CollisionPass));
         Assert.Equal(0x09c3, profile.World.EventObjects.Single(x => x.OwnerId == 28).TriggerEntry);
         Assert.Equal("@09C3", profile.Closure.Entry);
         Assert.Equal(9, profile.Closure.Entries.Count);
         Assert.All(profile.Closure.Entries, entry => Assert.Equal("contract-only", entry.Status));
         BattleClosureEntry battle = profile.Closure.Entries.Single(x => x.Id == "battle-team-18");
-        BattleCommandIdentity battleIdentity = Assert.IsType<BattleCommandIdentity>(battle.Identity);
-        Assert.Equal(0x09fe, battleIdentity.CommandAddress);
-        Assert.Equal(new[] { 0x0012, 0xa073, 0x0000 }, battleIdentity.Operands);
+        Assert.Equal("command", battle.Category);
         Assert.Equal(new[] { 46, 47, 51, 53 }, battle.OwnerTickets);
         Assert.Equal(new[] { "events", "battle-data" }, battle.ResourceIds);
         Assert.Equal(6, profile.Resources.Count);
@@ -109,87 +107,6 @@ public sealed class FirstMandatoryBattleProfileTests
         Assert.Equal(FirstMandatoryBattleEnvelopeCodec.Sha256(envelope), Convert.ToHexStringLower(SHA256.HashData(canonical)));
     }
 
-    [Fact]
-    public void Load_exposes_all_nine_closed_typed_closure_identities()
-    {
-        FirstMandatoryBattleProfile profile = LoadContextForTest(BattleContextTestFixture.Valid().ContextBytes);
-        Assert.Collection(profile.Closure.Entries,
-            entry => { var x = Typed<BattleEventRangeIdentity>(entry); Assert.Equal((0x09c3, 0x09fe, 0x09ff, 0x0a32), (x.StartAddress, x.BattleAddress, x.WonStartAddress, x.EndAddress)); },
-            entry => { var x = Typed<BattleCommandIdentity>(entry); Assert.Equal((0x09fe, 18, 495, 97, 2, 24), (x.CommandAddress, x.EnemyTeamId, x.EnemyObjectId, x.EnemyId, x.EnemyCount, x.BattlefieldId)); Assert.Equal(new[] { 0x0012, 0xa073, 0 }, x.Operands); Assert.Equal(("third-operand-zero-is-boss-no-flee", "encode-operands-from-semantic-fields"), (x.SpecialValue, x.ReverseEncoding)); },
-            entry => { var x = Typed<BattleRoleHooksIdentity>(entry); Assert.Equal((1, 0xa96e, 0xa987, 0, 0xa9b5, 0xa9d1, "all-random-branches"), (x.DyingRoleId, x.DyingStartAddress, x.DyingEndAddress, x.FriendDeathRoleId, x.FriendDeathStartAddress, x.FriendDeathEndAddress, x.BranchCoverage)); },
-            entry => { var x = Typed<BattleEquipmentLayoutIdentity>(entry); Assert.Equal((6, 6, 170, true), (x.RoleCount, x.SlotCount, x.DualAttackObjectId, x.PersistentEquipmentStatus)); },
-            entry => { var x = Typed<BattleGrowthLayoutIdentity>(entry); Assert.Equal((5, true, true, true), (x.RoleCount, x.IncludesPrimaryExperience, x.IncludesHiddenExperience, x.IncludesRecoveryAndCleanup)); },
-            entry => { var x = Typed<BattleDynamicAutoIdentity>(entry); Assert.Equal((0x0a36, 0x0a3b, "update-driven"), (x.StartAddress, x.EndAddress, x.Advance)); Assert.Equal(new[] { "movement", "direction", "hidden" }, x.Effects); },
-            entry => { var x = Typed<BattleFailureBoundaryIdentity>(entry); Assert.Equal((0xa073, 0x004e, "diagnose-and-stop-without-reload-retry-or-exploration"), (x.LostEntryAddress, x.ReloadCommand, x.Behavior)); },
-            entry => { var x = Typed<BattleImageSetIdentity>(entry); Assert.Equal((97, "ABC97", 24, "FBP24", true), (x.EnemyId, x.EnemyArchiveEntry, x.BattlefieldId, x.BattlefieldArchiveEntry, x.IncludesLayoutAndEffectFrames)); Assert.Equal(new[] { "F0", "F1" }, x.RoleSpriteIds); },
-            entry => { var x = Typed<BattleLocalizedDialogueIdentity>(entry); Assert.Equal(new[] { "zh-CN", "en" }, x.Languages); Assert.Equal(new[] { "messages", "names", "portraits", "glyphs", "ui" }, x.Contents); });
-    }
-
-    [Fact]
-    public void Closure_identity_hierarchy_is_closed_to_external_assemblies_and_has_exactly_nine_variants()
-    {
-        Type baseType = typeof(BattleClosureIdentity);
-        ConstructorInfo[] externallyUsableConstructors = baseType
-            .GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Where(constructor => constructor.IsPublic || constructor.IsFamily || constructor.IsFamilyOrAssembly)
-            .ToArray();
-        Assert.Empty(externallyUsableConstructors);
-
-        Type[] variants = baseType.Assembly.GetTypes()
-            .Where(type => type.BaseType == baseType && !type.IsAbstract)
-            .OrderBy(type => type.Name, StringComparer.Ordinal)
-            .ToArray();
-        Assert.All(variants, type => Assert.True(type.IsPublic && type.IsSealed, $"{type.Name} must be public sealed."));
-        Assert.Equal(new[]
-        {
-            typeof(BattleCommandIdentity),
-            typeof(BattleDynamicAutoIdentity),
-            typeof(BattleEquipmentLayoutIdentity),
-            typeof(BattleEventRangeIdentity),
-            typeof(BattleFailureBoundaryIdentity),
-            typeof(BattleGrowthLayoutIdentity),
-            typeof(BattleImageSetIdentity),
-            typeof(BattleLocalizedDialogueIdentity),
-            typeof(BattleRoleHooksIdentity)
-        }.OrderBy(type => type.Name, StringComparer.Ordinal), variants);
-    }
-
-    [Fact]
-    public void Collection_bearing_closure_identities_defensively_copy_all_caller_lists()
-    {
-        int[] operands = [0x0012, 0xa073, 0];
-        var effects = new List<string> { "movement", "direction", "hidden" };
-        string[] roleSpriteIds = ["F0", "F1"];
-        var languages = new List<string> { "zh-CN", "en" };
-        string[] contents = ["messages", "names", "portraits", "glyphs", "ui"];
-        var command = new BattleCommandIdentity(0x09fe, operands, 18, 495, 97, 2, 24, "special", "reverse");
-        var dynamicAuto = new BattleDynamicAutoIdentity(0x0a36, 0x0a3b, effects, "update-driven");
-        var images = new BattleImageSetIdentity(97, "ABC97", roleSpriteIds, 24, "FBP24", true);
-        var dialogue = new BattleLocalizedDialogueIdentity(languages, contents);
-
-        operands[0] = 999;
-        effects[0] = "changed";
-        roleSpriteIds[0] = "changed";
-        languages[0] = "changed";
-        contents[0] = "changed";
-
-        Assert.Equal(new[] { 0x0012, 0xa073, 0 }, command.Operands);
-        Assert.Equal(new[] { "movement", "direction", "hidden" }, dynamicAuto.Effects);
-        Assert.Equal(new[] { "F0", "F1" }, images.RoleSpriteIds);
-        Assert.Equal(new[] { "zh-CN", "en" }, dialogue.Languages);
-        Assert.Equal(new[] { "messages", "names", "portraits", "glyphs", "ui" }, dialogue.Contents);
-    }
-
-    [Fact]
-    public void Collection_bearing_closure_identities_fail_fast_for_null_lists()
-    {
-        Assert.Throws<ArgumentNullException>(() => new BattleCommandIdentity(0, null!, 0, 0, 0, 0, 0, "", ""));
-        Assert.Throws<ArgumentNullException>(() => new BattleDynamicAutoIdentity(0, 0, null!, ""));
-        Assert.Throws<ArgumentNullException>(() => new BattleImageSetIdentity(0, "", null!, 0, "", false));
-        Assert.Throws<ArgumentNullException>(() => new BattleLocalizedDialogueIdentity(null!, []));
-        Assert.Throws<ArgumentNullException>(() => new BattleLocalizedDialogueIdentity([], null!));
-    }
-
     [Theory]
     [InlineData("duplicate")]
     [InlineData("unknown")]
@@ -250,7 +167,6 @@ public sealed class FirstMandatoryBattleProfileTests
     [InlineData("role")]
     [InlineData("provenance")]
     [InlineData("owner28")]
-    [InlineData("search")]
     [InlineData("closure")]
     [InlineData("resource")]
     [InlineData("unsafe-reference")]
@@ -272,7 +188,6 @@ public sealed class FirstMandatoryBattleProfileTests
         if (mutation == "role") document["snapshot"]!["roles"]![1]!["hp"] = 29;
         else if (mutation == "provenance") document["provenance"]!["fieldSources"]![0]!["sourceAddress"] = 0x0904;
         else if (mutation == "owner28") document["snapshot"]!["world"]!["eventObjects"]![0]!["spriteId"] = 211;
-        else if (mutation == "search") document["snapshot"]!["world"]!["searchProof"]!["sampleIndex"] = 13;
         else if (mutation == "closure") document["closure"]!["entries"]!.AsArray().RemoveAt(0);
         else if (mutation == "resource") document["resources"]![0]!["kind"] = "other";
         else if (mutation == "unsafe-rooted") document["resources"]![0]!["reference"] = "/events/index.json";
@@ -327,7 +242,7 @@ public sealed class FirstMandatoryBattleProfileTests
         JsonObject document = fixture.Document.DeepClone().AsObject();
         document["_note"] = "root comment";
         document["snapshot"]!["world"]!["leader"]!["_note"] = "nested comment";
-        document["closure"]!["entries"]![0]!["identity"]!["_note"] = "structured identity comment";
+        document["closure"]!["entries"]![0]!["_note"] = "closure entry comment";
         LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString()));
         document["snapshot"]!["world"]!["leader"]!["note"] = "not a comment";
         Assert.Throws<InvalidDataException>(() => LoadContextForTest(Encoding.UTF8.GetBytes(document.ToJsonString())));
@@ -397,5 +312,4 @@ public sealed class FirstMandatoryBattleProfileTests
             new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["battle-context.json"] = contextBytes });
     }
 
-    private static T Typed<T>(BattleClosureEntry entry) where T : BattleClosureIdentity => Assert.IsType<T>(entry.Identity);
 }

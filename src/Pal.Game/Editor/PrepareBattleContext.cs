@@ -7,6 +7,7 @@ using Pal.Core;
 using Pal.Game.Map;
 using Pal.Game.Profiles;
 using Pal.Game.Resources;
+using Pal.Core.Legacy;
 
 namespace Pal.Game.Editor;
 

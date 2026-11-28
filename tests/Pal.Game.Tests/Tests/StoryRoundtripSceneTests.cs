@@ -11,6 +11,12 @@ using Godot;
 using Pal.Core;
 using Pal.Game.Dialogue;
 using static GdUnit4.Assertions;
+using Pal.Core.State;
+using Pal.Core.Dialogue;
+using Pal.Core.Battle;
+using Pal.Core.Events;
+using Pal.Core.Save;
+using Pal.Game.Battle;
 
 namespace Pal.Game.Tests;
 
@@ -814,7 +820,7 @@ public class StoryRoundtripSceneTests
         // fixed (150,100) center; the three FX frames blit at BOTH struck enemies without the
         // per-frame x offset; both struck enemies shift color at poses 8-9 and shake -8/-4/-6
         // horizontally at poses 10-12; the HP result reveals at pose 7.
-        var presentation = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+        var presentation = new Pal.Game.Battle.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
             [new Vector2(100, 120), new Vector2(156, 88)], [1, 3], [80, 60], [40, 55], 2, dual: false, secondStrike: false);
         Vector2[] poses =
         [
@@ -849,9 +855,9 @@ public class StoryRoundtripSceneTests
         }
         // fight.c 2080-2101: a dual attack-all actor stays at its home column instead (first
         // strike −8/−4, second strike −20/−12).
-        var first = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+        var first = new Pal.Game.Battle.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
             [new Vector2(100, 120)], [1], [80], [70], 2, dual: true, secondStrike: false);
-        var second = new Pal.Game.Dialogue.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
+        var second = new Pal.Game.Battle.StoryPlayerAttackAllPresentation(new Vector2(200, 176),
             [new Vector2(100, 120)], [1], [70], [60], 2, dual: true, secondStrike: true);
         for (int pose = 0; pose < 16; pose++)
         {
@@ -1542,7 +1548,7 @@ public class StoryRoundtripSceneTests
             bool escapeFailLabel = false;
             await host.Wait(() =>
             {
-                escapeFailLabel |= old.StoryDrawSnapshot?.FeedbackWord == Pal.Game.Dialogue.PalStoryBattleView.EscapeFailWord;
+                escapeFailLabel |= old.StoryDrawSnapshot?.FeedbackWord == Pal.Game.Battle.PalStoryBattleView.EscapeFailWord;
                 return escapeFailLabel;
             });
             await host.Wait(() => old.StoryBattleMode != StoryBattlePresentation.Feedback);
@@ -1591,7 +1597,7 @@ public class StoryRoundtripSceneTests
             AssertThat(old.StoryCashGranted == 0 && old.StoryExperienceGranted == 0).IsTrue();
             AssertThat(old.Interaction!.Phase).IsEqual(NpcInteractionPhase.Trigger);
             AssertThat(old.StoryBattleMode).IsNull();
-            AssertThat(old.GetChildren().OfType<Pal.Game.Dialogue.PalStoryBattleView>().Count()).IsEqual(0);
+            AssertThat(old.GetChildren().OfType<Pal.Game.Battle.PalStoryBattleView>().Count()).IsEqual(0);
             // The red fade converges (32 steps of 75ms) with the text palette preserved.
             await host.Wait(() => old.StoryRedFadeStep >= 32);
             var red = old.StoryRedPalette!;
@@ -1659,7 +1665,7 @@ public class StoryRoundtripSceneTests
             await host.Wait(() =>
             {
                 var draw = old.StoryDrawSnapshot;
-                sawEscapeFailLabel |= draw?.FeedbackWord == Pal.Game.Dialogue.PalStoryBattleView.EscapeFailWord;
+                sawEscapeFailLabel |= draw?.FeedbackWord == Pal.Game.Battle.PalStoryBattleView.EscapeFailWord;
                 if (draw is { } snapshot && old.StoryBattleMode == StoryBattlePresentation.Feedback)
                 {
                     Vector2 player = snapshot.PartyPlayers.Count > 0 ? snapshot.PartyPlayers[0].Position : snapshot.PlayerPosition;
@@ -1934,7 +1940,7 @@ public class StoryRoundtripSceneTests
             AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
             AssertThat(script.CallId).IsEqual(call);
             AssertThat(battle.Current.Combat.Enemies.Select(e => e.Hp).SequenceEqual(new[] { 0, 0 })).IsTrue();
-            var memberActions = host.Actions.Where(a => a.Attacker == Pal.Core.ClassicBattleSide.Player).ToArray();
+            var memberActions = host.Actions.Where(a => a.Attacker == Pal.Core.Battle.ClassicBattleSide.Player).ToArray();
             // Role1's dual attack presents as two distinct action records in one queue action:
             // same target, first/second strike flags, each with its own feedback presentation.
             var strikes = memberActions.Where(a => a.ActorIndex == 1).ToArray();
@@ -1950,8 +1956,8 @@ public class StoryRoundtripSceneTests
             // The clean member still kills its slot alone (atk40: 43..49 or critical 129..148).
             var clean = memberActions.Single(a => a.ActorIndex == 0);
             AssertThat(clean.Damage is >= 43 and <= 148).IsTrue();
-            AssertThat(host.Actions.Select(a => a.Attacker).Count(a => a == Pal.Core.ClassicBattleSide.Enemy)).IsEqual(2);
-            foreach (var enemy in host.Actions.Where(a => a.Attacker == Pal.Core.ClassicBattleSide.Enemy))
+            AssertThat(host.Actions.Select(a => a.Attacker).Count(a => a == Pal.Core.Battle.ClassicBattleSide.Enemy)).IsEqual(2);
+            foreach (var enemy in host.Actions.Where(a => a.Attacker == Pal.Core.Battle.ClassicBattleSide.Enemy))
             {
                 // Enemy strength 36..38 vs defense52 gives 2..4 on member1, vs defense20 20..23
                 // on member0; a covered strike deals zero damage without the evade flag (fight.c:4959).
@@ -1970,7 +1976,7 @@ public class StoryRoundtripSceneTests
             AssertThat(battle.Current.Combat.Players[1].Counts.Health is 2 or 3).IsTrue();
             AssertThat(battle.Current.Combat.Players[0].Counts.Attack).IsEqual(1);
             // Both strikes were presented as their own feedback cycles at distinct updates.
-            var strikeStarts = host.ActionStarts.Where(c => c.Action is { Attacker: Pal.Core.ClassicBattleSide.Player, ActorIndex: 1 }).ToArray();
+            var strikeStarts = host.ActionStarts.Where(c => c.Action is { Attacker: Pal.Core.Battle.ClassicBattleSide.Player, ActorIndex: 1 }).ToArray();
             AssertThat(strikeStarts.Length).IsEqual(2);
             AssertThat(strikeStarts[0].Update != strikeStarts[1].Update).IsTrue();
             AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual("胜");
@@ -2032,7 +2038,7 @@ public class StoryRoundtripSceneTests
         }
         AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
         AssertThat(host.Actions.Any(a => a.SecondStrike)).IsFalse();
-        AssertThat(host.Actions.Count(a => a.Attacker == Pal.Core.ClassicBattleSide.Player && a.ActorIndex == 1)).IsEqual(1);
+        AssertThat(host.Actions.Count(a => a.Attacker == Pal.Core.Battle.ClassicBattleSide.Player && a.ActorIndex == 1)).IsEqual(1);
         // The panel projection still consumes the remaining worn objects (dex 100+14=114).
         AssertThat(battle.Current.Combat.Players[1].Dexterity).IsEqual(114);
         AssertThat(battle.Current.Roles[1].Statuses[8]).IsEqual(0);
@@ -2435,8 +2441,8 @@ public class StoryRoundtripSceneTests
             await host.Wait(() => old.StoryBattleMode == StoryBattlePresentation.AttackMenu);
             var battle = old.StoryBattle!;
             // Hooks pause and resume inside one drive; observe them on the real Main callback.
-            var hookEvents = new System.Collections.Generic.List<(Pal.Core.ClassicBattleHookKind Kind, int RoleId, string? First)>();
-            Pal.Core.ClassicBattleHookKind? recordedKind = null;
+            var hookEvents = new System.Collections.Generic.List<(Pal.Core.Battle.ClassicBattleHookKind Kind, int RoleId, string? First)>();
+            Pal.Core.Battle.ClassicBattleHookKind? recordedKind = null;
             void CaptureHook()
             {
                 if (script.PendingBattleHook is not { } hook) { recordedKind = null; return; }
@@ -2451,7 +2457,7 @@ public class StoryRoundtripSceneTests
                     AssertThat(old.StoryBattleMode).IsEqual(StoryBattlePresentation.HookDialogue);
                     AssertThat(old.GetChildren().OfType<PalStoryBattleView>().Count()).IsEqual(1);
                     var text = display.Content.Parts[0].Text!;
-                    AssertThat(hook.Kind == Pal.Core.ClassicBattleHookKind.Dying
+                    AssertThat(hook.Kind == Pal.Core.Battle.ClassicBattleHookKind.Dying
                         ? firstDisplays.Contains(text) : FriendDeathHookFirstDisplaysSet(zh).Contains(text)).IsTrue();
                     hookEvents[^1] = (hook.Kind, hook.RoleId, text);
                     GD.Print($"PAL_HOOK:{hook.Kind};role={hook.RoleId};first={text}");
@@ -2460,11 +2466,11 @@ public class StoryRoundtripSceneTests
             old.UpdateCompleted += CaptureHook;
             while (script.PendingBattle is not null) await DriveMidbattleMenus(host, old);
             old.UpdateCompleted -= CaptureHook;
-            AssertThat(hookEvents.Any(h => h.Kind == Pal.Core.ClassicBattleHookKind.Dying)).IsTrue();
+            AssertThat(hookEvents.Any(h => h.Kind == Pal.Core.Battle.ClassicBattleHookKind.Dying)).IsTrue();
             AssertThat(hookEvents.All(h => h.First is not null)).IsTrue();
             AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
             // The dying member really acted after the pause (its dual strikes are real queue actions).
-            AssertThat(host.Actions.Any(a => a.Attacker == Pal.Core.ClassicBattleSide.Player && a.ActorIndex == 1)).IsTrue();
+            AssertThat(host.Actions.Any(a => a.Attacker == Pal.Core.Battle.ClassicBattleSide.Player && a.ActorIndex == 1)).IsTrue();
             AssertThat(host.Actions.Any(a => a.SecondStrike)).IsTrue(); // the dual second strike ran in the resumed queue
             AssertThat(script.CallId).IsEqual(call);
             AssertThat(script.PendingDisplay!.Content.Parts[0].Text!).IsEqual(zh ? "胜" : "WIN");
@@ -2509,7 +2515,7 @@ public class StoryRoundtripSceneTests
             updateObserver: main =>
             {
                 if (main.Dialogue?.Session is { } running
-                    && running.RunningBattleHook is { Kind: Pal.Core.ClassicBattleHookKind.Dying }
+                    && running.RunningBattleHook is { Kind: Pal.Core.Battle.ClassicBattleHookKind.Dying }
                     && main.Dialogue.FirstBattleWorld is { } world)
                     hookCounters.Add(world.Objects.Single(o => o.Id == 1).TriggerIdleCount);
             }))
@@ -2595,7 +2601,7 @@ public class StoryRoundtripSceneTests
             var observedBoosts = new System.Collections.Generic.List<IReadOnlyList<int>>();
             void CaptureFriendDeath()
             {
-                if (script.PendingBattleHook is { Kind: Pal.Core.ClassicBattleHookKind.FriendDeath } hook && !friendDeathSeen)
+                if (script.PendingBattleHook is { Kind: Pal.Core.Battle.ClassicBattleHookKind.FriendDeath } hook && !friendDeathSeen)
                 {
                     friendDeathSeen = true;
                     var player = battle.Current.Combat.Players[hook.PartyIndex];
@@ -2605,7 +2611,7 @@ public class StoryRoundtripSceneTests
                     AssertThat(battle.Current.Combat.Players[1].Hp).IsEqual(0); // the covered member died
                     GD.Print($"PAL_FRIEND_DEATH:before hp={hpBeforeHook} mp={mpBeforeHook} atk={attackBeforeHook}");
                 }
-                if (friendDeathSeen && script.PendingBattleHook is { Kind: Pal.Core.ClassicBattleHookKind.FriendDeath }
+                if (friendDeathSeen && script.PendingBattleHook is { Kind: Pal.Core.Battle.ClassicBattleHookKind.FriendDeath }
                     && script.PendingDisplay is { } friendDisplay)
                 {
                     // The paused battle shows the coverer's script over the visible battle.
@@ -2741,7 +2747,7 @@ public class StoryRoundtripSceneTests
         }
         AssertThat(battle.Completion!.Outcome).IsEqual(ClassicBattlePhase.Won);
         // role1's one dual action presented as two strikes: the first plus exactly one flagged second.
-        AssertThat(host.Actions.Count(a => a.Attacker == Pal.Core.ClassicBattleSide.Player && a.ActorIndex == 1)).IsEqual(2);
+        AssertThat(host.Actions.Count(a => a.Attacker == Pal.Core.Battle.ClassicBattleSide.Player && a.ActorIndex == 1)).IsEqual(2);
         AssertThat(host.Actions.Count(a => a.SecondStrike)).IsEqual(1);
         AssertThat(host.Main.StoryBattleMode).IsNull();
     }
@@ -3359,7 +3365,7 @@ public class StoryRoundtripSceneTests
         }
         // The target-confirm Enter either starts the next alive member's selection or, for
         // the final selecting member, builds the queue and enters Resolving.
-        internal async Task ConfirmMemberTarget(Pal.Core.ClassicBattleLifecycleSession battle)
+        internal async Task ConfirmMemberTarget(Pal.Core.Battle.ClassicBattleLifecycleSession battle)
         {
             var combat = Main.StoryBattle!.Current.Combat;
             int selecting = combat.SelectingPlayerIndex

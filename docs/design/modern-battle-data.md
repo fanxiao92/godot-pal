@@ -236,7 +236,7 @@ Game 正式 API 位于 `Pal.Game.Profiles.NativeBattleContent`：
 
 ## 六角色装备闭包与有效面板投影（#48 unit 1）
 
-状态：数据/typed/Prepare 链已交付；#48 unit 2 已把执行语义接入 session/Main（DualAttack 双击、cover、有效面板、持续状态保留，见[经典战斗契约](classic-battle-session.md)），装备 battleSprite override 仍在副作用前拒绝。指定 RED 于 `6cfce2a` 真实失败（现有公开 Parse 拒绝 `roleEquipment` 未知字段），Core 15 例新增后完整 Core **831**，NativeBattleContentTests **55**（44+11，含装备 roundtrip 与 10 个 typed 边界）、公开 PrepareBattleDataTests **35**（33+2）；native-map 批次 408、库存 604、game 601，同步于 GameTestBatches/GameBatches 回归。
+状态：数据/typed/Prepare 链已交付；#48 unit 2 已把执行语义接入 session/Main（DualAttack 双击、cover、有效面板、持续状态保留，见[经典战斗契约](../archive/design/classic-battle-session.md)），装备 battleSprite override 仍在副作用前拒绝。指定 RED 于 `6cfce2a` 真实失败（现有公开 Parse 拒绝 `roleEquipment` 未知字段），Core 15 例新增后完整 Core **831**，NativeBattleContentTests **55**（44+11，含装备 roundtrip 与 10 个 typed 边界）、公开 PrepareBattleDataTests **35**（33+2）；native-map 批次 408、库存 604、game 601，同步于 GameTestBatches/GameBatches 回归。
 
 根对象新增两个可选 section（旧零装备文件不变合法）。
 
@@ -279,7 +279,7 @@ typed 同步：`PalBattleContent` 新增 `Equipments: PalBattleEquipment[]` 与�
 
 正常编辑器入口 `res://Editor/PrepareBattleData.tscn` 的 `_Ready` 只接受精确顺序 `--battle-input <dir> --battle-output <dir>`，调用同一 public Prepare，成功后输出 `PAL_PREPARE_BATTLE_DATA:BattleContent.tres` 并 exit0；失败 stderr `Battle data native import failed: <原诊断>` 并 exit1，不发成功 marker。
 
-先按[固定 GdUnit 源码包与 bootstrap](../testing/gdunit-source-packages.md)准备仓库锁定的包；下面的 wrapper 会执行项目 build，但不负责下载或升级依赖。
+项目依赖直接通过 `dotnet restore` 从 nuget.org 还原（M7 已切回官方 GdUnit4 包，见 [ADR-0006](../adr/0006-split-game-tests-and-official-gdunit.md)）；下面的 wrapper 会执行项目 build，但不负责下载或升级依赖。
 
 ```powershell
 # 显式离线操作；不会由正常 Main 自动执行。OutputPath 必须新建或为空。

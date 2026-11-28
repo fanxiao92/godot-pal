@@ -1,0 +1,3 @@
+# Compile-time boundary for src/Pal.Game (#274).
+
+T:System.Runtime.CompilerServices.InternalsVisibleToAttribute;禁止在 Pal.Game 使用 InternalsVisibleTo（会导致 Godot 源码生成器 CS0436 冲突）；请改为显式 public 接缝（见 CODING_STANDARDS.md）。

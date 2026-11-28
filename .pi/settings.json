@@ -1,4 +1,7 @@
 {
+  "skills": [
+    "../.agents/skills"
+  ],
   "subagents": {
     "agentOverrides": {
       "worker": {

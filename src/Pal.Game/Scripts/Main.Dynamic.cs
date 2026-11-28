@@ -8,6 +8,8 @@ using Pal.Game.Dialogue;
 using Pal.Game.Map;
 using Pal.Game.Profiles;
 using Pal.Game.Resources;
+using Pal.Core.Dialogue;
+using Pal.Core.Events;
 
 namespace Pal.Game;
 

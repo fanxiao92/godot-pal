@@ -2,7 +2,7 @@
 
 一个独立的 TypeScript 本机开发工具：**普通程序长期管理执行，短生命周期 Pi session 完成单票实施与独立评审**。不需要一个常驻 main agent；关闭交互对话不会删除执行状态。直接嵌入 SDK，不经过 RPC，也不依赖 pi-subagents。
 
-这是旧显式计划的兼容入口，保留原人工恢复协议（自主纠正额度0：v1计划没有授权有界纠正/引擎/父规格执行）。默认推荐[GitHub模式](README.md)，新能力集中在那里；不把旧计划的退出0当父规格通过。它不改变 [跨票协调协议](../../docs/agents/large-task-handoffs.md)、[Issue 工作流](../../docs/agents/issue-tracker.md)或[测试职责](../../docs/testing/test-layers.md)。当前工作树已有的 handoff/source snapshot 工具保持原样；这里的源码指纹只用于本 Host 自身的候选核对，不冒充其强审计收据，也不替换既有 current.json 契约。
+这是旧显式计划的兼容入口，保留原人工恢复协议（自主纠正额度0：v1计划没有授权有界纠正/引擎/父规格执行）。默认推荐[GitHub模式](README.md)，新能力集中在那里；不把旧计划的退出0当父规格通过。它不改变 [跨票协调协议](../../docs/agents/large-task-handoffs.md)、[Issue 工作流](../../docs/agents/issue-tracker.md)或[验证矩阵](../../docs/testing/verification-matrix.md)。当前工作树已有的 handoff/source snapshot 工具保持原样；这里的源码指纹只用于本 Host 自身的候选核对，不冒充其强审计收据，也不替换既有 current.json 契约。
 
 ## 责任与执行流程
 

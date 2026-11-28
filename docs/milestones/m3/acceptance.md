@@ -67,7 +67,7 @@ Test-M0仅修复dotnet函数的root+双流EOF共享600s预算和额外最多5s�
 
 ### 历史：2026-10-23 固定串行拆批第一次完整入口未通过
 
-用户确认保留120秒、工具链、全部案例与三轮，按完整类固定拆为66/79/97；[历史固定规则](../../archive/m3/game-test-history.md#完整门的固定串行批次)已实现于共享入口及小型元数据辅助，保留solution restore/build，显式串行Core/CLI/Prepare，避免再次未拆批solution test。纯离线11组回归、语法、245项独立源码库存及历史格式核对通过，不作为运行通过证据。
+用户确认保留120秒、工具链、全部案例与三轮，按完整类固定拆为66/79/97（历史固定批次记录 `docs/archive/m3/game-test-history.md` 已于 M7 退役）；已实现于共享入口及小型元数据辅助，保留solution restore/build，显式串行Core/CLI/Prepare，避免再次未拆批solution test。纯离线11组回归、语法、245项独立源码库存及历史格式核对通过，不作为运行通过证据。
 
 实际身份为 `task/m3-finalize@0ee82045320a9793ec64ca63ca7bf3cf5fda2baf` 加本轮未提交门禁/说明补丁；唯一入口UTC **2026-10-23T15:51:15.872817Z–15:52:44.536975Z**，实际exit1、88.664秒，无outer timeout。首五条主dotnet命令全部exit0：SDK info（10.0.402）、独立空NuGet包/HTTP缓存restore、solution build、Core及CLI。保留已有bin/.godot，不称clean build/clean checkout。
 
@@ -124,7 +124,7 @@ Core、Game66、Game77的TRX SHA256分别为 `d662ccd54af51be772c5270579d3e25d81
 
 **历史检查点结论：精确 dab79ad8 完整自动门 PASS，经独立 evidence review 支持；用户确认 Windows 人工清单通过。** 这些历史证据不替代最终远端回填。Observer 是 agent 自行追加、规格外的辅助采证工具，现已停用，其缺陷不作为 M3 功能验收门；历史 verifier criterion-1 仍为 `not-satisfied`，不改写历史报告、不宣称工具修复或隐私风险消除。此前记录的 OPEN 状态是 2026-10-23 快照，最终交付及当前状态入口见[本页当前状态](#当前状态)和 GitHub 实时 Issue。
 
-批准范围见 [计划](plan.md)；普通运行与资源身份见 [NPC 宿主契约](../../design/npc-interaction-host.md)。这是 scene4/map10/owner60/0188 的显式独立上下文，不是原版出生、正常自由探索或全量 VM/auto。owner57 热点未改 state，只是不在此上下文调度；32原始对象保留显示/碰撞。默认简中，英文只在启动时显式选择。不带 M3 参数仍走 M2 Main，独立静态模式保留。运行时只读准备好的原生资源和现代事件 JSON，不读原始 MKF/SLF/M.MSG/M1 JSON/参考头文件，不自动提取或补配置。
+批准范围见 [计划](plan.md)；普通运行与资源身份见 [NPC 宿主契约](../../archive/design/npc-interaction-host.md)。这是 scene4/map10/owner60/0188 的显式独立上下文，不是原版出生、正常自由探索或全量 VM/auto。owner57 热点未改 state，只是不在此上下文调度；32原始对象保留显示/碰撞。默认简中，英文只在启动时显式选择。不带 M3 参数仍走 M2 Main，独立静态模式保留。运行时只读准备好的原生资源和现代事件 JSON，不读原始 MKF/SLF/M.MSG/M1 JSON/参考头文件，不自动提取或补配置。
 
 ## 实际 integration 共享门结果
 

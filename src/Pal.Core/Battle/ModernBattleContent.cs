@@ -1,0 +1,412 @@
+using System.Text.Json;
+using Pal.Core.Shared;
+using Pal.Core.State;
+
+namespace Pal.Core.Battle;
+
+/// <summary>Strict, pure numeric modern battle data. Parsing does not grant selected-entry combat capability.</summary>
+public static partial class ModernBattleContent
+{
+    private const string Root = "battle-data.json.$";
+
+    public static TriggerBattleContent Parse(string json)
+    {
+        using var document = EventJson.Parse(json, Root);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) throw Error(Root, "expected an object");
+        bool gridDeclared = root.TryGetProperty("roleEquipment", out JsonElement gridElement);
+        bool objectsDeclared = root.TryGetProperty("equipments", out JsonElement objectsElement);
+        bool inventoryDeclared = root.TryGetProperty("inventory", out JsonElement inventoryElement);
+        bool equipMenuDeclared = root.TryGetProperty("equipMenu", out JsonElement equipMenuElement);
+        bool useMenuDeclared = root.TryGetProperty("useMenu", out JsonElement useMenuElement);
+        bool magicMenuDeclared = root.TryGetProperty("magicMenu", out JsonElement magicMenuElement);
+        bool shopObjectsDeclared = root.TryGetProperty("shopObjects", out JsonElement shopObjectsElement);
+        bool storesDeclared = root.TryGetProperty("stores", out JsonElement storesElement);
+        bool cashDeclared = root.TryGetProperty("cash", out JsonElement cashElement);
+        var rootKeys = new List<string> { "formatVersion", "roles", "players", "growth", "teams" };
+        if (gridDeclared) rootKeys.Add("roleEquipment");
+        if (objectsDeclared) rootKeys.Add("equipments");
+        if (inventoryDeclared) rootKeys.Add("inventory");
+        if (equipMenuDeclared) rootKeys.Add("equipMenu");
+        if (useMenuDeclared) rootKeys.Add("useMenu");
+        if (magicMenuDeclared) rootKeys.Add("magicMenu");
+        if (shopObjectsDeclared) rootKeys.Add("shopObjects");
+        if (storesDeclared) rootKeys.Add("stores");
+        if (cashDeclared) rootKeys.Add("cash");
+        EventJson.Keys(root, Root, [.. rootKeys]);
+        if (Number(root, "formatVersion", Root) != 1)
+            throw Error(Root, "unsupported formatVersion");
+        var roles = new List<BattleRoleSnapshot>();
+        var panelDeclaredRoles = new HashSet<int>();
+        foreach (var (item, i) in Array(root, "roles", Root).Select((x, i) => (x, i)))
+        {
+            string path = Root + $".roles[{i}]";
+            if (ValidateRole(item, path)) panelDeclaredRoles.Add(Number(item, "roleId", path, 0, 5));
+            roles.Add(BattleRoleSnapshotHelper.ParseRole(item));
+        }
+        var players = Array(root, "players", Root).Select((x, i) => Player(x, Root + $".players[{i}]")).ToArray();
+        var growthByRole = new Dictionary<int, ClassicBattleGrowthData>();
+        foreach (var (growth, i) in Array(root, "growth", Root).Select((x, i) => (x, i)))
+        {
+            string gp = Root + $".growth[{i}]";
+            EventJson.Keys(growth, gp, "roleId", "levelUpExperience", "levelUpMagics");
+            int growthRole = Number(growth, "roleId", gp, 0, 5);
+            var thresholds = Words(growth, "levelUpExperience", gp, 100);
+            var rows = new List<BattleLevelUpMagic>();
+            int rowIndex = 0;
+            foreach (var row in Array(growth, "levelUpMagics", gp))
+            {
+                string path = gp + $".levelUpMagics[{rowIndex++}]";
+                EventJson.Keys(row, path, "level", "magicId");
+                rows.Add(new(Number(row, "level", path), Number(row, "magicId", path)));
+            }
+            if (!growthByRole.TryAdd(growthRole, new(thresholds, rows))) throw Error(gp, "duplicate growth roleId");
+        }
+        var teams = new Dictionary<int, IReadOnlyList<ClassicBattleEnemy>>();
+        int teamIndex = 0;
+        foreach (var team in Array(root, "teams", Root))
+        {
+            string path = Root + $".teams[{teamIndex++}]";
+            EventJson.Keys(team, path, "teamId", "enemies");
+            int id = Number(team, "teamId", path);
+            var enemy = Array(team, "enemies", path).Select((x, i) => Enemy(x, path + $".enemies[{i}]")).ToArray();
+            if (!teams.TryAdd(id, enemy)) throw Error(path + ".teamId", $"duplicate team ID {id}");
+        }
+        if (teams.Count == 0) throw Error(Root + ".teams", "expected at least one team");
+        var roleEquipment = gridDeclared ? RoleEquipment(gridElement) : null;
+        var equipmentObjects = objectsDeclared ? EquipmentObjects(objectsElement) : null;
+        BattleEquipmentState.ValidateEquipmentClosure(roleEquipment, equipmentObjects, roles);
+        var initialInventory = inventoryDeclared ? InventoryRows(inventoryElement) : null;
+        var equipMenu = equipMenuDeclared ? EquipMenuBindings(equipMenuElement) : null;
+        var useMenu = useMenuDeclared ? UseMenuBindings(useMenuElement) : null;
+        var magicMenu = magicMenuDeclared ? MagicMenuBindings(magicMenuElement) : null;
+        var shopObjects = shopObjectsDeclared ? ShopObjectBindings(shopObjectsElement) : null;
+        var stores = storesDeclared ? StoreBindings(storesElement) : null;
+        var initialCash = cashDeclared ? CashSeed(cashElement) : null;
+        TriggerBattleContent content;
+        try { content = new TriggerBattleContent(roles, players, growthByRole, teams, roleEquipment, equipmentObjects, panelDeclaredRoles, initialInventory, equipMenu, useMenu, magicMenu, shopObjects, stores, initialCash); }
+        catch (InvalidDataException error) { throw Error(Root, error.Message); }
+        Validate(content);
+        return content;
+    }
+
+    /// <summary>Explicit shared-wallet seed (script.c/gpGlobals dwCash is a DWORD); the host
+    /// owns the seeded CashLiveState instance.</summary>
+    private static uint? CashSeed(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt64(out long value)
+            || value < 0 || value > uint.MaxValue)
+            throw Error(Root + ".cash", "expected an integer in 0..4294967295");
+        return (uint)value;
+    }
+
+    /// <summary>Shop-object bindings: the object's item.wPrice WORD, kItemFlagSellable bit and
+    /// item.wBitmap word the buy/sell menus consume (uigame.c PAL_BuyMenu/PAL_SellMenu).</summary>
+    private static IReadOnlyList<BattleShopObjectBinding> ShopObjectBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".shopObjects", "expected an array");
+        var bindings = new List<BattleShopObjectBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".shopObjects[{index++}]";
+            EventJson.Keys(item, path, "objectId", "price", "sellable", "bitmap");
+            bindings.Add(new(Number(item, "objectId", path, 1), Number(item, "price", path),
+                Boolean(item, "sellable", path), Number(item, "bitmap", path)));
+        }
+        return System.Array.AsReadOnly(bindings.ToArray());
+    }
+
+    /// <summary>Store rows: the lprgStore WORD id and its rgwItems list (1..9 object WORDs in
+    /// store order; the reference's 0 terminator is not authored).</summary>
+    private static IReadOnlyList<BattleShopStoreBinding> StoreBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".stores", "expected an array");
+        var stores = new List<BattleShopStoreBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".stores[{index++}]";
+            EventJson.Keys(item, path, "storeId", "items");
+            var items = Array(item, "items", path).ToArray();
+            if (items.Length is < 1 or > 9)
+                throw Error(path + ".items", "expected 1..9 store item WORDs");
+            stores.Add(new(Number(item, "storeId", path, 1),
+                System.Array.AsReadOnly(items.Select((word, i) => Integer(word, path + $".items[{i}]", 1, 65535)).ToArray())));
+        }
+        return System.Array.AsReadOnly(stores.ToArray());
+    }
+
+    /// <summary>Explicit ordered initial bag rows (WORD item ids, amounts 0..99, slot order kept).
+    /// Mirrors InventoryLiveState's seed domain; the host owns the shared instance.</summary>
+    private static IReadOnlyList<InventorySlot> InventoryRows(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".inventory", "expected an array");
+        var rows = new List<InventorySlot>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".inventory[{index++}]";
+            EventJson.Keys(item, path, "itemId", "amount");
+            rows.Add(new(Number(item, "itemId", path, 1), Number(item, "amount", path, 0, 99), 0));
+        }
+        return System.Array.AsReadOnly(rows.ToArray());
+    }
+
+    /// <summary>Equip-menu bindings: object, body part 0..5 and the eligible-role id list
+    /// (kItemFlagEquipableByPlayerRole bits; an empty list is a listed, never-equippable object).</summary>
+    private static IReadOnlyList<BattleEquipMenuBinding> EquipMenuBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".equipMenu", "expected an array");
+        var bindings = new List<BattleEquipMenuBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".equipMenu[{index++}]";
+            EventJson.Keys(item, path, "objectId", "part", "equipableBy");
+            if (item.GetProperty("equipableBy").ValueKind != JsonValueKind.Array)
+                throw Error(path + ".equipableBy", "expected an array");
+            int mask = 0;
+            int roleIndex = 0;
+            foreach (JsonElement role in item.GetProperty("equipableBy").EnumerateArray())
+            {
+                int value = Integer(role, path + $".equipableBy[{roleIndex++}]", 0, 5);
+                if ((mask & (1 << value)) != 0) throw Error(path + ".equipableBy", $"duplicate role id {value}");
+                mask |= 1 << value;
+            }
+            bindings.Add(new(Number(item, "objectId", path, 1), Number(item, "part", path, 0, BattleEquipmentState.SlotCount - 1), mask));
+        }
+        return System.Array.AsReadOnly(bindings.ToArray());
+    }
+
+    /// <summary>Use-menu bindings: object plus its kItemFlagConsuming, kItemFlagApplyToAll
+    /// and BALL bitmap (item.wBitmap) words. Listing declares the exploration-usable
+    /// category (kItemFlagUsable); 0 is the reference's empty-chunk no-draw word.</summary>
+    private static IReadOnlyList<BattleUseMenuBinding> UseMenuBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".useMenu", "expected an array");
+        var bindings = new List<BattleUseMenuBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".useMenu[{index++}]";
+            EventJson.Keys(item, path, "objectId", "consuming", "applyToAll", "bitmap");
+            bindings.Add(new(Number(item, "objectId", path, 1), Boolean(item, "consuming", path),
+                Boolean(item, "applyToAll", path), Number(item, "bitmap", path)));
+        }
+        return System.Array.AsReadOnly(bindings.ToArray());
+    }
+
+    /// <summary>Magic-menu bindings: the magic object, its lprgMagic cost WORD and the
+    /// kMagicFlagApplyToAll / kMagicFlagUsableOutsideBattle words the exploration magic menu
+    /// consumes (uigame.c PAL_InGameMagicMenu over magicmenu.c PAL_MagicSelectionMenu).</summary>
+    private static IReadOnlyList<BattleMagicMenuBinding> MagicMenuBindings(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".magicMenu", "expected an array");
+        var bindings = new List<BattleMagicMenuBinding>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".magicMenu[{index++}]";
+            EventJson.Keys(item, path, "objectId", "costMp", "applyToAll", "usableOutsideBattle");
+            bindings.Add(new(Number(item, "objectId", path, 1), Number(item, "costMp", path),
+                Boolean(item, "applyToAll", path), Boolean(item, "usableOutsideBattle", path)));
+        }
+        return System.Array.AsReadOnly(bindings.ToArray());
+    }
+
+    private static IReadOnlyList<IReadOnlyList<int>> RoleEquipment(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".roleEquipment", "expected an array");
+        var rows = element.EnumerateArray().Select((row, i) => WordArray(row, Root + $".roleEquipment[{i}]", BattleEquipmentState.SlotCount)).ToArray();
+        if (rows.Length != BattleEquipmentState.RoleCount)
+            throw Error(Root + ".roleEquipment", $"expected exactly {BattleEquipmentState.RoleCount} rows");
+        return System.Array.AsReadOnly(rows);
+    }
+
+    private static IReadOnlyList<BattleEquipmentObject> EquipmentObjects(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array) throw Error(Root + ".equipments", "expected an array");
+        var objects = new List<BattleEquipmentObject>();
+        var identifiers = new HashSet<int>();
+        int index = 0;
+        foreach (JsonElement item in element.EnumerateArray())
+        {
+            string path = Root + $".equipments[{index++}]";
+            EventJson.Keys(item, path, "objectId", "effects");
+            int id = Number(item, "objectId", path, 1);
+            if (!identifiers.Add(id)) throw Error(path + ".objectId", $"duplicate equipment object ID {id}");
+            var rows = Array(item, "effects", path).ToArray();
+            if (rows.Length != BattleEquipmentState.RoleCount)
+                throw Error(path + ".effects", $"expected exactly {BattleEquipmentState.RoleCount} items");
+            var effects = new List<BattleEquipmentEffect>();
+            int rowIndex = 0;
+            foreach (JsonElement row in rows)
+            {
+                string effectPath = path + $".effects[{rowIndex++}]";
+                EventJson.Keys(row, effectPath, ["attack", "defense", "dexterity", "battleSprite", "statuses"],
+                    ["magicPower", "fleeRate", "poisonResistance", "attackAll", "cooperativeMagic"]);
+                var statuses = Words(row, "statuses", effectPath, BattleEquipmentState.StatusCount);
+                for (int status = 0; status < statuses.Count; status++)
+                {
+                    if (statuses[status] == 0) continue;
+                    if (status < BattleEquipmentState.GoodStatusFirstIndex)
+                        throw Error(effectPath + $".statuses[{status}]", "equipment statuses support only bravery, protect, haste and dualAttack slots");
+                    if (statuses[status] is < BattleEquipmentState.PersistentStatusFloor or > 65535)
+                        throw Error(effectPath + $".statuses[{status}]", $"persistent equipment status must be {BattleEquipmentState.PersistentStatusFloor}..65535");
+                }
+                effects.Add(new(Number(row, "attack", effectPath), Number(row, "defense", effectPath),
+                    Number(row, "dexterity", effectPath), Number(row, "battleSprite", effectPath), statuses,
+                    OptionalWord(row, "magicPower", effectPath), OptionalWord(row, "fleeRate", effectPath),
+                    OptionalWord(row, "poisonResistance", effectPath))
+                {
+                    AttackAll = NullableWord(row, "attackAll", effectPath),
+                    CooperativeMagic = NullableWord(row, "cooperativeMagic", effectPath)
+                });
+            }
+            objects.Add(new(id, effects));
+        }
+        return objects;
+    }
+
+    /// <summary>Strict role validation. Returns true when all five base panel words are declared
+    /// (the growth source that flows into subsequent battles); a partial declaration is rejected.</summary>
+    private static bool ValidateRole(JsonElement role, string path)
+    {
+        // The base panel words are optional like the player's magicPower/fleeRate: absent words
+        // carry zero; present ones are strictly ranged. The five words declare together.
+        EventJson.Keys(role, path,
+            ["roleId", "level", "hp", "maxHp", "mp", "maxMp", "primaryExperience",
+             "hiddenExperience", "equipment", "magics", "statuses", "coveredByRoleId"],
+            ["attack", "magicPower", "defense", "dexterity", "fleeRate"]);
+        int declared = new[] { "attack", "magicPower", "defense", "dexterity", "fleeRate" }
+            .Count(panel => role.TryGetProperty(panel, out _));
+        if (declared is not 0 and not 5)
+            throw Error(path, "role panel words attack, magicPower, defense, dexterity and fleeRate must be declared together");
+        Number(role, "roleId", path, 0, 5);
+        Number(role, "level", path);
+        int hp = Number(role, "hp", path), maxHp = Number(role, "maxHp", path, 1);
+        int mp = Number(role, "mp", path), maxMp = Number(role, "maxMp", path);
+        if (hp > maxHp) throw Error(path + ".hp", "must not exceed maxHp");
+        if (mp > maxMp) throw Error(path + ".mp", "must not exceed maxMp");
+        Experience(Property(role, "primaryExperience", path), path + ".primaryExperience");
+        var hidden = Property(role, "hiddenExperience", path);
+        string[] names = ["health", "magic", "attack", "magicPower", "defense", "dexterity", "flee"];
+        EventJson.Keys(hidden, path + ".hiddenExperience", names);
+        foreach (string name in names)
+            Experience(Property(hidden, name, path + ".hiddenExperience"), path + ".hiddenExperience." + name);
+        foreach (string panel in new[] { "attack", "magicPower", "defense", "dexterity", "fleeRate" })
+            if (role.TryGetProperty(panel, out JsonElement word) && (word.ValueKind != JsonValueKind.Number || !word.TryGetInt32(out int value) || value < 0 || value > 65535))
+                throw Error(path + "." + panel, "expected integer in 0..65535");
+        Words(role, "equipment", path, 6);
+        Words(role, "magics", path, 32);
+        Words(role, "statuses", path, 9);
+        Number(role, "coveredByRoleId", path, 0, 5);
+        return declared == 5;
+    }
+
+    private static void Experience(JsonElement value, string path)
+    {
+        EventJson.Keys(value, path, "value", "level", "count");
+        Number(value, "value", path);
+        Number(value, "level", path);
+        Number(value, "count", path);
+    }
+
+    private static ClassicBattlePlayer Player(JsonElement value, string path)
+    {
+        EventJson.Keys(value, path, ["roleId", "hp", "maxHp", "attack", "defense", "dexterity", "equipment",
+            "statuses", "poisons", "dyingScript", "friendDeathScript", "coveredByRoleId", "attackAll"], ["magicPower", "fleeRate", "nameObjectId"]);
+        int hp = Number(value, "hp", path), maxHp = Number(value, "maxHp", path, 1);
+        if (hp > maxHp) throw Error(path + ".hp", "must not exceed maxHp");
+        var cover = Property(value, "coveredByRoleId", path);
+        return new(Number(value, "roleId", path, 0, 5), hp, maxHp,
+            Number(value, "attack", path), Number(value, "defense", path), Number(value, "dexterity", path))
+        {
+            Equipment = Words(value, "equipment", path, 6), Statuses = Words(value, "statuses", path, 9),
+            Poisons = Words(value, "poisons", path), DyingScript = Number(value, "dyingScript", path),
+            FriendDeathScript = Number(value, "friendDeathScript", path),
+            NameObjectId = value.TryGetProperty("nameObjectId", out var name) ? Integer(name, path + ".nameObjectId", 0, 65535) : null,
+            CoveredByRoleId = cover.ValueKind == JsonValueKind.Null ? null : Integer(cover, path + ".coveredByRoleId", 0, 5),
+            AttackAll = Boolean(value, "attackAll", path),
+            MagicPower = OptionalWord(value, "magicPower", path), FleeRate = OptionalWord(value, "fleeRate", path)
+        };
+    }
+
+    private static int OptionalWord(JsonElement value, string key, string path) =>
+        value.TryGetProperty(key, out var item) ? Integer(item, path + "." + key, 0, 65535) : 0;
+
+    private static int? NullableWord(JsonElement value, string key, string path) =>
+        value.TryGetProperty(key, out var item) ? Integer(item, path + "." + key, 0, 65535) : null;
+
+    private static ClassicBattleEnemy Enemy(JsonElement value, string path)
+    {
+        // #140: optional isEmpty admits PAL_StartBattle's zero source row as a real runtime slot
+        // (battle.c:1617-1717); an absent key keeps the legacy dense non-empty contract unchanged.
+        EventJson.Keys(value, path,
+            ["id", "level", "hp", "attack", "defense", "dexterity", "physicalResistance",
+             "statuses", "poisons", "turnStartScript", "readyScript", "battleEndScript", "magicId", "dualMove",
+             "attackEquivItem", "attackEquivItemRate", "experience", "cash"],
+            ["isEmpty"]);
+        bool empty = value.TryGetProperty("isEmpty", out _) && Boolean(value, "isEmpty", path);
+        ClassicBattleEnemy enemy = new(Number(value, "id", path, empty ? 0 : 1), Number(value, "level", path), Number(value, "hp", path, empty ? 0 : 1),
+            Number(value, "attack", path, -32768, 32767), Number(value, "defense", path, -32768, 32767),
+            Number(value, "dexterity", path, -32768, 32767), Number(value, "physicalResistance", path))
+        {
+            Statuses = Words(value, "statuses", path, 9), Poisons = Words(value, "poisons", path),
+            TurnStartScript = Number(value, "turnStartScript", path), ReadyScript = Number(value, "readyScript", path),
+            BattleEndScript = Number(value, "battleEndScript", path), MagicId = Number(value, "magicId", path),
+            DualMove = Number(value, "dualMove", path), AttackEquivItem = Number(value, "attackEquivItem", path),
+            AttackEquivItemRate = Number(value, "attackEquivItemRate", path),
+            Experience = Number(value, "experience", path), Cash = Number(value, "cash", path),
+            IsEmpty = empty
+        };
+        if (empty && (enemy.Id != 0 || enemy.Level != 0 || enemy.Hp != 0 || enemy.Attack != 0 || enemy.Defense != 0
+            || enemy.Dexterity != 0 || enemy.PhysicalResistance != 0 || enemy.Experience != 0 || enemy.Cash != 0
+            || enemy.TurnStartScript != 0 || enemy.ReadyScript != 0 || enemy.BattleEndScript != 0 || enemy.MagicId != 0
+            || enemy.DualMove != 0 || enemy.AttackEquivItem != 0 || enemy.AttackEquivItemRate != 0
+            || enemy.Statuses.Any(status => status != 0) || enemy.Poisons.Any(poison => poison != 0)))
+            throw Error(path + ".isEmpty", "an empty enemy slot requires canonical id 0, hp 0 and all-zero abilities, hooks and rewards");
+        return enemy;
+    }
+
+    private static JsonElement Property(JsonElement value, string key, string path) =>
+        value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out var result) ? result
+            : throw Error(path + "." + key, "missing field or expected parent object");
+
+    private static int Number(JsonElement value, string key, string path, int min = 0, int max = 65535) =>
+        Integer(Property(value, key, path), path + "." + key, min, max);
+
+    private static int Integer(JsonElement value, string path, int min, int max) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int number) && number >= min && number <= max
+            ? number : throw Error(path, $"expected integer in {min}..{max}");
+
+    private static bool Boolean(JsonElement value, string key, string path) => Property(value, key, path).ValueKind switch
+    {
+        JsonValueKind.True => true, JsonValueKind.False => false,
+        _ => throw Error(path + "." + key, "expected boolean")
+    };
+
+    private static JsonElement.ArrayEnumerator Array(JsonElement value, string key, string path)
+    {
+        var array = Property(value, key, path);
+        return array.ValueKind == JsonValueKind.Array ? array.EnumerateArray() : throw Error(path + "." + key, "expected array");
+    }
+
+    private static IReadOnlyList<int> Words(JsonElement value, string key, string path, int? count = null)
+    {
+        var items = Array(value, key, path).ToArray();
+        if (count is not null && items.Length != count) throw Error(path + "." + key, $"expected exactly {count} items");
+        return System.Array.AsReadOnly(items.Select((item, i) => Integer(item, path + $".{key}[{i}]", 0, 65535)).ToArray());
+    }
+
+    private static IReadOnlyList<int> WordArray(JsonElement value, string path, int count)
+    {
+        if (value.ValueKind != JsonValueKind.Array) throw Error(path, "expected an array");
+        var items = value.EnumerateArray().ToArray();
+        if (items.Length != count) throw Error(path, $"expected exactly {count} items");
+        return System.Array.AsReadOnly(items.Select((item, i) => Integer(item, path + $"[{i}]", 0, 65535)).ToArray());
+    }
+
+    private static InvalidDataException Error(string path, string message) => new($"{path}: {message}.");
+}

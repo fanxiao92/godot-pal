@@ -4,152 +4,139 @@
 
 ## 这是什么
 
-把经典 RPG《仙剑奇侠传》(目标版本:**1998 柔情版**)做成一个跨平台的桌面游戏。**使用 Godot .NET 引擎和 C# 语言原生重写整个游戏**,代码模块清晰,方便日后给游戏加场景、剧情、任务、物品、技能、玩法。
+把经典 RPG《仙剑奇侠传》（目标版本：**1998 柔情版**）重实现为跨平台桌面游戏。使用 Godot .NET 引擎与 C# 原生重写核心逻辑与表现层，保持模块清晰以便扩展。
 
-- **忠实移植优先**:第一目标是把原版 98 柔情版完整、忠实地在桌面平台上跑起来。
-- **参考而非 fork**:sdlpal 的 C 源码作为引擎逻辑的"规格说明书"(战斗公式、脚本语义、数据格式),我们照着它用 C# 重写。
-- **个人自用**:自己游玩,不公开发布。
+- **忠实移植优先**：第一目标是把原版 98 柔情版完整、忠实地在桌面平台上跑起来。
+- **参考而非 fork**：`reference/sdlpal/` 的 C 源码仅作为只读规格参考（战斗公式、脚本语义、数据格式），用 C# 重新实现。
+- **个人自用**：本地游玩，不提交、不上传任何原版数据或版权资源。
 
 ## 当前状态
 
-**M0 工程骨架与工具链、M1 静态场景资源提取均已验收通过。** M0 的核心/游戏/CLI/测试链路、本地干净检出与真实 Windows CI 均通过，桌面显示和正常关闭也已由用户确认。M1 的本地构建、测试、真实资源核对及独立 Standards/Spec 审查已通过；其结果不替代 M2 验收。
-
-**M2 Windows 单领队探索里程碑已完成（2026-10-22）。** 功能、自动/人工验收及收尾文档独立双轴终审均已接受；成果已合入并通过 SSH 推送到 `main`，已验证交付提交为 `a76f83bf08c421e83892cc9515cbdd4c032014ec`。[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)、[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 和后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，[远端完整 Windows CI](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过。场景 2 / 地图 12 的静态对象、单领队离散行走/碰撞/遮挡、320×200 整数缩放、方向键/WASD 与失焦恢复已交付。入口与独立原生配置见 [M2 计划](docs/milestones/m2/plan.md)，分层证据与限制见 [M2 验收记录](docs/milestones/m2/acceptance.md)。其余表现层/外壳层能力按后续阶段设计。[事件 JSON 契约](docs/design/events-schema.md) 已确定原版忠实低层转写策略、v1 文件结构与基础命令,全量 opcode 映射尚未实现；当前 M3 有限执行与工具进度见下。独立 CLI 已提供只读 MKF 检查、Windows YJ2/图像解码、地图/精灵导出及带 v1 来源清单的完整静态场景包。
-
-**M3 独立真实 NPC 对话切片已主线交付。** 当前范围为 scene 4 / map 10 / owner 60 的 faithful 事件转换、现代双语资源、有限 trigger、搜索及返回/再次交谈；不包含正常场景4自由探索、全量 VM/auto 或完整剧情。共享探索已取消 M2 额外的失焦冻结/清键/fresh-press。当前状态、最终 Issue/CI 和分层证据以[M3 验收页](docs/milestones/m3/acceptance.md#当前状态)为单点索引；旧本地门、GPU/用户反馈、SceneRunner 性能、失败与 Observer 限制保留在[历史交付摘要](docs/archive/m3/game-test-run-history.md#根目录交付摘要结构收口前)，不转签为本轮实测。
-
-用户数据已放入 `data/raw/sdlpal/`,初步核对符合 Windows 数据分支。[M1 计划](docs/milestones/m1/plan.md) 范围已确认：只提取地图、瓦片、精灵、调色板与场景对象初始数据。[实施任务 #6～#10](https://github.com/fanxiao92/godot-pal/issues/6) 已完成本地验收和独立双轴审查，结果与收尾说明见对应 Issue。场景 2 的两次完整导出 416 文件字节一致，原始数据散列/长度/mtime 不变；M1 当轮 Debug/Release 构建测试与 Godot headless 启动通过，当轮未重跑 clean-cache/桌面/远程 CI 验收。M2 负责 Godot 场景构建与探索；事件、对话、语言包和字库是 M3 的独立增量，不是 M1/M2 场景构建的前置条件。后续阶段见 [总体路线](docs/design/development-plan.md)。
+- **M0–M6 已主线交付并合入 `main`**：涵盖工程骨架（M0）、静态场景提取（M1）、单领队探索（M2）、真实 NPC 双语对话切片（M3）、首战剧情战斗上下文（M4）、全量数据表与 165 opcode 忠实转写/往返（M5），以及完整经典战斗、状态/装备/背包/商店菜单与五槽存读档/战败重载（M6）。
+- **M7 验证基建已落地**：独立游戏测试工程 `tests/Pal.Game.Tests`（官方 nuget.org GdUnit4）、跨平台统一前门 `./pal.ps1`、四档验证分层（T0–T3）、`ubuntu-24.04` 3 并行 Linux CI（`dotnet` / `prepare` / `game`）与 T3 共享真实资源缓存 + GPU YAML 端到端回归均已上线。
+- 动态任务进度、当前里程碑与远端状态以 [GitHub Issues](https://github.com/fanxiao92/godot-pal/issues) 与实时提交/CI 为准；各里程碑计划见 [docs/README.md](docs/README.md)。
 
 ## 技术栈与开发环境
 
 | 项目 | 当前基线 |
-|---|---|
-| 语言 | C# |
-| 引擎 | Godot .NET `4.7.2`，Godot.NET.Sdk `4.7.2` |
-| .NET SDK | `10.0.402`，按 `global.json` 允许同 feature band 的补丁更新 |
-| 目标框架 | 全部项目为 `net10.0` |
-| 离线工具 | 独立 C#/.NET CLI，不依赖 Godot 或游戏工程 |
-| 自动化测试 | Core/CLI/Prepare xUnit 与真实进程测试 + GdUnit4Net 场景/输入测试 + Godot import/Main 启动回归；Core xUnit `2.9.3` 基线保留 |
-| 本地验收环境 / CI | Windows x64、PowerShell 7 / GitHub Actions `windows-2022` |
+| --- | --- |
+| 语言 / 目标框架 | C# / `net10.0` |
+| 引擎 | Godot .NET `4.7.2`（`Godot.NET.Sdk 4.7.2`） |
+| .NET SDK | `10.0.x`（以 `global.json` 为准） |
+| 统一前门 | 根目录 `./pal.ps1`（PowerShell 7 / `pwsh`，Windows 与 Linux 共用） |
+| 离线工具 | `tools/Pal.Extract`（纯 .NET CLI，零 Godot 依赖） |
+| 自动化测试 | Core/Extract xUnit + CLI/Prepare 集成 + `tests/Pal.Game.Tests`（官方 GdUnit4）+ T3 GPU YAML E2E |
+| 自动 CI | GitHub Actions `ubuntu-24.04` 3 并行必需 job（`dotnet` / `prepare` / `game`） |
 
-版本约束以 `global.json`、各项目 `.csproj` 和脚本为准，README 提供开发环境概览。跨平台桌面是目标，其他操作系统与导出包尚未验证；M2 先验收 Windows 开发运行，不包含导出包。GdUnit4Net 隔离关卡已通过并接入；#18 后续另获批准交付固定源码包，版本、来源与下载校验以[包说明](docs/testing/gdunit-source-packages.md)及锁文件为准，进一步升级仍需授权。
+具体版本约束以 `global.json`、各项目 `.csproj` 与 `pal.ps1` 为准。
 
-## 测试：第一阶段默认 Unit-only
+## 快速开始与常用命令
 
-新人和 work agent 从[唯一短上手入口](docs/testing/getting-started.md)选明确 Core/CLI Unit 工程，直接使用 dotnet CLI 与原生 runsettings，保留输出、退出和本轮 TRX；无需 Python、测试执行框架、Godot 或真实资源。默认信任原生结果，强审计改为显式维护能力，取舍见 [ADR-0003](docs/adr/0003-native-unit-feedback.md)。按需的 Integration、Game SceneRunner、真实进程与完整验收由[职责矩阵](docs/testing/test-layers.md)分流，不能由 Unit 补签。
+所有测试、引擎准备、资源准备与证据生成均通过 `./pal.ps1` 执行；选档规则与证据要求见[验证矩阵](docs/testing/verification-matrix.md)。
 
-当前自动 CI 使用独立 `unit-check`，#67 已完成远端检查、保护切换及实际普通拒绝/允许验收；main 的已记录测试要求是 Unit，而非完整门。实时状态及过渡期仍明确失败的旧 `full-check` 见[CI 分流](docs/testing/ci-dispatch.md)和[保护说明](docs/testing/merge-protection.md)；覆盖损失、保留工具与恢复条件见 [ADR-0002](docs/adr/0002-unit-only-first-stage.md)。
-
-## 完整构建与游戏运行（显式路径）
-
-以下不是默认 Unit 反馈。从仓库根目录执行，需先安装上述 SDK 和完整的 Godot .NET 引擎：
-
-直接还原/构建前先显式 bootstrap 固定 GdUnit 包（需要下载或已校验的本地四文件包，详见[包说明](docs/testing/gdunit-source-packages.md)）：
+### 1. 构建与日常验证（T0 / T2）
 
 ```powershell
-./scripts/Get-GdUnitPackages.ps1
+# 还原与构建
 dotnet restore GodotPal.sln
 dotnet build GodotPal.sln --no-restore
-dotnet run --project tools/Pal.Extract --no-build -- --help
+
+# T0 增量选测（自动基于 .csproj 依赖图与 tests/affected-map.psd1 选测；加 --explain 仅预览）
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 test affected
+
+# 定向运行单层
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 test unit
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 test integration
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 test game
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 test lra
+
+# 本地全量公开套件（映射自检 + unit + integration + game）
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 test full
 ```
 
-仅在显式选择完整验收时使用下方 `Test-M0.ps1`，它在内部 bootstrap 并设置 `GODOT_BIN` / `PAL_TEST_GODOT`。单独执行 Game 或 solution 测试前须按 [Game 测试说明](src/Pal.Game/Tests/README.md)设置这两个引擎路径变量、完成必要导入并核对 `tests/Pal.Game.Tests/game.runsettings`（headless、串行、会话超时及零测试失败）；默认测试过滤三个故意失败控制，完整门禁会分别验证它们。Godot、Prepare、Game 与 solution 检查全局串行。
-
-### 测试职责
-
-纯规则与精确时间用 Core 公开接口；真实资源、输入、信号和更新连接默认用 GdUnit4Net SceneRunner；argv、诊断、退出码、READY 和必要进程隔离继续用最小真实进程代表。SceneRunner 每例承载独立生产场景、入树前配置、在实际更新完成边界断言，并释放自有输入/订阅/节点及恢复改动的全局状态；不是额外叠加一套长期重复测试。新增或迁移测试先读[分层规范](docs/testing/game-test-layers.md)，具体命令和覆盖映射见 [Game 测试说明](src/Pal.Game/Tests/README.md)。
-
-只读检查原始场景归档（不解压、不写文件）：
+### 2. 固定版 Godot 准备
 
 ```powershell
+# 定位本机已安装的固定版 Godot 4.7.2-stable mono
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 godot locate
+
+# 或按当前 OS 自动下载固定版本并完成 --headless --import 预热
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 godot install --destination .artifacts/godot
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 godot import
+```
+
+### 3. 离线提取与资源准备
+
+将原版 98 柔情版数据文件放在本机私有目录（例如 `data/raw/sdlpal/`，绝不提交或上传）：
+
+```powershell
+# 只读检查原始 MKF 归档
 dotnet run --project tools/Pal.Extract --no-build -- inspect --input data/raw/sdlpal
-```
 
-输入目录需包含 `DATA.MKF`、`GOP.MKF`、`MAP.MKF`、`MGO.MKF`、`PAT.MKF`、`SSS.MKF`，文件名大小写不敏感；其他文件忽略。成功向 stdout 输出 JSON，包含归档散列、chunk 偏移与压缩线索；线索不等于已验证解压。退出码：成功 `0`、输入或归档错误 `1`、参数错误 `2`。报告字段与验证结果见 [Issue #7](https://github.com/fanxiao92/godot-pal/issues/7)。
-
-完整静态场景转换（地图从真实场景记录读取；输出必须新建或为空，禁止输入内输出及链接路径）：
-
-```powershell
+# 提取静态场景包（详见 docs/milestones/m1/extract-scene.md）
 dotnet run --project tools/Pal.Extract --no-build -- extract-scene `
   --input data/raw/sdlpal --output data/extracted/m1-scene-2 `
   --scene 2 --palette 0 --lighting day
+
+# 显式准备单类原生资源（统一经 pal.ps1 封装 scripts/Prepare-*.ps1）
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 assets prepare `
+  --kind scene --input data/extracted/m1-scene-2 --output src/Pal.Game/Assets
 ```
 
-同样只需上述六个归档，不需要文字、SLF、字库、事件产物；脚本入口只保留数值，不执行。输出一个根目录下的 PNG/JSON、`manifest.json` v1（参数、完整消费归档 SHA-256、根相对资源引用、非自递归产物散列）。调色板与昼夜必须显式选定，不按场景猜测。`preview.png` 是静态地图瓦片预览，不包含脚本初始化或人物合成。详见 [完整包契约与已执行验证](docs/milestones/m1/extract-scene.md)；单独地图命令见 [export-map](docs/milestones/m1/export-map.md)，`export-scene` 使用同样五个选项导出场景/人物切片。
-
-### M2 原生资源与普通 Main
-
-已有经核对的真实资源和独立配置时直接复用，无需再次准备。清洁检出不含真实资源；只有在需要首次准备且获准使用本机数据时，才执行显式离线导入（输入必须在 Godot 工程外，输出为新/空 `Assets` 或其子目录）：
+### 4. T3 真实资源 GPU 端到端回归与证据报告
 
 ```powershell
-./scripts/Prepare-GameScene.ps1 `
-  -InputPath data/extracted/m1-scene-2-accepted `
-  -OutputPath src/Pal.Game/Assets `
-  -GodotPath "C:/path/to/godot-mono.console.exe"
+# 设置原版数据目录（可选 PAL_CACHE_DIR 指定共享缓存根）
+$env:PAL_RAW_DATA_DIR = "C:/path/to/raw-sdlpal"
+
+# 命中或构建仓库外共享缓存并链接至工作树
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 assets prepare
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 assets status
+
+# 运行本地 GPU YAML 端到端 5 场景并生成标准 PR 证据评论
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 test e2e --gpu --out .artifacts/pal/verify-t3
+pwsh -NoProfile -NonInteractive -File ./pal.ps1 report --from .artifacts/pal/verify-t3 --out .artifacts/pal/verify-t3/pr-comment.md
 ```
 
-该脚本校验完整 M1 包并生成 Godot 原生场景/资源及纹理，不覆盖非空目标，不自动清理或回滚失败输出，**不会创建探索 profile**。默认 Main 需要 `res://Assets/Scenes/Scene.tscn` 和独立的 `res://Assets/Profiles/Exploration.tres`；缺少任一项或校验不符均明确失败。profile 必须另行显式 author 为 `PalExplorationProfile`，包含经核对的起点、角色行走参数与来源；类型、字段和新用户步骤见 [M2 配置契约](docs/milestones/m2/plan.md#33-已交付的原生入口与配置)。运行时仅加载 Resource/PackedScene/Texture2D，不读取 M1 JSON/MKF，不自动提取、同步或补配置。
+### 5. 启动桌面游戏
 
-启动桌面游戏（替换为本机完整 Godot .NET 安装中的 console 可执行文件；普通 Main，默认 1280×800 窗口）：
+运行时仅消费已准备的 Godot 原生 Resource / PackedScene / Texture2D（不读取 JSON/MKF，不自动同步）：
 
 ```powershell
-& "C:/path/to/godot-mono.console.exe" --path src/Pal.Game
-# 可选：已存在且匹配的独立原生资源根及 profile，参数在 -- 之后
-& "C:/path/to/godot-mono.console.exe" --path src/Pal.Game -- `
-  --m2-resources res://Assets/MyScene --m2-profile res://Assets/Profiles/MyExploration.tres
+& "<path-to-godot-mono-console>" --path src/Pal.Game
 ```
-
-更改资源根不会重定位默认 profile；`--m2-resources` 仅接受规范化 `res://Assets` 或子目录 URI，`--m2-profile` 接受规范化项目资源 URI，均只允许一次。示例中的自定义资源必须事先准备，不能直接粘贴到没有这些文件的检出中启动。
-
-### M3 独立 NPC 对话入口
-
-必须事先显式准备并核对原生静态资源、完整事件集合及七个现代对话资源，组合 `.tres` profile 绑定资源身份，默认简中、英文在启动时选择。不重新提取已有产物，不自动补配置；清洁检出没有真实资源。将下例 URI 换为实际已 author 的 profile：
-
-```powershell
-& "C:/path/to/godot-mono.console.exe" --path src/Pal.Game -- `
-  --m3-dialogue-profile res://Assets/NpcInteraction/Profile.tres
-& "C:/path/to/godot-mono.console.exe" --path src/Pal.Game -- `
-  --m3-dialogue-profile res://Assets/NpcInteraction/Profile.tres --m3-dialogue-language en
-```
-
-独立起点 (1232,1336)、South0/layer0/phase0，默认 role0；相机由 (160,112) 锚点推导。保留全部 32 原始对象，搜索 owner60 / trigger0188；owner57 热点未被改 state 关闭，只是不在此独立上下文调度。方向键/WASD 移动，Return/Space/KP Enter/左Ctrl 搜索；按参考输入加速正文/继续等待，不用 `ui_accept` 代替。缺失/损坏/身份不符/语言缺失/不支持入口明确失败，不静默回退地图12。不带 M3 参数仍是普通 M2 Main；旧独立静态模式也保留。完整配置、输入与拒绝边界见 [NPC 宿主契约](docs/design/npc-interaction-host.md)，离线入口见[对话资源](docs/design/dialogue-display.md)和[事件执行](docs/design/trigger-execution.md)。
-
-保留的显式完整验收入口（当前自动 CI 不运行）：
-
-```powershell
-pwsh -NoProfile -File scripts/Test-M0.ps1 `
-  -GodotPath "C:/path/to/godot-mono.console.exe"
-```
-
-该入口使用全新 NuGet 包/HTTP 缓存，保留 solution 还原/构建，显式串行执行 Core、CLI unit、CLI integration、Prepare，再执行当前脚本定义的 Game 三轮完整批次、发现、指定失败控制及人工资源的 headless 导入/启动；日志路径会打印到终端，不清空既有 `.godot` 缓存。批次、工具链及预算以当前脚本/config 为准；旧批次与已完成运行见[历史索引](docs/archive/m3/game-test-history.md)，历史结果保持原身份，不证明本批更名后完整门的运行兼容性已验证。实际退出码、完整 TRX 与诊断共同决定是否通过。桌面/GPU/物理输入不由 headless 证明；历史 M2 本地/远端结果见 [M2 验收记录](docs/milestones/m2/acceptance.md)；M3 的当前交付状态见 [M3 验收检查点](docs/milestones/m3/acceptance.md#当前状态)；历史自动门、用户人工确认、已停用 Observer 缺陷和失败 CI 按历史身份保留，不得拿历史 CI 代替当前状态。
-
-技术版本记录在此，检查由测试和 CI 执行，任务结果记录在 GitHub Issue 中；不要求每次检查另写一份报告。M0 的详细历史记录保留在 [归档](docs/archive/m0/acceptance.md)，仅在排障或追溯时查阅。
 
 ## 仓库结构
 
+- `pal.ps1` —— 跨平台统一前门 CLI（测试、CI、架构/账本自检、Godot 安装预热、资源准备/脱敏自省、证据报告）
+- `ARCHITECTURE.md` —— [架构总览](ARCHITECTURE.md)（三段管道、归位模块拓扑、编译期护栏与冻结切片边界）
+- `AGENTS.md` —— Agent 按需上下文指针与不可逆安全硬约束
+- `CODING_STANDARDS.md` —— `/code-review` Standards 轴评审标准
+- `GLOSSARY.md` —— 项目领域术语表
+- `.editorconfig` —— 编译期护栏（`RS0030` / `PAL0001`–`PAL0003`）与基础代码风格配置
+- `.agents/skills/` —— 仓内工程级 Skills 单一真源（`verify`、`garden`；Claude Code 本地桥接见 `scripts/Sync-AgentSkills.ps1`）
 - `docs/` —— [文档导航](docs/README.md)
-  - `design/` —— 项目设计背景、架构、总体路线和待定问题
-  - `milestones/` —— 各里程碑实施计划，当前有 M0、M1、已交付 M2 及 M3 计划/分层检查点
-  - `archive/` —— 已完成阶段的历史记录，按需查阅
-  - `agents/` —— Agent 的 Issue、标签与领域文档工作流
-  - `adr/` —— 值得长期保留的架构取舍
-- `GLOSSARY.md` —— 项目领域术语
-- `src/Pal.Core/` —— 纯 .NET 核心类库
-- `src/Pal.Game/` —— Godot .NET 游戏工程
-- `tools/Pal.Extract/` —— 独立离线提取 CLI（只读检查、地图/场景导出、完整静态场景包、事件转写/重建与现代对话转换）
-- `tests/Pal.Core.UnitTests/` —— 核心 xUnit 测试
-- `tests/Pal.Extract.UnitTests/` —— CLI 内存单元测试，不依赖文件/进程/Godot
-- `tests/Pal.Extract.IntegrationTests/` —— CLI 文件与真实进程集成测试
-- `scripts/` —— [用途与调用方清单](docs/testing/script-inventory.md)；显式维护、资源准备及 CI/验收证据工具，不是默认 Unit 编排入口
-- `reference/sdlpal/` —— sdlpal 源码,作为引擎逻辑参考(见 `reference/README.md`)
-- `data/raw/` —— 放原版 98 柔情版数据文件的地方(见 `data/raw/README.md`)
+  - `testing/` —— [验证矩阵](docs/testing/verification-matrix.md)及 3 篇专题规范（Game 分层、时序边界、合并保护）
+  - `adr/` —— 架构决策记录（`ADR-0001`–`ADR-0008`）
+  - `design/` —— 有效格式契约与可行性基线（5 篇）
+  - `generated/` —— 代码派生自动生成文档（[`capabilities-ledger.md`](docs/generated/capabilities-ledger.md)）
+  - `milestones/` —— 各里程碑实施计划（M0–M6）
+  - `agents/` —— Agent 执行环境、Issue 工作流、单票/多票与异常诊断规则
+  - `archive/` —— [历史文档归档索引](docs/archive/README.md)（M0、早期设计稿与 M6 就绪度核对稿）
+- `src/Pal.Core/` —— 纯 .NET 核心类库（零 Godot 依赖，按 9 个子域目录与命名空间组织）
+- `src/Pal.Game/` —— 纯 Godot .NET 游戏生产工程（零测试依赖）
+- `tools/Pal.Extract/` —— 独立离线提取、往返验证与能力账本导出 CLI
+- `tools/Pal.Analyzers/` —— 仓内编译期 Roslyn 架构护栏（`PAL0001`–`PAL0003`）与 `BannedSymbols.*.txt`
+- `tools/long-running-agent/` —— 基于 GitHub Issues 的长任务编排器
+- `tests/` —— 全部自动化测试工程：
+  - `Pal.Core.UnitTests/`、`Pal.Extract.UnitTests/`、`Pal.Analyzers.Tests/` —— 纯内存 xUnit 单元测试
+  - `Pal.Extract.IntegrationTests/`、`Pal.Prepare.Tests/` —— CLI 文件进程与 Godot Prepare 集成测试
+  - `Pal.Game.Tests/` —— 独立 Godot .NET / 官方 GdUnit4 集成测试与 T3 GPU YAML E2E 场景
+  - `affected-map.psd1` —— T0 增量选测映射表
+- `scripts/` —— `pal.ps1` 模块、离线资源准备原语、技能本地桥接与轻量仓库护栏脚本
+- `reference/sdlpal/` —— 只读 SDLPal 参考源码（见 [reference/README.md](reference/README.md)）
+- `data/raw/` —— 本地原版 98 柔情版数据目录（不提交，见 [data/raw/README.md](data/raw/README.md)）
 
-## 怎么继续
+## 新会话接入提示
 
-在本目录新开一个对话，可直接给 AI 以下提示词：
-
-> 新任务先读 `AGENTS.md`，核对仓库、分支、HEAD、已有改动、目标 Issue 正文/评论/直接依赖及当前脚本配置；再按任务契约选择 [文档导航](docs/README.md) 中的职责入口。不要默认递归读取全部 design、reference 或历史 Issue；只在具体忠实转写/参考实现、ADR、时序、Game 迁移、排障或追溯触发时进入对应文档。
->
-> 当前里程碑和远端状态是动态事实，必须以实时 Issue、实际提交、CI 和证据为准；历史计数、人工反馈、失败、授权和 Observer 结论保持原身份，不能移给新 HEAD 或拼成新通过。真实资源只显式准备并本地复用，不上传、不自动同步。提交、推送、合并、Issue 收尾、CI/保护操作按明确授权执行；Draft/Ready/main/manual 的操作规则见 [CI 分流](docs/testing/ci-dispatch.md)，服务端保护状态不由 workflow 或仓库 public 推断。
-
-`reference/README.md` 是参考源码导航，不要求通读整个 SDLPal；实现具体任务时再读取相关源码。`docs/archive/` 仅在排障、环境升级或追溯历史结论时查阅。
+新开对话时直接按 [AGENTS.md](AGENTS.md) 触发对应指针：先读[执行环境契约](docs/agents/execution-environment.md)，核对仓库、分支、HEAD、已有改动与目标 Issue 正文/评论/依赖；验证与取证统一遵循[验证矩阵](docs/testing/verification-matrix.md)与 `./pal.ps1`。

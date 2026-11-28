@@ -1,6 +1,7 @@
 using System;
 using Godot;
 using Pal.Core;
+using Pal.Core.Exploration;
 
 namespace Pal.Game.Resources;
 

@@ -40,22 +40,22 @@ public sealed record BattleContextTestFixture(JsonObject Document, byte[] Contex
             ["magics"] = new JsonArray(magics.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray()),
             ["statuses"] = new JsonArray(Enumerable.Repeat(0, 9).Select(value => (JsonNode?)JsonValue.Create(value)).ToArray()), ["coveredByRoleId"] = coveredBy
         };
-        JsonObject Closure(string id, string category, JsonObject identity, int[] owners, string[] resources) => new()
+        JsonObject Closure(string id, string category, int[] owners, string[] resources) => new()
         {
-            ["id"] = id, ["category"] = category, ["identity"] = identity,
+            ["id"] = id, ["category"] = category,
             ["ownerTickets"] = new JsonArray(owners.Select(x => (JsonNode?)x).ToArray()), ["status"] = "contract-only",
             ["resourceIds"] = new JsonArray(resources.Select(x => (JsonNode?)x).ToArray())
         };
         var closureEntries = new JsonArray(
-            Closure("trigger-09c3-0a32", "command", new JsonObject { ["kind"] = "event-range", ["startAddress"] = 0x09c3, ["battleAddress"] = 0x09fe, ["wonStartAddress"] = 0x09ff, ["endAddress"] = 0x0a32 }, [52, 53], ["events"]),
-            Closure("battle-team-18", "command", new JsonObject { ["kind"] = "battle-command", ["commandAddress"] = 0x09fe, ["operands"] = new JsonArray(0x0012, 0xa073, 0x0000), ["enemyTeamId"] = 18, ["enemyObjectId"] = 495, ["enemyId"] = 97, ["enemyCount"] = 2, ["battlefieldId"] = 24, ["specialValue"] = "third-operand-zero-is-boss-no-flee", ["reverseEncoding"] = "encode-operands-from-semantic-fields" }, [46, 47, 51, 53], ["events", "battle-data"]),
-            Closure("role-hooks-random", "command", new JsonObject { ["kind"] = "role-script-ranges", ["dyingRoleId"] = 1, ["dyingStartAddress"] = 0xa96e, ["dyingEndAddress"] = 0xa987, ["friendDeathRoleId"] = 0, ["friendDeathStartAddress"] = 0xa9b5, ["friendDeathEndAddress"] = 0xa9d1, ["branchCoverage"] = "all-random-branches" }, [49], ["events", "battle-data", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
-            Closure("equipment-six-role", "validation", new JsonObject { ["kind"] = "equipment-layout", ["roleCount"] = 6, ["slotCount"] = 6, ["dualAttackObjectId"] = 170, ["persistentEquipmentStatus"] = true }, [48], ["battle-data"]),
-            Closure("growth-five-role", "validation", new JsonObject { ["kind"] = "growth-layout", ["roleCount"] = 5, ["includesPrimaryExperience"] = true, ["includesHiddenExperience"] = true, ["includesRecoveryAndCleanup"] = true }, [50], ["battle-data"]),
-            Closure("dynamic-auto-0a36-0a3b", "command", new JsonObject { ["kind"] = "dynamic-auto-range", ["startAddress"] = 0x0a36, ["endAddress"] = 0x0a3b, ["effects"] = new JsonArray("movement", "direction", "hidden"), ["advance"] = "update-driven" }, [52], ["events"]),
-            Closure("failure-reload-todo", "command", new JsonObject { ["kind"] = "failure-boundary", ["lostEntryAddress"] = 0xa073, ["reloadCommand"] = 0x004e, ["behavior"] = "diagnose-and-stop-without-reload-retry-or-exploration" }, [51], ["events", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
-            Closure("battle-images", "resource", new JsonObject { ["kind"] = "battle-image-set", ["enemyId"] = 97, ["enemyArchiveEntry"] = "ABC97", ["roleSpriteIds"] = new JsonArray("F0", "F1"), ["battlefieldId"] = 24, ["battlefieldArchiveEntry"] = "FBP24", ["includesLayoutAndEffectFrames"] = true }, [53], ["battle-images"]),
-            Closure("dialogue-languages", "resource", new JsonObject { ["kind"] = "localized-dialogue-set", ["languages"] = new JsonArray("zh-CN", "en"), ["contents"] = new JsonArray("messages", "names", "portraits", "glyphs", "ui") }, [49, 53], ["dialogue-zh-cn", "dialogue-en", "glyphs"]));
+            Closure("trigger-09c3-0a32", "command", [52, 53], ["events"]),
+            Closure("battle-team-18", "command", [46, 47, 51, 53], ["events", "battle-data"]),
+            Closure("role-hooks-random", "command", [49], ["events", "battle-data", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
+            Closure("equipment-six-role", "validation", [48], ["battle-data"]),
+            Closure("growth-five-role", "validation", [50], ["battle-data"]),
+            Closure("dynamic-auto-0a36-0a3b", "command", [52], ["events"]),
+            Closure("failure-reload-todo", "command", [51], ["events", "dialogue-zh-cn", "dialogue-en", "glyphs"]),
+            Closure("battle-images", "resource", [53], ["battle-images"]),
+            Closure("dialogue-languages", "resource", [49, 53], ["dialogue-zh-cn", "dialogue-en", "glyphs"]));
         JsonObject Resource(string id, string kind, string reference, int[] owners) => new()
         {
             ["id"] = id, ["kind"] = kind, ["reference"] = reference, ["sha256"] = new string('a', 64),
@@ -88,7 +88,6 @@ public sealed record BattleContextTestFixture(JsonObject Document, byte[] Contex
                 {
                     ["sceneId"] = 2, ["mapId"] = 12, ["paletteId"] = 0, ["nightPalette"] = false, ["musicId"] = 31, ["battleMusicId"] = 37,
                     ["leader"] = new JsonObject { ["x"] = 1248, ["y"] = 256, ["direction"] = "east", ["layer"] = 0, ["phase"] = 0 },
-                    ["searchProof"] = new JsonObject { ["ownerId"] = 28, ["sampleIndex"] = 3, ["collisionPass"] = true },
                     ["sceneEntries"] = new JsonArray(new JsonObject { ["sceneId"] = 2, ["enterEntry"] = 0x0e97, ["teleportEntry"] = 0 }),
                     ["eventObjects"] = new JsonArray(new JsonObject { ["ownerId"] = 28, ["x"] = 1280, ["y"] = 256, ["direction"] = 0, ["state"] = 2, ["vanishTime"] = 0, ["triggerMode"] = 1, ["triggerEntry"] = 0x09c3, ["autoEntry"] = 0, ["autoIdleFrameCount"] = 0, ["spriteId"] = 210, ["spriteFrames"] = 0, ["currentFrame"] = 0, ["scriptIdleFrameCount"] = 0, ["spritePtrOffset"] = 0, ["autoSpriteFrames"] = 0, ["layer"] = 0 })
                 }

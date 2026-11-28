@@ -5,6 +5,8 @@ using System.Linq;
 using Godot;
 using Pal.Core;
 using Pal.Game.Resources;
+using Pal.Core.State;
+using Pal.Core.Battle;
 
 namespace Pal.Game.Profiles;
 

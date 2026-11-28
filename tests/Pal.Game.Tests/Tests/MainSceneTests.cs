@@ -8,6 +8,9 @@ using GdUnit4;
 using Godot;
 using Pal.Core;
 using static GdUnit4.Assertions;
+using Pal.Core.Exploration;
+using Pal.Core.Events;
+using Pal.Core.Legacy;
 
 namespace Pal.Game.Tests;
 
@@ -458,7 +461,6 @@ public class MainSceneTests
             .IsEqual((2, 12, 0, false, 31, 37));
         AssertThat((world.Leader.X, world.Leader.Y, world.Leader.Direction, world.Leader.Layer, world.Leader.Phase))
             .IsEqual((1264, 248, "east", 0, phase));
-        AssertThat((world.SearchProof.OwnerId, world.SearchProof.SampleIndex, world.SearchProof.CollisionPass)).IsEqual((28, 1, true));
         AssertThat(world.SceneEntries.Length).IsEqual(1);
         AssertThat((world.SceneEntries[0].SceneId, world.SceneEntries[0].EnterEntry, world.SceneEntries[0].TeleportEntry)).IsEqual((2, 0x0e97, 0));
         AssertThat(world.EventObjects.Length).IsEqual(1);

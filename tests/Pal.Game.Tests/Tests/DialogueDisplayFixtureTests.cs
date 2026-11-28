@@ -8,6 +8,7 @@ using Pal.Core;
 using Pal.Game.Dialogue;
 using Pal.Game.Resources;
 using static GdUnit4.Assertions;
+using Pal.Core.Dialogue;
 
 namespace Pal.Game.Tests;
 
@@ -23,8 +24,6 @@ public class DialogueDisplayFixtureTests
         AssertThat(display is not null).IsTrue();
         var chinese = Load<PalDialogueLanguage>("DialogueSyntheticZh.tres");
         var english = Load<PalDialogueLanguage>("DialogueSyntheticEn.tres");
-        var selection = new DialogueLanguageSelection();
-        AssertThat(selection.Language).IsEqual("zh-Hans");
         var font = Load<PalDialogueFont>("DialogueSyntheticFont.tres");
         var portrait = Load<PalDialogueIndexedImage>("DialogueSyntheticPortrait.tres");
         var prompt0 = Load<PalDialogueIndexedImage>("DialogueSyntheticPrompt.tres");
@@ -40,7 +39,6 @@ public class DialogueDisplayFixtureTests
         surface.SetImage(Load<PalDialogueIndexedImage>("DialogueSyntheticBackground.tres"));
         surface.SetPalette(palette);
         display!.ActivePaletteChanged += surface.SetPalette;
-        AssertThat(selection.Select(chinese.ToCorePackage(), english.ToCorePackage()).Language).IsEqual("zh-Hans");
         display.Start(chinese, font, portrait, prompts, palette, 61, 1, 59, 0, 79);
         await WaitFor(runner, display, DialogueDisplayPhase.WaitingForAdvance);
         AssertThat(display.Current!.VisibleText).IsEqual("A");
@@ -58,7 +56,6 @@ public class DialogueDisplayFixtureTests
             AssertThat(display.Current.ClearDisplay).IsTrue();
             AssertThat(display.Current.PaletteRotation).IsEqual(0);
         });
-        AssertThat(new DialogueLanguageSelection("en").Select(chinese.ToCorePackage(), english.ToCorePackage()).Language).IsEqual("en");
         display.Start(english,
             font, portrait, prompts, palette, 61, 1, 59, 0, 79);
         await WaitFor(runner, display, DialogueDisplayPhase.WaitingForAdvance);

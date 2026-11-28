@@ -1,4 +1,5 @@
 using Xunit;
+using Pal.Core.State;
 
 namespace Pal.Core.Tests;
 

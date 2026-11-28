@@ -1,0 +1,19 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = false
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,xml,csproj,props,targets,runsettings}]
+indent_size = 2
+
+[*.cs]
+# Compile-time architecture & purity guardrails (#274)
+dotnet_diagnostic.RS0030.severity = error
+dotnet_diagnostic.RS0031.severity = error
+dotnet_diagnostic.PAL0001.severity = error
+dotnet_diagnostic.PAL0002.severity = error
+dotnet_diagnostic.PAL0003.severity = error

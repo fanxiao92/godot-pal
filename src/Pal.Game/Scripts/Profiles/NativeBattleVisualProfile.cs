@@ -5,7 +5,8 @@ using System.IO;
 using System.Linq;
 using Godot;
 using Pal.Game.Resources;
-using static Pal.Game.Profiles.NativeContentDependencies;
+using static Pal.Game.Resources.NativeContentDependencies;
+using Pal.Core.Battle;
 
 namespace Pal.Game.Profiles;
 
@@ -31,7 +32,7 @@ public static class NativeBattleVisualProfile
     /// selected. Every party position is authenticated; there is no head-role fallback and no
     /// legacy scalar/shared-sprite form (old resources are re-prepared, not dual-loaded).</summary>
     public static CheckedBattleVisualProfile Load(string uri, IReadOnlyList<int> partyRoleIds,
-        IReadOnlyDictionary<int, IReadOnlyList<Pal.Core.ClassicBattleEnemy>> enemyTeams,
+        IReadOnlyDictionary<int, IReadOnlyList<Pal.Core.Battle.ClassicBattleEnemy>> enemyTeams,
         IReadOnlyList<int> requirementTeamIds, IReadOnlyList<Color> palette)
     {
         try

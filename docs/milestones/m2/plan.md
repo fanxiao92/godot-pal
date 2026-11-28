@@ -2,7 +2,7 @@
 
 状态（2026-10-22）：**M2 已完成。** Windows 单领队探索功能、自动/人工验收及收尾文档独立双轴终审已接受；成果已合入并推送 main，已验证交付提交为 `a76f83b`。[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11)、[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 及后续跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 均已关闭，[远端完整 Windows headless CI](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 已通过。分层证据、完整门禁计数和未验收范围见 [M2 验收记录](acceptance.md)。M0/M1 历史构建、离线预览或启动 smoke test 不替代 M2 功能证据；后续工作按 [Issue 工作流](../../agents/issue-tracker.md) 核对实时正文、评论与直接依赖，不重做已接受前置。
 
-本计划承接 [总体路线](../../design/development-plan.md)、[架构设计](../../design/architecture.md) 与 [M1 完整静态资源包契约](../m1/extract-scene.md)。技术基线与当前可执行命令以 [根目录 README](../../../README.md) 及工程配置为准；下文入口按已交付实现同步，原立项的 Content/M2Scene 与 JSON profile 路线已由 #13 后续批准的原生资源路线替代，不是当前可执行契约。
+本计划承接 [总体路线](../../archive/design/development-plan.md)、[架构设计](../../archive/design/architecture.md) 与 [M1 完整静态资源包契约](../m1/extract-scene.md)。技术基线与当前可执行命令以 [根目录 README](../../../README.md) 及工程配置为准；下文入口按已交付实现同步，原立项的 Content/M2Scene 与 JSON profile 路线已由 #13 后续批准的原生资源路线替代，不是当前可执行契约。
 
 ## 1. 目标与已确认范围
 
@@ -38,7 +38,7 @@
 ### 3.1 显式准备、游戏只读加载
 
 1. 输入是用户选定的完整 M1 包；根相对引用、manifest v1 与散列规则沿用既有契约。初始真实验收采用已验证的 scene2 / map12 / palette0/day；这只是显式参数，不代表进入脚本选择的调色板。
-2. 已交付显式 PowerShell 入口 `scripts/Prepare-GameScene.ps1`：校验完整包，再生成 `Assets` 下的 Godot 原生场景、Resource 和 PNG 纹理，不把 M1 JSON 原样复制为运行依赖。实际参数与定位见下节及 [README](../../../README.md#m2-原生资源与普通-main)。已有经核对的真实资源直接复用，不建议为文档同步再次导入。
+2. 已交付显式 PowerShell 入口 `scripts/Prepare-GameScene.ps1`（现统一经 `./pal.ps1 assets prepare` 封装）：校验完整包，再生成 `Assets` 下的 Godot 原生场景、Resource 和 PNG 纹理，不把 M1 JSON 原样复制为运行依赖。实际参数与定位见下节及 [README](../../../README.md#3-离线提取与资源准备)。已有经核对的真实资源直接复用，不建议为文档同步再次导入。
 3. 准备时校验版本、清单、产物长度/散列、资源引用与 ID 一致性，保持包内路径相对资源包根；不将子目录 JSON 的引用误解为相对其自身目录。
 4. 准备步骤不读取原始归档、不执行提取、不修改原包，也不默认清空或覆盖有内容的目标目录。拒绝越出包根的引用和危险的源/目标路径关系，不因准备失败宣称资源可用。
 5. 游戏通过 `ResourceLoader` / `PackedScene` / `Texture2D` 加载原生资源与独立 typed profile，不解释 M1 JSON/manifest；启动不自动提取、准备或复制，不依赖开发机外部绝对路径，不引用 `Pal.Extract` 或解析 MKF。装载时仍检查必要结构、版本与引用，缺失/损坏资源明确失败，不静默补图或猜值。
@@ -59,7 +59,7 @@ M1 包没有队伍坐标、朝向、层值或相机初值。参考默认新游�
 ### 3.3 已交付的原生入口与配置
 
 - 准备入口：`scripts/Prepare-GameScene.ps1`，必需 `-InputPath <完整M1包>` 与 `-OutputPath <Assets内新或空目录>`，可选 `-GodotPath <exe>`（否则 `GODOT_BIN`，再查 `godot`）、`-TimeoutSeconds <1..600>`（默认60）。退出码成功0、参数错误2、数据/导入错误1；没有覆盖开关。
-- 输入必须在 `src/Pal.Game` 工程外；输出仅允许 `src/Pal.Game/Assets` 或其子目录，拒绝非空、双向重叠及链接/reparse 风险。脚本会构建 Game、准备纹理、执行 Godot editor import，再保存原生引用；失败可能留下不完整输出，不自动清理或回滚。命令示例见 [README](../../../README.md#m2-原生资源与普通-main)。
+- 输入必须在 `src/Pal.Game` 工程外；输出仅允许 `src/Pal.Game/Assets` 或其子目录，拒绝非空、双向重叠及链接/reparse 风险。脚本会构建 Game、准备纹理、执行 Godot editor import，再保存原生引用；失败可能留下不完整输出，不自动清理或回滚。命令示例见 [README](../../../README.md#3-离线提取与资源准备)。
 - 默认资源根为 `res://Assets`，场景为 `<资源根>/Scenes/Scene.tscn`；按 Maps/Tiles/Sprites/Scenes/Palettes 分类，来源元数据保留为原生字段。游戏用 `--m2-resources <规范化res://Assets或子目录URI>` 选择已导入根。
 - 默认独立配置为 `res://Assets/Profiles/Exploration.tres`，游戏用 `--m2-profile <规范化res://项目资源URI>` 选择。改变资源根不会自动重定位配置；参数放在 Godot 的 `--` 之后，各只允许一次，未知/重复参数明确失败。默认资源和 profile 任一缺失都不能启动成功。
 - **Prepare 只生成原生 scene/resources，不 author profile。** #14 另行离线核对并落地了默认真实 profile；T2 的地图静态视点已由 T3 领队起点替代，不保留第二套相机真值。真实原生资源、派生配置及缓存均受 Git 忽略，人工测试资源可提交。
@@ -118,7 +118,7 @@ profile 是 `PalExplorationProfile : Resource`，字段使用实际 C# 导出属
 
 ## 6. 首个前置任务：测试框架兼容性关卡
 
-**已完成 #12**：有界 GdUnit4Net 隔离关卡已通过并接入正式工程，见[兼容性记录](framework-compatibility.md)；Core 未迁移。后续 #18 另获批准交付固定源码 API/adapter 包、完整门禁与同字节稳定发布，来源/版本/bootstrap 以[包说明](../../testing/gdunit-source-packages.md)为准。下面保留原关卡设计作为历史验收标准，不要求重新选型或重跑。
+**已完成 #12**：有界 GdUnit4Net 隔离关卡已通过并接入正式工程，见[兼容性记录](framework-compatibility.md)；Core 未迁移。后续 #18 曾交付固定源码 API/adapter 包（旧 `docs/testing/gdunit-source-packages.md` 已于 M7 退役，现已切回官方包见 [ADR-0006](../../adr/0006-split-game-tests-and-official-gdunit.md)）。下面保留原关卡设计作为历史验收标准，不要求重新选型或重跑。
 
 立项轮只读官方资料查证曾发现：[master README](https://github.com/godot-gdunit-labs/gdUnit4Net/blob/master/README.md) 的 API `5.1.0-rc6` 行列出 Godot 4.7.2 / .NET 10，但当次 [NuGet 版本索引](https://api.nuget.org/v3-flatcontainer/gdunit4.api/index.json) 查询未取得 rc6 已发布的证据。master 声明、NuGet computed TFM 和旧版示例不能拼成已实测的版本组合；当时要求实施时重新确认可获取版本并固定，不能把当次资料状态当成永久发布事实。[官方 adapter 文档](https://github.com/godot-gdunit-labs/gdUnit4Net/blob/master/TestAdapter/README.md) 提供 VSTest、Godot executable 与 headless 配置方向，但当时项目完整基线尚未实验；该历史检索状态不代表当前包不可获取或关卡未通过。
 
@@ -138,7 +138,7 @@ profile 是 `PalExplorationProfile : Resource`，字段使用实际 C# 导出属
 - **准备与加载**：覆盖完整包、版本错误、坏散列/长度、缺资源/非法帧、路径越界、非空目标、原包不变、无原始归档/事件/文字也可运行；测试配置与默认角色/精灵匹配。
 - **Godot 集成**：实际加载人工资源、构建场景、接入输入、处理帧、失焦/恢复和错误退出；检查测试失败确实传到进程结果，不只等待 `PAL_GAME_READY`。
 - **画面验证**：节点、坐标或排序断言不等于像素输出正确；headless 测试不当作实际图形渲染证据。用有图形渲染的检查与桌面观察核对透明、帧锚点、遮挡、像素缩放，明确各自覆盖范围。
-- 保留 solution 构建/测试、M1 CLI 回归与 Godot import/startup 检查。共享入口已交付为 `scripts/Test-M0.ps1 -GodotPath <exe>`，内部 bootstrap、串行执行并保留原始证据；独立 Game 命令/环境变量/runsettings 见 [测试说明](../../../src/Pal.Game/Tests/README.md)。已接受完整门为 Core129、CLI300pass/302total（2项准确Windows大小写歧义跳过）、Prepare52、solution/独立/repeat Game各170、发现173含三个各1fail/exit1指定原因控制，以及原生 prepare/profile/import/Main startup0，详 [验收记录](acceptance.md)。本地原完整门与 #19 修复后远端完整 Windows headless CI 均已通过；CI 只使用代码生成的人工小型资源，不读取或上传原版数据。
+- 保留 solution 构建/测试、M1 CLI 回归与 Godot import/startup 检查。历史共享入口曾为 `scripts/Test-M0.ps1` 与 `src/Pal.Game/Tests/README.md`（均已于 M7 退役，现统一入口见[验证矩阵](../../testing/verification-matrix.md)）。已接受完整门为 Core129、CLI300pass/302total（2项准确Windows大小写歧义跳过）、Prepare52、solution/独立/repeat Game各170、发现173含三个各1fail/exit1指定原因控制，以及原生 prepare/profile/import/Main startup0，详 [验收记录](acceptance.md)。本地原完整门与 #19 修复后远端完整 Windows headless CI 均已通过；CI 只使用代码生成的人工小型资源，不读取或上传原版数据。
 
 ### 真实资源 Windows 桌面验收
 

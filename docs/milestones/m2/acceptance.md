@@ -4,7 +4,7 @@
 
 **M2 已完成（2026-10-22）：功能、本地自动/人工验收、收尾文档独立双轴终审及后续远端完整 Windows headless CI 均已接受。** 成果已合入并通过 SSH 推送 main，已验证交付提交为 `a76f83bf08c421e83892cc9515cbdd4c032014ec`。[最终验收 #17](https://github.com/fanxiao92/godot-pal/issues/17) 于 05:39:50Z 关闭，[父规格 #11](https://github.com/fanxiao92/godot-pal/issues/11) 于 05:39:58Z 关闭；发布后跨盘测试缺陷 [#19](https://github.com/fanxiao92/godot-pal/issues/19) 修复并于 07:21:05Z 关闭，[新远端 CI 39738074108](https://github.com/fanxiao92/godot-pal/actions/runs/39738074108) 为 completed/success。M3 尚未启动，音频、导出包和其他平台未验收。
 
-本页是进度与分层证据汇总；普通执行日志仍在 Issue / 本机证据目录。入口与 typed profile 前置见 [M2 计划](plan.md#3-资源准备与测试配置)，包身份与 bootstrap 见 [固定 GdUnit 包说明](../../testing/gdunit-source-packages.md)。原本地完整门、人工检查、后续主干交付和远端 CI 分别保留原时间线；后来的成功不改写旧失败，也不将 headless 结果外推为新的 GPU/物理操作验收。
+本页是进度与分层证据汇总；普通执行日志仍在 Issue / 本机证据目录。入口与 typed profile 前置见 [M2 计划](plan.md#3-资源准备与测试配置)（历史固定 GdUnit 包说明 `docs/testing/gdunit-source-packages.md` 已于 M7 退役，现已切回官方包见 [ADR-0006](../../adr/0006-split-game-tests-and-official-gdunit.md)）。原本地完整门、人工检查、后续主干交付和远端 CI 分别保留原时间线；后来的成功不改写旧失败，也不将 headless 结果外推为新的 GPU/物理操作验收。
 
 - [完整自动门及同字节发布](https://github.com/fanxiao92/godot-pal/issues/17#issuecomment-6320185765)。
 - [提交与本地合入](https://github.com/fanxiao92/godot-pal/issues/17#issuecomment-6328157497)。

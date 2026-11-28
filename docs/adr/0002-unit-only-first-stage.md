@@ -1,6 +1,8 @@
 # 第一阶段采用 Unit-only 默认反馈与测试合并门槛
 
-为降低 work agent 的依赖和反馈编排成本，按[规格 #69](https://github.com/fanxiao92/godot-pal/issues/69) 采用直接项目级、默认全量的 Core/CLI Unit 反馈，并以独立 `unit-check` 满足第一阶段的测试合并要求，而非默认执行 solution 或重型完整门。选择依据是纯内存规则可以独立反馈，不是承诺固定耗时；具体协议由[短指南](../testing/getting-started.md)及其专题维护。
+> Status: Superseded by [ADR-0005](0005-m7-verification-infrastructure.md)（保留历史决策原件；当前验证模型见[验证矩阵](../testing/verification-matrix.md)）
+
+为降低 work agent 的依赖和反馈编排成本，按[规格 #69](https://github.com/fanxiao92/godot-pal/issues/69) 采用直接项目级、默认全量的 Core/CLI Unit 反馈，并以独立 `unit-check` 满足第一阶段的测试合并要求，而非默认执行 solution 或重型完整门。选择依据是纯内存规则可以独立反馈，不是承诺固定耗时；具体协议原由 `docs/testing/getting-started.md` 及其专题维护（已于 M7 退役）。
 
 后续用户在 #69 复盘中批准[原生反馈方案 B（ADR-0003）](0003-native-unit-feedback.md)：Unit-only 覆盖决定不变，默认证据/成本改为原生基线，强审计转为显式维护。该后续调整不改写 #69 的历史交付或远端结果。
 

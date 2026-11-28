@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Xunit;
+using Pal.Core.Events;
 
 namespace Pal.Extract.Tests;
 
@@ -33,7 +34,7 @@ public sealed class OpcodeVocabularyParityTests
     {
         string root = OpcodeRegistryCompletenessTests.FindRepositoryRootForTests();
         var registry = RegistryVocabulary(Path.Combine(root, "tools", "Pal.Extract", "OpcodeRegistry.cs"));
-        var loader = LoaderVocabulary(Path.Combine(root, "src", "Pal.Core", "TriggerEventCollection.cs"));
+        var loader = LoaderVocabulary(Path.Combine(root, "src", "Pal.Core", "Events", "TriggerEventCollection.cs"));
 
         Assert.NotEmpty(registry);
         Assert.NotEmpty(loader);

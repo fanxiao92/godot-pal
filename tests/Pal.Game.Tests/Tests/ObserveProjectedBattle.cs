@@ -6,6 +6,11 @@ using Pal.Core;
 using Pal.Game.Dialogue;
 using Pal.Game.Profiles;
 using Pal.Game.Resources;
+using Pal.Core.State;
+using Pal.Core.Battle;
+using Pal.Core.Events;
+using Pal.Core.Menu;
+using Pal.Game.Battle;
 
 namespace Pal.Game.Tests;
 

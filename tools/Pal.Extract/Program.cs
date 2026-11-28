@@ -183,9 +183,25 @@ if (args.Length == 11 && args[0] is "export-map" or "export-scene" or "extract-s
     }
 }
 
+if ((args.Length == 3 || args.Length == 5) && args[0] == "export-capability-ledger"
+    && args[1] == "--output" && !string.IsNullOrWhiteSpace(args[2]) && !args[2].StartsWith("--", StringComparison.Ordinal)
+    && (args.Length == 3 || (args[3] == "--repo-root" && !string.IsNullOrWhiteSpace(args[4]) && !args[4].StartsWith("--", StringComparison.Ordinal))))
+{
+    try
+    {
+        CapabilityLedgerExporter.Export(args[2], args.Length == 5 ? args[4] : null);
+        return 0;
+    }
+    catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine($"Capability ledger export failed: {exception.Message}");
+        return 1;
+    }
+}
+
 if (args.Length != 0 && (args.Length != 1 || args[0] != "--help"))
 {
-    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" or "author-battle-context" or "export-data" or "export-battle-images" or "project-battle-data" ? $"Unsupported arguments for {args[0]}."
+    Console.Error.WriteLine(args[0] is "export-map" or "export-scene" or "extract-scene" or "export-events" or "rebuild-events" or "extract-dialogue" or "author-battle-context" or "export-data" or "export-battle-images" or "project-battle-data" or "export-capability-ledger" ? $"Unsupported arguments for {args[0]}."
         : $"Unsupported arguments: {string.Join(" ", args)}");
     Console.Error.WriteLine("Use --help for usage.");
     return 2;
@@ -206,6 +222,7 @@ Console.WriteLine("""
            pal-extract export-battle-images --input <directory> --archive <abc|ball|f|fbp|fire> --output <new-or-empty-directory>
            pal-extract author-battle-context --input <author.json> --output <new-or-empty-directory>
            pal-extract project-battle-data --input <verified-M5-directory> --roles <ordered-ids> --teams <ids> --output <new-or-empty-directory>
+           pal-extract export-capability-ledger --output <markdown-file> [--repo-root <directory>]
       --help  Show this help message.
       inspect Read-only MKF inspection; reports structure and compression hints as JSON.
 

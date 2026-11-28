@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Godot;
 using Pal.Game.Editor;
+using Pal.Core.Battle;
 
 namespace Pal.Game.Tests;
 

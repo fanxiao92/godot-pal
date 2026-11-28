@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Pal.Core;
 using Xunit;
+using Pal.Core.Battle;
 
 namespace Pal.Extract.Tests;
 

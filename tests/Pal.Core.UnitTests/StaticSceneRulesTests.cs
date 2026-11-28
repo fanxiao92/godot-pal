@@ -1,5 +1,6 @@
 using Pal.Core;
 using Xunit;
+using Pal.Core.Exploration;
 
 namespace Pal.Core.Tests;
 

@@ -1,5 +1,10 @@
 using System.Text.Json.Nodes;
 using Xunit;
+using Pal.Core.State;
+using Pal.Core.Exploration;
+using Pal.Core.Battle;
+using Pal.Core.Events;
+using Pal.Core.Menu;
 
 namespace Pal.Core.Tests;
 

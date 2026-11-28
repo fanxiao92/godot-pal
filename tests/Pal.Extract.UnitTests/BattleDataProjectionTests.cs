@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 using Pal.Core;
 using Pal.Extract;
 using Xunit;
+using Pal.Core.State;
+using Pal.Core.Battle;
 
 namespace Pal.Extract.Tests;
 
